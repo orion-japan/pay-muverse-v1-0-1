@@ -37,6 +37,14 @@ import { writeIT } from '@/lib/iros/language/itWriter';
 import { resolveRememberBundle } from '@/lib/iros/remember/resolveRememberBundle';
 import { logConvEvidence } from '@/lib/iros/conversation/evidenceLog';
 import { buildHistoryDigestV1 } from '@/lib/iros/history/historyDigestV1';
+import { summarizeTopicLineV1 } from '@/lib/iros/memory/topicSummarizer';
+import {
+  loadDurableMemoriesForTurnV1,
+  buildLongTermMemoryNoteTextV1,
+} from '@/lib/iros/memory/longTermMemory.recall';
+import { updateMemoryPriorityV1 } from '@/lib/iros/memory/longTermMemory.priority';
+import { decayUnusedMemoriesV1 } from '@/lib/iros/memory/longTermMemory.decay';
+import { selectLongTermMemoriesV1 } from '@/lib/iros/memory/longTermMemory.selector';
 
 import {
   // ✅ assistant保存はしない
@@ -2271,11 +2279,11 @@ if (extra && typeof extra === 'object') {
 // - metaForSave.extra に正本一本化（route.ts が拾える）
 // =========================================================
 // ✅ writer入力用の “このターン確定データ” を meta.extra に刻む（route.ts が拾う）
+// ✅ writer入力用の “このターン確定データ” を meta.extra に刻む（route.ts が拾う）
 try {
   out.metaForSave = out.metaForSave ?? {};
-  out.metaForSave.extra = out.metaForSave.extra ?? {};
-
-  const exAny: any = out.metaForSave.extra;
+  (out.metaForSave as any).extra = (out.metaForSave as any).extra ?? {};
+  const exAny: any = (out.metaForSave as any).extra;
 
   // ---------------------------------------------------------
   // ✅ historyForWriter は「最後の数件」だけに制限する（token削減の要）
@@ -2291,21 +2299,23 @@ try {
 
   // roleバランスを崩さず末尾から取る（user/assistantが片寄らないように）
   const takeTailWithBalanceLocal = (arr: any[], n: number) => {
-    const out: any[] = [];
-    let need = Math.max(1, n);
+    const picked: any[] = [];
+    const need = Math.max(1, n);
 
     let hasU = 0;
     let hasA = 0;
 
-    for (let i = arr.length - 1; i >= 0 && out.length < need; i--) {
+    for (let i = arr.length - 1; i >= 0 && picked.length < need; i--) {
       const m = arr[i];
       const role = m?.role === 'assistant' ? 'assistant' : m?.role === 'user' ? 'user' : null;
-      const content = typeof (m?.text ?? m?.content) === 'string' ? String(m.text ?? m.content).trim() : '';
+      const content =
+        typeof (m?.text ?? m?.content) === 'string' ? String(m.text ?? m.content).trim() : '';
+
       if (!role || !content) continue;
 
       // できるだけ user/assistant の両方を拾う
-      if (out.length < need - 1) {
-        out.push({ role, content });
+      if (picked.length < need - 1) {
+        picked.push({ role, content });
         if (role === 'user') hasU++;
         if (role === 'assistant') hasA++;
         continue;
@@ -2313,17 +2323,17 @@ try {
 
       // 最後の1枠は「欠けてる側」を優先して埋める
       if (hasU === 0 && role === 'user') {
-        out.push({ role, content });
+        picked.push({ role, content });
         hasU++;
       } else if (hasA === 0 && role === 'assistant') {
-        out.push({ role, content });
+        picked.push({ role, content });
         hasA++;
-      } else if (out.length < need) {
-        out.push({ role, content });
+      } else if (picked.length < need) {
+        picked.push({ role, content });
       }
     }
 
-    return out.reverse();
+    return picked.reverse();
   };
 
   const hs = Array.isArray(historyForTurn) ? (historyForTurn as any[]) : [];
@@ -2331,7 +2341,6 @@ try {
 
   // ✅ 最小形（role/content のみ）で保存：metaは持たない（太るので）
   exAny.historyForWriter = tail;
-
   exAny.rememberTextForIros = typeof rememberTextForIros === 'string' ? rememberTextForIros : null;
   exAny.historyForWriterAt = new Date().toISOString();
 
@@ -2343,8 +2352,27 @@ try {
       out_len: Array.isArray(exAny.historyForWriter) ? exAny.historyForWriter.length : 0,
     });
   }
+
+  // =========================================================
+  // ✅ FlowTape / FlowDigest（LLM-facing tiny continuity）
+  // - “禁止/縛り” は入れない（ログとして素直に刻むだけ）
+  // - metaForSave.extra に正本一本化（route.ts が拾える）
+  // =========================================================
+  try {
+    const { appendFlowTape } = await import('../flow/flowTape');
+    const { buildFlowDigest } = await import('../flow/flowDigest');
+
+    const prevTape = typeof exAny.flowTape === 'string' ? exAny.flowTape : null;
+
+    // ※この下は「あなたの既存の coord 構築 & append/build」をそのまま残してOK
+    // exAny.flowTape = appendFlowTape(prevTape, coord, ...);
+    // exAny.flowDigest = buildFlowDigest(exAny.flowTape);
+  } catch (e) {
+    // Flow は非必須：失敗しても会話を止めない
+    console.warn('[IROS/FlowTape] stamp failed (non-fatal)', e);
+  }
 } catch (e) {
-  console.warn('[IROS/Reply] historyForWriter stamp failed', e);
+  console.warn('[IROS/Reply] failed to stamp history/remember for writer', e);
 }
   // =========================================================
   // ✅ FlowTape / FlowDigest（LLM-facing tiny continuity）
@@ -2602,94 +2630,47 @@ if (prevAtIso) {
     flowDelta: deltaNow ?? null, // 互換
     returnStreak: rsNow,
     sessionBreak: false,
-
   };
 }
 
-// ---- conversationLine v1 ----
-// 目的：戻す（復帰）に必要な「話題1行」を ctxPack に保存する（重い処理なし）。
-// ルール：
-// - 既存が「Q/D/Pだけのデバッグ行」なら上書きしてよい（話題1行が永遠に入らないのを防ぐ）
-// - 直近ユーザー3発話（+ 今回入力）から共通語彙を抽出して短く圧縮する
+// ---- conversationLine v2 (semantic summarizer) ----
+// 目的：戻す（復帰）に必要な「話題1行」を ctxPack に保存する
+// 方針：既存の単語頻度圧縮ではなく、topicSummarizer で意味ラベル化する
 {
   const current = String(text ?? '').trim();
 
   const existing = String((extra2.ctxPack as any).conversationLine ?? '').trim();
   const looksLikeDebugLine =
     !!existing &&
-    (/^Q:/.test(existing) || existing.includes('Q:') || existing.includes('D:') || existing.includes('P:') || existing.includes('流れ:') || existing.includes('戻り:'));
+    (/^Q:/.test(existing) ||
+      existing.includes('Q:') ||
+      existing.includes('D:') ||
+      existing.includes('P:') ||
+      existing.includes('流れ:') ||
+      existing.includes('戻り:'));
 
   if (!existing || looksLikeDebugLine) {
-    // --- last3 user turns from history + current ---
-    const lastUsers: string[] = [];
-    for (let i = hft.length - 1; i >= 0; i--) {
-      const m = hft[i];
-      const role = String((m as any)?.role ?? '').toLowerCase();
-      if (role !== 'user') continue;
-      const c = String((m as any)?.content ?? (m as any)?.text ?? '').trim();
-      if (!c) continue;
-      lastUsers.push(c);
-      if (lastUsers.length >= 3) break;
+    const topic = summarizeTopicLineV1({
+      userText: current,
+      historyForWriter: hft,
+      historyDigestV1: ((extra2.ctxPack as any)?.historyDigestV1 ?? null) as any,
+      situationSummary:
+        String((extra2.ctxPack as any)?.situationSummary ?? '').trim() || null,
+      situationTopic:
+        String((extra2.ctxPack as any)?.situationTopic ?? '').trim() || null,
+    });
+
+    const line = topic?.conversationLine ?? null;
+    const digest = topic?.topicDigest ?? line ?? null;
+
+    (extra2.ctxPack as any).conversationLine = line;
+    (extra2.ctxPack as any).topicDigest = digest;
+
+    if (Array.isArray(topic?.keywords) && topic.keywords.length > 0) {
+      (extra2.ctxPack as any).topicKeywords = topic.keywords;
     }
-    const turns = [...lastUsers.reverse(), current].filter(Boolean);
-
-    const STOP = new Set([
-      'これ', 'それ', 'あれ', 'ここ', 'そこ', 'どこ', '何', 'なん', 'だっけ',
-      'こと', 'もの', '感じ', 'いま', '今', 'その', 'この', 'あの',
-      'です', 'ます', 'する', 'した', 'して', 'いる', 'なる', 'ため',
-      'あと', 'だけ', 'ちょっと', 'やっぱり', 'まだ',
-    ]);
-
-    const pickKeywords = (s: string) => {
-      const t = s
-        .replace(/[　\s]+/g, ' ')
-        .replace(/[。、，．・\(\)（）「」『』【】\[\]{}<>＜＞"“”'’!?！？:：;；]/g, ' ')
-        .trim();
-
-      const words: string[] = [];
-
-      // 漢字・カタカナ・英数の“塊”だけ拾う（日本語分かち書き無しでも最低限動く）
-      const re = /[一-龥]{2,}|[ァ-ヶー]{2,}|[A-Za-z0-9]{3,}/g;
-      const ms = t.match(re) ?? [];
-      for (const w0 of ms) {
-        const w = w0.trim();
-        if (!w) continue;
-        if (STOP.has(w)) continue;
-        words.push(w);
-      }
-      return words;
-    };
-
-    const freq = new Map<string, number>();
-    for (const s of turns) {
-      for (const w of pickKeywords(s)) {
-        freq.set(w, (freq.get(w) ?? 0) + 1);
-      }
-    }
-
-    const ranked = [...freq.entries()]
-      .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
-      .map(([w]) => w);
-
-    // できるだけ短く：上位2〜3語
-    const picked = ranked.slice(0, 3);
-    let line = picked.join('・').trim();
-
-    // どうしても拾えないときは、今回入力を短く使う
-    if (!line) {
-      line = current.length > 18 ? current.slice(0, 18) + '…' : current;
-    }
-
-    // 最終ガード（長すぎ防止）
-    if (line.length > 28) line = line.slice(0, 28) + '…';
-
-    (extra2.ctxPack as any).conversationLine = line || null;
-
-    // rephraseEngine が拾えるように topicDigest も同期（TOPIC_DIGEST: (none) を消す）
-    (extra2.ctxPack as any).topicDigest = line || null;
   }
 }
-
 // ✅ flowDelta をこの場で算出
 // 方針：
 // 1) すでに out/metaForSave 側に flow があるなら「それを正本」として採用（上書きしない）
@@ -3663,12 +3644,30 @@ if ((policy === 'SCAFFOLD' || policy === 'FINAL') && (seedOnlyNow || emptyLikeNo
 
 // ✅ /reply では RenderEngine 側（src/app/api/agent/iros/reply/_impl/rephrase.ts）に writer を一本化する
 // - handleIrosReply 側の rephraseBridge が LLM を叩くと「二重呼び」になるため、ここで抑止
-const disableRephraseBridgeWriter =
+// - ただし seedOnly / emptyLike の「空っぽ系」は RenderEngine が writer を打たない瞬間があるため、bridge を許可する
+const disableRephraseBridgeWriterBase =
   (out.metaForSave as any)?.extra?.renderEngineGate === true ||
   (out.metaForSave as any)?.extra?.renderEngine === true ||
   (out.metaForSave as any)?.extra?.persistedByRoute === true ||
   (out.metaForSave as any)?.extra?.persistAssistantMessage === false;
 
+// ✅ “空っぽ系”だけは bridge writer を許可（穴を塞ぐ）
+const disableRephraseBridgeWriter = disableRephraseBridgeWriterBase && !(seedOnlyNow || emptyLikeNow);
+console.log('[IROS/rephraseBridge][DISABLE_DBG_V1]', {
+  disableRephraseBridgeWriterBase,
+  seedOnlyNow,
+  emptyLikeNow,
+  orValue: (seedOnlyNow || emptyLikeNow),
+  notOrValue: !(seedOnlyNow || emptyLikeNow),
+  computed: disableRephraseBridgeWriterBase && !(seedOnlyNow || emptyLikeNow),
+  computed2: disableRephraseBridgeWriter,
+  types: {
+    base: typeof disableRephraseBridgeWriterBase,
+    seedOnlyNow: typeof seedOnlyNow,
+    emptyLikeNow: typeof emptyLikeNow,
+    computed2: typeof disableRephraseBridgeWriter,
+  },
+});
 const shouldRunWriter =
   (policy === 'SCAFFOLD' || policy === 'FINAL') &&
   (seedOnlyNow || emptyLikeNow) &&
@@ -3904,7 +3903,6 @@ if (shouldRunWriter) {
         const exAny = (out.metaForSave as any)?.extra ?? {};
 
         // ✅ BlockPlan は“system注入専用”で保存・継続しない（残留は揺れの原因）
-        // - ここで必ず消す（enabled=false の残留封じ）
         try {
           if (exAny && typeof exAny === 'object') {
             delete (exAny as any).blockPlan;
@@ -3914,7 +3912,6 @@ if (shouldRunWriter) {
           }
         } catch {}
 
-        // ✅ 行数予算は UI/保存の“可視ブロック”に寄せる（BlockPlanは不可視なので basis にしない）
         const rbLen = Array.isArray((exAny as any)?.rephraseBlocks)
           ? (exAny as any)?.rephraseBlocks.length
           : 0;
@@ -3934,10 +3931,10 @@ if (shouldRunWriter) {
         userCode: _userCode ?? null,
         slotPlanPolicy,
         renderEngine: true,
-        inputKind: inputKindCanon, // ✅ debug も統一
+        inputKind: inputKindCanon,
       } as any,
 
-      userContext: (() => {
+      userContext: await (async () => {
         const turns: Array<{ role: 'user' | 'assistant'; content: string }> = Array.isArray(
           (out.metaForSave as any)?.extra?.historyForWriter,
         )
@@ -3969,29 +3966,83 @@ if (shouldRunWriter) {
           delete ctxPackPrev.blockPlanTriggerText;
         } catch {}
 
+        const longTermRows =
+          typeof _userCode === 'string' && _userCode.trim().length > 0
+            ? await loadDurableMemoriesForTurnV1({
+                userCode: _userCode,
+                limit: 12,
+              })
+            : [];
+
+            const selectedLongTermRows = selectLongTermMemoriesV1({
+              rows: longTermRows,
+              userText: typeof text === 'string' ? text : '',
+              maxItems: 4,
+            });
+
+            const longTermBuilt = buildLongTermMemoryNoteTextV1({
+              rows: selectedLongTermRows,
+              maxItems: 4,
+            });
+            await updateMemoryPriorityV1({
+              rows: longTermBuilt.picked,
+            });
+
+            await decayUnusedMemoriesV1({
+              allRows: longTermRows,
+              usedRowIds: longTermBuilt.picked.map((r) => r.id),
+            });
+
+        const longTermMemoryNoteText =
+          typeof longTermBuilt.noteText === 'string' && longTermBuilt.noteText.trim().length > 0
+            ? longTermBuilt.noteText
+            : null;
+            console.log('[IROS/LTM][SELECTED]', {
+              count: selectedLongTermRows?.length ?? 0,
+              keys: (selectedLongTermRows ?? []).map((r) => r.key),
+              clusters: (selectedLongTermRows ?? []).map((r) => r.cluster_key),
+              types: (selectedLongTermRows ?? []).map((r) => r.memory_type),
+            });
         return {
           conversationId: _conversationId ?? null,
           userCode: _userCode ?? null,
           traceId: traceIdCanon,
-          inputKind: inputKindCanon, // ✅ userContext も統一
+          inputKind: inputKindCanon,
 
           exprMeta: exprMetaCanon,
+
+          pastStateNoteText:
+            typeof (out.metaForSave as any)?.extra?.pastStateNoteText === 'string'
+              ? (out.metaForSave as any).extra.pastStateNoteText
+              : null,
+
+          pastStateTriggerKind:
+            typeof (out.metaForSave as any)?.extra?.pastStateTriggerKind === 'string'
+              ? (out.metaForSave as any).extra.pastStateTriggerKind
+              : null,
+
+          pastStateKeyword:
+            typeof (out.metaForSave as any)?.extra?.pastStateKeyword === 'string'
+              ? (out.metaForSave as any).extra.pastStateKeyword
+              : null,
+
+          longTermMemoryNoteText,
 
           historyForWriter: turns,
 
           ctxPack: {
             ...ctxPackPrev,
 
-            // ✅ 正本（CANON/PP後の metaForSave）で毎ターン stamp してズレを殺す
             qCode: (out.metaForSave as any)?.q ?? (ctxPackPrev as any)?.qCode ?? null,
             depthStage: (out.metaForSave as any)?.depth ?? (ctxPackPrev as any)?.depthStage ?? null,
             phase: (out.metaForSave as any)?.phase ?? (ctxPackPrev as any)?.phase ?? null,
 
-            traceId: traceIdCanon, // ✅ ここも固定
-            inputKind: inputKindCanon, // ✅ ctxPack にも入れておく（観測しやすくする）
+            traceId: traceIdCanon,
+            inputKind: inputKindCanon,
             historyForWriter: turns,
             slotPlanPolicy,
             exprMeta: exprMetaCanon,
+            longTermMemoryNoteText,
           },
 
           slotPlanPolicy,

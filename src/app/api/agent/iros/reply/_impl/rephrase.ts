@@ -236,6 +236,27 @@ export async function maybeAttachRephraseForRenderV2(args: {
       // 典型の短文ループ
       if (/^(続けて(ください)?|続けよう|続けてね)[\s。．.!！?？]*$/.test(t)) return true;
 
+      // ✅ 内部マーカーそのもの
+      if (/^@[A-Z_]+(?:\s|$)/.test(t)) return true;
+
+      // ✅ NEXT_HINT / SAFE / OBS などの内部JSON断片
+      if (
+        /"(?:mode|laneKey|delta|hint|reason|flow)"\s*:/.test(t) &&
+        /(advance_hint|flow_continue_minimal|advance_flow_continue_minimal|advance_t_concretize_one_step|advance_idea_band_candidates)/.test(t)
+      ) {
+        return true;
+      }
+
+      // ✅ 内部コード単体がそのまま漏れたケース
+      if (
+        /^(?:flow_continue_minimal|advance_flow_continue_minimal|advance_t_concretize_one_step|advance_idea_band_candidates)$/.test(t)
+      ) {
+        return true;
+      }
+
+      // ✅ DO NOT OUTPUT 系の内部パック断片
+      if (/(DO NOT OUTPUT|INTERNAL PACK|STATE_CUES_V3|HISTORY_LITE|COORD \()/i.test(t)) return true;
+
       return false;
     };
 
@@ -319,12 +340,20 @@ export async function maybeAttachRephraseForRenderV2(args: {
       return false;
     }
 
+    // ✅ fallback候補そのものが内部コード/内部断片なら採用しない
+    if (isGarbageText(t)) {
+      setSkip('GARBAGE_TEXT_FOR_FALLBACK_BLOCKS', {
+        attachReason,
+        head: t.slice(0, 120),
+      });
+      return false;
+    }
+
     const fb = buildFallbackRenderBlocksFromFinalText(t);
     if (!Array.isArray(fb) || fb.length === 0) {
       setSkip('FALLBACK_BLOCKS_EMPTY', { attachReason, pickedLen: t.length });
       return false;
     }
-
     meta.extra = {
       ...(meta.extra ?? {}),
       rephraseAttachSkipped: false,
@@ -1107,10 +1136,10 @@ console.log('[IROS/_impl/rephrase.ts][USERCTX_KEYS]', {
 
 try {
   const slotPlanPolicyForRephrase =
-  (userContext as any)?.ctxPack?.slotPlanPolicy ??
-  (meta as any)?.framePlan?.slotPlanPolicy ??
-  (meta as any)?.slotPlanPolicy ??
-  null;
+    (userContext as any)?.ctxPack?.slotPlanPolicy ??
+    (meta as any)?.framePlan?.slotPlanPolicy ??
+    (meta as any)?.slotPlanPolicy ??
+    null;
 
   const res = await rephraseSlotsFinal(extracted, {
     model,
@@ -1135,140 +1164,187 @@ try {
     replyGoal: replyGoalForCtx,
     repeatSignal: repeatSignalForCtx,
   } as any);
+
   console.log('[IROS/rephraseAttach][RES_KEYS]', {
     resKeys: Object.keys(res ?? {}),
     metaKeys: Object.keys((res as any)?.meta ?? {}),
-    // NOTE: rephraseSlotsFinal は out を返さない設計のため、outKeys は原則空になる
     hasOut: (res as any)?.out != null,
     outType: typeof (res as any)?.out,
     metaHasOut: (res as any)?.meta?.out != null,
     metaOutType: typeof (res as any)?.meta?.out,
-
-    // 本命：meta.extra を見る
     metaExtraKeys: Object.keys((res as any)?.meta?.extra ?? {}),
     metaExtra_hasRephraseHead: !!(res as any)?.meta?.extra?.rephraseHead,
     metaExtra_blocksLen: Array.isArray((res as any)?.meta?.extra?.rephraseBlocks)
       ? (res as any).meta.extra.rephraseBlocks.length
       : 0,
-
-    // raw 系の観測（fallback が効くか）
     rawLen: Number((res as any)?.meta?.rawLen ?? 0),
     rawHead: (res as any)?.meta?.rawHead ?? '',
   });
 
-    // 正本：res.meta.extra（AFTER_ATTACH）側
-    const resExtra = (res as any)?.meta?.extra ?? (res as any)?.metaForSave?.extra ?? (res as any)?.extra ?? null;
+  // 正本：res.meta.extra（AFTER_ATTACH）側
+  const resExtra =
+    (res as any)?.meta?.extra ?? (res as any)?.metaForSave?.extra ?? (res as any)?.extra ?? null;
 
-    // blocks が空でも head だけは先に反映（fallback で user seed を拾わせない）
-    const resHead = TRIM((resExtra as any)?.rephraseHead ?? '');
-    if (resHead) {
-      (extraMerged as any).rephraseHead = TRIM((extraMerged as any).rephraseHead) || resHead;
-      meta.extra = {
-        ...(meta.extra ?? {}),
-        rephraseHead: TRIM((meta as any)?.extra?.rephraseHead) || resHead,
-      };
-    }
-
-    // blocks 探索：res.meta.extra（正本）→ 互換 → 直下互換
-    const blocksAny =
-      (resExtra as any)?.rephraseBlocks ??
-      (resExtra as any)?.rephrase?.blocks ??
-      (res as any)?.meta?.extra?.rephraseBlocks ??
-      (res as any)?.meta?.extra?.rephrase?.blocks ??
-      (res as any)?.meta?.rephraseBlocks ??
-      (res as any)?.meta?.out?.blocks ??
-      (res as any)?.meta?.out?.rephraseBlocks ??
-      (res as any)?.blocks ??
-      (res as any)?.rephraseBlocks ??
-      (res as any)?.out?.blocks ??
-      (res as any)?.out?.rephraseBlocks ??
-      null;
-
-    const blocks: any[] | null = Array.isArray(blocksAny) ? blocksAny : null;
-
-    if (!blocks || blocks.length === 0) {
-      // ★最優先：rephraseEngine が本文を out に載せず meta.rawHead/rawLen だけ返すケース
-      const rawFromRes = TRIM(
-        (res as any)?.raw ??
-          (res as any)?.text ??
-          (res as any)?.content ??
-          (res as any)?.meta?.raw ??
-          (res as any)?.meta?.text ??
-          (res as any)?.meta?.content ??
-          (res as any)?.meta?.rawHead ??
-          '',
-      );
-
-      if (rawFromRes) {
-        attachBlocksFromTextOrSkip(rawFromRes, 'REPHRASE_RAW_FALLBACK');
-        return;
-      }
-
-      // それでも無理なら assistant 側の候補だけ（userText には逃げない）
-      const fallbackText = pickSafeAssistantText({
-        candidates: [
-          (extraMerged as any)?.finalAssistantTextCandidate,
-          (extraMerged as any)?.finalAssistantText,
-          (extraMerged as any)?.assistantText,
-          (extraMerged as any)?.resolvedText,
-          (extraMerged as any)?.extractedTextFromModel,
-          (extraMerged as any)?.rawTextFromModel,
-          (extraMerged as any)?.rephraseHead,
-          (meta as any)?.extra?.rephraseHead,
-          (extraMerged as any)?.content,
-          (extraMerged as any)?.text,
-        ],
-      });
-
-      attachBlocksFromTextOrSkip(fallbackText, 'REPHRASE_EMPTY_FALLBACK');
-      return;
-    }
-
-    (extraMerged as any).rephraseBlocks = blocks;
-    (extraMerged as any).rephraseBlocksAttached = true;
-    (extraMerged as any).rephraseLLMApplied = true;
-    (extraMerged as any).rephraseApplied = true;
-    (extraMerged as any).rephraseReason = (extraMerged as any).rephraseReason ?? 'rephrase_slots_final';
-    (extraMerged as any).rephraseHead = (extraMerged as any).rephraseHead ?? TRIM((blocks?.[0] as any)?.text ?? '');
-
+  // blocks が空でも head だけは先に反映（fallback で user seed を拾わせない）
+  const resHead = TRIM((resExtra as any)?.rephraseHead ?? '');
+  if (resHead) {
+    (extraMerged as any).rephraseHead = TRIM((extraMerged as any).rephraseHead) || resHead;
     meta.extra = {
       ...(meta.extra ?? {}),
-      rephraseAttachSkipped: false,
-      rephraseBlocksAttached: true,
-      rephraseLLMApplied: true,
-      rephraseApplied: true,
-      rephraseReason: (meta as any)?.extra?.rephraseReason ?? 'rephrase_slots_final',
-      rephraseHead: (meta as any)?.extra?.rephraseHead ?? TRIM((blocks?.[0] as any)?.text ?? ''),
+      rephraseHead: TRIM((meta as any)?.extra?.rephraseHead) || resHead,
     };
+  }
 
-    console.log('[IROS/rephraseAttach][OK]', {
-      conversationId,
-      userCode,
-      blocksLen: blocks.length,
-      head: String((blocks?.[0] as any)?.text ?? '').slice(0, 120),
-    });
-  } catch (e: any) {
-    console.error('[IROS/rephraseAttach][EXCEPTION]', {
-      conversationId,
-      userCode,
-      err: String(e?.message ?? e),
+  // blocks 探索：res.meta.extra（正本）→ 互換 → 直下互換
+  const blocksAny =
+    (resExtra as any)?.rephraseBlocks ??
+    (resExtra as any)?.rephrase?.blocks ??
+    (res as any)?.meta?.extra?.rephraseBlocks ??
+    (res as any)?.meta?.extra?.rephrase?.blocks ??
+    (res as any)?.meta?.rephraseBlocks ??
+    (res as any)?.meta?.out?.blocks ??
+    (res as any)?.meta?.out?.rephraseBlocks ??
+    (res as any)?.blocks ??
+    (res as any)?.rephraseBlocks ??
+    (res as any)?.out?.blocks ??
+    (res as any)?.out?.rephraseBlocks ??
+    null;
+
+  const blocksRaw: any[] | null = Array.isArray(blocksAny) ? blocksAny : null;
+
+  // ✅ blocks を“安全化”する：空 / 内部マーカー(@OBS/@SHIFT...) だけなら捨てる
+  const toText = (b: any) =>
+    TRIM(typeof b === 'string' ? b : (b?.text ?? b?.content ?? b?.message ?? ''));
+
+  const toKind = (b: any) => (typeof b === 'object' && b ? TRIM(b.kind) : '');
+
+  const safeBlocks: any[] = [];
+  if (Array.isArray(blocksRaw) && blocksRaw.length > 0) {
+    for (const b of blocksRaw) {
+      const t0 = toText(b);
+      const safe = pickSafeAssistantText({ candidates: [t0] });
+      if (!safe) continue;
+      safeBlocks.push({
+        text: safe,
+        kind: toKind(b) || 'p',
+      });
+    }
+  }
+
+  // ✅ 最重要：blocks が “ある” でも、中身が無効なら fallback 扱いにする
+  if (!safeBlocks.length) {
+    // ★最優先：rephraseEngine が blocks を返さない/使えないケースでも、
+    // “内部マーカー(@OBS/@SHIFT...)” を本文扱いして attach しない（micro事故の根）
+    const safeFromRes = pickSafeAssistantText({
+      candidates: [
+        // res 本体
+        (res as any)?.out?.text,
+        (res as any)?.out?.content,
+        (res as any)?.raw,
+        (res as any)?.text,
+        (res as any)?.content,
+
+        // meta 側
+        (res as any)?.meta?.out?.text,
+        (res as any)?.meta?.out?.content,
+        (res as any)?.meta?.raw,
+        (res as any)?.meta?.text,
+        (res as any)?.meta?.content,
+
+        // note / extra head を追加（rawHead しか無い事故の救済）
+        (res as any)?.meta?.note,
+        (resExtra as any)?.rephraseHead,
+
+        // rawHead は “最後の手段”（internal 判定で弾かれるので安全）
+        (res as any)?.meta?.rawHead,
+      ],
     });
 
+    if (safeFromRes) {
+      // ✅ 内部センチネルは絶対にUIへ出さない
+      const isSentinel =
+        /^MICRO_LIKE_SKIP_REPHRASE\b/.test(String(safeFromRes)) ||
+        /^REPHRASE_/i.test(String(safeFromRes));
+
+      if (!isSentinel) {
+        attachBlocksFromTextOrSkip(safeFromRes, 'REPHRASE_TEXT_FALLBACK_SAFE');
+        return;
+      }
+      // sentinel だったら「テキスト無し扱い」にして次の fallback へ落とす
+    }
+
+    // それでも無理なら assistant 側の候補だけ（userText には逃げない）
     const fallbackText = pickSafeAssistantText({
       candidates: [
+        // ✅ 追加：seedOnly/emptyLike でも最終UI文の種が先にここに入ることがある
+        (extraMerged as any)?.slotPlanSeedHead,
+        (extraMerged as any)?.slotPlanSeed,
+        (meta as any)?.extra?.slotPlanSeedHead,
+        (meta as any)?.extra?.slotPlanSeed,
+
         (extraMerged as any)?.finalAssistantTextCandidate,
         (extraMerged as any)?.finalAssistantText,
         (extraMerged as any)?.assistantText,
         (extraMerged as any)?.resolvedText,
         (extraMerged as any)?.extractedTextFromModel,
         (extraMerged as any)?.rawTextFromModel,
-        (extraMerged as any)?.content,
-        (extraMerged as any)?.text,
         (extraMerged as any)?.rephraseHead,
         (meta as any)?.extra?.rephraseHead,
+        (extraMerged as any)?.content,
+        (extraMerged as any)?.text,
       ],
     });
-
-    attachBlocksFromTextOrSkip(fallbackText, 'REPHRASE_EXCEPTION_FALLBACK');
+    attachBlocksFromTextOrSkip(fallbackText, 'REPHRASE_EMPTY_FALLBACK');
+    return;
   }
-}
+
+  // ✅ OK: safeBlocks を採用
+  (extraMerged as any).rephraseBlocks = safeBlocks;
+  (extraMerged as any).rephraseBlocksAttached = true;
+  (extraMerged as any).rephraseLLMApplied = true;
+  (extraMerged as any).rephraseApplied = true;
+  (extraMerged as any).rephraseReason = (extraMerged as any).rephraseReason ?? 'rephrase_slots_final';
+
+  const headSafe = TRIM((safeBlocks?.[0] as any)?.text ?? '');
+  (extraMerged as any).rephraseHead = TRIM((extraMerged as any).rephraseHead) || headSafe;
+
+  meta.extra = {
+    ...(meta.extra ?? {}),
+    rephraseAttachSkipped: false,
+    rephraseBlocksAttached: true,
+    rephraseLLMApplied: true,
+    rephraseApplied: true,
+    rephraseReason: (meta as any)?.extra?.rephraseReason ?? 'rephrase_slots_final',
+    rephraseHead: TRIM((meta as any)?.extra?.rephraseHead) || headSafe,
+  };
+
+  console.log('[IROS/rephraseAttach][OK]', {
+    conversationId,
+    userCode,
+    blocksLen: safeBlocks.length,
+    head: String(headSafe).slice(0, 120),
+  });
+} catch (e: any) {
+  console.error('[IROS/rephraseAttach][EXCEPTION]', {
+    conversationId,
+    userCode,
+    err: String(e?.message ?? e),
+  });
+
+  const fallbackText = pickSafeAssistantText({
+    candidates: [
+      (extraMerged as any)?.finalAssistantTextCandidate,
+      (extraMerged as any)?.finalAssistantText,
+      (extraMerged as any)?.assistantText,
+      (extraMerged as any)?.resolvedText,
+      (extraMerged as any)?.extractedTextFromModel,
+      (extraMerged as any)?.rawTextFromModel,
+      (extraMerged as any)?.rephraseHead,
+      (meta as any)?.extra?.rephraseHead,
+      (extraMerged as any)?.content,
+      (extraMerged as any)?.text,
+    ],
+  });
+
+  attachBlocksFromTextOrSkip(fallbackText, 'REPHRASE_EXCEPTION_FALLBACK');
+}}

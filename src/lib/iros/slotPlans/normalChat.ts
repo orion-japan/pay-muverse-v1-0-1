@@ -114,7 +114,7 @@ function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey | null; f
       ? '次の一手を1つに絞って実行'
       : laneKey === 'IDEA_BAND'
         ? '候補を2〜3に並べて選びやすくする'
-        : '流れを保ったまま前に進める';
+        : '続けてください';
 
   return {
     key: 'NEXT',

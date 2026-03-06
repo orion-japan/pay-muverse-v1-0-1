@@ -261,41 +261,69 @@ export function detectETurnV1(userText: string, micro: boolean): ETurnV1 | null 
   const hasExcl = /[!！]/.test(t);
   const hasQuest = /[?？]/.test(t);
 
+  // e1: 整える / 守る / 固める / 確認して進む
   const p1 = [
     /我慢/, /抑え/, /抑圧/, /耐え/, /義務/, /べき/, /ちゃんと/, /正しく/, /ルール/, /秩序/,
-    /仕様/, /規約/, /制約/, /守ら/, /固定/, /憲法/, /禁止/, /許可/,
+    /仕様/, /規約/, /制約/, /守ら/, /固定/, /禁止/, /許可/,
+    /整理/, /整え/, /確認したい/, /確認して/, /確かめ/, /検証/, /実在確認/, /存在確認/,
+    /一つずつ/, /1つずつ/, /順番/, /安全に/, /慎重/, /根拠を見たい/,
   ];
+
+  // e2: 進める / 押す / 直す / やる / 試す / 突破
   const p2 = [
     /怒/, /ムカ/, /イラ/, /腹立/, /許せ/, /対立/, /反発/, /喧嘩/, /キレ/, /最悪/,
     /ふざけ/, /舐め/, /ぶち/, /ダメダメ/, /何やってきた/, /できてないじゃん/,
+    /やる/, /進めたい/, /進もう/, /進める/, /試したい/, /試す/, /直したい/, /直す/,
+    /修正/, /実装/, /作りたい/, /作る/, /見たい/, /見てほしい/, /貼る/, /出したい/,
+    /突破/, /動かしたい/, /回したい/, /確認するぞ/,
   ];
+
+  // e3: 不安 / 迷い / どうする / 大丈夫 / 揺れ
   const p3 = [
-    /不安/, /心配/, /迷/, /わから/, /どうし/, /大丈夫/, /確認/, /恐らく/, /たぶん/, /微妙/,
-    /悩/, /もや/, /モヤ/, /自信ない/, /確証/, /根拠/, /本当に/, /これでok/,
+    /不安/, /心配/, /迷/, /どうし/, /大丈夫/, /恐らく/, /たぶん/, /微妙/,
+    /悩/, /もや/, /モヤ/, /自信ない/, /確証/, /本当に/, /これでok/, /これで大丈夫/,
+    /なんだっけ/, /思い出せ/, /あれって/, /どうだったっけ/,
   ];
+
+  // e4: 怖さ / 回避 / 萎縮 / 緊張
   const p4 = [
     /怖/, /こわ/, /恐/, /無理/, /無理だ/, /無理かも/, /萎縮/, /逃げ/, /避け/, /震え/, /緊張/,
     /焦り/, /パニック/, /詰ん/, /無理ゲー/,
   ];
+
+  // e5: 虚無 / 消耗 / 燃えない
   const p5 = [
     /虚無/, /空虚/, /空っぽ/, /意味ない/, /無意味/, /どうでも/, /燃え/, /やる気ない/, /飽き/,
-    /しんどい/, /つらい/, /辛い/, /落ち込/,
+    /しんどい/, /つらい/, /辛い/, /落ち込/, /疲れた/, /きつい/,
   ];
 
+  // “弱い揺れ” は即 return せず、補助点だけにする
   const softUncertain = [
     /…+/, /\.{2,}/, /うーん/, /んー/, /えー/, /えっと/, /なんか/, /微妙/, /よくわからない/, /たぶん/,
   ];
 
-  const s1 = countHits(t, p1);
-  const s2 = countHits(t, p2) + (/[!！]{2,}/.test(t) ? 2 : (hasExcl ? 1 : 0));
-  const s3 = countHits(t, p3) + (/[?？]{2,}/.test(t) ? 2 : (hasQuest ? 1 : 0));
-  const s4 = countHits(t, p4);
-  const s5 = countHits(t, p5);
+  let s1 = countHits(t, p1);
+  let s2 = countHits(t, p2);
+  let s3 = countHits(t, p3);
+  let s4 = countHits(t, p4);
+  let s5 = countHits(t, p5);
 
+  // 句読点補正
+  s2 += /[!！]{2,}/.test(t) ? 2 : hasExcl ? 1 : 0;
+  s3 += /[?？]{2,}/.test(t) ? 2 : hasQuest ? 1 : 0;
+
+  // 弱い揺れは e3 に少しだけ加点（即決しない）
   const soft = countHits(t, softUncertain);
+  if (soft >= 1) s3 += 1;
 
-  // “弱い揺れ” は e3 に倒す（micro でも反応する）
-  if (soft >= 1) return 'e3';
+  // 開発系の「確認」「根拠」は e3 ではなく e1 側へ寄せる
+  if (/確認|根拠|検証|存在確認|実在確認/.test(t)) s1 += 1;
+
+  // 「進めたい・直したい・見たい」は e2 を優先
+  if (/進めたい|直したい|修正したい|見たい|試したい|作りたい|やりたい/.test(t)) s2 += 1;
+
+  // 「疲れた」は e5 を優先
+  if (/疲れた|しんどい|つらい|辛い|きつい/.test(t)) s5 += 1;
 
   const scores: Array<[ETurnV1, number]> = [
     ['e1', s1],
@@ -307,25 +335,53 @@ export function detectETurnV1(userText: string, micro: boolean): ETurnV1 | null 
   scores.sort((a, b) => b[1] - a[1]);
   const [best, bestScore] = scores[0];
 
-  // 全ゼロでも “そのターンの値として必ず反応” → e3 に倒す（安全デフォルト）
+  // 全ゼロ時の安全デフォルト
+  // 確認系の短文は e1、問いは e3、勢いは e2、消耗は e5
   if (!bestScore || bestScore <= 0) {
+    if (/疲れた|しんどい|つらい|辛い|きつい/.test(t)) return 'e5';
+    if (/整理|整え|確認|検証|順番|一つずつ|1つずつ/.test(t)) return 'e1';
+    if (/進めたい|直したい|修正|試したい|やる/.test(t)) return 'e2';
     if (/[!！]{2,}/.test(t)) return 'e2';
     if (/[?？]{2,}/.test(t)) return 'e3';
     if (hasExcl) return 'e2';
     if (hasQuest) return 'e3';
-    return 'e3';
+    return micro ? 'e1' : 'e3';
   }
 
-  // tie-break: micro は安全側（e3）に寄せる
+  // tie-break
   const top = scores.filter(([, v]) => v === bestScore).map(([k]) => k);
+
   if (top.length >= 2) {
-    if (top.includes('e3')) return 'e3';
-    if (micro) return 'e3';
+    // 怖さ / 消耗は優先
+    if (top.includes('e4')) return 'e4';
+    if (top.includes('e5')) return 'e5';
+
+    // 進行意図があるなら e2
+    if (top.includes('e2') && /進め|直し|修正|試し|やる|作る|見たい/.test(t)) return 'e2';
+
+    // 整理 / 確認 / 順番 は e1
+    if (top.includes('e1') && /整理|整え|確認|検証|順番|一つずつ|1つずつ/.test(t)) return 'e1';
+
+    // 迷い語が強い時だけ e3
+    if (top.includes('e3') && /不安|心配|迷|どうし|なんだっけ|あれって/.test(t)) return 'e3';
+
+    if (micro) {
+      if (top.includes('e1')) return 'e1';
+      if (top.includes('e2')) return 'e2';
+      if (top.includes('e3')) return 'e3';
+    }
+
     if (top.includes('e1')) return 'e1';
   }
 
-  // micro の場合：単発一致は誤爆しやすいので e3 へ
-  if (micro && bestScore <= 1) return 'e3';
+  // micro の弱一致でも全部 e3 に倒さない
+  if (micro && bestScore <= 1) {
+    if (s5 > 0) return 'e5';
+    if (s4 > 0) return 'e4';
+    if (s2 > 0) return 'e2';
+    if (s1 > 0) return 'e1';
+    return 'e3';
+  }
 
   return best;
 }

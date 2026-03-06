@@ -42,11 +42,7 @@ export function classifyInputKind(t: string): InputKind {
   // ✅ micro = 相槌・了解・短い合図だけ（短い“内容文”は micro にしない）
   // - 例: はい / うん / そう / 了解 / OK / ありがとう / 👍 / … など
   const isAck =
-    /^(はい|うん|うーん|そう|そっか|了解|りょ|ok|おけ|わかった|なるほど|たしかに|ええ|うむ|まじ|ありがとう|サンキュー|thanks|thx)$/.test(
-      s.toLowerCase()
-    ) ||
-    /^[。．…!！]+$/.test(s) ||
-    /^[👍🙏🙆‍♂️🙆‍♀️🙆✅☑️]+$/.test(s);
+  /^[👍🙏🙆‍♂️🙆‍♀️🙆✅☑️👌👏✨🫶💯🔥🙇]+$/u.test(s);
 
   if (isAck) return 'micro';
 

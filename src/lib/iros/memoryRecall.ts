@@ -11,10 +11,11 @@
 //  - 'none'          : リコールと判定しない
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-
+import { supabaseServer } from '@/lib/supabaseServer'
+import { findSemanticSnapshotsV1 } from '@/lib/iros/memory/semanticRecall';
 // ★ 過去記憶トリガー検出 + キーワード抽出
 
-export type MemoryRecallTriggerKind = 'none' | 'recent_topic' | 'keyword';
+export type MemoryRecallTriggerKind = 'none' | 'recent_topic' | 'keyword' | 'semantic';
 
 export type MemoryRecallTrigger = {
   kind: MemoryRecallTriggerKind;
@@ -26,6 +27,7 @@ export type MemoryRecallResult = {
   pastStateNoteText: string | null;
   triggerKind: MemoryRecallTriggerKind | null;
   keyword: string | null;
+  matchedTerms?: string[];
 };
 
 // 「覚えてます？」系をゆるく拾う
@@ -46,6 +48,30 @@ export function detectMemoryRecallTriggerFromText(
   rawText: string,
 ): MemoryRecallTrigger {
   const text = normalizeForRecall(rawText);
+
+  // 0) 「◯◯ってなんの話だっけ？ / ◯◯って何だっけ？」系
+  // 例:
+  // - 逆行ってなんの話だっけ？ -> 逆行
+  // - Muverseって何だっけ？   -> Muverse
+  const topicQuestionPatterns = [
+    /^(.+?)って(?:なんの|何の)?話だっけ\??$/u,
+    /^(.+?)って何だっけ\??$/u,
+    /^(.+?)ってなんだっけ\??$/u,
+    /^(.+?)とは(?:なんの|何の)?話\??$/u,
+  ];
+
+  for (const pattern of topicQuestionPatterns) {
+    const m = text.match(pattern);
+    if (m && m[1]) {
+      const keyword = cleanKeyword(m[1]);
+      if (keyword) {
+        return {
+          kind: 'keyword',
+          keyword,
+        };
+      }
+    }
+  }
 
   // 1) 「覚えてます？」系 → 優先して扱う
   if (REMEMBER_TRIGGER_REGEX.test(text)) {
@@ -211,10 +237,122 @@ async function loadRecentSnapshots(args: {
   userCode: string;
   trigger: MemoryRecallTrigger;
   limit?: number;
+  userText?: string;
 }): Promise<SnapshotRow[]> {
   const { client, userCode, trigger } = args;
   const limit = args.limit ?? 5;
 
+  const normalizeCompareText = (v: unknown): string => {
+    return String(v ?? '')
+      .trim()
+      .replace(/[　\s]+/g, '')
+      .replace(/[!?！？。．、,\.\-ー～〜「」『』（）()【】\[\]]/g, '')
+      .toLowerCase();
+  };
+
+  const currentInputNorm = normalizeCompareText(args.userText);
+
+  const toSnapshotFromTraining = (row: TrainingSampleRow): SnapshotRow => ({
+    date: row.created_at,
+    summary: null,
+    depth_stage: row.depth_stage,
+    q_primary: row.q_code,
+    self_acceptance: row.self_acceptance,
+    situation_summary: row.situation_summary,
+    situation_topic: row.situation_topic,
+  });
+
+  const toSnapshotFromMemory = (row: MemoryStateRow): SnapshotRow => ({
+    date: row.updated_at,
+    summary: row.summary,
+    depth_stage: row.depth_stage,
+    q_primary: row.q_primary,
+    self_acceptance: row.self_acceptance,
+    situation_summary: row.situation_summary,
+    situation_topic: row.situation_topic,
+  });
+
+  const filterAndDedupeSnapshots = (rows: SnapshotRow[]): SnapshotRow[] => {
+    const filtered = rows.filter((row) => {
+      // ✅ situation_summary だけでなく summary も候補にする
+      const rawSummary = String(
+        row.situation_summary ??
+        row.summary ??
+        ''
+      ).trim();
+
+      const rawTopic = String(row.situation_topic ?? '').trim();
+
+      const summaryNorm = normalizeCompareText(rawSummary);
+      const topicNorm = normalizeCompareText(rawTopic);
+
+      // summary も topic も空なら除外
+      if (!summaryNorm && !topicNorm) return false;
+
+      // 現在入力と実質同じ summary / topic は除外
+      if (currentInputNorm) {
+        if (summaryNorm && summaryNorm === currentInputNorm) return false;
+        if (topicNorm && topicNorm === currentInputNorm) return false;
+      }
+
+      // 低情報な相槌・短文は除外
+      const lowInfoSet = new Set([
+        'はい',
+        'うん',
+        'ok',
+        'okay',
+        'ありがとう',
+        'ありがとうございます',
+        'どういたしまして',
+        '了解',
+        'りょうかい',
+        '承知',
+        'なるほど',
+        'そうなんだ',
+        'そうですか',
+        'たしかに',
+      ]);
+
+      if (rawSummary && lowInfoSet.has(rawSummary.toLowerCase())) return false;
+
+      // summary が短すぎて topic も無いなら除外
+      if (summaryNorm.length <= 2 && !topicNorm) return false;
+
+      // keyword recall のときは keyword が summary/topic のどちらかに含まれる候補を優先的に残す
+      if (trigger.kind === 'keyword' && trigger.keyword) {
+        const kwNorm = normalizeCompareText(trigger.keyword);
+        if (kwNorm) {
+          const hitSummary = summaryNorm.includes(kwNorm);
+          const hitTopic = topicNorm.includes(kwNorm);
+
+          // training fallback / memory_state fallback でも
+          // keyword と無関係なノイズ候補を落とす
+          if (!hitSummary && !hitTopic) return false;
+        }
+      }
+
+      return true;
+    });
+
+    const seen = new Set<string>();
+    const deduped: SnapshotRow[] = [];
+
+    for (const row of filtered) {
+      const key = [
+        normalizeCompareText(row.summary),
+        normalizeCompareText(row.situation_summary),
+        normalizeCompareText(row.situation_topic),
+        String(row.depth_stage ?? '').trim(),
+        String(row.q_primary ?? '').trim(),
+      ].join('|');
+
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(row);
+    }
+
+    return deduped.slice(0, limit);
+  };
   /* ---------- ① iros_training_samples をメインで見る ---------- */
 
   const baseTrainQuery = client
@@ -227,12 +365,19 @@ async function loadRecentSnapshots(args: {
   let trainQuery = baseTrainQuery;
 
   if (trigger.kind === 'keyword' && trigger.keyword) {
-    trainQuery = trainQuery.ilike('situation_summary', `%${trigger.keyword}%`);
+    const kw = `%${trigger.keyword}%`;
+
+    trainQuery = trainQuery.or(
+      [
+        `situation_summary.ilike.${kw}`,
+        `situation_topic.ilike.${kw}`
+      ].join(',')
+    );
   }
 
   let { data: trainData, error: trainError } = await trainQuery
     .order('created_at', { ascending: false })
-    .limit(limit);
+    .limit(limit * 3);
 
   if (trainError) {
     console.error('[IROS/MemoryRecall] training_samples load error', {
@@ -249,7 +394,7 @@ async function loadRecentSnapshots(args: {
   if (trainData.length === 0 && trigger.kind === 'keyword') {
     const fb = await baseTrainQuery
       .order('created_at', { ascending: false })
-      .limit(limit);
+      .limit(limit * 3);
 
     if (fb.error) {
       console.error('[IROS/MemoryRecall] training_samples fallback error', {
@@ -262,15 +407,12 @@ async function loadRecentSnapshots(args: {
   }
 
   if (trainData.length > 0) {
-    return (trainData as TrainingSampleRow[]).map((row) => ({
-      date: row.created_at,
-      summary: null, // training_samples には summary は無い
-      depth_stage: row.depth_stage,
-      q_primary: row.q_code,
-      self_acceptance: row.self_acceptance,
-      situation_summary: row.situation_summary,
-      situation_topic: row.situation_topic,
-    }));
+    const snapshots = (trainData as TrainingSampleRow[]).map(toSnapshotFromTraining);
+    const cleaned = filterAndDedupeSnapshots(snapshots);
+
+    if (cleaned.length > 0) {
+      return cleaned;
+    }
   }
 
   /* ---------- ② 最終手段として iros_memory_state を見る ---------- */
@@ -282,7 +424,7 @@ async function loadRecentSnapshots(args: {
     )
     .eq('user_code', userCode)
     .order('updated_at', { ascending: false })
-    .limit(limit);
+    .limit(limit * 3);
 
   if (memError) {
     console.error('[IROS/MemoryRecall] memory_state load error', {
@@ -294,17 +436,9 @@ async function loadRecentSnapshots(args: {
 
   if (!memData || memData.length === 0) return [];
 
-  return (memData as MemoryStateRow[]).map((row) => ({
-    date: row.updated_at,
-    summary: row.summary,
-    depth_stage: row.depth_stage,
-    q_primary: row.q_primary,
-    self_acceptance: row.self_acceptance,
-    situation_summary: row.situation_summary,
-    situation_topic: row.situation_topic,
-  }));
+  const snapshots = (memData as MemoryStateRow[]).map(toSnapshotFromMemory);
+  return filterAndDedupeSnapshots(snapshots);
 }
-
 /**
  * スナップショット配列から IROS_PAST_STATE_NOTE 文字列を組み立てる
  *
@@ -316,8 +450,10 @@ function buildPastStateNoteTextFromSnapshots(args: {
   rows: SnapshotRow[];
   topicLabel?: string | null;
   keyword?: string | null;
+  triggerKind?: MemoryRecallTriggerKind | null;
+  matchedTerms?: string[] | null;
 }): string | null {
-  const { rows, topicLabel, keyword } = args;
+  const { rows, topicLabel, keyword, triggerKind, matchedTerms } = args;
   if (!rows || rows.length === 0) return null;
 
   // ★ summary 最優先（最新=rows[0] 前提：loadRecentSnapshots は新しい順）
@@ -326,6 +462,18 @@ function buildPastStateNoteTextFromSnapshots(args: {
     typeof latest?.summary === 'string' ? latest.summary.trim() : '';
 
   if (summary) {
+    if (triggerKind === 'semantic') {
+      const semanticLines: string[] = [summary];
+
+      if (matchedTerms && matchedTerms.length > 0) {
+        semanticLines.push('');
+        semanticLines.push(`関連トリガー: semantic`);
+        semanticLines.push(`一致語: ${matchedTerms.slice(0, 6).join(', ')}`);
+      }
+
+      return semanticLines.join('\n');
+    }
+
     // summary は「そのまま LLM に渡すテキスト」想定なので、余計な装飾は付けない
     return summary;
   }
@@ -344,6 +492,12 @@ function buildPastStateNoteTextFromSnapshots(args: {
   );
   if (keyword && keyword.trim().length > 0) {
     lines.push(`関連キーワード: 「${keyword}」`);
+  }
+  if (triggerKind === 'semantic') {
+    lines.push(`関連トリガー: semantic`);
+    if (matchedTerms && matchedTerms.length > 0) {
+      lines.push(`一致語: ${matchedTerms.slice(0, 6).join(', ')}`);
+    }
   }
   lines.push('');
   lines.push(
@@ -376,7 +530,6 @@ function buildPastStateNoteTextFromSnapshots(args: {
 
   return lines.join('\n');
 }
-
 /* =========================================================
    3) 外部公開：このターン用の pastStateNote を準備
    - handleIrosReply などから呼び出す想定
@@ -395,6 +548,10 @@ export async function preparePastStateNoteForTurn(args: {
   userText: string;
   topicLabel?: string | null;
   limit?: number;
+  conversationLine?: string | null;
+  topicDigest?: string | null;
+  situationTopic?: string | null;
+  depthStage?: string | null;
 
   /**
    * ★ 追加：
@@ -405,7 +562,16 @@ export async function preparePastStateNoteForTurn(args: {
    */
   forceRecentTopicFallback?: boolean;
 }): Promise<MemoryRecallResult> {
-  const { client, userCode, userText, topicLabel } = args;
+  const {
+    client,
+    userCode,
+    userText,
+    topicLabel,
+    conversationLine,
+    topicDigest,
+    situationTopic,
+    depthStage,
+  } = args;
 
   // 1) トリガー判定
   let trigger = detectMemoryRecallTriggerFromText(userText);
@@ -415,8 +581,7 @@ export async function preparePastStateNoteForTurn(args: {
       ? args.forceRecentTopicFallback
       : true;
 
-  // ★ ここが今回のポイント：
-  //   - kind='none' でも毎ターン recent_topic に倒す（デフォルト true）
+  // kind='none' でも毎ターン recent_topic に倒す（デフォルト true）
   if (trigger.kind === 'none' && forceFallback) {
     console.log(
       '[IROS/MemoryRecall] no explicit trigger in text → fallback to recent_topic',
@@ -426,13 +591,13 @@ export async function preparePastStateNoteForTurn(args: {
     trigger = { kind: 'recent_topic', keyword: null };
   }
 
-  // ★ 強制フォールバックしない運用のときは、none なら即return
   if (trigger.kind === 'none') {
     return {
       hasNote: false,
       pastStateNoteText: null,
       triggerKind: 'none',
       keyword: null,
+      matchedTerms: [],
     };
   }
 
@@ -442,6 +607,7 @@ export async function preparePastStateNoteForTurn(args: {
     userCode,
     trigger,
     limit: args.limit,
+    userText,
   });
 
   if (!rows || rows.length === 0) {
@@ -450,19 +616,59 @@ export async function preparePastStateNoteForTurn(args: {
       triggerKind: trigger.kind,
       keyword: trigger.keyword,
     });
+
     return {
       hasNote: false,
       pastStateNoteText: null,
       triggerKind: trigger.kind,
       keyword: trigger.keyword ?? null,
+      matchedTerms: [],
     };
   }
 
-  // 3) ノート文字列を組み立て（summary 最優先）
+  // 3) semantic rerank
+  let finalRows = rows;
+  let finalTriggerKind: MemoryRecallTriggerKind = trigger.kind;
+  let matchedTerms: string[] = [];
+
+  const semantic = findSemanticSnapshotsV1({
+    userText,
+    conversationLine: conversationLine ?? null,
+    topicDigest: topicDigest ?? null,
+    situationTopic: situationTopic ?? null,
+    depthStage: depthStage ?? null,
+    snapshots: rows.map((row) => ({
+      summary: row.summary ?? row.situation_summary ?? null,
+      topic: row.situation_topic ?? null,
+      situation_summary: row.situation_summary ?? null,
+      situation_topic: row.situation_topic ?? null,
+      depth_stage: row.depth_stage ?? null,
+      q_code: row.q_primary ?? null,
+      raw: row,
+    })),
+    minScore: 4,
+    topN: Math.min(args.limit ?? 3, 3),
+  });
+
+  if (semantic.hits.length > 0) {
+    const semanticRows = semantic.hits
+      .map((hit) => (hit.raw ?? null) as SnapshotRow | null)
+      .filter((v): v is SnapshotRow => !!v);
+
+    if (semanticRows.length > 0) {
+      finalRows = semanticRows;
+      finalTriggerKind = 'semantic';
+      matchedTerms = semantic.matchedTerms ?? [];
+    }
+  }
+
+  // 4) ノート文字列を組み立て（summary 最優先）
   const noteText = buildPastStateNoteTextFromSnapshots({
-    rows,
+    rows: finalRows,
     topicLabel: topicLabel ?? null,
     keyword: trigger.keyword ?? null,
+    triggerKind: finalTriggerKind,
+    matchedTerms,
   });
 
   const hasNote = !!noteText && noteText.trim().length > 0;
@@ -470,15 +676,21 @@ export async function preparePastStateNoteForTurn(args: {
   console.log('[IROS/MemoryRecall] pastStateNoteText prepared', {
     userCode,
     hasNote,
-    triggerKind: trigger.kind,
+    triggerKind_requested: trigger.kind,
+    triggerKind_final: finalTriggerKind,
     keyword: trigger.keyword,
-    usedSummary: typeof rows?.[0]?.summary === 'string' && !!rows[0].summary?.trim(),
+    matchedTerms,
+    semanticBestScore: semantic.bestScore,
+    usedSummary:
+      typeof finalRows?.[0]?.summary === 'string' &&
+      !!finalRows[0].summary?.trim(),
   });
 
   return {
     hasNote,
-    pastStateNoteText: hasNote ? noteText! : null,
-    triggerKind: trigger.kind,
+    pastStateNoteText: hasNote ? noteText : null,
+    triggerKind: finalTriggerKind,
     keyword: trigger.keyword ?? null,
+    matchedTerms,
   };
 }

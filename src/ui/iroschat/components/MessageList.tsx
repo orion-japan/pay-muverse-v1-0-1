@@ -475,54 +475,93 @@ const safeText = transformIrTemplateToMarkdown(displayText);
 
         // ✅ 表示用Qコードは「現在Q」を優先して拾う（targetQ / goalTargetQ は表示に使わない）
         const qToShowRaw =
-          // いま最優先：トップレベル（UIに直置きされてる場合）
           (m.meta?.qCode as any) ??
           (m.meta?.q as any) ??
-
-          // よくある：extra.ctxPack に入ってる場合（postprocess / ctxPack系）
           (m.meta?.extra?.ctxPack?.qCode as any) ??
-          (m.meta?.extra?.ctxPack?.qPrimary as any) ?? // 念のため
-
-          // unified がある場合
+          (m.meta?.extra?.ctxPack?.qPrimary as any) ??
           (m.meta?.unified?.q?.current as any) ??
-
-          // 旧/フラットなpayload（DB/CSV系）
           ((m as any)?.q_code as any) ??
           ((m as any)?.q as any) ??
           null;
-        // 安全弁：Q1〜Q5 以外は出さない
+
         const qToShowSafe =
           typeof qToShowRaw === 'string' && /^Q[1-5]$/.test(qToShowRaw)
             ? (qToShowRaw as 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5')
             : null;
 
+        // ✅ 表示用 e_turn を拾う
+        const eTurnToShowRaw =
+          (m.meta?.extra?.e_turn as any) ??
+          (m.meta?.extra?.mirror?.e_turn as any) ??
+          (m.meta?.extra?.mirrorFlowV1?.mirror?.e_turn as any) ??
+          (m.meta?.extra?.ctxPack?.e_turn as any) ??
+          (m.meta?.extra?.ctxPack?.mirror?.e_turn as any) ??
+          ((m.meta as any)?.e_turn as any) ??
+          ((m as any)?.e_turn as any) ??
+          null;
 
-// ✅ 表示用 depth（S/R/C/I/T）候補を拾う（確定キーはログで当てる）
-const depthToShowRaw =
-  (m.meta?.depth as any) ??
-  ((m.meta as any)?.depthStage as any) ??
-  (m.meta?.unified?.depth?.current as any) ??
-  ((m as any)?.depth_stage as any) ??
-  ((m as any)?.depth as any) ??
-  null;
+        const eTurnToShowSafe =
+          typeof eTurnToShowRaw === 'string' && /^e[1-5]$/i.test(eTurnToShowRaw.trim())
+            ? (eTurnToShowRaw.trim().toLowerCase() as 'e1' | 'e2' | 'e3' | 'e4' | 'e5')
+            : null;
 
-const depthToShowSafe =
-  typeof depthToShowRaw === 'string' && /^[SRCIT]\d+$/.test(depthToShowRaw)
-    ? depthToShowRaw
-    : null;
+        // ✅ 表示用 depth 候補
+        const depthToShowRaw =
+          (m.meta?.depth as any) ??
+          ((m.meta as any)?.depthStage as any) ??
+          (m.meta?.unified?.depth?.current as any) ??
+          (m.meta?.extra?.ctxPack?.depthStage as any) ??
+          ((m as any)?.depth_stage as any) ??
+          ((m as any)?.depth as any) ??
+          null;
 
-// ✅ 表示用 mode 候補を拾う（uiMode=SILENCEとは別枠）
-const modeToShowRaw =
-  (m.meta?.mode as any) ??
-  (m.meta?.extra?.mode as any) ??
-  (m.meta?.unified?.mode?.current as any) ??
-  ((m as any)?.mode as any) ??
-  null;
+        const depthToShowSafe =
+          typeof depthToShowRaw === 'string' && /^[SFRCIT]\d+$/i.test(depthToShowRaw.trim())
+            ? depthToShowRaw.trim().toUpperCase()
+            : null;
 
-const modeToShowSafe =
-  typeof modeToShowRaw === 'string' && modeToShowRaw.trim().length > 0
-    ? modeToShowRaw
-    : null;
+        // ✅ レーン / 応答タイプ
+        const laneKeyToShowRaw =
+          (m.meta?.extra?.expr?.laneKey as any) ??
+          (m.meta?.extra?.ctxPack?.expr?.laneKey as any) ??
+          (m.meta?.extra?.ctxPack?.exprLane as any) ??
+          (m.meta?.extra?.exprLane as any) ??
+          null;
+
+        const flowDeltaToShowRaw =
+          (m.meta?.extra?.flow?.delta as any) ??
+          (m.meta?.extra?.ctxPack?.flow?.delta as any) ??
+          (m.meta?.extra?.flowMirror?.delta as any) ??
+          null;
+
+        const modeToShowRaw =
+          (m.meta?.mode as any) ??
+          (m.meta?.extra?.mode as any) ??
+          (m.meta?.unified?.mode?.current as any) ??
+          ((m as any)?.mode as any) ??
+          null;
+
+        const laneKeyToShowSafe =
+          typeof laneKeyToShowRaw === 'string' && laneKeyToShowRaw.trim().length > 0
+            ? laneKeyToShowRaw.trim()
+            : null;
+
+        const flowDeltaToShowSafe =
+          typeof flowDeltaToShowRaw === 'string' && flowDeltaToShowRaw.trim().length > 0
+            ? flowDeltaToShowRaw.trim().toUpperCase()
+            : null;
+
+        const modeToShowSafe =
+          typeof modeToShowRaw === 'string' && modeToShowRaw.trim().length > 0
+            ? modeToShowRaw.trim()
+            : null;
+
+        const responseTypeToShow =
+          laneKeyToShowSafe ??
+          flowDeltaToShowSafe ??
+          modeToShowSafe ??
+          null;
+
         return (
           <div
             key={m.id}
@@ -571,8 +610,12 @@ const modeToShowSafe =
 {!isUser && (
   <IrosMetaBadge
     qCode={qToShowSafe ?? undefined}
+    eTurn={eTurnToShowSafe ?? undefined}
     depth={depthToShowSafe}
+    responseType={responseTypeToShow}
     mode={modeToShowSafe}
+    laneKey={laneKeyToShowSafe}
+    flowDelta={flowDeltaToShowSafe}
     compact
   />
 )}

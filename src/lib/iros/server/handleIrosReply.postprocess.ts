@@ -19,6 +19,8 @@ import type { IrosStyle } from '@/lib/iros/system';
 import { isMetaAnchorText } from '@/lib/iros/intentAnchor';
 
 import { preparePastStateNoteForTurn } from '@/lib/iros/memoryRecall';
+import { extractDurableMemoriesV1 } from '@/lib/iros/memory/longTermMemory.extractor';
+import { saveDurableMemoriesV1 } from '@/lib/iros/memory/longTermMemory.store';
 import { decideExpressionLane } from '@/lib/iros/expression/decideExpressionLane';
 import { buildMirrorFlowV1, type PolarityV1 } from '@/lib/iros/mirrorFlow/mirrorFlow.v1';
 import { buildExprDirectiveV1 } from '@/lib/iros/expression/exprDirectiveV1';
@@ -412,9 +414,8 @@ function shouldSkipPastStateNote(args: PostProcessReplyArgs, metaForSave: any): 
   if (metaForSave?.achievementSummaryOnly === true) return true;
   if (requestedMode === 'recall') return true;
 
-  // explicit じゃない時は基本スキップ（注入事故防止）
-  if (!isExplicitRecallRequest(args.userText)) return true;
-
+  // ✅ 明示 recall 以外も許可する。
+  // 実際の trigger 判定・recent_topic fallback は memoryRecall.ts 側で行う。
   return false;
 }
 
@@ -821,42 +822,81 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
     console.warn('[IROS/PostProcess] ensureRotationState failed', e);
   }
 
-  // 5) pastStateNote（明示リコール要求だけ）
-  if (shouldSkipPastStateNote(args, metaForSave)) {
-    metaForSave.extra.pastStateNoteText = null;
-    metaForSave.extra.pastStateTriggerKind = null;
-    metaForSave.extra.pastStateKeyword = null;
-  } else {
-    try {
-      const topicLabel =
-        typeof args.topicLabel === 'string'
-          ? args.topicLabel
-          : metaForSave?.situation_topic ?? metaForSave?.situationTopic ?? metaForSave?.topicLabel ?? null;
+  // 5) pastStateNote（常時注入）
+  try {
+    const topicLabel =
+      typeof args.topicLabel === 'string'
+        ? args.topicLabel
+        : metaForSave?.situation_topic ?? metaForSave?.situationTopic ?? metaForSave?.topicLabel ?? null;
 
-      const limit = typeof args.pastStateLimit === 'number' && Number.isFinite(args.pastStateLimit) ? args.pastStateLimit : 3;
+    const limit = typeof args.pastStateLimit === 'number' && Number.isFinite(args.pastStateLimit) ? args.pastStateLimit : 3;
 
-      const forceFallback =
-        typeof args.forceRecentTopicFallback === 'boolean' ? args.forceRecentTopicFallback : Boolean(topicLabel);
+    const forceFallback =
+      typeof args.forceRecentTopicFallback === 'boolean' ? args.forceRecentTopicFallback : Boolean(topicLabel);
 
       const recall = await preparePastStateNoteForTurn({
         client: supabase,
-        supabase,
         userCode,
         userText,
         topicLabel,
         limit,
+        conversationLine:
+          String((metaForSave as any)?.extra?.ctxPack?.conversationLine ?? '').trim() || null,
+        topicDigest:
+          String(
+            (metaForSave as any)?.extra?.ctxPack?.topicDigest ??
+              (metaForSave as any)?.extra?.topicDigest ??
+              '',
+          ).trim() || null,
+        situationTopic:
+          String(
+            (metaForSave as any)?.extra?.ctxPack?.situationTopic ??
+              (metaForSave as any)?.situation_topic ??
+              (metaForSave as any)?.situationTopic ??
+              topicLabel ??
+              '',
+          ).trim() || null,
+        depthStage:
+          String(
+            (metaForSave as any)?.extra?.ctxPack?.depthStage ??
+              (metaForSave as any)?.depth_stage ??
+              (metaForSave as any)?.depthStage ??
+              '',
+          ).trim() || null,
         forceRecentTopicFallback: forceFallback,
-      } as any);
+      });
 
-      metaForSave.extra.pastStateNoteText = recall?.pastStateNoteText ?? null;
-      metaForSave.extra.pastStateTriggerKind = recall?.triggerKind ?? null;
-      metaForSave.extra.pastStateKeyword = recall?.keyword ?? null;
+    metaForSave.extra.pastStateNoteText = recall?.pastStateNoteText ?? null;
+    metaForSave.extra.pastStateTriggerKind = recall?.triggerKind ?? null;
+    metaForSave.extra.pastStateKeyword = recall?.keyword ?? null;
+    try {
+      const durableCandidates = extractDurableMemoriesV1({
+        userText,
+        assistantText:
+          typeof (metaForSave as any)?.assistantText === 'string'
+            ? (metaForSave as any).assistantText
+            : null,
+        conversationId,
+        traceId:
+          typeof (metaForSave as any)?.extra?.traceId === 'string'
+            ? (metaForSave as any).extra.traceId
+            : null,
+      });
+
+      if (durableCandidates.length > 0) {
+        await saveDurableMemoriesV1({
+          userCode,
+          candidates: durableCandidates,
+        });
+      }
     } catch (e) {
-      console.warn('[IROS/PostProcess] pastStateNote inject failed (non-fatal)', e);
-      metaForSave.extra.pastStateNoteText = null;
-      metaForSave.extra.pastStateTriggerKind = null;
-      metaForSave.extra.pastStateKeyword = null;
+      console.warn('[IROS/PostProcess] longTermMemory save failed (non-fatal)', e);
     }
+  } catch (e) {
+    console.warn('[IROS/PostProcess] pastStateNote inject failed (non-fatal)', e);
+    metaForSave.extra.pastStateNoteText = null;
+    metaForSave.extra.pastStateTriggerKind = null;
+    metaForSave.extra.pastStateKeyword = null;
   }
   // =========================================================
   // 5.9) MIRROR_FLOW / viewShift / cards を常時ルートで生成（stopgap外）
@@ -2422,12 +2462,27 @@ try {
       } else {
         // writer に委ねる（UI本文は空に固定し、seedは meta にだけ持つ）
         let baseVisible =
-          String(seedForWriterSanitized ?? '').trim() || String(coreLine ?? '').trim() || '';
+        String(seedForWriterSanitized ?? '').trim() || String(coreLine ?? '').trim() || '';
 
-        // FINAL で "hint " から始まるものは UI 露出禁止（空にする）
-        if (det?.policy === 'FINAL' && baseVisible.trim().startsWith('hint ')) {
-          baseVisible = '';
+      // FINAL で内部コード/内部マーカーは writer seed にも載せない
+      const isInternalSeedLike = (s: string) => {
+        const t = String(s ?? '').trim();
+        if (!t) return false;
+
+        if (t.startsWith('@')) return true;
+        if (/^(hint\s+)/.test(t)) return true;
+        if (/^(flow_continue_minimal|advance_flow_continue_minimal|advance_t_concretize_one_step|advance_idea_band_candidates)$/.test(t)) {
+          return true;
         }
+        if (/^@[A-Z_]+(?:\s|$)/.test(t)) return true;
+        if (/(DO NOT OUTPUT|INTERNAL PACK|STATE_CUES_V3|HISTORY_LITE|COORD \()/i.test(t)) return true;
+
+        return false;
+      };
+
+      if (det?.policy === 'FINAL' && isInternalSeedLike(baseVisible)) {
+        baseVisible = '';
+      }
 
         // ✅ 重要：ここで本文に入れない（seed-only）
         finalAssistantText = '';

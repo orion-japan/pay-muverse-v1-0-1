@@ -24,6 +24,9 @@ export type DepthStage =
   | 'S2'
   | 'S3'
   | 'S4' // ← 幽霊値（後段で F1 に正規化）
+  | 'F1'
+  | 'F2'
+  | 'F3'
   | 'R1'
   | 'R2'
   | 'R3'
@@ -38,9 +41,7 @@ export type DepthStage =
   | 'T3';
 
 // 🔹 外部互換用 Depth
-// - orchestrator.ts が import { type Depth } するため必須
-// - F1 は「S4を丸めた後の安全受け皿」
-export type Depth = DepthStage | 'F1';
+export type Depth = DepthStage;
 
 // 🔹 判定・正規化用（唯一）
 export const DEPTH_VALUES: readonly Depth[] = [
@@ -49,6 +50,8 @@ export const DEPTH_VALUES: readonly Depth[] = [
   'S3',
   'S4',
   'F1',
+  'F2',
+  'F3',
   'R1',
   'R2',
   'R3',
@@ -62,7 +65,6 @@ export const DEPTH_VALUES: readonly Depth[] = [
   'T2',
   'T3',
 ];
-
 export function normalizeDepthStrict(depth?: Depth | null): Depth | undefined {
   if (!depth) return undefined;
   if (depth === 'S4') return 'F1';
@@ -108,7 +110,7 @@ export type LlmSignals = {
  * フレーム（3軸＋T）
  * ======================================================= */
 
-export type FrameLayer = 'S' | 'R' | 'C' | 'I' | 'T';
+export type FrameLayer = 'S' | 'F' | 'R' | 'C' | 'I' | 'T';
 
 /* =========================================================
  * T層・アンカー

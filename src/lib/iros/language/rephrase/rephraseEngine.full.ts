@@ -2160,7 +2160,15 @@ const toRephraseBlocks = (s: string): string[] => {
 
   // (B) LLM
   const userText = norm(opts?.userText ?? '');
-  const metaText = safeContextToText(opts?.userContext ?? null);
+  const metaTextBase = safeContextToText(opts?.userContext ?? null);
+  const longTermMemoryNoteText = String(
+    (opts as any)?.userContext?.longTermMemoryNoteText ??
+    (opts as any)?.userContext?.ctxPack?.longTermMemoryNoteText ??
+    '',
+  ).trim();
+  const metaText = longTermMemoryNoteText
+    ? `${metaTextBase}\n${longTermMemoryNoteText}`.trim()
+    : metaTextBase;
 
   const inputKindFromOpts = String(opts?.inputKind ?? '').trim().toLowerCase();
   const inputKindFromDebug = String((opts as any)?.debug?.inputKind ?? '').trim().toLowerCase();
@@ -2450,8 +2458,16 @@ const mustIncludeRuleText = buildMustIncludeRuleText(
     const kept = lines.filter((line) => {
       const t = String(line ?? '').trim();
       if (!t) return false;
-      if (INTERNAL_LINE_MARKER.test(t)) return false;
+
+      // ✅ NEXT_HINT は evidence 専用：seed には絶対混ぜない
+      if (/^@NEXT_HINT\b/.test(t)) return false;
+
+      // ✅ ILINE マーカーは露出禁止（中身だけ残すのは extractLockedILines 側で処理済み）
       if (/\[\[ILINE\]\]/.test(t) || /\[\[\/ILINE\]\]/.test(t)) return false;
+
+      // ✅ “directive行(@OBS/@SHIFT/@SAFE…)" は seed として必要なので落とさない
+      // （= INTERNAL_LINE_MARKER ではフィルタしない）
+
       return true;
     });
 
@@ -3157,18 +3173,58 @@ const conversationLineForWriter =
   ).trim();
 
 // ✅ まず turnsForWriter を優先
-// ✅ 無ければ ctxPack.turns を使う（今回のログでここに実体がある）
-// ✅ それも無ければ historyForWriter / lastTurnsSafe にフォールバック
+// ✅ 無ければ ctxPack.turns を使う
+// ✅ pastState recall（keyword / recent_topic）のときは
+//    historyForWriter フォールバックを止めて、過去 assistant 文脈への引っ張られを防ぐ
+const pastStateNoteTextForWriter = String(
+  (opts as any)?.extra?.pastStateNoteText ??
+  (opts as any)?.userContext?.pastStateNoteText ??
+  (opts as any)?.userContext?.meta?.extra?.pastStateNoteText ??
+  ''
+).trim();
+
+const pastStateTriggerKindForWriter = String(
+  (opts as any)?.extra?.pastStateTriggerKind ??
+  (opts as any)?.userContext?.pastStateTriggerKind ??
+  (opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind ??
+  ''
+).trim();
+
+const shouldPreferPastStateRecall =
+  !!pastStateNoteTextForWriter &&
+  (pastStateTriggerKindForWriter === 'keyword' ||
+    pastStateTriggerKindForWriter === 'recent_topic');
+
 const rawTurnsForWriter =
-  (opts as any)?.turnsForWriter ??
-  (opts as any)?.userContext?.turnsForWriter ??
-  (opts as any)?.userContext?.ctxPack?.turnsForWriter ??
-  (opts as any)?.userContext?.ctxPack?.turns ??
-  (opts as any)?.userContext?.turns ??
-  (opts as any)?.userContext?.ctxPack?.historyForWriter ??
-  (opts as any)?.userContext?.historyForWriter ??
-  lastTurnsSafe ??
-  [];
+  shouldPreferPastStateRecall
+    ? (
+        (opts as any)?.turnsForWriter ??
+        (opts as any)?.userContext?.turnsForWriter ??
+        (opts as any)?.userContext?.ctxPack?.turnsForWriter ??
+        (opts as any)?.userContext?.ctxPack?.turns ??
+        (opts as any)?.userContext?.turns ??
+        []
+      )
+    : (
+        (opts as any)?.turnsForWriter ??
+        (opts as any)?.userContext?.turnsForWriter ??
+        (opts as any)?.userContext?.ctxPack?.turnsForWriter ??
+        (opts as any)?.userContext?.ctxPack?.turns ??
+        (opts as any)?.userContext?.turns ??
+        (opts as any)?.userContext?.ctxPack?.historyForWriter ??
+        (opts as any)?.userContext?.historyForWriter ??
+        lastTurnsSafe ??
+        []
+      );
+
+console.log('[IROS/PAST_STATE][turnsForWriter_policy]', {
+  traceId: (opts as any)?.traceId ?? (opts as any)?.extra?.traceId ?? null,
+  shouldPreferPastStateRecall,
+  pastStateTriggerKindForWriter: pastStateTriggerKindForWriter || null,
+  hasPastStateNoteText: !!pastStateNoteTextForWriter,
+  rawTurnsIsArray: Array.isArray(rawTurnsForWriter),
+  rawTurnsLen: Array.isArray(rawTurnsForWriter) ? rawTurnsForWriter.length : null,
+});
 
 // ✅ 末尾だけ使う（LAST_TURNS_PICK と整合）
 const MAX_TURNS_FOR_WRITER = 6;
@@ -4318,6 +4374,27 @@ raw = await (async () => {
     return roleOk && c.includes('STATE_CUES (DO NOT OUTPUT)');
   });
 
+  const pastStateNoteText = String(
+    (opts as any)?.extra?.pastStateNoteText ??
+    (opts as any)?.userContext?.pastStateNoteText ??
+    (opts as any)?.userContext?.meta?.extra?.pastStateNoteText ??
+    ''
+  ).trim();
+
+  const pastStateTriggerKind = String(
+    (opts as any)?.extra?.pastStateTriggerKind ??
+    (opts as any)?.userContext?.pastStateTriggerKind ??
+    (opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind ??
+    ''
+  ).trim();
+
+  const pastStateKeyword = String(
+    (opts as any)?.extra?.pastStateKeyword ??
+    (opts as any)?.userContext?.pastStateKeyword ??
+    (opts as any)?.userContext?.meta?.extra?.pastStateKeyword ??
+    ''
+  ).trim();
+
   const stateCuesText = (() => {
     // CORE（確証つき値）
     const coreBits = [
@@ -4342,9 +4419,7 @@ raw = await (async () => {
       return safeHead(near, 420);
     })();
 
-    // TOPIC_LINE / KEYWORDS（historyDigestV1.ts に集約した生成器を使う）
-    // ※ ここで import しない（あなたの現在のスコープに合わせて "上で import 済み" 前提にしないため）
-    // → ファイル上の先頭 or 近くで一度だけ import してください（下に指示あり）
+    // TOPIC_LINE / KEYWORDS
     const topicLine = (() => {
       try {
         return buildTopicLineV1((historyDigestV1 ?? null) as any);
@@ -4362,7 +4437,7 @@ raw = await (async () => {
       }
     })();
 
-    // TOPIC_RAW（今の JSON head も残す：補助）
+    // TOPIC_RAW
     const topicRaw = (() => {
       if (!historyDigestV1) return null;
 
@@ -4382,8 +4457,15 @@ raw = await (async () => {
     if (topicLine) lines.push(`TOPIC_LINE: ${safeHead(String(topicLine), 200)}`);
     if (keywords.length > 0) lines.push(`KEYWORDS: ${keywords.map((k) => String(k)).join(', ')}`);
     if (topicRaw) lines.push(`TOPIC_RAW: ${topicRaw}`);
-
     if (cardsBits) lines.push(`CARDS: ${cardsBits}`);
+
+    if (pastStateNoteText) {
+      lines.push('PAST_STATE_RECALL: enabled');
+      if (pastStateTriggerKind) lines.push(`PAST_STATE_TRIGGER: ${safeHead(pastStateTriggerKind, 80)}`);
+      if (pastStateKeyword) lines.push(`PAST_STATE_KEYWORD: ${safeHead(pastStateKeyword, 120)}`);
+      lines.push('PAST_STATE_HINT: ユーザーは過去トピックを思い出そうとしている。過去状態メモを優先して回答する。');
+      lines.push(`PAST_STATE_NOTE: ${safeHead(pastStateNoteText, 900)}`);
+    }
 
     return lines.join('\n');
   })();
@@ -4883,22 +4965,65 @@ raw = await (async () => {
   const inputKindNow = pol.inputKindNow;
   const isMicroOrGreetingNow = pol.isMicroOrGreetingNow;
 
-// - Micro Writer が先に走って microDraft（短文の最終候補）ができている状態で、ここで rephrase writer を呼ぶと「二重LLM」になる。
-//   二重LLM = microGenerate と writer/rephraseGenerate の両方が同一ターンで実行されること。
-//   micro が ok のときは（原則）microDraft を採用し、rephrase writer は呼ばない（例外は明示する）。
+  // - Micro Writer が先に走って microDraft（短文の最終候補）ができている状態で、ここで rephrase writer を呼ぶと「二重LLM」になる。
+  //   二重LLM = microGenerate と writer/rephraseGenerate の両方が同一ターンで実行されること。
+  //   ただし「ありがとう」等の短文は “会話の継続” として扱いたいので、tiny のときだけ skip する。
   const userLenTiny = String(userText ?? '').trim().length <= 2;
   const seedDraftTrim = String(seedDraft ?? '').trim();
   const seedLenTiny = seedDraftTrim.length > 0 && seedDraftTrim.length <= 40;
 
-  const microLikeNow = Boolean(isMicroOrGreetingNow || (userLenTiny && seedLenTiny));
+  // ✅ 変更点：
+  // - 以前：isMicroOrGreetingNow を含めて強制 skip（「ありがとう」も落ちる）
+  // - 今回：本当に tiny（<=2）なときだけ skip（例: 「うん」「OK」「👍」など）
+  const microLikeNow = Boolean(userLenTiny && seedLenTiny);
 
   if (microLikeNow) {
-    const fixed = seedDraftTrim || String(candidate ?? '').trim() || '';
+    const extractHintFromScaffold = (s0: any): string => {
+      const s = String(s0 ?? '').trim();
+      if (!s) return '';
+
+      // 1) @NEXT_HINT の hint を優先して拾う
+      //    例: @NEXT_HINT {"mode":"advance_hint",...,"hint":"流れを保ったまま前に進める"}
+      const mNext = s.match(/@NEXT_HINT\s+(\{[\s\S]*?\})(?:\n|$)/);
+      if (mNext?.[1]) {
+        try {
+          const j = JSON.parse(mNext[1]);
+          const hint = String(j?.hint ?? '').trim();
+          if (hint) return hint;
+        } catch {}
+      }
+
+      // 2) @SHIFT の hint を拾う（auto_fill など）
+      const mShift = s.match(/@SHIFT\s+(\{[\s\S]*?\})(?:\n|$)/);
+      if (mShift?.[1]) {
+        try {
+          const j = JSON.parse(mShift[1]);
+          const hint = String(j?.hint ?? '').trim();
+          if (hint) return hint;
+        } catch {}
+      }
+
+      // 3) 行単位で internal を捨て、自然文っぽい行だけ拾う
+      const lines = s
+        .split('\n')
+        .map((x) => String(x ?? '').trim())
+        .filter(Boolean)
+        .filter((x) => !x.startsWith('@')); // internal marker除外
+
+      // 先頭の1行だけで十分（micro系）
+      return (lines[0] ?? '').trim();
+    };
+
+    const fixed =
+      extractHintFromScaffold(seedDraftTrim) ||
+      extractHintFromScaffold(seedFromSlots) ||
+      extractHintFromScaffold(candidate) ||
+      '';
+
     if (fixed.length > 0) {
       return adoptAsSlots(fixed, 'MICRO_LIKE_SKIP_REPHRASE', { scaffoldActive });
     }
   }
-
   const shortReplyOkRaw = pol.shortReplyOkRaw;
   const shortReplyOk = pol.shortReplyOk;
 

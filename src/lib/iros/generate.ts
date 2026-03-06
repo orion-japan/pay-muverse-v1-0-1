@@ -1089,7 +1089,8 @@ pnpm -s tsc --noEmit
 */
 
 
-  // ✅ 明示 recall のときだけ pastState を注入（デモ事故防止）
+  // ✅ pastState は「明示 recall」だけでなく、
+  // postprocess / memoryRecall 側で生成された結果を優先して注入する
   const t = String(userText ?? '').trim();
   const explicitRecall =
     t.includes('思い出して') ||
@@ -1129,30 +1130,30 @@ pnpm -s tsc --noEmit
     ? ({ role: 'user', content: writerHints.hintText } as ChatMessage)
     : null;
 
-// ✅ SAFE slot
-const safeSystemMessage = buildSafeSystemMessage(meta as any, userText);
+  // ✅ SAFE slot
+  const safeSystemMessage = buildSafeSystemMessage(meta as any, userText);
 
-// buildSafeSystemMessage は ChatMessage を返すことがあるので、content を取り出して user hint に落とす
-const safeHintMessage: ChatMessage | null = safeSystemMessage
-  ? ({
-      role: 'user',
-      content:
-        typeof (safeSystemMessage as any)?.content === 'string'
-          ? String((safeSystemMessage as any).content)
-          : String(safeSystemMessage),
-    } as ChatMessage)
-  : null;
+  // buildSafeSystemMessage は ChatMessage を返すことがあるので、content を取り出して user hint に落とす
+  const safeHintMessage: ChatMessage | null = safeSystemMessage
+    ? ({
+        role: 'user',
+        content:
+          typeof (safeSystemMessage as any)?.content === 'string'
+            ? String((safeSystemMessage as any).content)
+            : String(safeSystemMessage),
+      } as ChatMessage)
+    : null;
 
-// ✅ SpeechAct 器（露出禁止の hint として user に落とす）
-const speechHintMessage: ChatMessage | null = (speechApplied as any).llmSystem
-  ? ({
-      role: 'user',
-      content:
-        typeof (speechApplied as any).llmSystem === 'string'
-          ? String((speechApplied as any).llmSystem)
-          : String((speechApplied as any).llmSystem?.content ?? ''),
-    } as ChatMessage)
-  : null;
+  // ✅ SpeechAct 器（露出禁止の hint として user に落とす）
+  const speechHintMessage: ChatMessage | null = (speechApplied as any).llmSystem
+    ? ({
+        role: 'user',
+        content:
+          typeof (speechApplied as any).llmSystem === 'string'
+            ? String((speechApplied as any).llmSystem)
+            : String((speechApplied as any).llmSystem?.content ?? ''),
+      } as ChatMessage)
+    : null;
 
   // history → LLM
   const historyMessagesRaw = normalizeHistoryToMessages(args.history, 12);
@@ -1161,15 +1162,40 @@ const speechHintMessage: ChatMessage | null = (speechApplied as any).llmSystem
     rawLen: historyMessagesRaw.length,
     len: historyMessages.length,
     roles: historyMessages.map((m) => m.role),
-    lastHead: historyMessages.length ? String(historyMessages[historyMessages.length - 1].content ?? '').slice(0, 60) : null,
+    lastHead: historyMessages.length
+      ? String(historyMessages[historyMessages.length - 1].content ?? '').slice(0, 60)
+      : null,
   });
 
   const pastStateNoteText =
-    typeof (meta as any)?.extra?.pastStateNoteText === 'string' ? (meta as any).extra.pastStateNoteText.trim() : '';
+    typeof (meta as any)?.extra?.pastStateNoteText === 'string'
+      ? (meta as any).extra.pastStateNoteText.trim()
+      : '';
 
-  const pastStateHintMessage: ChatMessage | null =
-    explicitRecall && pastStateNoteText ? ({ role: 'user', content: pastStateNoteText } as ChatMessage) : null;
+  const pastStateTriggerKind =
+    typeof (meta as any)?.extra?.pastStateTriggerKind === 'string'
+      ? String((meta as any).extra.pastStateTriggerKind).trim()
+      : '';
 
+  const shouldInjectPastState =
+    !!pastStateNoteText &&
+    (
+      explicitRecall ||
+      pastStateTriggerKind === 'keyword' ||
+      pastStateTriggerKind === 'recent_topic'
+    );
+
+  const pastStateHintMessage: ChatMessage | null = shouldInjectPastState
+    ? ({ role: 'user', content: pastStateNoteText } as ChatMessage)
+    : null;
+
+  console.log('[IROS/GEN][PAST_STATE]', {
+    explicitRecall,
+    pastStateTriggerKind,
+    hasPastStateNoteText: !!pastStateNoteText,
+    injected: !!pastStateHintMessage,
+    head: pastStateNoteText ? pastStateNoteText.slice(0, 120) : null,
+  });
   // ✅ protocol / whisper は “system 札”にせず user hint に落とす（system の圧を抜く）
   const protocolHintMessage: ChatMessage | null = protocol
     ? ({ role: 'user', content: protocol } as ChatMessage)

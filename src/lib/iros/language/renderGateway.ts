@@ -1277,11 +1277,11 @@ if (isIR && !allowRephraseBlocksInIR) {
     blocks = cleanedBlocksText.map((t: string) => ({ text: t }));
   } else {
     // ✅ rb は “存在しても” UI採用しない（writer/base側へフォールバック）
-    const lines = splitToLines(base);
-    blocks = lines
-      .map((t) => stripInternalLabels(t))
-      .filter(Boolean)
-      .map((t) => ({ text: t }));
+    // IMPORTANT:
+    // - micro の directive（@OBS/@SHIFT/...）が base/text に混ざると、
+    //   stripInternalLabels で「@OBS だけ消えて JSON 断片が UI に漏れる」事故が起きる。
+    // - ここでは base を本文化しない。後段の nextHint rescue（slotPlan 側）に任せて落下を止める。
+    blocks = [];
 
     usedSlots = false;
     pickedFrom = 'text';
