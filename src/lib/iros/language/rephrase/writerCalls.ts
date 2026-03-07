@@ -672,252 +672,322 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
               ? `この先は「${flowNextMeaning}」が開きやすい`
               : '(bridge_unknown)';
 
-  const whyItMatchesBits: string[] = [];
-  if (latestUserText) whyItMatchesBits.push(`user="${latestUserText.slice(0, 90)}"`);
-  if (flowDelta2 === 'RETURN') {
-    whyItMatchesBits.push('戻りの調整が入力の空気と合っている');
-  } else if (flowDelta2 === 'FORWARD') {
-    whyItMatchesBits.push('前に進みたい流れが入力の空気と合っている');
-  }
-  if (returnStreak2) whyItMatchesBits.push(`戻り回数=${returnStreak2}`);
-  if (qCode === 'Q3') whyItMatchesBits.push('不安を整えたい基調がある');
-  else if (qCode === 'Q2') whyItMatchesBits.push('引っかかりをほどいて進みたい基調がある');
-  else if (qCode === 'Q1') whyItMatchesBits.push('秩序を保ちながら進めたい基調がある');
-  else if (qCode === 'Q4') whyItMatchesBits.push('恐れを流して軽くしたい基調がある');
-  else if (qCode === 'Q5') whyItMatchesBits.push('空白に火を戻したい基調がある');
-  if (flowCurrentMeaning !== '(none)') whyItMatchesBits.push(`current=${flowCurrentMeaning}`);
-  if (flowNextMeaning !== '(none)') whyItMatchesBits.push(`next=${flowNextMeaning}`);
+              const whyItMatchesBits: string[] = [];
+              if (latestUserText) whyItMatchesBits.push(`user="${latestUserText.slice(0, 90)}"`);
 
-  const whyItMatches = (
-    whyItMatchesBits.length > 0 ? whyItMatchesBits.join(' / ') : '(match_unknown)'
-  ).slice(0, 220);
+              if (flowDelta2 === 'RETURN') {
+                whyItMatchesBits.push('戻りの調整が入力の空気と合っている');
+              } else if (flowDelta2 === 'FORWARD') {
+                whyItMatchesBits.push('前に進みたい流れが入力の空気と合っている');
+              }
 
-  const shiftMeaning = (() => {
-    if (flowCurrentMeaning !== '(none)' && flowNextMeaning !== '(none)') {
-      return `${flowCurrentMeaning} → ${flowNextMeaning}`;
-    }
-    if (flowCurrentMeaning !== '(none)') return flowCurrentMeaning;
-    if (flowBridge !== '(bridge_unknown)') return flowBridge;
-    return '(none)';
-  })();
+              if (returnStreak2) whyItMatchesBits.push(`戻り回数=${returnStreak2}`);
 
-  const safeMeaning = (() => {
-    if (qCode === 'Q3') return '今の安定を崩さずに整え直せば十分';
-    if (qCode === 'Q2') return '引っかかりを一気に壊さず、ほどけるところから触れれば十分';
-    if (qCode === 'Q1') return '秩序を崩さず、無理のない形で進めれば十分';
-    if (qCode === 'Q4') return '怖さを無視せず、軽くできるところから進めれば十分';
-    if (qCode === 'Q5') return '火を消さず、小さく戻すだけでも十分';
-    if (flowBridge !== '(bridge_unknown)') return flowBridge;
-    return '(none)';
-  })();
+              if (qCode === 'Q3') whyItMatchesBits.push('不安を整えたい基調がある');
+              else if (qCode === 'Q2') whyItMatchesBits.push('引っかかりをほどいて進みたい基調がある');
+              else if (qCode === 'Q1') whyItMatchesBits.push('秩序を保ちながら進めたい基調がある');
+              else if (qCode === 'Q4') whyItMatchesBits.push('恐れを流して軽くしたい基調がある');
+              else if (qCode === 'Q5') whyItMatchesBits.push('空白に火を戻したい基調がある');
 
-  const relationFocusForSeed = (() => {
-    const rf = (ctxPack as any)?.relationFocus ?? null;
-    if (!rf || typeof rf !== 'object') return null;
+              if (flowCurrentMeaning !== '(none)') whyItMatchesBits.push(`current=${flowCurrentMeaning}`);
+              if (flowNextMeaning !== '(none)') whyItMatchesBits.push(`next=${flowNextMeaning}`);
 
-    const selfPosition = String((rf as any)?.selfPosition ?? '').trim() || 'unknown';
-    const otherPosition = String((rf as any)?.otherPosition ?? '').trim() || 'unknown';
-    const powerBalance = String((rf as any)?.powerBalance ?? '').trim() || 'unknown';
-    const distanceLevel = String((rf as any)?.distanceLevel ?? '').trim() || 'unknown';
-    const certaintyLevel = String((rf as any)?.certaintyLevel ?? '').trim() || 'unknown';
+              const whyItMatches = (
+                whyItMatchesBits.length > 0 ? whyItMatchesBits.join(' / ') : '(match_unknown)'
+              ).slice(0, 220);
 
-    return {
-      selfPosition,
-      otherPosition,
-      powerBalance,
-      distanceLevel,
-      certaintyLevel,
-    };
-  })();
+              const shiftMeaning = (() => {
+                const topicCorrectionLine =
+                  String((ctxPack as any)?.topicCorrectionGuard?.guardLine ?? '').trim() || '';
 
-  const emotionalTemperatureForSeed = (() => {
-    const raw = String((ctxPack as any)?.emotionalTemperature ?? '').trim().toLowerCase();
-    if (raw === 'low' || raw === 'mid' || raw === 'high' || raw === 'volatile') return raw;
-    return 'mid';
-  })();
+                if (topicCorrectionLine) return topicCorrectionLine;
 
-  const shiftKindForSeed = (() => {
-    const raw = String((ctxPack as any)?.shiftKind ?? '').trim();
-    if (raw) return raw;
-    return inputKindNow === 'question' ? 'clarify_shift' : 'narrow_shift';
-  })();
+                if (flowCurrentMeaning !== '(none)' && flowNextMeaning !== '(none)') {
+                  return `${flowCurrentMeaning} → ${flowNextMeaning}`;
+                }
+                if (flowCurrentMeaning !== '(none)') return flowCurrentMeaning;
+                if (flowBridge !== '(bridge_unknown)') return flowBridge;
+                return '(none)';
+              })();
 
-  const relationMeaning = (() => {
-    const rf = relationFocusForSeed;
-    if (!rf) return '(none)';
+              const safeMeaning = (() => {
+                if (qCode === 'Q3') return '今の安定を崩さずに整え直せば十分';
+                if (qCode === 'Q2') return '引っかかりを一気に壊さず、ほどけるところから触れれば十分';
+                if (qCode === 'Q1') return '秩序を崩さず、無理のない形で進めれば十分';
+                if (qCode === 'Q4') return '怖さを無視せず、軽くできるところから進めれば十分';
+                if (qCode === 'Q5') return '火を消さず、小さく戻すだけでも十分';
+                if (flowBridge !== '(bridge_unknown)') return flowBridge;
+                return '(none)';
+              })();
 
-    const bits: string[] = [];
+              const relationFocusForSeed = (() => {
+                const rf = (ctxPack as any)?.relationFocus ?? null;
+                if (!rf || typeof rf !== 'object') return null;
 
-    if (rf.selfPosition === 'unclear') bits.push('自分の立ち位置がまだ定まっていない');
-    else if (rf.selfPosition === 'approach') bits.push('自分は近づきたい側に寄っている');
-    else if (rf.selfPosition === 'withdraw') bits.push('自分は少し離れて整えたい側に寄っている');
+                const selfPosition = String((rf as any)?.selfPosition ?? '').trim() || 'unknown';
+                const otherPosition = String((rf as any)?.otherPosition ?? '').trim() || 'unknown';
+                const powerBalance = String((rf as any)?.powerBalance ?? '').trim() || 'unknown';
+                const distanceLevel = String((rf as any)?.distanceLevel ?? '').trim() || 'unknown';
+                const certaintyLevel = String((rf as any)?.certaintyLevel ?? '').trim() || 'unknown';
 
-    if (rf.otherPosition === 'unreadable') bits.push('相手の位置が読めず、確信が持ちにくい');
-    else if (rf.otherPosition === 'approaching') bits.push('相手側はやや近づいている可能性がある');
-    else if (rf.otherPosition === 'distancing') bits.push('相手側は少し距離を取っている可能性がある');
+                return {
+                  selfPosition,
+                  otherPosition,
+                  powerBalance,
+                  distanceLevel,
+                  certaintyLevel,
+                };
+              })();
 
-    if (rf.powerBalance === 'weaker') bits.push('自分のほうが立場を弱く感じやすい');
-    else if (rf.powerBalance === 'stronger') bits.push('自分が主導しやすい配置に寄っている');
+              const emotionalTemperatureForSeed = (() => {
+                const raw = String((ctxPack as any)?.emotionalTemperature ?? '').trim().toLowerCase();
+                if (raw === 'low' || raw === 'mid' || raw === 'high' || raw === 'volatile') return raw;
+                return 'mid';
+              })();
 
-    if (rf.distanceLevel === 'too_close') bits.push('近すぎて苦しさが出やすい');
-    else if (rf.distanceLevel === 'far') bits.push('遠さが不安を強めやすい');
-    else if (rf.distanceLevel === 'unstable') bits.push('距離の揺れがしんどさを作りやすい');
-    else if (rf.distanceLevel === 'close') bits.push('距離テーマが今の中心にある');
+              const shiftKindForSeed = (() => {
+                const raw = String((ctxPack as any)?.shiftKind ?? '').trim();
+                if (raw) return raw;
+                return inputKindNow === 'question' ? 'clarify_shift' : 'narrow_shift';
+              })();
 
-    if (rf.certaintyLevel === 'low') bits.push('確信不足が詰まりの中心にある');
-    else if (rf.certaintyLevel === 'mid') bits.push('少しの見立てがあれば整理しやすい');
+              const relationMeaning = (() => {
+                const rf = relationFocusForSeed;
+                if (!rf) return '(none)';
 
-    return bits.length ? bits.join(' / ') : '(none)';
-  })();
+                const bits: string[] = [];
 
-  const temperatureMeaning = (() => {
-    if (emotionalTemperatureForSeed === 'low') return '静かに整えれば届く温度';
-    if (emotionalTemperatureForSeed === 'mid') return '視点を1つ切ると動きやすい温度';
-    if (emotionalTemperatureForSeed === 'high') return '先に受け止めてから角度を切るべき温度';
-    if (emotionalTemperatureForSeed === 'volatile') return '今は切りすぎず、揺れを増やさない方がよい温度';
-    return '(none)';
-  })();
+                if (rf.selfPosition === 'unclear') bits.push('自分の立ち位置がまだ定まっていない');
+                else if (rf.selfPosition === 'approach') bits.push('自分は近づきたい側に寄っている');
+                else if (rf.selfPosition === 'withdraw') bits.push('自分は少し離れて整えたい側に寄っている');
 
-  const bestShiftDirection = (() => {
-    const rf = relationFocusForSeed;
-    const sk = shiftKindForSeed;
-    const temp = emotionalTemperatureForSeed;
+                if (rf.otherPosition === 'unreadable') bits.push('相手の位置が読めず、確信が持ちにくい');
+                else if (rf.otherPosition === 'approaching') bits.push('相手側はやや近づいている可能性がある');
+                else if (rf.otherPosition === 'distancing') bits.push('相手側は少し距離を取っている可能性がある');
 
-    if (sk === 'clarify_shift') {
-      return '説明で閉じる。広げず、意味をそのまま返す';
-    }
+                if (rf.powerBalance === 'weaker') bits.push('自分のほうが立場を弱く感じやすい');
+                else if (rf.powerBalance === 'stronger') bits.push('自分が主導しやすい配置に寄っている');
 
-    if (temp === 'volatile') {
-      return 'まず焦点を増やさず、揺れを少し静める方向を優先する';
-    }
+                if (rf.distanceLevel === 'too_close') bits.push('近すぎて苦しさが出やすい');
+                else if (rf.distanceLevel === 'far') bits.push('遠さが不安を強めやすい');
+                else if (rf.distanceLevel === 'unstable') bits.push('距離の揺れがしんどさを作りやすい');
+                else if (rf.distanceLevel === 'close') bits.push('距離テーマが今の中心にある');
 
-    if (temp === 'high') {
-      if (sk === 'distance_shift') return '距離を詰める/切る前に、先に自分の位置を戻す';
-      if (sk === 'decide_shift') return '決断を急がず、先に判断軸を1本に絞る';
-      return '先にいま起きていることを短く受け止め、そのあと1つだけ角度を切る';
-    }
+                if (rf.certaintyLevel === 'low') bits.push('確信不足が詰まりの中心にある');
+                else if (rf.certaintyLevel === 'mid') bits.push('少しの見立てがあれば整理しやすい');
 
-    if (rf) {
-      if (rf.distanceLevel === 'far') return '相手分析を増やすより、遠さで揺れている自分の足場を戻す';
-      if (rf.distanceLevel === 'too_close') return '近づくより先に、少し呼吸できる距離感へ戻す';
-      if (rf.distanceLevel === 'unstable') return '関係全体を決めず、今ぶれている一点だけを狭く見る';
-      if (rf.certaintyLevel === 'low') return '答えを取りに行くより、何が読めないのかを1段狭める';
-      if (rf.powerBalance === 'weaker') return '相手基準で動く前に、自分の位置を先に定める';
-    }
+                return bits.length ? bits.join(' / ') : '(none)';
+              })();
 
-    if (sk === 'stabilize_shift') return '進めるより先に、戻って整える角度を優先する';
-    if (sk === 'narrow_shift') return '問題を小さく切って、いま触る一点だけを見せる';
-    if (sk === 'repair_shift') return '修復の正解探しではなく、安全な入口を1つだけ置く';
-    if (sk === 'decide_shift') return '結論を急がず、選ぶ基準を先に固定する';
-    if (sk === 'distance_shift') return '近づく/離れるの前に、いまの距離で何が苦しいかを定める';
+              const temperatureMeaning = (() => {
+                if (emotionalTemperatureForSeed === 'low') return '静かに整えれば届く温度';
+                if (emotionalTemperatureForSeed === 'mid') return '視点を1つ切ると動きやすい温度';
+                if (emotionalTemperatureForSeed === 'high') return '先に受け止めてから角度を切るべき温度';
+                if (emotionalTemperatureForSeed === 'volatile') return '今は切りすぎず、揺れを増やさない方がよい温度';
+                return '(none)';
+              })();
 
-    return '抽象化せず、いま動くための角度を1つだけ返す';
-  })();
+              const bestShiftDirection = (() => {
+                const rf = relationFocusForSeed;
+                const sk = shiftKindForSeed;
+                const temp = emotionalTemperatureForSeed;
 
-  const stingLevelForSeed = (() => {
-    const pick = (v: any): 'LOW' | 'MID' | 'HIGH' | null => {
-      const s = String(v ?? '').trim().toUpperCase();
-      if (s === 'LOW' || s === 'MID' || s === 'HIGH') return s as 'LOW' | 'MID' | 'HIGH';
-      return null;
-    };
+                if (sk === 'clarify_shift') {
+                  return '説明で閉じる。広げず、意味をそのまま返す';
+                }
 
-    const fromCtx =
-      pick((ctxPack as any)?.stingLevel) ??
-      pick((ctxPack as any)?.state?.stingLevel) ??
-      null;
+                if (temp === 'volatile') {
+                  return 'まず焦点を増やさず、揺れを少し静める方向を優先する';
+                }
 
-    if (fromCtx) return fromCtx;
+                if (temp === 'high') {
+                  if (sk === 'distance_shift') return '距離を詰める/切る前に、先に自分の位置を戻す';
+                  if (sk === 'decide_shift') return '決断を急がず、先に判断軸を1本に絞る';
+                  return '先にいま起きていることを短く受け止め、そのあと1つだけ角度を切る';
+                }
 
-    const d = String(depthStage || '').trim().toUpperCase().charAt(0);
-    const rs =
-      typeof returnStreak2 === 'number'
-        ? returnStreak2
-        : Number.isFinite(Number(returnStreak2))
-          ? Number(returnStreak2)
-          : 0;
+                if (rf) {
+                  if (rf.distanceLevel === 'far') return '相手分析を増やすより、遠さで揺れている自分の足場を戻す';
+                  if (rf.distanceLevel === 'too_close') return '近づくより先に、少し呼吸できる距離感へ戻す';
+                  if (rf.distanceLevel === 'unstable') return '関係全体を決めず、今ぶれている一点だけを狭く見る';
+                  if (rf.certaintyLevel === 'low') return '答えを取りに行くより、何が読めないのかを1段狭める';
+                  if (rf.powerBalance === 'weaker') return '相手基準で動く前に、自分の位置を先に定める';
+                }
 
-    let level: 'LOW' | 'MID' | 'HIGH' = 'LOW';
-    if (d === 'C' || d === 'I' || d === 'T') level = 'HIGH';
-    if (level !== 'HIGH' && rs >= 3) level = 'MID';
-    if (level !== 'HIGH' && rs >= 5) level = 'HIGH';
-    return level;
-  })();
+                if (sk === 'stabilize_shift') return '進めるより先に、戻って整える角度を優先する';
+                if (sk === 'narrow_shift') return '問題を小さく切って、いま触る一点だけを見せる';
+                if (sk === 'repair_shift') return '修復の正解探しではなく、安全な入口を1つだけ置く';
+                if (sk === 'decide_shift') return '結論を急がず、選ぶ基準を先に固定する';
+                if (sk === 'distance_shift') return '近づく/離れるの前に、いまの距離で何が苦しいかを定める';
 
-  const cueLabels = (() => {
-    const summaryHead = String((ctxPack as any)?.situationSummary ?? '').trim() || '(none)';
+                return '抽象化せず、いま動くための角度を1つだけ返す';
+              })();
 
-    if (shiftKindForSeed === 'clarify_shift') {
-      const isTopicCorrectionCue =
-        summaryHead !== '(none)' &&
-        summaryHead.length <= 24 &&
-        !/[?？]/.test(summaryHead) &&
-        (
-          summaryHead.includes('話ですよ') ||
-          summaryHead.includes('の話') ||
-          summaryHead.includes('のこと') ||
-          summaryHead.includes('について') ||
-          /.+の話(です|だ)?よ?$/.test(summaryHead)
-        );
+              const stingLevelForSeed = (() => {
+                const pick = (v: any): 'LOW' | 'MID' | 'HIGH' | null => {
+                  const s = String(v ?? '').trim().toUpperCase();
+                  if (s === 'LOW' || s === 'MID' || s === 'HIGH') return s as 'LOW' | 'MID' | 'HIGH';
+                  return null;
+                };
 
-      if (isTopicCorrectionCue) {
-        return {
-          currentMeaning: '(none)',
-          shiftMeaning: '話題の補正として受け取り、何の話かを勝手に広げず、その話題の中で確認する',
-          nextMeaning: '(none)',
-          flowBridge: '(suppressed_for_clarify)',
-          whyItMatches: `user="${summaryHead}" / shiftKind=clarify_shift / topic_correction=true`,
-        };
-      }
+                const fromCtx =
+                  pick((ctxPack as any)?.stingLevel) ??
+                  pick((ctxPack as any)?.state?.stingLevel) ??
+                  null;
 
-      return {
-        currentMeaning: '(none)',
-        shiftMeaning: '質問の向きをそのまま受け取り、話題を広げずにこのテーマのどこを知りたいのかを狭く確かめる',
-        nextMeaning: '(none)',
-        flowBridge: '(suppressed_for_clarify)',
-        whyItMatches: `user="${summaryHead}" / shiftKind=clarify_shift`,
-      };
-    }
+                if (fromCtx) return fromCtx;
 
-    return {
-      currentMeaning: flowCurrentMeaning,
-      shiftMeaning,
-      nextMeaning: flowNextMeaning,
-      flowBridge,
-      whyItMatches,
-    };
-  })();
+                const d = String(depthStage || '').trim().toUpperCase().charAt(0);
+                const rs =
+                  typeof returnStreak2 === 'number'
+                    ? returnStreak2
+                    : Number.isFinite(Number(returnStreak2))
+                      ? Number(returnStreak2)
+                      : 0;
 
-  const stateCueLines0 = [
-    'STATE_CUES_V3 (DO NOT OUTPUT):',
-    '',
+                let level: 'LOW' | 'MID' | 'HIGH' = 'LOW';
+                if (d === 'C' || d === 'I' || d === 'T') level = 'HIGH';
+                if (level !== 'HIGH' && rs >= 3) level = 'MID';
+                if (level !== 'HIGH' && rs >= 5) level = 'HIGH';
+                return level;
+              })();
 
-    'STATE_CORE:',
-    stateCore,
-    '',
+              const cueLabels = (() => {
+                const summaryHead = String((ctxPack as any)?.situationSummary ?? '').trim() || '(none)';
 
-    'CURRENT_MEANING:',
-    cueLabels.currentMeaning,
-    '',
+                if (shiftKindForSeed === 'clarify_shift') {
+                  const isTopicCorrectionCue =
+                    summaryHead !== '(none)' &&
+                    summaryHead.length <= 24 &&
+                    !/[?？]/.test(summaryHead) &&
+                    (
+                      summaryHead.includes('話ですよ') ||
+                      summaryHead.includes('の話') ||
+                      summaryHead.includes('のこと') ||
+                      summaryHead.includes('について') ||
+                      /.+の話(です|だ)?よ?$/.test(summaryHead)
+                    );
 
-    'SHIFT_MEANING:',
-    cueLabels.shiftMeaning,
-    '',
+                  if (isTopicCorrectionCue) {
+                    return {
+                      currentMeaning: '(none)',
+                      shiftMeaning: '話題の補正として受け取り、何の話かを勝手に広げず、その話題の中で確認する',
+                      nextMeaning: '(none)',
+                      flowBridge: '(suppressed_for_clarify)',
+                      whyItMatches: `user="${summaryHead}" / shiftKind=clarify_shift / topic_correction=true`,
+                    };
+                  }
 
-    'NEXT_MEANING:',
-    cueLabels.nextMeaning,
-    '',
+                  return {
+                    currentMeaning: '(none)',
+                    shiftMeaning: '質問の向きをそのまま受け取り、話題を広げずにこのテーマのどこを知りたいのかを狭く確かめる',
+                    nextMeaning: '(none)',
+                    flowBridge: '(suppressed_for_clarify)',
+                    whyItMatches: `user="${summaryHead}" / shiftKind=clarify_shift`,
+                  };
+                }
 
-    'SAFE_MEANING:',
-    safeMeaning,
-    '',
+                return {
+                  currentMeaning: flowCurrentMeaning,
+                  shiftMeaning,
+                  nextMeaning: flowNextMeaning,
+                  flowBridge,
+                  whyItMatches,
+                };
+              })();
 
-    'FLOW_BRIDGE:',
-    cueLabels.flowBridge,
-    '',
+              const topicCorrectionGuard = (() => {
+                const user = String((args as any)?.userText ?? latestUserText ?? '').trim();
+                const sk = String(shiftKindForSeed ?? '').trim();
 
-    'WHY_IT_MATCHES:',
-    cueLabels.whyItMatches,
-    '',
+                const isTopicCorrection =
+                  sk === 'clarify_shift' &&
+                  user.length <= 24 &&
+                  !/[?？]/.test(user) &&
+                  (
+                    /.+の話(です|だ)?よ?$/.test(user) ||
+                    /.+のこと(です|だ)?よ?$/.test(user) ||
+                    /.+について(です|だ)?よ?$/.test(user) ||
+                    /話ですよ/.test(user)
+                  );
+
+                if (!isTopicCorrection) {
+                  return {
+                    active: false,
+                    guardLine: '(none)',
+                    rules: [] as string[],
+                  };
+                }
+
+                const coreTopic =
+                  user.replace(/(の話|のこと|について)(です|だ)?よ?$/g, '').trim() || user;
+
+                const guardLine =
+                  `いまは話題補正の入力。核は「${coreTopic}」。この語を上位カテゴリへ一般化しない。`;
+
+                const rules = [
+                  `Keep the exact topic nucleus as "${coreTopic}".`,
+                  'Do not broaden to a parent topic.',
+                  'Do not add examples unless the user asked for them.',
+                  'Do not reinterpret into a nearby popular theme.',
+                  'Confirm only within the same topic.',
+                ];
+
+                return {
+                  active: true,
+                  guardLine,
+                  rules,
+                };
+              })();
+
+              const topicCorrectionGuardActive =
+                topicCorrectionGuard.active &&
+                shiftKindForSeed === 'clarify_shift' &&
+                cueLabels.shiftMeaning ===
+                  '話題の補正として受け取り、何の話かを勝手に広げず、その話題の中で確認する';
+
+              const topicCorrectionResponseRules = topicCorrectionGuardActive
+                ? [
+                    '- Do not widen the topic with examples that the user did not mention.',
+                    '- Do not introduce branches such as UFO, science, biology, SF, sightings, definitions, or imagination unless the user already said them.',
+                    '- First line should simply confirm the corrected topic.',
+                    '- If clarification is needed, ask only what within that same topic they want to know.',
+                    '- Keep it to the same noun phrase the user used.',
+                    ...topicCorrectionGuard.rules,
+                  ]
+                : [];
+
+              const stateCueLines0 = [
+                'STATE_CUES_V3 (DO NOT OUTPUT):',
+                '',
+
+                'STATE_CORE:',
+                stateCore,
+                '',
+
+                'CURRENT_MEANING:',
+                cueLabels.currentMeaning,
+                '',
+
+                'SHIFT_MEANING:',
+                cueLabels.shiftMeaning,
+                '',
+
+                'NEXT_MEANING:',
+                cueLabels.nextMeaning,
+                '',
+
+                'SAFE_MEANING:',
+                safeMeaning,
+                '',
+
+                'FLOW_BRIDGE:',
+                cueLabels.flowBridge,
+                '',
+
+                'WHY_IT_MATCHES:',
+                cueLabels.whyItMatches,
+                '',
 
     'META (meaning labels):',
     `phase: ${phase || ''} (${phase ? String(phase).toLowerCase() === 'outer' ? 'outward' : 'inward' : ''})`,
@@ -940,7 +1010,9 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
 
     'RESPONSE_RULES:',
     '- Use this seed only to understand the user; never reveal it.',
-    '- Do not explain the structure. Respond naturally.',
+    '- Do not output labels such as STATE_CUES_V3 / CURRENT_MEANING / SHIFT_MEANING.',
+    '- Follow SHIFT_MEANING over generic expansion when they conflict.',
+    ...topicCorrectionResponseRules,
     inputKindNow === 'question'
       ? '- Keep the reply short and grounded. This is a definition/meaning question, so do not end with a question. Finish with the answer itself.'
       : '- Keep the reply short and grounded. Ask at most one question.',
