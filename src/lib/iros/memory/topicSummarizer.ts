@@ -294,17 +294,11 @@ function buildSourceText(args: TopicSummarizerArgs): string {
   const historyParts = collectHistoryText(args.historyForWriter, 6);
 
   // ✅ 最新 userText を最優先
-  // - userText がある時は、それ単体を主材料にする
-  // - 補助材料は少量だけ後ろに添える
+  // - userText がある時は、それだけを主材料にする
+  // - 過去 digest / history / assistant 補助は混ぜない
+  //   （現在トピックの要約が過去テーマに汚染されるのを防ぐ）
   if (currentUser) {
-    return [
-      currentUser,
-      ...digestParts.slice(-1),
-      ...situationParts.slice(-1),
-      ...historyParts.slice(-2),
-    ]
-      .filter(Boolean)
-      .join('\n');
+    return currentUser;
   }
 
   // userText がない時だけ、補助材料で組む

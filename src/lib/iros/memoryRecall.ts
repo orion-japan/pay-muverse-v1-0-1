@@ -91,15 +91,24 @@ export function detectMemoryRecallTriggerFromText(
     };
   }
 
-  // 2) 上記以外でも「質問っぽい文」は全部リコール対象にする
-  if (isQuestionLike(text)) {
+  // 2) 「前の話 / さっきの件 / この前のやつ」など、
+  //    明示的に“過去参照”を含む質問だけ recent_topic にする
+  const explicitRecentTopicPatterns = [
+    /(前に話した|前に言った|この前の|さっきの|さっき話した|前回の|前の話|あの話|あの件|その件)/u,
+    /(なんの話だっけ|何の話だっけ|なんだっけ|何だっけ|でしたっけ|だよね|だったよね)/u,
+  ];
+
+  const hasExplicitPastRef = explicitRecentTopicPatterns.some((re) => re.test(text));
+  if (hasExplicitPastRef && isQuestionLike(text)) {
     return {
       kind: 'recent_topic',
       keyword: null,
     };
   }
 
-  // 3) それ以外はリコールなし（※ prepare 側で recent_topic にフォールバック）
+  // 3) それ以外はリコールなし
+  //    ※ 普通の質問（例: 真実が知りたい / 地球外生命体の話）は
+  //       過去状態リコールに入れない
   return { kind: 'none' };
 }
 
@@ -579,9 +588,12 @@ export async function preparePastStateNoteForTurn(args: {
   const forceFallback =
     typeof args.forceRecentTopicFallback === 'boolean'
       ? args.forceRecentTopicFallback
-      : true;
+      : false;
 
-  // kind='none' でも毎ターン recent_topic に倒す（デフォルト true）
+  // ✅ 明示指定がある場合だけ recent_topic に倒す
+  // - 通常の知識質問・構造質問では pastStateRecall を混ぜない
+  // - 「覚えてる？」「前の話だっけ？」のような明示トリガーは
+  //   detectMemoryRecallTriggerFromText() 側で拾う
   if (trigger.kind === 'none' && forceFallback) {
     console.log(
       '[IROS/MemoryRecall] no explicit trigger in text → fallback to recent_topic',
@@ -589,16 +601,6 @@ export async function preparePastStateNoteForTurn(args: {
     );
 
     trigger = { kind: 'recent_topic', keyword: null };
-  }
-
-  if (trigger.kind === 'none') {
-    return {
-      hasNote: false,
-      pastStateNoteText: null,
-      triggerKind: 'none',
-      keyword: null,
-      matchedTerms: [],
-    };
   }
 
   // 2) 最近の状態をロード
@@ -672,6 +674,28 @@ export async function preparePastStateNoteForTurn(args: {
   });
 
   const hasNote = !!noteText && noteText.trim().length > 0;
+
+  // ✅ 最終ガード:
+  // trigger が none のままなら、note は返さない
+  // - 通常の知識質問 / 構造質問に pastStateNote を混ぜない
+  // - 明示的な recall（keyword / recent_topic / semantic）のときだけ返す
+  if (finalTriggerKind === 'none') {
+    console.log('[IROS/MemoryRecall] note suppressed by finalTriggerKind=none', {
+      userCode,
+      hasNote_raw: hasNote,
+      keyword: trigger.keyword,
+      matchedTerms,
+      semanticBestScore: semantic.bestScore,
+    });
+
+    return {
+      hasNote: false,
+      pastStateNoteText: null,
+      triggerKind: 'none',
+      keyword: trigger.keyword ?? null,
+      matchedTerms: [],
+    };
+  }
 
   console.log('[IROS/MemoryRecall] pastStateNoteText prepared', {
     userCode,

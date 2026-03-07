@@ -857,10 +857,10 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
       shiftText.includes('"hint":"stabilize_shift_v1"') ||
       shiftText.includes('"kind":"stabilize_shift"');
 
-    const forceFallback =
+      const forceFallback =
       typeof args.forceRecentTopicFallback === 'boolean'
         ? args.forceRecentTopicFallback
-        : !isStabilizeLike && Boolean(topicLabel);
+        : false;
     const recall = await preparePastStateNoteForTurn({
       client: supabase,
       userCode,

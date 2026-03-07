@@ -699,151 +699,200 @@ function buildFlowReply(args: {
       ? 'IDEA_BAND'
       : null;
 
-      const shiftMeaning = buildShiftMeaningV1({
-        userText: t,
-        flowDelta: delta,
-        returnStreak: returnStreak ?? null,
-      });
+  const shiftMeaning = buildShiftMeaningV1({
+    userText: t,
+    flowDelta: delta,
+    returnStreak: returnStreak ?? null,
+  });
 
-      const hasAny = (...needles: string[]) =>
-        needles.some((n) => t.includes(n) || t.toLowerCase().includes(n.toLowerCase()));
+  const hasAny = (...needles: string[]) =>
+    needles.some((n) => t.includes(n) || t.toLowerCase().includes(n.toLowerCase()));
 
-      const emotionalTemperature2 = (() => {
-        const volatileHit =
-          hasAny('わからない', '揺れる', 'ぐるぐる', '混乱', 'まとまらない') &&
-          typeof returnStreak === 'number' &&
-          returnStreak >= 2;
+  const emotionalTemperature2 = (() => {
+    const volatileHit =
+      hasAny('わからない', '揺れる', 'ぐるぐる', '混乱', 'まとまらない') &&
+      typeof returnStreak === 'number' &&
+      returnStreak >= 2;
 
-        if (volatileHit) return 'volatile' as const;
+    if (volatileHit) return 'volatile' as const;
 
-        if (
-          (typeof returnStreak === 'number' && returnStreak >= 3) ||
-          hasAny('苦しい', 'つらい', '怖い', 'しんどい', '限界')
-        ) {
-          return 'high' as const;
-        }
+    if (
+      (typeof returnStreak === 'number' && returnStreak >= 3) ||
+      hasAny('苦しい', 'つらい', '怖い', 'しんどい', '限界')
+    ) {
+      return 'high' as const;
+    }
 
-        if (hasAny('迷う', '不安', '止まる', '動けない', 'どうしよう', '戻ってきた')) {
-          return 'mid' as const;
-        }
+    if (hasAny('迷う', '不安', '止まる', '動けない', 'どうしよう', '戻ってきた')) {
+      return 'mid' as const;
+    }
 
-        return 'low' as const;
-      })();
+    return 'low' as const;
+  })();
 
-      const shiftKind2 = (() => {
-        if (hasAny('って何', 'とは', '意味', '違い', '定義')) {
-          return 'clarify_shift' as const;
-        }
+  const shiftKind2 = (() => {
+    // ✅ 上流で確定した shiftKind を最優先
+    const stampedShiftKind =
+      String((args as any)?.context?.ctxPack?.shiftKind ?? '').trim() ||
+      String((args as any)?.ctxPack?.shiftKind ?? '').trim() ||
+      '';
 
-        if (
-          delta === 'RETURN' ||
-          hasAny('戻ってきた', '動けない', '止まる', 'しんどい', 'また同じところ') ||
-          emotionalTemperature2 === 'high' ||
-          emotionalTemperature2 === 'volatile'
-        ) {
-          return 'stabilize_shift' as const;
-        }
+    if (
+      stampedShiftKind === 'clarify_shift' ||
+      stampedShiftKind === 'stabilize_shift' ||
+      stampedShiftKind === 'distance_shift' ||
+      stampedShiftKind === 'repair_shift' ||
+      stampedShiftKind === 'decide_shift'
+    ) {
+      return stampedShiftKind as
+        | 'clarify_shift'
+        | 'stabilize_shift'
+        | 'distance_shift'
+        | 'repair_shift'
+        | 'decide_shift';
+    }
 
-        if (
-          hasAny('相手', '恋愛', '関係', '距離', '気持ち', '連絡', '既読', '未読') &&
-          hasAny('距離を置かれてる', '遠い', '近すぎる', '追いかけ', '避け', 'わからない')
-        ) {
-          return 'distance_shift' as const;
-        }
+    // ✅ 話題修正ターンは clarify を優先
+    const topicCorrection =
+      /(.+?)の話ですよ/u.test(t) ||
+      /(.+?)のことです/u.test(t) ||
+      /(その話です|そのことです|その件です)/u.test(t) ||
+      /(さっきから言ってるのは.+です)/u.test(t);
 
-        if (hasAny('仲直り', '修復', '戻りたい', 'やり直したい')) {
-          return 'repair_shift' as const;
-        }
+    if (topicCorrection) {
+      return 'clarify_shift' as const;
+    }
 
-        if (hasAny('決められない', '行くべきか', 'やめるべきか', '迷ってる', '選べない')) {
-          return 'decide_shift' as const;
-        }
+    if (hasAny('って何', 'とは', '意味', '違い', '定義')) {
+      return 'clarify_shift' as const;
+    }
 
-        if (hasAny('何から', '何が不安かわからない', '整理したい', '焦点')) {
-          return 'narrow_shift' as const;
-        }
+    if (
+      delta === 'RETURN' ||
+      hasAny('戻ってきた', '動けない', '止まる', 'しんどい', 'また同じところ') ||
+      emotionalTemperature2 === 'high' ||
+      emotionalTemperature2 === 'volatile'
+    ) {
+      return 'stabilize_shift' as const;
+    }
 
-        return 'narrow_shift' as const;
-      })();
+    if (
+      hasAny('相手', '恋愛', '関係', '距離', '気持ち', '連絡', '既読', '未読') &&
+      hasAny('距離を置かれてる', '遠い', '近すぎる', '追いかけ', '避け', 'わからない')
+    ) {
+      return 'distance_shift' as const;
+    }
 
-      const shiftHint2 = (() => {
-        if (shiftKind2 === 'clarify_shift') return 'clarify_meaning_v2';
-        if (shiftKind2 === 'stabilize_shift') return 'stabilize_shift_v1';
-        if (shiftKind2 === 'distance_shift') return 'distance_shift_v1';
-        if (shiftKind2 === 'repair_shift') return 'repair_shift_v1';
-        if (shiftKind2 === 'decide_shift') return 'decide_shift_v1';
-        return 'narrow_shift_v1';
-      })();
+    if (hasAny('仲直り', '修復', '戻りたい', 'やり直したい')) {
+      return 'repair_shift' as const;
+    }
 
-      const shiftIntent2 = (() => {
-        if (shiftKind2 === 'clarify_shift') return 'meaning_reframe';
-        if (shiftKind2 === 'stabilize_shift') return 'stabilize_direction';
-        if (shiftKind2 === 'distance_shift') return 'distance_tuning';
-        if (shiftKind2 === 'repair_shift') return 'repair_entry';
-        if (shiftKind2 === 'decide_shift') return 'decision_axis';
-        return 'narrow_focus';
-      })();
+    if (hasAny('決められない', '行くべきか', 'やめるべきか', '迷ってる', '選べない')) {
+      return 'decide_shift' as const;
+    }
 
-      const shiftLine2 = (() => {
-        if (shiftKind2 === 'clarify_shift') {
-          return shiftMeaning.line;
-        }
+    if (hasAny('何から', '何が不安かわからない', '整理したい', '焦点')) {
+      return 'narrow_shift' as const;
+    }
 
-        if (shiftKind2 === 'stabilize_shift') {
-          if (hasAny('また同じところ', '戻ってきた')) {
-            return 'いまは進めることより、同じところに見える一点を静かに整え直す角度が合っている';
-          }
-          return 'いまは進めるより、足場を戻して整える角度のほうが合っている';
-        }
+    return 'narrow_shift' as const;
+  })();
 
-        if (shiftKind2 === 'distance_shift') {
-          return '相手を読み切るより先に、いま苦しくしている距離の一点を狭く見たほうが動きやすい';
-        }
+  const shiftHint2 = (() => {
+    if (shiftKind2 === 'clarify_shift') return 'clarify_meaning_v2';
+    if (shiftKind2 === 'stabilize_shift') return 'stabilize_shift_v1';
+    if (shiftKind2 === 'distance_shift') return 'distance_shift_v1';
+    if (shiftKind2 === 'repair_shift') return 'repair_shift_v1';
+    if (shiftKind2 === 'decide_shift') return 'decide_shift_v1';
+    return 'narrow_shift_v1';
+  })();
 
-        if (shiftKind2 === 'repair_shift') {
-          return '正解の修復を急ぐより、関係を壊さない入口を一つだけ置く角度が合っている';
-        }
+  const shiftIntent2 = (() => {
+    if (shiftKind2 === 'clarify_shift') return 'meaning_reframe';
+    if (shiftKind2 === 'stabilize_shift') return 'stabilize_direction';
+    if (shiftKind2 === 'distance_shift') return 'distance_tuning';
+    if (shiftKind2 === 'repair_shift') return 'repair_entry';
+    if (shiftKind2 === 'decide_shift') return 'decision_axis';
+    return 'narrow_focus';
+  })();
 
-        if (shiftKind2 === 'decide_shift') {
-          return '結論を急ぐより先に、何を基準に決めるかを一つに絞る角度が合っている';
-        }
+  const shiftLine2 = (() => {
+    if (shiftKind2 === 'clarify_shift') {
+      const isTopicCorrection =
+        t.length <= 24 &&
+        !/[?？]/.test(t) &&
+        (hasAny('話ですよ', 'の話', 'のこと', 'について') ||
+          /.+の話(です|だ)?よ?$/.test(t));
 
-        return '全部を動かすより、いま引っかかっている一点だけを狭くすると動きやすい';
-      })();
+      const isDefinitionQuestion2 =
+        /(?:って何|とは|意味|違い|定義)/.test(t) || /[?？]/.test(t);
 
-      const questionsMax2 =
-        shiftKind2 === 'clarify_shift' ||
-        shiftKind2 === 'stabilize_shift' ||
-        shiftKind2 === 'distance_shift' ||
-        emotionalTemperature2 === 'high' ||
-        emotionalTemperature2 === 'volatile'
-          ? 0
-          : 1;
+      if (isTopicCorrection) {
+        return '話題の補正として受け取り、何の話かを勝手に広げず、その話題の中で確認する';
+      }
 
-      const shift =
-        useTConcretize
-          ? buildShiftTConcretize(seedText, args.focusLabel)
-          : useIdeaBand
-            ? buildShiftIdeaBand(seedText)
-            : m('SHIFT', {
-                kind: shiftKind2,
-                intent: shiftIntent2,
-                hint: shiftHint2,
-                line: shiftLine2,
-                source: 'phase2_shift',
-                rules: {
-                  answer_user_meaning: true,
-                  keep_it_simple: true,
-                  no_flow_lecture: true,
-                  no_meta_explain: true,
-                  questions_max: questionsMax2,
-                },
-                allow: {
-                  concrete_reply: true,
-                  short_reply_ok: true,
-                },
-                seed_text: seedText,
-              });
+      if (isDefinitionQuestion2) {
+        return shiftMeaning.line;
+      }
+
+      return '質問の向きをそのまま受け取り、話題を広げずに、このテーマのどこを知りたいのかを狭く確かめる';
+    }
+
+    if (shiftKind2 === 'stabilize_shift') {
+      if (hasAny('また同じところ', '戻ってきた')) {
+        return 'いまは進めることより、同じところに見える一点を静かに整え直す角度が合っている';
+      }
+      return 'いまは進めるより、足場を戻して整える角度のほうが合っている';
+    }
+
+    if (shiftKind2 === 'distance_shift') {
+      return '相手を読み切るより先に、いま苦しくしている距離の一点を狭く見たほうが動きやすい';
+    }
+
+    if (shiftKind2 === 'repair_shift') {
+      return '正解の修復を急ぐより、関係を壊さない入口を一つだけ置く角度が合っている';
+    }
+
+    if (shiftKind2 === 'decide_shift') {
+      return '結論を急ぐより先に、何を基準に決めるかを一つに絞る角度が合っている';
+    }
+
+    return '全部を動かすより、いま引っかかっている一点だけを狭くすると動きやすい';
+  })();
+
+  const questionsMax2 =
+    shiftKind2 === 'clarify_shift' ||
+    shiftKind2 === 'stabilize_shift' ||
+    shiftKind2 === 'distance_shift' ||
+    emotionalTemperature2 === 'high' ||
+    emotionalTemperature2 === 'volatile'
+      ? 0
+      : 1;
+
+  const shift =
+    useTConcretize
+      ? buildShiftTConcretize(seedText, args.focusLabel)
+      : useIdeaBand
+        ? buildShiftIdeaBand(seedText)
+        : m('SHIFT', {
+            kind: shiftKind2,
+            intent: shiftIntent2,
+            hint: shiftHint2,
+            line: shiftLine2,
+            source: 'phase2_shift',
+            rules: {
+              answer_user_meaning: true,
+              keep_it_simple: true,
+              no_flow_lecture: true,
+              no_meta_explain: true,
+              questions_max: questionsMax2,
+            },
+            allow: {
+              concrete_reply: true,
+              short_reply_ok: true,
+            },
+            seed_text: seedText,
+          });
 
   return [
     {

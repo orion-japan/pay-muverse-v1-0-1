@@ -3054,7 +3054,15 @@ if ((extra2.ctxPack as any).historyDigestV1 == null && digestV1Raw) {
   // relationFocus（軽量）
   // -----------------------------
   const relationFocus = (() => {
-    const looksRelation = hasAny(
+    // ✅ relation 判定は「現在の userText」を最優先に見る
+    // - seed / shift text / 補助文に混ざった人間関係語で誤発火させない
+    const currentUserText = String(text ?? '').trim();
+    const currentUserTextLc = currentUserText.toLowerCase();
+
+    const hasAnyInUser = (...needles: string[]) =>
+      needles.some((n) => currentUserText.includes(n) || currentUserTextLc.includes(n.toLowerCase()));
+
+    const looksRelation = hasAnyInUser(
       '相手',
       '恋愛',
       '関係',
@@ -3161,6 +3169,29 @@ if ((extra2.ctxPack as any).historyDigestV1 == null && digestV1Raw) {
   // shiftKind（第二段の主ルーティング）
   // -----------------------------
   const shiftKind = (() => {
+    const currentUserText = String(text ?? '').trim();
+    const currentUserTextLc = currentUserText.toLowerCase();
+
+    const hasAnyInUser = (...needles: string[]) =>
+      needles.some((n) => currentUserText.includes(n) || currentUserTextLc.includes(n.toLowerCase()));
+
+    // ✅ 話題修正ターンを最優先で拾う
+    // 例:
+    // - 地球外生命体の話ですよ
+    // - その話です
+    // - ○○のことです
+    // - さっきから言ってるのは○○です
+    const topicCorrection =
+      /(.+?)の話ですよ/u.test(currentUserText) ||
+      /(.+?)のことです/u.test(currentUserText) ||
+      /(その話です|そのことです|その件です)/u.test(currentUserText) ||
+      /(さっきから言ってるのは.+です)/u.test(currentUserText);
+
+    // ✅ correction turn では stabilize に落とさず、話題固定の clarify に倒す
+    if (topicCorrection) {
+      return 'clarify_shift' as const;
+    }
+
     if (hasAny('って何', 'とは', '意味', '違い', '定義')) return 'clarify_shift' as const;
 
     if (relationFocus) {

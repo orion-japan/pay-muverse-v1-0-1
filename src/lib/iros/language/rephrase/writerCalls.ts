@@ -843,6 +843,50 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     return level;
   })();
 
+  const cueLabels = (() => {
+    const summaryHead = String((ctxPack as any)?.situationSummary ?? '').trim() || '(none)';
+
+    if (shiftKindForSeed === 'clarify_shift') {
+      const isTopicCorrectionCue =
+        summaryHead !== '(none)' &&
+        summaryHead.length <= 24 &&
+        !/[?？]/.test(summaryHead) &&
+        (
+          summaryHead.includes('話ですよ') ||
+          summaryHead.includes('の話') ||
+          summaryHead.includes('のこと') ||
+          summaryHead.includes('について') ||
+          /.+の話(です|だ)?よ?$/.test(summaryHead)
+        );
+
+      if (isTopicCorrectionCue) {
+        return {
+          currentMeaning: '(none)',
+          shiftMeaning: '話題の補正として受け取り、何の話かを勝手に広げず、その話題の中で確認する',
+          nextMeaning: '(none)',
+          flowBridge: '(suppressed_for_clarify)',
+          whyItMatches: `user="${summaryHead}" / shiftKind=clarify_shift / topic_correction=true`,
+        };
+      }
+
+      return {
+        currentMeaning: '(none)',
+        shiftMeaning: '質問の向きをそのまま受け取り、話題を広げずにこのテーマのどこを知りたいのかを狭く確かめる',
+        nextMeaning: '(none)',
+        flowBridge: '(suppressed_for_clarify)',
+        whyItMatches: `user="${summaryHead}" / shiftKind=clarify_shift`,
+      };
+    }
+
+    return {
+      currentMeaning: flowCurrentMeaning,
+      shiftMeaning,
+      nextMeaning: flowNextMeaning,
+      flowBridge,
+      whyItMatches,
+    };
+  })();
+
   const stateCueLines0 = [
     'STATE_CUES_V3 (DO NOT OUTPUT):',
     '',
@@ -852,15 +896,15 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     '',
 
     'CURRENT_MEANING:',
-    flowCurrentMeaning,
+    cueLabels.currentMeaning,
     '',
 
     'SHIFT_MEANING:',
-    shiftMeaning,
+    cueLabels.shiftMeaning,
     '',
 
     'NEXT_MEANING:',
-    flowNextMeaning,
+    cueLabels.nextMeaning,
     '',
 
     'SAFE_MEANING:',
@@ -868,23 +912,11 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     '',
 
     'FLOW_BRIDGE:',
-    flowBridge,
+    cueLabels.flowBridge,
     '',
 
     'WHY_IT_MATCHES:',
-    whyItMatches,
-    '',
-
-    'RELATION_MEANING:',
-    relationMeaning,
-    '',
-
-    'TEMPERATURE_MEANING:',
-    temperatureMeaning,
-    '',
-
-    'BEST_SHIFT_DIRECTION:',
-    bestShiftDirection,
+    cueLabels.whyItMatches,
     '',
 
     'META (meaning labels):',
