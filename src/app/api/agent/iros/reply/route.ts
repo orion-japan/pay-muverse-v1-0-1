@@ -441,12 +441,21 @@ const styleInput: string | undefined =
         .limit(1)
         .maybeSingle();
 
-      if (hitErr) {
-        return NextResponse.json(
-          { ok: false, error: 'db_error', detail: 'failed to lookup conversation by uuid' },
-          { status: 500, headers: withTrace(CORS_HEADERS, traceId) },
-        );
-      }
+        if (hitErr) {
+          console.error('[IROS/reply][conversation_uuid_lookup][ERROR]', {
+            traceId,
+            conversationKey,
+            message: (hitErr as any)?.message ?? null,
+            details: (hitErr as any)?.details ?? null,
+            hint: (hitErr as any)?.hint ?? null,
+            code: (hitErr as any)?.code ?? null,
+          });
+
+          return NextResponse.json(
+            { ok: false, error: 'db_error', detail: 'failed to lookup conversation by uuid' },
+            { status: 500, headers: withTrace(CORS_HEADERS, traceId) },
+          );
+        }
 
       if (!hit?.id) {
         return NextResponse.json(
@@ -1042,6 +1051,38 @@ if (isNonForwardButEmpty) {
         },
       };
 
+      {
+        const shiftKindNow =
+          String((meta as any)?.extra?.ctxPack?.shiftKind ?? '').trim() || null;
+
+        const pastStateTriggerKindNow =
+          typeof (meta as any)?.extra?.pastStateTriggerKind === 'string'
+            ? String((meta as any).extra.pastStateTriggerKind).trim()
+            : null;
+
+        const shouldHideHistoryForResponse =
+          shiftKindNow === 'narrow_shift' ||
+          shiftKindNow === 'stabilize_shift' ||
+          pastStateTriggerKindNow === 'none';
+
+        if (shouldHideHistoryForResponse) {
+          (meta as any).extra = (meta as any).extra ?? {};
+
+          if (Array.isArray((meta as any).extra.historyForWriter)) {
+            (meta as any).extra.historyForWriter = [];
+          }
+
+          if (
+            (meta as any).extra.ctxPack &&
+            typeof (meta as any).extra.ctxPack === 'object'
+          ) {
+            if (Array.isArray((meta as any).extra.ctxPack.historyForWriter)) {
+              (meta as any).extra.ctxPack.historyForWriter = [];
+            }
+          }
+        }
+      }
+
       // 三軸 next step
       meta = attachNextStepMeta({
         meta,
@@ -1488,10 +1529,26 @@ const fromBlocks = stripInternalLines(blocksJoinedCleaned);
 const fromResultObj = stripInternalLines(resultObjFinalRaw);
 
 const contentForPersist = (() => {
+  const shiftKindNow = String(
+    (metaForSaveExtraAny?.ctxPack as any)?.shiftKind ??
+      (metaForSaveExtraAny as any)?.ctxPack?.shiftKind ??
+      ''
+  ).trim();
+
+  const shouldPreferBlocks =
+    shiftKindNow === 'stabilize_shift' ||
+    shiftKindNow === 'distance_shift' ||
+    shiftKindNow === 'clarify_shift';
+
+  // ✅ Phase 2: personal SHIFT が効いているターンでは rephraseBlocks(clean) を最優先
+  if (shouldPreferBlocks && !isEffectivelyEmptyText(fromBlocks) && fromBlocks.length > 0) {
+    return fromBlocks;
+  }
+
   if (!isEffectivelyEmptyText(uiReturnText) && uiReturnText.length > 0) return uiReturnText;
   if (!isEffectivelyEmptyText(uiResolvedText) && uiResolvedText.length > 0) return uiResolvedText;
 
-  // 以下は “正本が空” の救済（原則ここに落ちない）
+  // 以下は “正本が空” の救済
   if (!isEffectivelyEmptyText(fromBlocks) && fromBlocks.length > 0) return fromBlocks;
   if (!isEffectivelyEmptyText(fromResultObj) && fromResultObj.length > 0) return fromResultObj;
 

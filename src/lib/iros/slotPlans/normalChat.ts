@@ -226,15 +226,13 @@ function buildCompose(userText: string, laneKey?: LaneKey, flowDelta?: string | 
   ];
 }
 
-// ✅ clarify：テンプレ自然文を出さない。LLMに “意味に答える” を許可するだけ。
-// ✅ FIX: laneKey 未指定(null/undefined)を勝手に T_CONCRETIZE にしない（t_concretize seed支配の原因）
 function buildClarify(
   userText: string,
   laneKey?: LaneKey,
   flowDelta?: string | null,
   flow?: { delta?: string; confidence?: number; returnStreak?: number } | null
 ): NormalChatSlot[] {
-  const lane = laneKey; // ここで補完しない（未指定なら undefined のまま）
+  const lane = laneKey;
   const isT = lane === 'T_CONCRETIZE';
 
   const contractsClarify = [
@@ -250,22 +248,85 @@ function buildClarify(
 
   const seedText = clamp(norm(userText), 240);
   const delta = flowDelta ? String(flowDelta) : null;
+  const conf = typeof flow?.confidence === 'number' ? flow.confidence : undefined;
 
-  // ✅ どの経路でも OBS を固定で出す（生文は入れない：構造だけ）
+  const buildClarifyMeaningV1 = (text: string): { kind: 'define' | 'reframe' | 'structure'; line: string; source: string } => {
+    const t = norm(text);
+
+    if (/(刺さるSHIFT|刺さるシフト)/i.test(t)) {
+      return {
+        kind: 'define',
+        line: '刺さるSHIFTは、「頑張る」に変えることではなく「その向きなら動ける」に変わる切り替え',
+        source: 'question_term',
+      };
+    }
+
+    if (/(SHIFTって何|シフトって何|shiftとは|シフトとは)/i.test(t)) {
+      return {
+        kind: 'define',
+        line: 'SHIFTは、状況を変える前に「見え方」や「力の通し方」を一段ずらすこと',
+        source: 'question_term',
+      };
+    }
+
+    if (/(なんで.*動けない|なぜ.*動けない|どうして.*動けない)/.test(t)) {
+      return {
+        kind: 'reframe',
+        line: '動けないのは意志が弱いからではなく、まだ抵抗の小さい向きが見つかっていない状態',
+        source: 'question_pattern',
+      };
+    }
+
+    if (/(どうすれば|どうしたら|何から|なにから)/.test(t)) {
+      return {
+        kind: 'structure',
+        line: 'いま必要なのは答えを増やすことより、最初の一歩が通る角度を絞ること',
+        source: 'question_pattern',
+      };
+    }
+
+    if (/(って何|とは|どういう意味|意味)/.test(t)) {
+      return {
+        kind: 'define',
+        line: 'ここで聞かれているのは言葉の説明だけでなく、実際にどう働くかの芯',
+        source: 'question_pattern',
+      };
+    }
+
+    return {
+      kind: 'reframe',
+      line: '表面の言い換えではなく、その人の中で実際に向きが変わる一点をつかむ話',
+      source: 'fallback',
+    };
+  };
+
+  const clarifyMeaning = buildClarifyMeaningV1(seedText);
+  const isDefinitionQuestion =
+    /(って何|とは|どういう意味|意味|何ですか|なんですか)/.test(seedText) ||
+    /(刺さるSHIFT|刺さるシフト|SHIFTって何|シフトって何)/i.test(seedText);
+
   const obs: NormalChatSlot = {
     key: 'OBS',
     role: 'assistant',
     style: 'soft',
     content: m('OBS', {
-      laneKey: lane ?? null, // 未指定は null のまま出す
-      flow: { delta },
-      // 🚫 生文遮断：user / lastUserText を slot に入れない
+      laneKey: lane ?? null,
+      flow: conf === undefined ? { delta } : { delta, confidence: conf },
       user: null,
       lastUserText: null,
     }),
   };
 
-  // ✅ IDEA_BAND: clarify でも候補契約へ（質問返し/講義/手順を抑える）
+  const safe: NormalChatSlot = {
+    key: 'SAFE',
+    role: 'assistant',
+    style: 'soft',
+    content: m('SAFE', {
+      laneKey: lane ?? null,
+      flow: conf === undefined ? { delta } : { delta, confidence: conf },
+    }),
+  };
+
   if (lane === 'IDEA_BAND') {
     return [
       obs,
@@ -275,15 +336,13 @@ function buildClarify(
         style: 'neutral',
         content: buildShiftIdeaBand(seedText),
       },
+      safe,
       buildNextHintSlot({ userText, laneKey: lane, flowDelta: delta }),
     ];
   }
 
   const shiftPreset = isT ? SHIFT_PRESET_T_CONCRETIZE : null;
 
-  // deepReadBoost: RETURN が続く “確認モード” 局面だけ、定義（構造説明）を少し許可
-  // - 命名（no_naming）は絶対に緩めない
-  // - no_definition だけを false に落とす（RETURN streak>=2 のときだけ）
   const deepReadBoost =
     String(flow?.delta ?? flowDelta ?? '').toUpperCase() === 'RETURN' &&
     Number((flow as any)?.returnStreak ?? 0) >= 2;
@@ -296,20 +355,23 @@ function buildClarify(
       style: 'neutral',
       content: m('SHIFT', {
         kind: isT ? 't_concretize' : 'clarify',
-
-        // ✅ clarify は「質問に答える」より「意味に答える」を優先
         intent: isT ? 'implement_next_step' : 'answer_user_meaning',
-
-        // ✅ contract を弱める：clarify の “硬い先頭候補” を外す
-        contract: pickRandom(isT ? contractsT : contractsClarify.slice(1)),
-
+        hint: isT ? 'clarify_t_concretize_v1' : 'clarify_meaning_v1',
+        line: isT ? null : clarifyMeaning.line,
+        source: isT ? 't_concretize' : clarifyMeaning.source,
+        meaning_kind: isT ? null : clarifyMeaning.kind,
+        contract: isT
+        ? pickRandom(contractsT)
+        : isDefinitionQuestion
+          ? ['answer_in_one_shot', 'first_line_is_definition_or_pointing', 'no_meta_explain', 'plain_words', 'no_boilerplate']
+          : pickRandom(contractsClarify.slice(1)),
         rules: {
           ...(shiftPreset?.rules ?? {}),
           answer_user_meaning: true,
           keep_it_simple: true,
-          questions_max: isT ? 0 : 1,
-
-          // ✅ RETURN streak>=2 の時だけ「定義/構造説明」を許可
+          no_flow_lecture: true,
+          no_meta_explain: true,
+          questions_max: isT ? 0 : isDefinitionQuestion ? 0 : 1,
           ...(deepReadBoost ? { no_definition: false } : {}),
         },
         allow: {
@@ -320,12 +382,10 @@ function buildClarify(
         seed_text: seedText,
       }),
     },
+    safe,
     buildNextHintSlot({ userText, laneKey: lane, flowDelta: delta }),
   ];
 }
-
-
-
 
 // ✅ HowTo/方法質問（QuestionSlots）を normalChat に合わせて「@行だけ」に正規化
 function buildQuestion(
@@ -531,81 +591,289 @@ function buildShiftTConcretize(seedText: string, focusLabel?: string) {
 function buildFlowReply(args: {
   userText: string;
   laneKey: LaneKey | null | undefined;
-  flow: { delta: string; confidence?: number } | null;
+  flow: { delta: string; confidence?: number; returnStreak?: number } | null;
   lastUserText?: string | null;
 
   // ✅ A案：上流が「いま触る1点（対象）」を渡せる差し込み口
   focusLabel?: string;
 }): NormalChatSlot[] {
+  function buildShiftMeaningV1(input: {
+    userText: string;
+    flowDelta?: string | null;
+    returnStreak?: number | null;
+  }) {
+    const t = norm(input.userText);
+    const delta = String(input.flowDelta ?? '').trim().toUpperCase();
+    const returnStreak =
+      typeof input.returnStreak === 'number' && Number.isFinite(input.returnStreak)
+        ? input.returnStreak
+        : 0;
+
+    const hasProgressWish =
+      /(進みたい|進もう|進めたい|前に進みたい|変わりたい|抜けたい|抜け出したい|動きたい)/.test(t);
+
+    const hasHoldWish =
+      /(まだ動きたくない|動けない|止まりたい|休みたい|このままでいたい|怖い|不安|様子を見たい)/.test(t);
+
+    const hasRepeatSense =
+      /(また|同じ|戻っ|逆戻り|繰り返|ループ|堂々巡り)/.test(t);
+
+    if (delta === 'RETURN') {
+      if (hasProgressWish && hasHoldWish) {
+        return {
+          kind: 'structure',
+          line: '進みたい気持ちと、まだ止まっていたい気持ちが同時に走っている状態',
+          source: 'userText+flow',
+        };
+      }
+      if (hasRepeatSense || returnStreak >= 2) {
+        return {
+          kind: 'redefine',
+          line: '逆戻りというより、まだ抜けきっていない地点を整え直している流れ',
+          source: 'flow',
+        };
+      }
+      return {
+        kind: 'redefine',
+        line: '止まったのではなく、次に進む前の足場を戻って整えている流れ',
+        source: 'flow',
+      };
+    }
+
+    if (delta === 'HOLD' || delta === 'STAY') {
+      if (hasProgressWish && hasHoldWish) {
+        return {
+          kind: 'structure',
+          line: '前に進みたい意志はあるけれど、まだ動かすには早い部分が残っている状態',
+          source: 'userText+flow',
+        };
+      }
+      return {
+        kind: 'reframe',
+        line: '止まっているというより、いまは動くより保持を優先している状態',
+        source: 'flow',
+      };
+    }
+
+    if (delta === 'FORWARD') {
+      if (hasProgressWish && hasHoldWish) {
+        return {
+          kind: 'reframe',
+          line: '迷いが消えたわけではなく、迷いを抱えたままでも少し進める段階',
+          source: 'userText+flow',
+        };
+      }
+      return {
+        kind: 'reframe',
+        line: 'まだ完成していなくても、前に進みたい輪郭はもう出はじめている',
+        source: 'flow',
+      };
+    }
+
+    return {
+      kind: 'reframe',
+      line: 'いま起きていることを、そのまま次の動きにつながる形で見直す段階',
+      source: 'flow',
+    };
+  }
+
   const t = norm(args.userText);
   const seedText = clamp(t, 240);
 
-  // ✅ TSエラー原因：delta/conf が未宣言だったので復活
   const delta = args.flow?.delta ? String(args.flow.delta) : 'FORWARD';
-  const conf = typeof args.flow?.confidence === 'number' ? args.flow!.confidence : undefined;
+  const conf = typeof args.flow?.confidence === 'number' ? args.flow.confidence : undefined;
+  const returnStreak =
+    typeof args.flow?.returnStreak === 'number' ? args.flow.returnStreak : undefined;
 
-  // ✅ laneKey は「明示されたときだけ」使う。null/不明は通常扱い（IDEA_BANDにも落とさない）
   const laneKeyRaw = args.laneKey;
   const laneKeyKnown: LaneKey | null =
     laneKeyRaw === 'T_CONCRETIZE' || laneKeyRaw === 'IDEA_BAND' ? laneKeyRaw : null;
 
-  // ✅ IDEA_BAND は「選択宣言（＠）」があるときだけ（要件通り）
   const hasAtDecl = /[@＠]/.test(t);
   const useIdeaBand = laneKeyKnown === 'IDEA_BAND' && hasAtDecl;
-
-  // ✅ T_CONCRETIZE も「明示されたときだけ」
   const useTConcretize = laneKeyKnown === 'T_CONCRETIZE';
 
-  // OBSに載せるlaneKeyも同じ基準（nullのままOK）
-  const laneKeyForObs: LaneKey | null = useTConcretize ? 'T_CONCRETIZE' : useIdeaBand ? 'IDEA_BAND' : null;
+  const laneKeyForObs: LaneKey | null = useTConcretize
+    ? 'T_CONCRETIZE'
+    : useIdeaBand
+      ? 'IDEA_BAND'
+      : null;
 
-  const shift =
-    useTConcretize
-      ? buildShiftTConcretize(seedText, args.focusLabel)
-      : useIdeaBand
-        ? buildShiftIdeaBand(seedText)
-        : m('SHIFT', {
-            kind: 'auto_fill',
-            hint: 'flow_continue_minimal',
-          });
+      const shiftMeaning = buildShiftMeaningV1({
+        userText: t,
+        flowDelta: delta,
+        returnStreak: returnStreak ?? null,
+      });
 
-          return [
-            {
-              key: 'OBS',
-              role: 'assistant',
-              style: 'soft',
-              content: m('OBS', {
-                laneKey: laneKeyForObs,
-                flow: conf === undefined ? { delta } : { delta, confidence: conf },
-                // 🚫 生文は入れない（user / lastUserText は slot から完全排除）
-              }),
-            },
-            {
-              key: 'SHIFT',
-              role: 'assistant',
-              style: 'neutral',
-              content: shift,
-            },
+      const hasAny = (...needles: string[]) =>
+        needles.some((n) => t.includes(n) || t.toLowerCase().includes(n.toLowerCase()));
 
-            // ✅ SAFE を常駐（slotPlan=4を安定させる）
-            {
-              key: 'SAFE',
-              role: 'assistant',
-              style: 'soft',
-              content: m('SAFE', {
-                laneKey: laneKeyForObs,
-                flow: conf === undefined ? { delta } : { delta, confidence: conf },
-              }),
-            },
+      const emotionalTemperature2 = (() => {
+        const volatileHit =
+          hasAny('わからない', '揺れる', 'ぐるぐる', '混乱', 'まとまらない') &&
+          typeof returnStreak === 'number' &&
+          returnStreak >= 2;
 
-            // ✅ Phase11 advance測定用の橋（通常フローでも必ず出す）
-            // laneKeyはnullでも落ちないように（型が厳しい場合があるのでas anyで通す）
-            buildNextHintSlot({ userText: t, laneKey: laneKeyForObs as any, flowDelta: delta }),
-          ];
+        if (volatileHit) return 'volatile' as const;
 
+        if (
+          (typeof returnStreak === 'number' && returnStreak >= 3) ||
+          hasAny('苦しい', 'つらい', '怖い', 'しんどい', '限界')
+        ) {
+          return 'high' as const;
+        }
 
-// ✅ 置き換え：src/lib/iros/slotPlans/normalChat.ts
+        if (hasAny('迷う', '不安', '止まる', '動けない', 'どうしよう', '戻ってきた')) {
+          return 'mid' as const;
+        }
+
+        return 'low' as const;
+      })();
+
+      const shiftKind2 = (() => {
+        if (hasAny('って何', 'とは', '意味', '違い', '定義')) {
+          return 'clarify_shift' as const;
+        }
+
+        if (
+          delta === 'RETURN' ||
+          hasAny('戻ってきた', '動けない', '止まる', 'しんどい', 'また同じところ') ||
+          emotionalTemperature2 === 'high' ||
+          emotionalTemperature2 === 'volatile'
+        ) {
+          return 'stabilize_shift' as const;
+        }
+
+        if (
+          hasAny('相手', '恋愛', '関係', '距離', '気持ち', '連絡', '既読', '未読') &&
+          hasAny('距離を置かれてる', '遠い', '近すぎる', '追いかけ', '避け', 'わからない')
+        ) {
+          return 'distance_shift' as const;
+        }
+
+        if (hasAny('仲直り', '修復', '戻りたい', 'やり直したい')) {
+          return 'repair_shift' as const;
+        }
+
+        if (hasAny('決められない', '行くべきか', 'やめるべきか', '迷ってる', '選べない')) {
+          return 'decide_shift' as const;
+        }
+
+        if (hasAny('何から', '何が不安かわからない', '整理したい', '焦点')) {
+          return 'narrow_shift' as const;
+        }
+
+        return 'narrow_shift' as const;
+      })();
+
+      const shiftHint2 = (() => {
+        if (shiftKind2 === 'clarify_shift') return 'clarify_meaning_v2';
+        if (shiftKind2 === 'stabilize_shift') return 'stabilize_shift_v1';
+        if (shiftKind2 === 'distance_shift') return 'distance_shift_v1';
+        if (shiftKind2 === 'repair_shift') return 'repair_shift_v1';
+        if (shiftKind2 === 'decide_shift') return 'decide_shift_v1';
+        return 'narrow_shift_v1';
+      })();
+
+      const shiftIntent2 = (() => {
+        if (shiftKind2 === 'clarify_shift') return 'meaning_reframe';
+        if (shiftKind2 === 'stabilize_shift') return 'stabilize_direction';
+        if (shiftKind2 === 'distance_shift') return 'distance_tuning';
+        if (shiftKind2 === 'repair_shift') return 'repair_entry';
+        if (shiftKind2 === 'decide_shift') return 'decision_axis';
+        return 'narrow_focus';
+      })();
+
+      const shiftLine2 = (() => {
+        if (shiftKind2 === 'clarify_shift') {
+          return shiftMeaning.line;
+        }
+
+        if (shiftKind2 === 'stabilize_shift') {
+          if (hasAny('また同じところ', '戻ってきた')) {
+            return 'いまは進めることより、同じところに見える一点を静かに整え直す角度が合っている';
+          }
+          return 'いまは進めるより、足場を戻して整える角度のほうが合っている';
+        }
+
+        if (shiftKind2 === 'distance_shift') {
+          return '相手を読み切るより先に、いま苦しくしている距離の一点を狭く見たほうが動きやすい';
+        }
+
+        if (shiftKind2 === 'repair_shift') {
+          return '正解の修復を急ぐより、関係を壊さない入口を一つだけ置く角度が合っている';
+        }
+
+        if (shiftKind2 === 'decide_shift') {
+          return '結論を急ぐより先に、何を基準に決めるかを一つに絞る角度が合っている';
+        }
+
+        return '全部を動かすより、いま引っかかっている一点だけを狭くすると動きやすい';
+      })();
+
+      const questionsMax2 =
+        shiftKind2 === 'clarify_shift' ||
+        shiftKind2 === 'stabilize_shift' ||
+        shiftKind2 === 'distance_shift' ||
+        emotionalTemperature2 === 'high' ||
+        emotionalTemperature2 === 'volatile'
+          ? 0
+          : 1;
+
+      const shift =
+        useTConcretize
+          ? buildShiftTConcretize(seedText, args.focusLabel)
+          : useIdeaBand
+            ? buildShiftIdeaBand(seedText)
+            : m('SHIFT', {
+                kind: shiftKind2,
+                intent: shiftIntent2,
+                hint: shiftHint2,
+                line: shiftLine2,
+                source: 'phase2_shift',
+                rules: {
+                  answer_user_meaning: true,
+                  keep_it_simple: true,
+                  no_flow_lecture: true,
+                  no_meta_explain: true,
+                  questions_max: questionsMax2,
+                },
+                allow: {
+                  concrete_reply: true,
+                  short_reply_ok: true,
+                },
+                seed_text: seedText,
+              });
+
+  return [
+    {
+      key: 'OBS',
+      role: 'assistant',
+      style: 'soft',
+      content: m('OBS', {
+        laneKey: laneKeyForObs,
+        flow: conf === undefined ? { delta } : { delta, confidence: conf },
+      }),
+    },
+    {
+      key: 'SHIFT',
+      role: 'assistant',
+      style: 'neutral',
+      content: shift,
+    },
+    {
+      key: 'SAFE',
+      role: 'assistant',
+      style: 'soft',
+      content: m('SAFE', {
+        laneKey: laneKeyForObs,
+        flow: conf === undefined ? { delta } : { delta, confidence: conf },
+      }),
+    },
+    buildNextHintSlot({ userText: t, laneKey: laneKeyForObs as any, flowDelta: delta }),
+  ];
 }
+
 // ✅ 置き換え 1) safeLaneKey を関数まるごと置き換え
 function safeLaneKey(v: unknown): LaneKey | null {
   return v === 'IDEA_BAND' || v === 'T_CONCRETIZE' ? v : null;

@@ -91,9 +91,9 @@ function ensureEndsWithUser(messages: WriterMessage[], finalUserText?: string): 
   const normFinal = typeof finalUserText === 'string' ? norm(finalUserText) : '';
   const last = out[out.length - 1];
 
-  // ✅ user で終わっていない場合は追加
+  // ✅ user で終わっていない場合は、finalUserText がある時だけ追加
   if (!last || last.role !== 'user') {
-    out.push({ role: 'user', content: normFinal || '（入力なし）' });
+    if (normFinal) out.push({ role: 'user', content: normFinal });
     return out;
   }
 
@@ -140,7 +140,8 @@ function turnsToMessages(
     if (role === 'user') {
       const s0 = stripInternalMarkersFromUserText(content0);
       const s1 = clampStr(s0, MAX_USER_LEN);
-      out.push({ role: 'user', content: s1 || '（入力なし）' });
+      if (!s1) continue;
+      out.push({ role: 'user', content: s1 });
       continue;
     }
 
@@ -177,7 +178,6 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
   const systemPrompt = norm(args.systemPrompt ?? '');
 
   // ✅ 会話の線（topicDigest / conversationLine）を拾う（短く system 側に固定）
-  // - ここが太ると prompt_tokens が跳ねるので、強制クランプする
   const topicDigest = clampStr(norm(args.topicDigest ?? ''), 260);
   const conversationLine = clampStr(norm(args.conversationLine ?? ''), 260);
   const internalPackRaw = norm(args.internalPack ?? '');
@@ -189,19 +189,15 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
 
   const conversationLineBlockClamped = clampStr(conversationLineBlock, 360);
 
-  // ✅ system は「軽量」に固定（PDFの上限設計に合わせる）
-  // - internalPack は system に混ぜない（systemLen が肥大化するため）
   const systemOne = [
     systemPrompt,
-    conversationLineBlockClamped ? `CONVERSATION_LINE (DO NOT OUTPUT):\n${conversationLineBlockClamped}` : '',
+    conversationLineBlockClamped
+      ? `CONVERSATION_LINE (DO NOT OUTPUT):\n${conversationLineBlockClamped}`
+      : '',
   ]
     .map((x) => norm(x))
     .filter((x) => x.length > 0)
     .join('\n\n');
-
-  // ------------------------------------------------------------
-  // ✅ COORD / CARDS / TEXT_SEED を internalPack の先頭に固定注入（露出禁止）
-  // ------------------------------------------------------------
 
   const pick = (...vals: any[]) => {
     for (const v of vals) {
@@ -231,10 +227,26 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
       ).toLowerCase();
 
       if (!s) return '';
-      if (s === 'yin' || s === '陰' || s === 'neg' || s === 'negative' || s === '-' || s === 'minus')
+      if (
+        s === 'yin' ||
+        s === '陰' ||
+        s === 'neg' ||
+        s === 'negative' ||
+        s === '-' ||
+        s === 'minus'
+      ) {
         return 'yin';
-      if (s === 'yang' || s === '陽' || s === 'pos' || s === 'positive' || s === '+' || s === 'plus')
+      }
+      if (
+        s === 'yang' ||
+        s === '陽' ||
+        s === 'pos' ||
+        s === 'positive' ||
+        s === '+' ||
+        s === 'plus'
+      ) {
         return 'yang';
+      }
       return '';
     };
 
@@ -255,8 +267,9 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
 
   const normFutureHint = (raw: any): string => {
     if (raw == null) return '';
-    if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean')
+    if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') {
       return norm(String(raw));
+    }
     if (typeof raw === 'object') {
       const s = pick(raw.hint, raw.label, raw.next, raw.text, raw.future, raw.value);
       return norm(s);
@@ -264,111 +277,17 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     return '';
   };
 
-  const normCardText = (raw: any): string => {
+  const normFlowText = (raw: any): string => {
     if (raw == null) return '';
-    if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean')
+    if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') {
       return norm(String(raw));
+    }
     if (typeof raw === 'object') {
-      const s = pick(raw.shortText, raw.text, raw.cardId, raw.id, raw.meaningKey);
+      const s = pick(raw.shortText, raw.text, raw.flowId, raw.cardId, raw.id, raw.meaningKey);
       return norm(s);
     }
     return '';
   };
-
-  const ctxPack = (args?.ctxPack ?? args?.ctx_pack ?? args?.meta?.extra?.ctxPack ?? null) as any;
-  const extra = (args?.extra ?? args?.meta?.extra ?? null) as any;
-  const flow = (args?.flow ?? ctxPack?.flow ?? extra?.flow ?? null) as any;
-
-  const qCode = pick(args?.qCode, args?.q_code, ctxPack?.qCode, ctxPack?.q_code, extra?.qCode, extra?.q_code);
-  const depthStage = pick(
-    args?.depthStage,
-    args?.depth_stage,
-    ctxPack?.depthStage,
-    ctxPack?.depth_stage,
-    extra?.depthStage,
-    extra?.depth_stage,
-  );
-
-  const phase = pick(args?.phase, ctxPack?.phase, extra?.phase);
-  const eTurn = pick(args?.e_turn, args?.eTurn, ctxPack?.e_turn, ctxPack?.eTurn, extra?.e_turn, extra?.eTurn);
-
-  const exprMeta = (args?.exprMeta ?? ctxPack?.exprMeta ?? extra?.exprMeta ?? null) as any;
-  const saRhythm = pick(exprMeta?.rhythm, args?.sa?.rhythm, ctxPack?.sa?.rhythm);
-  const saTone = pick(exprMeta?.tone, args?.sa?.tone, ctxPack?.sa?.tone);
-  const saBrevity = pick(exprMeta?.brevity, args?.sa?.brevity, ctxPack?.sa?.brevity);
-
-  const mirror = firstNonNull<any>(ctxPack?.mirror, extra?.mirror, (extra as any)?.ctxPack?.mirror, null);
-  const polRaw = firstNonNull<any>(args?.polarity, mirror?.polarity, ctxPack?.polarity, extra?.polarity, null);
-  const polN = normPolarity(polRaw);
-  const polarity = polN.pol;
-
-  const intent = (args?.intent ?? ctxPack?.intent ?? extra?.intent ?? null) as any;
-  const intentAnchor = pick(
-    intent?.anchor,
-    intent?.intentAnchor,
-    args?.intentAnchor,
-    ctxPack?.intentAnchor,
-    extra?.intentAnchor,
-  );
-  const intentDir = pick(intent?.direction, args?.intentDirection, ctxPack?.intentDirection, extra?.intentDirection);
-  const itxStep = pick(args?.itx_step, ctxPack?.itx_step, extra?.itx_step, args?.itxStep, ctxPack?.itxStep);
-  const itxReason = pick(args?.itx_reason, ctxPack?.itx_reason, extra?.itx_reason, args?.itxReason, ctxPack?.itxReason);
-
-  const future = firstNonNull<any>(args?.future, ctxPack?.future, extra?.future, null);
-  const futureHint = normFutureHint(firstNonNull<any>(future, args?.futureHint, ctxPack?.futureHint, null));
-
-  const cards = (args?.cards ?? ctxPack?.cards ?? extra?.cards ?? null) as any;
-  const cardNow = normCardText(
-    firstNonNull<any>(cards?.now, cards?.card_now, cards?.CARD_NOW, args?.cardNow, ctxPack?.cardNow, null),
-  );
-  const cardNext = normCardText(
-    firstNonNull<any>(cards?.next, cards?.card_next, cards?.CARD_NEXT, args?.cardNext, ctxPack?.cardNext, null),
-  );
-
-  const coordLines: string[] = [];
-  if (qCode || depthStage || phase || eTurn || futureHint) {
-    coordLines.push('COORD (DO NOT OUTPUT):');
-
-    // ✅ 必須だけ残す（tokens削減）
-    if (eTurn) coordLines.push(`e_turn=${eTurn}`);
-    if (depthStage) coordLines.push(`depthStage=${depthStage}`);
-    if (qCode) coordLines.push(`qCode=${qCode}`);
-    if (phase) coordLines.push(`phase=${phase}`);
-
-    // ✅ flow は delta / returnStreak だけ（必要最小）
-    const flowDelta = pick(flow?.delta, flow?.flowDelta);
-    const returnStreak = pick(flow?.returnStreak, flow?.return_streak);
-    const flowParts = [flowDelta && `delta=${flowDelta}`, returnStreak && `returnStreak=${returnStreak}`]
-      .filter(Boolean)
-      .join(' ');
-    if (flowParts) coordLines.push(`flow=${flowParts}`);
-
-    // ✅ future は短いヒントだけ
-    if (futureHint) coordLines.push(`future=${futureHint}`);
-  }
-
-  // NOTE: vNext — seed内で「CARDS/CARD_*」という語を使わない（占い感を避ける）
-  // - current/next は STATE_CUES_V3 側で渡す
-  const cardLines: string[] = [];
-
-  const inputKindNow = String(
-    pick(args?.inputKind, ctxPack?.inputKind, (ctxPack as any)?.input_kind, (extra as any)?.inputKind, (extra as any)?.input_kind) ??
-      '',
-  )
-    .trim()
-    .toLowerCase();
-
-  const seedTextRaw = String(
-    pick(
-      (args as any)?.seed_text,
-      (args as any)?.seedText,
-      (ctxPack as any)?.seed_text,
-      (ctxPack as any)?.seedText,
-      (extra as any)?.seed_text,
-      (extra as any)?.seedText,
-      '',
-    ) ?? '',
-  ).trim();
 
   const clampLinesByLen = (lines: string[], maxLines: number, maxLen: number) => {
     const out: string[] = [];
@@ -386,13 +305,183 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     return out;
   };
 
-  const flowDelta2 = String(pick(flow?.delta, (flow as any)?.flowDelta) ?? '').trim();
-  const returnStreak2 = String(pick((flow as any)?.returnStreak, (flow as any)?.return_streak) ?? '').trim();
+  const ctxPack = (args?.ctxPack ?? args?.ctx_pack ?? args?.meta?.extra?.ctxPack ?? null) as any;
+  const extra = (args?.extra ?? args?.meta?.extra ?? null) as any;
+  const flow = (args?.flow ?? ctxPack?.flow ?? extra?.flow ?? null) as any;
 
-  // ------------------------------------------------------------
-  // ✅ e_turn を「状態側(qCounts)」からも拾う（writerCalls入力に無いケースがある）
-  // ※このスコープでは mirror2 / mirrorFlowV1 が無いので、ここで安全に組み立てる
-  // ------------------------------------------------------------
+  const qCode = pick(
+    args?.qCode,
+    args?.q_code,
+    ctxPack?.qCode,
+    ctxPack?.q_code,
+    extra?.qCode,
+    extra?.q_code,
+  );
+
+  const depthStage = pick(
+    args?.depthStage,
+    args?.depth_stage,
+    ctxPack?.depthStage,
+    ctxPack?.depth_stage,
+    extra?.depthStage,
+    extra?.depth_stage,
+  );
+
+  const phase = pick(args?.phase, ctxPack?.phase, extra?.phase);
+  const eTurn = pick(
+    args?.e_turn,
+    args?.eTurn,
+    ctxPack?.e_turn,
+    ctxPack?.eTurn,
+    extra?.e_turn,
+    extra?.eTurn,
+  );
+
+  const exprMeta = (args?.exprMeta ?? ctxPack?.exprMeta ?? extra?.exprMeta ?? null) as any;
+  const saRhythm = pick(exprMeta?.rhythm, args?.sa?.rhythm, ctxPack?.sa?.rhythm);
+  const saTone = pick(exprMeta?.tone, args?.sa?.tone, ctxPack?.sa?.tone);
+  const saBrevity = pick(exprMeta?.brevity, args?.sa?.brevity, ctxPack?.sa?.brevity);
+
+  const mirror = firstNonNull<any>(
+    ctxPack?.mirror,
+    extra?.mirror,
+    (extra as any)?.ctxPack?.mirror,
+    null,
+  );
+  const polRaw = firstNonNull<any>(
+    args?.polarity,
+    mirror?.polarity,
+    ctxPack?.polarity,
+    extra?.polarity,
+    null,
+  );
+  const polN = normPolarity(polRaw);
+  const polarity = polN.pol;
+
+  const intent = (args?.intent ?? ctxPack?.intent ?? extra?.intent ?? null) as any;
+  const intentAnchor = pick(
+    intent?.anchor,
+    intent?.intentAnchor,
+    args?.intentAnchor,
+    ctxPack?.intentAnchor,
+    extra?.intentAnchor,
+  );
+  const intentDir = pick(
+    intent?.direction,
+    args?.intentDirection,
+    ctxPack?.intentDirection,
+    extra?.intentDirection,
+  );
+  const itxStep = pick(
+    args?.itx_step,
+    ctxPack?.itx_step,
+    extra?.itx_step,
+    args?.itxStep,
+    ctxPack?.itxStep,
+  );
+  const itxReason = pick(
+    args?.itx_reason,
+    ctxPack?.itx_reason,
+    extra?.itx_reason,
+    args?.itxReason,
+    ctxPack?.itxReason,
+  );
+
+  const future = firstNonNull<any>(args?.future, ctxPack?.future, extra?.future, null);
+  const futureHint = normFutureHint(
+    firstNonNull<any>(future, args?.futureHint, ctxPack?.futureHint, null),
+  );
+
+  const flowHints = (
+    args?.flows ??
+    args?.cards ??
+    ctxPack?.flows ??
+    ctxPack?.cards ??
+    extra?.flows ??
+    extra?.cards ??
+    null
+  ) as any;
+
+  const flowNow = normFlowText(
+    firstNonNull<any>(
+      flowHints?.now,
+      flowHints?.flow_now,
+      flowHints?.card_now,
+      flowHints?.FLOW_NOW,
+      flowHints?.CARD_NOW,
+      args?.flowNow,
+      args?.cardNow,
+      ctxPack?.flowNow,
+      ctxPack?.cardNow,
+      null,
+    ),
+  );
+
+  const flowNext = normFlowText(
+    firstNonNull<any>(
+      flowHints?.next,
+      flowHints?.flow_next,
+      flowHints?.card_next,
+      flowHints?.FLOW_NEXT,
+      flowHints?.CARD_NEXT,
+      args?.flowNext,
+      args?.cardNext,
+      ctxPack?.flowNext,
+      ctxPack?.cardNext,
+      null,
+    ),
+  );
+
+  const coordLines: string[] = [];
+  if (qCode || depthStage || phase || eTurn || futureHint) {
+    coordLines.push('COORD (DO NOT OUTPUT):');
+    if (eTurn) coordLines.push(`e_turn=${eTurn}`);
+    if (depthStage) coordLines.push(`depthStage=${depthStage}`);
+    if (qCode) coordLines.push(`qCode=${qCode}`);
+    if (phase) coordLines.push(`phase=${phase}`);
+
+    const flowDelta = pick(flow?.delta, flow?.flowDelta);
+    const returnStreak = pick(flow?.returnStreak, flow?.return_streak);
+    const flowParts = [
+      flowDelta && `delta=${flowDelta}`,
+      returnStreak && `returnStreak=${returnStreak}`,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    if (flowParts) coordLines.push(`flow=${flowParts}`);
+
+    if (futureHint) coordLines.push(`future=${futureHint}`);
+  }
+
+  const inputKindNow = String(
+    pick(
+      args?.inputKind,
+      ctxPack?.inputKind,
+      (ctxPack as any)?.input_kind,
+      (extra as any)?.inputKind,
+      (extra as any)?.input_kind,
+    ) ?? '',
+  )
+    .trim()
+    .toLowerCase();
+
+  const seedTextRaw = String(
+    pick(
+      (args as any)?.seed_text,
+      (args as any)?.seedText,
+      (ctxPack as any)?.seed_text,
+      (ctxPack as any)?.seedText,
+      (extra as any)?.seed_text,
+      (extra as any)?.seedText,
+      '',
+    ) ?? '',
+  ).trim();
+
+  const flowDelta2 = String(pick(flow?.delta, (flow as any)?.flowDelta) ?? '').trim();
+  const returnStreak2 = String(
+    pick((flow as any)?.returnStreak, (flow as any)?.return_streak) ?? '',
+  ).trim();
+
   const mirrorAny: any =
     pick(
       (args as any)?.mirror,
@@ -447,9 +536,6 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
       ),
     ) || '';
 
-  // ------------------------------------------------------------
-  // ✅ confidence（あれば拾う。無ければ空）
-  // ------------------------------------------------------------
   const confidenceRaw = pick(
     (args as any)?.confidence,
     (ctxPack as any)?.confidence,
@@ -462,13 +548,31 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
   );
 
   const confidence =
-    confidenceRaw != null && String(confidenceRaw).trim() !== '' ? String(confidenceRaw).trim() : '';
+    confidenceRaw != null && String(confidenceRaw).trim() !== ''
+      ? String(confidenceRaw).trim()
+      : '';
 
-  // ------------------------------------------------------------
-  // ✅ stateCore / currentLine / nextLine をこのスコープ内で確定させる
-  // - 「card/cardId」等の語をseed側に出さない（値として入るのはOK）
-  // ------------------------------------------------------------
   const seedLabel = seedTextRaw ? seedTextRaw.replace(/\s+/g, ' ').slice(0, 60) : '';
+
+  const latestUserText = String(
+    pick(
+      (args as any)?.latestUserText,
+      (args as any)?.userText,
+      (args as any)?.text,
+      (ctxPack as any)?.latestUserText,
+      (ctxPack as any)?.userText,
+      (extra as any)?.latestUserText,
+      (extra as any)?.userText,
+      '',
+    ) ?? '',
+  ).trim();
+
+  const cleanMeaningLine = (v: any): string => {
+    const s = String(v ?? '').replace(/\s+/g, ' ').trim();
+    if (!s) return '';
+    if (s === '(null)' || s === 'null' || s === 'undefined') return '';
+    return s.slice(0, 120);
+  };
 
   const meaningBits: string[] = [];
   if (flowDelta2 === 'RETURN') meaningBits.push('いまは戻りの調整局面');
@@ -486,79 +590,351 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
   if (phase) meaningBits.push(`位相=${phase}`);
   if (seedLabel) meaningBits.push(`補助=${seedLabel}`);
 
-  const stateCore = (meaningBits.length > 0 ? meaningBits.join(' / ') : '(no_state_core)').slice(0, 160);
+  const stateCore = (
+    meaningBits.length > 0 ? meaningBits.join(' / ') : '(no_state_core)'
+  ).slice(0, 160);
 
-  // current/next は、既存の変数が無い前提で「拾えるところから拾う」
-  const currentLine = String(
+  const flowCurrentRaw = String(
     pick(
+      flowNow,
+      (args as any)?.flowNow,
+      (args as any)?.flow_now,
       (args as any)?.cardNow,
       (args as any)?.card_now,
+      (ctxPack as any)?.flowNow,
+      (ctxPack as any)?.flow_now,
       (ctxPack as any)?.cardNow,
       (ctxPack as any)?.card_now,
+      (extra as any)?.flowNow,
+      (extra as any)?.flow_now,
       (extra as any)?.cardNow,
       (extra as any)?.card_now,
+      (ctxPack as any)?.flows?.current,
+      (args as any)?.flows?.current,
+      (extra as any)?.flows?.current,
       (ctxPack as any)?.cards?.current,
       (args as any)?.cards?.current,
       (extra as any)?.cards?.current,
+      (ctxPack as any)?.flows?.now,
+      (args as any)?.flows?.now,
+      (extra as any)?.flows?.now,
       (ctxPack as any)?.cards?.now,
       (args as any)?.cards?.now,
       (extra as any)?.cards?.now,
-      '(null)',
-    ) ?? '(null)',
+      '',
+    ) ?? '',
   );
 
-  const nextLine = String(
+  const flowNextRaw = String(
     pick(
+      flowNext,
+      (args as any)?.flowNext,
+      (args as any)?.flow_next,
       (args as any)?.cardNext,
       (args as any)?.card_next,
+      (ctxPack as any)?.flowNext,
+      (ctxPack as any)?.flow_next,
       (ctxPack as any)?.cardNext,
       (ctxPack as any)?.card_next,
+      (extra as any)?.flowNext,
+      (extra as any)?.flow_next,
       (extra as any)?.cardNext,
       (extra as any)?.card_next,
+      (ctxPack as any)?.flows?.next,
+      (args as any)?.flows?.next,
+      (extra as any)?.flows?.next,
       (ctxPack as any)?.cards?.next,
       (args as any)?.cards?.next,
       (extra as any)?.cards?.next,
+      (ctxPack as any)?.flows?.future,
+      (args as any)?.flows?.future,
+      (extra as any)?.flows?.future,
       (ctxPack as any)?.cards?.future,
       (args as any)?.cards?.future,
       (extra as any)?.cards?.future,
-      '(null)',
-    ) ?? '(null)',
+      '',
+    ) ?? '',
   );
+
+  const flowCurrentMeaning = cleanMeaningLine(flowCurrentRaw) || '(none)';
+  const flowNextMeaning = cleanMeaningLine(flowNextRaw) || '(none)';
+
+  const flowBridge =
+    flowCurrentMeaning !== '(none)' && flowNextMeaning !== '(none)'
+      ? `${flowCurrentMeaning} → ${flowNextMeaning}`
+      : flowDelta2 === 'RETURN'
+        ? 'いったん戻って整えることで、次に進む足場ができる'
+        : flowDelta2 === 'FORWARD'
+          ? 'いまの動きが、そのまま次の展開を開きやすい'
+          : flowCurrentMeaning !== '(none)'
+            ? `いまの流れは「${flowCurrentMeaning}」にある`
+            : flowNextMeaning !== '(none)'
+              ? `この先は「${flowNextMeaning}」が開きやすい`
+              : '(bridge_unknown)';
+
+  const whyItMatchesBits: string[] = [];
+  if (latestUserText) whyItMatchesBits.push(`user="${latestUserText.slice(0, 90)}"`);
+  if (flowDelta2 === 'RETURN') {
+    whyItMatchesBits.push('戻りの調整が入力の空気と合っている');
+  } else if (flowDelta2 === 'FORWARD') {
+    whyItMatchesBits.push('前に進みたい流れが入力の空気と合っている');
+  }
+  if (returnStreak2) whyItMatchesBits.push(`戻り回数=${returnStreak2}`);
+  if (qCode === 'Q3') whyItMatchesBits.push('不安を整えたい基調がある');
+  else if (qCode === 'Q2') whyItMatchesBits.push('引っかかりをほどいて進みたい基調がある');
+  else if (qCode === 'Q1') whyItMatchesBits.push('秩序を保ちながら進めたい基調がある');
+  else if (qCode === 'Q4') whyItMatchesBits.push('恐れを流して軽くしたい基調がある');
+  else if (qCode === 'Q5') whyItMatchesBits.push('空白に火を戻したい基調がある');
+  if (flowCurrentMeaning !== '(none)') whyItMatchesBits.push(`current=${flowCurrentMeaning}`);
+  if (flowNextMeaning !== '(none)') whyItMatchesBits.push(`next=${flowNextMeaning}`);
+
+  const whyItMatches = (
+    whyItMatchesBits.length > 0 ? whyItMatchesBits.join(' / ') : '(match_unknown)'
+  ).slice(0, 220);
+
+  const shiftMeaning = (() => {
+    if (flowCurrentMeaning !== '(none)' && flowNextMeaning !== '(none)') {
+      return `${flowCurrentMeaning} → ${flowNextMeaning}`;
+    }
+    if (flowCurrentMeaning !== '(none)') return flowCurrentMeaning;
+    if (flowBridge !== '(bridge_unknown)') return flowBridge;
+    return '(none)';
+  })();
+
+  const safeMeaning = (() => {
+    if (qCode === 'Q3') return '今の安定を崩さずに整え直せば十分';
+    if (qCode === 'Q2') return '引っかかりを一気に壊さず、ほどけるところから触れれば十分';
+    if (qCode === 'Q1') return '秩序を崩さず、無理のない形で進めれば十分';
+    if (qCode === 'Q4') return '怖さを無視せず、軽くできるところから進めれば十分';
+    if (qCode === 'Q5') return '火を消さず、小さく戻すだけでも十分';
+    if (flowBridge !== '(bridge_unknown)') return flowBridge;
+    return '(none)';
+  })();
+
+  const relationFocusForSeed = (() => {
+    const rf = (ctxPack as any)?.relationFocus ?? null;
+    if (!rf || typeof rf !== 'object') return null;
+
+    const selfPosition = String((rf as any)?.selfPosition ?? '').trim() || 'unknown';
+    const otherPosition = String((rf as any)?.otherPosition ?? '').trim() || 'unknown';
+    const powerBalance = String((rf as any)?.powerBalance ?? '').trim() || 'unknown';
+    const distanceLevel = String((rf as any)?.distanceLevel ?? '').trim() || 'unknown';
+    const certaintyLevel = String((rf as any)?.certaintyLevel ?? '').trim() || 'unknown';
+
+    return {
+      selfPosition,
+      otherPosition,
+      powerBalance,
+      distanceLevel,
+      certaintyLevel,
+    };
+  })();
+
+  const emotionalTemperatureForSeed = (() => {
+    const raw = String((ctxPack as any)?.emotionalTemperature ?? '').trim().toLowerCase();
+    if (raw === 'low' || raw === 'mid' || raw === 'high' || raw === 'volatile') return raw;
+    return 'mid';
+  })();
+
+  const shiftKindForSeed = (() => {
+    const raw = String((ctxPack as any)?.shiftKind ?? '').trim();
+    if (raw) return raw;
+    return inputKindNow === 'question' ? 'clarify_shift' : 'narrow_shift';
+  })();
+
+  const relationMeaning = (() => {
+    const rf = relationFocusForSeed;
+    if (!rf) return '(none)';
+
+    const bits: string[] = [];
+
+    if (rf.selfPosition === 'unclear') bits.push('自分の立ち位置がまだ定まっていない');
+    else if (rf.selfPosition === 'approach') bits.push('自分は近づきたい側に寄っている');
+    else if (rf.selfPosition === 'withdraw') bits.push('自分は少し離れて整えたい側に寄っている');
+
+    if (rf.otherPosition === 'unreadable') bits.push('相手の位置が読めず、確信が持ちにくい');
+    else if (rf.otherPosition === 'approaching') bits.push('相手側はやや近づいている可能性がある');
+    else if (rf.otherPosition === 'distancing') bits.push('相手側は少し距離を取っている可能性がある');
+
+    if (rf.powerBalance === 'weaker') bits.push('自分のほうが立場を弱く感じやすい');
+    else if (rf.powerBalance === 'stronger') bits.push('自分が主導しやすい配置に寄っている');
+
+    if (rf.distanceLevel === 'too_close') bits.push('近すぎて苦しさが出やすい');
+    else if (rf.distanceLevel === 'far') bits.push('遠さが不安を強めやすい');
+    else if (rf.distanceLevel === 'unstable') bits.push('距離の揺れがしんどさを作りやすい');
+    else if (rf.distanceLevel === 'close') bits.push('距離テーマが今の中心にある');
+
+    if (rf.certaintyLevel === 'low') bits.push('確信不足が詰まりの中心にある');
+    else if (rf.certaintyLevel === 'mid') bits.push('少しの見立てがあれば整理しやすい');
+
+    return bits.length ? bits.join(' / ') : '(none)';
+  })();
+
+  const temperatureMeaning = (() => {
+    if (emotionalTemperatureForSeed === 'low') return '静かに整えれば届く温度';
+    if (emotionalTemperatureForSeed === 'mid') return '視点を1つ切ると動きやすい温度';
+    if (emotionalTemperatureForSeed === 'high') return '先に受け止めてから角度を切るべき温度';
+    if (emotionalTemperatureForSeed === 'volatile') return '今は切りすぎず、揺れを増やさない方がよい温度';
+    return '(none)';
+  })();
+
+  const bestShiftDirection = (() => {
+    const rf = relationFocusForSeed;
+    const sk = shiftKindForSeed;
+    const temp = emotionalTemperatureForSeed;
+
+    if (sk === 'clarify_shift') {
+      return '説明で閉じる。広げず、意味をそのまま返す';
+    }
+
+    if (temp === 'volatile') {
+      return 'まず焦点を増やさず、揺れを少し静める方向を優先する';
+    }
+
+    if (temp === 'high') {
+      if (sk === 'distance_shift') return '距離を詰める/切る前に、先に自分の位置を戻す';
+      if (sk === 'decide_shift') return '決断を急がず、先に判断軸を1本に絞る';
+      return '先にいま起きていることを短く受け止め、そのあと1つだけ角度を切る';
+    }
+
+    if (rf) {
+      if (rf.distanceLevel === 'far') return '相手分析を増やすより、遠さで揺れている自分の足場を戻す';
+      if (rf.distanceLevel === 'too_close') return '近づくより先に、少し呼吸できる距離感へ戻す';
+      if (rf.distanceLevel === 'unstable') return '関係全体を決めず、今ぶれている一点だけを狭く見る';
+      if (rf.certaintyLevel === 'low') return '答えを取りに行くより、何が読めないのかを1段狭める';
+      if (rf.powerBalance === 'weaker') return '相手基準で動く前に、自分の位置を先に定める';
+    }
+
+    if (sk === 'stabilize_shift') return '進めるより先に、戻って整える角度を優先する';
+    if (sk === 'narrow_shift') return '問題を小さく切って、いま触る一点だけを見せる';
+    if (sk === 'repair_shift') return '修復の正解探しではなく、安全な入口を1つだけ置く';
+    if (sk === 'decide_shift') return '結論を急がず、選ぶ基準を先に固定する';
+    if (sk === 'distance_shift') return '近づく/離れるの前に、いまの距離で何が苦しいかを定める';
+
+    return '抽象化せず、いま動くための角度を1つだけ返す';
+  })();
+
+  const stingLevelForSeed = (() => {
+    const pick = (v: any): 'LOW' | 'MID' | 'HIGH' | null => {
+      const s = String(v ?? '').trim().toUpperCase();
+      if (s === 'LOW' || s === 'MID' || s === 'HIGH') return s as 'LOW' | 'MID' | 'HIGH';
+      return null;
+    };
+
+    const fromCtx =
+      pick((ctxPack as any)?.stingLevel) ??
+      pick((ctxPack as any)?.state?.stingLevel) ??
+      null;
+
+    if (fromCtx) return fromCtx;
+
+    const d = String(depthStage || '').trim().toUpperCase().charAt(0);
+    const rs =
+      typeof returnStreak2 === 'number'
+        ? returnStreak2
+        : Number.isFinite(Number(returnStreak2))
+          ? Number(returnStreak2)
+          : 0;
+
+    let level: 'LOW' | 'MID' | 'HIGH' = 'LOW';
+    if (d === 'C' || d === 'I' || d === 'T') level = 'HIGH';
+    if (level !== 'HIGH' && rs >= 3) level = 'MID';
+    if (level !== 'HIGH' && rs >= 5) level = 'HIGH';
+    return level;
+  })();
 
   const stateCueLines0 = [
     'STATE_CUES_V3 (DO NOT OUTPUT):',
     '',
+
     'STATE_CORE:',
     stateCore,
     '',
-    'current:',
-    currentLine,
+
+    'CURRENT_MEANING:',
+    flowCurrentMeaning,
     '',
-    'next:',
-    nextLine,
+
+    'SHIFT_MEANING:',
+    shiftMeaning,
     '',
+
+    'NEXT_MEANING:',
+    flowNextMeaning,
+    '',
+
+    'SAFE_MEANING:',
+    safeMeaning,
+    '',
+
+    'FLOW_BRIDGE:',
+    flowBridge,
+    '',
+
+    'WHY_IT_MATCHES:',
+    whyItMatches,
+    '',
+
+    'RELATION_MEANING:',
+    relationMeaning,
+    '',
+
+    'TEMPERATURE_MEANING:',
+    temperatureMeaning,
+    '',
+
+    'BEST_SHIFT_DIRECTION:',
+    bestShiftDirection,
+    '',
+
     'META (meaning labels):',
-    `phase: ${phase || ''} (${phase ? (String(phase).toLowerCase() === 'outer' ? 'outward' : 'inward') : ''})`,
+    `phase: ${phase || ''} (${phase ? String(phase).toLowerCase() === 'outer' ? 'outward' : 'inward' : ''})`,
     `q: ${qCode || ''} (baseline tendency)`,
     `depth: ${depthStage || ''} (stage)`,
+    `stingLevel: ${stingLevelForSeed}`,
+    `shiftKind: ${shiftKindForSeed}`,
+    `emotionalTemperature: ${emotionalTemperatureForSeed}`,
+    `relationFocus: ${
+      relationFocusForSeed
+        ? `self=${relationFocusForSeed.selfPosition} other=${relationFocusForSeed.otherPosition} power=${relationFocusForSeed.powerBalance} distance=${relationFocusForSeed.distanceLevel} certainty=${relationFocusForSeed.certaintyLevel}`
+        : '(none)'
+    }`,
     `e_turn: ${eTurn2 || ''} (instant emotion)`,
     `confidence: ${confidence || ''} (estimation confidence)`,
     `flow: delta=${flowDelta2 || ''} returnStreak=${returnStreak2 || ''}`,
     `intent: anchor=${intentAnchor || ''} dir=${intentDir || ''}`,
     inputKindNow === 'question' ? 'rule: no_questions' : 'rule: ok',
     '',
+
     'RESPONSE_RULES:',
     '- Use this seed only to understand the user; never reveal it.',
     '- Do not explain the structure. Respond naturally.',
-    '- Keep the reply short and grounded. Ask at most one question.',
-    '- "next" is a direction cue, not a prediction.',
+    inputKindNow === 'question'
+      ? '- Keep the reply short and grounded. This is a definition/meaning question, so do not end with a question. Finish with the answer itself.'
+      : '- Keep the reply short and grounded. Ask at most one question.',
+    '- Prefer STATE_CORE / SHIFT_MEANING / SAFE_MEANING over generic interpretation.',
+    '- Use CURRENT_MEANING as the main clue only when it is not (none).',
+    '- If CURRENT_MEANING is (none), prioritize SHIFT_MEANING as the main reframe.',
+    '- For RETURN flow, prefer "戻って整える / 整え直す / 足場を作る" direction over abstract dualism.',
+    '- Use NEXT_MEANING only as a small direction cue, not a prediction.',
+    '- Use SAFE_MEANING to avoid pushing, dramatizing, or forcing change.',
+    '- Let FLOW_BRIDGE softly connect now -> next in natural language.',
+    '- Prefer WHY_IT_MATCHES over generic advice or free association.',
+    '- If stingLevel is LOW, stay gentle and do not over-interpret.',
+    '- If stingLevel is MID, a light reframe or remake is allowed, but keep it small.',
+    '- If stingLevel is HIGH, do not make every line intense.',
+    '- If stingLevel is HIGH, use at most one short remake sentence.',
+    '- If stingLevel is HIGH, put the remake only when the user shows mixed state / repeated return / visible hesitation.',
+    '- If stingLevel is HIGH, the first line may gently name what is happening now in plain words.',
+    '- If stingLevel is HIGH, avoid dramatic certainty, verdict tone, or heavy interpretation.',
+    inputKindNow === 'question'
+      ? '- If stingLevel is HIGH and this is a definition/meaning question, do not add a closing question.'
+      : '- If stingLevel is HIGH, ask at most one question and only after the short remake.',
+    '- If stingLevel is HIGH, skip the remake for direct factual questions or simple practical requests.',
+    '- The reply should still feel calm, ordinary, and easy to receive.',
   ];
-
   const stateCueSeed = clampLinesByLen(stateCueLines0, 30, 980).join('\n');
 
-  // ✅ injectedHead を最小化：COORD は最重要6点だけ（重複・枝葉は注入しない）
-  // - tokens削減の本丸（injectedPackLen を落とす）
-  // - STATE_CUES_V3 があるため、COORD は「座標の骨」だけに絞る
   const coordMinimal: string[] = [];
   coordMinimal.push('COORD (DO NOT OUTPUT):');
   if (eTurn) coordMinimal.push(`e_turn=${eTurn}`);
@@ -567,36 +943,82 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
   if (phase) coordMinimal.push(`phase=${phase}`);
   if (polarity) coordMinimal.push(`polarity=${polarity}`);
 
-  // 何も無い時は COORD 自体を出さない
-  const coordMinimalBlock =
-    coordMinimal.length > 1 ? coordMinimal.join('\n') : '';
+  const coordMinimalBlock = coordMinimal.length > 1 ? coordMinimal.join('\n') : '';
 
   const injectedHead = [coordMinimalBlock, stateCueSeed]
     .filter((x) => norm(x))
     .join('\n\n');
 
-  const internalPackFixed = [injectedHead, internalPackRaw].filter((x) => norm(x)).join('\n\n').trim();
+  const internalPackFixed = [injectedHead, internalPackRaw]
+    .filter((x) => norm(x))
+    .join('\n\n')
+    .trim();
+
   try {
-    const h = norm(internalPackFixed).slice(0, 420);
+    const packNorm = norm(internalPackFixed);
+    const h = packNorm.slice(0, 420);
+
+    const flowIdx = packNorm.indexOf('FLOW_MEANING (DO NOT OUTPUT):');
+    const flowSnippet =
+      flowIdx >= 0 ? packNorm.slice(flowIdx, Math.min(packNorm.length, flowIdx + 520)) : '';
+
     console.log('[IROS/writerCalls][INJECTED_PACK_HEAD]', {
       traceId: (args as any)?.traceId ?? null,
       conversationId: (args as any)?.conversationId ?? null,
-      packLen: norm(internalPackFixed).length,
+      packLen: packNorm.length,
       head: h,
-      hasCOORD: /COORD\s*\(DO NOT OUTPUT\)/.test(internalPackFixed),
-      hasPolarity: /polarity=/.test(internalPackFixed),
-      hasSA: /sa=/.test(internalPackFixed),
-      hasITX: /itx_step=|itx_reason=/.test(internalPackFixed),
-      hasFuture: /future=/.test(internalPackFixed),
-      hasStateCues: /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/.test(internalPackFixed),
+      hasCOORD: /COORD\s*\(DO NOT OUTPUT\)/.test(packNorm),
+      hasPolarity: /polarity=/.test(packNorm),
+      hasSA: /sa=/.test(packNorm),
+      hasITX: /itx_step=|itx_reason=/.test(packNorm),
+      hasFuture: /future=/.test(packNorm),
+      hasStateCues: /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/.test(packNorm),
+      hasFlowMeaning: flowIdx >= 0,
+      flowSnippet,
+      saRhythm: saRhythm || null,
+      saTone: saTone || null,
+      saBrevity: saBrevity || null,
+      itxStep: itxStep || null,
+      itxReason: itxReason || null,
     });
   } catch {}
 
-  // ✅ turns は user 生文も含めて入れる（上限のみ）
-  const turns = turnsToMessages(args.turns, { maxTurnLen: 900, maxUserTurnLen: 900 });
+  const shiftHintRaw = (() => {
+    const s = String(internalPackFixed ?? '');
 
-  // ✅ internalPack は「assistant」メッセージとして分離して注入（露出禁止）
-  const packMsg: WriterMessage | null = internalPackFixed ? { role: 'assistant', content: internalPackFixed } : null;
+    const mShift = s.match(/@SHIFT\s+(\{[\s\S]*?\})(?:\n|$)/);
+    if (mShift?.[1]) {
+      try {
+        const j = JSON.parse(mShift[1]);
+        return String(j?.hint ?? '').trim();
+      } catch {}
+    }
+
+    return '';
+  })();
+
+  const isClarifyMeaningTurn = shiftHintRaw === 'clarify_meaning_v1';
+
+  const turnsRaw = turnsToMessages(args.turns, { maxTurnLen: 900, maxUserTurnLen: 900 });
+
+  // clarify_meaning_v1 では古い履歴汚染を避ける
+  // - 直前1往復だけ残す
+  // - ただし current turn は ensureEndsWithUser(args.userText) が後で正本を付ける
+  const turns =
+    isClarifyMeaningTurn
+      ? (() => {
+          const tail = Array.isArray(turnsRaw) ? turnsRaw.slice(-2) : [];
+          // 末尾 user は current turn 混入のことがあるので落とす
+          if (tail.length > 0 && tail[tail.length - 1]?.role === 'user') {
+            return tail.slice(0, -1);
+          }
+          return tail;
+        })()
+      : turnsRaw;
+
+  const packMsg: WriterMessage | null = internalPackFixed
+    ? { role: 'assistant', content: internalPackFixed }
+    : null;
 
   let messages: WriterMessage[] = [
     { role: 'system', content: systemOne },
@@ -604,13 +1026,9 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     ...turns,
   ];
 
-  // ✅ role 連続をマージ
   messages = mergeConsecutiveSameRole(messages);
+  messages = ensureEndsWithUser(messages, String(args.userText ?? ''));
 
-  // ✅ 末尾 user を保証
-  messages = ensureEndsWithUser(messages);
-
-  // ✅ HistoryDigest v1 をここで注入（ある時だけ）
   let digest = (args.historyDigestV1 ?? null) as HistoryDigestV1 | null;
   if (digest) {
     const injected = injectHistoryDigestV1({ messages, digest }) as any;
@@ -620,16 +1038,13 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
       messages = injectedMsgs;
     }
 
-    // ✅ NEW: inject側で補完された digest を採用（STATE_CUES の continuity を埋める）
     const injectedDigest = (injected?.digest ?? null) as HistoryDigestV1 | null;
     if (injectedDigest) {
       digest = injectedDigest;
     }
   }
-  // ✅ 先頭の system は 1枚に畳む
-  messages = foldLeadingSystemToOne(messages);
 
-  // ✅ 最終的に末尾 user を再保証（注入で崩れた場合の保険）
+  messages = foldLeadingSystemToOne(messages);
   messages = ensureEndsWithUser(messages);
 
   return messages;
@@ -661,7 +1076,8 @@ export function buildRetryMessages(args: {
       if (role === 'user') {
         const s0 = stripInternalMarkersFromUserText(String(t?.content ?? t?.text ?? ''));
         const s1 = clampStr(s0, 900);
-        return { role: 'user', content: s1 || '（入力なし）' } as WriterMessage;
+        if (!s1) return null;
+        return { role: 'user', content: s1 } as WriterMessage;
       }
 
       const a0 = norm(String(t?.content ?? t?.text ?? ''));
@@ -670,19 +1086,28 @@ export function buildRetryMessages(args: {
     })
     .filter(Boolean) as WriterMessage[];
 
-  let messages: WriterMessage[] = [
-    { role: 'system', content: systemPrompt },
-    ...(internalPack
-      ? [
-          {
-            role: 'assistant',
-            content: `INTERNAL PACK (DO NOT OUTPUT):\n${internalPack}`.trim(),
-          } as WriterMessage,
-        ]
-      : []),
-    ...turnMsgs,
-    { role: 'user', content: baseDraft },
-  ];
+    const userTextSanitized = clampStr(
+      stripInternalMarkersFromUserText(String(args.userText ?? '')),
+      900,
+    );
+
+    const retryUserContent =
+      baseDraft && baseDraft !== '(empty)' && baseDraft !== '（入力なし）'
+        ? baseDraft
+        : userTextSanitized;
+    let messages: WriterMessage[] = [
+      { role: 'system', content: systemPrompt },
+      ...(internalPack
+        ? [
+            {
+              role: 'assistant',
+              content: `INTERNAL PACK (DO NOT OUTPUT):\n${internalPack}`.trim(),
+            } as WriterMessage,
+          ]
+        : []),
+      ...turnMsgs,
+      { role: 'user', content: retryUserContent },
+    ];
 
   messages = mergeConsecutiveSameRole(messages);
   messages = foldLeadingSystemToOne(messages);
@@ -736,9 +1161,9 @@ export async function callWriterLLM(args: {
       if (m.role === 'user') {
         const s0 = stripInternalMarkersFromUserText(String(m.content ?? ''));
         const s1 = clampStr(s0, MAX_USER);
-        return { role: 'user', content: s1 || '（入力なし）' } as WriterMessage;
+        if (!s1) return null;
+        return { role: 'user', content: s1 } as WriterMessage;
       }
-
       if (m.role === 'assistant') {
         const a1 = clampStr(norm(m.content ?? ''), MAX_ASSIST);
         return a1 ? ({ role: 'assistant', content: a1 } as WriterMessage) : null;

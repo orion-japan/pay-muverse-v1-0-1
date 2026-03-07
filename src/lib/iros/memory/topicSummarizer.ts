@@ -278,22 +278,40 @@ function collectHistoryText(
 }
 
 function buildSourceText(args: TopicSummarizerArgs): string {
-  const userParts = [
-    normalizeText(args.userText),
-    normalizeText(args.historyDigestV1?.topic),
-    normalizeText(args.historyDigestV1?.summary),
-    ...(args.historyDigestV1?.keywords ?? []).map((v) => normalizeText(v)),
+  const currentUser = normalizeText(args.userText);
+
+  const digestParts = [
+    normalizeText((args.historyDigestV1 as any)?.topic),
+    normalizeText((args.historyDigestV1 as any)?.summary),
+    ...(((args.historyDigestV1 as any)?.keywords ?? []) as string[]).map((v) => normalizeText(v)),
+  ].filter(Boolean);
+
+  const situationParts = [
     normalizeText(args.situationSummary),
     normalizeText(args.situationTopic),
   ].filter(Boolean);
 
   const historyParts = collectHistoryText(args.historyForWriter, 6);
 
-  // user / digest / situation を主材料、
-  // history は補助として後ろに足す
-  return [...userParts, ...historyParts].join('\n');
-}
+  // ✅ 最新 userText を最優先
+  // - userText がある時は、それ単体を主材料にする
+  // - 補助材料は少量だけ後ろに添える
+  if (currentUser) {
+    return [
+      currentUser,
+      ...digestParts.slice(-1),
+      ...situationParts.slice(-1),
+      ...historyParts.slice(-2),
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
 
+  // userText がない時だけ、補助材料で組む
+  return [...digestParts, ...situationParts, ...historyParts]
+    .filter(Boolean)
+    .join('\n');
+}
 function countHits(text: string, terms: string[]): number {
   let score = 0;
   for (const term of terms) {

@@ -2161,14 +2161,23 @@ const toRephraseBlocks = (s: string): string[] => {
   // (B) LLM
   const userText = norm(opts?.userText ?? '');
   const metaTextBase = safeContextToText(opts?.userContext ?? null);
+
+  const memoryStateNoteText = String(
+    (opts as any)?.userContext?.memoryStateNoteText ??
+    (opts as any)?.userContext?.ctxPack?.memoryStateNoteText ??
+    '',
+  ).trim();
+
   const longTermMemoryNoteText = String(
     (opts as any)?.userContext?.longTermMemoryNoteText ??
     (opts as any)?.userContext?.ctxPack?.longTermMemoryNoteText ??
     '',
   ).trim();
-  const metaText = longTermMemoryNoteText
-    ? `${metaTextBase}\n${longTermMemoryNoteText}`.trim()
-    : metaTextBase;
+
+  const metaText = [metaTextBase, memoryStateNoteText, longTermMemoryNoteText]
+    .filter((v) => typeof v === 'string' && v.trim().length > 0)
+    .join('\n')
+    .trim();
 
   const inputKindFromOpts = String(opts?.inputKind ?? '').trim().toLowerCase();
   const inputKindFromDebug = String((opts as any)?.debug?.inputKind ?? '').trim().toLowerCase();
@@ -2927,135 +2936,79 @@ const injectCardUndetectableRule = (reason: string) => {
 };
 
   // ✅ chat/card でも ctxPack.cards があるなら seed に入れる
-  // - ここで「短いラベル」ではなく、card180 の packet（本文）を作ってそのまま internalPack に注入する
-  // - task/micro など “実務系” には混ぜない（副作用を避ける）
-  // - env(IROS_DISABLE_CARD_SEEDIN=1) は chat 側も含めて尊重する
-  try {
-    if (disableCardSeedin) {
-      // ここで止める（chat 側も止める）
-      try {
-        console.log('[IROS/rephraseEngine][CARD_SEEDIN] disabled_by_env(chat_guard)', {
-          traceId: debug.traceId,
-          conversationId: debug.conversationId,
-          userCode: debug.userCode,
-          inputKind: inputKindForSeed,
-          wantsCardByText,
-        });
-      } catch {}
-    } else {
-      const ctxPack0: any = (opts as any)?.userContext?.ctxPack ?? null;
+  // 旧FLOW_MEANING / FLOW180_SEED は STATE_CUES_V3 に移管済みのため注入しない
+  if (!disableCardSeedin) {
+    const ctxPack0: any = (opts as any)?.userContext?.ctxPack ?? null;
 
-      const c = ctxPack0?.cards?.current ?? null;
-      const f = ctxPack0?.cards?.future ?? null;
+    const c = ctxPack0?.cards?.current ?? null;
+    const f = ctxPack0?.cards?.future ?? null;
 
-      // cards-lite があるか（現状の“ラベル生成”でも true になる）
-      const hasLightCards = !!(c || f);
+    const hasLightCards = !!(c || f);
 
-      // ✅ task/micro など “実務系” には混ぜない
-      const liteOk =
-        inputKindForSeed === 'chat' || inputKindForSeed === 'card' || inputKindForSeed === '';
+    const liteOk =
+      inputKindForSeed === 'chat' ||
+      inputKindForSeed === 'card' ||
+      inputKindForSeed === '';
 
-      if (liteOk && hasLightCards) {
-        const ip = String(internalPack ?? '');
+    if (liteOk && hasLightCards) {
+      const ip = String(internalPack ?? '');
 
-        // 既に入ってたら重ねない（重複注入防止）
-        if (!/CARD180_SEED\s*\(DO NOT OUTPUT\)/.test(ip)) {
-          const { buildDualCardPacket, formatDualCardPacketForLLM } =
-            await import('@/lib/iros/cards/card180');
+      if (!/(?:FLOW180_SEED|CARD180_SEED)\s*\(DO NOT OUTPUT\)/.test(ip)) {
+        const { buildDualCardPacket, formatDualCardPacketForLLM } =
+          await import('@/lib/iros/cards/card180');
 
-          // card180 に渡す “今の入力値” を ctxPack / pickedDepthStage から組む
-          const basedOn = String(userText ?? '').trim().slice(0, 80) || null;
+        const basedOn = String(userText ?? '').trim().slice(0, 80) || null;
 
-          const e_turn =
-            (ctxPack0?.mirror?.e_turn ?? ctxPack0?.e_turn ?? null) as any;
+        const e_turn =
+          (ctxPack0?.mirror?.e_turn ?? ctxPack0?.e_turn ?? null) as any;
 
-          const polarity =
-            (ctxPack0?.mirror?.polarity ?? ctxPack0?.polarity ?? null) as any;
+        const polarity =
+          (ctxPack0?.mirror?.polarity ?? ctxPack0?.polarity ?? null) as any;
 
-          const sa = (ctxPack0?.sa ?? null) as any;
-          const confidence =
-            (ctxPack0?.mirror?.confidence ?? ctxPack0?.confidence ?? null) as any;
+        const sa = (ctxPack0?.sa ?? null) as any;
+        const confidence =
+          (ctxPack0?.mirror?.confidence ?? ctxPack0?.confidence ?? null) as any;
 
-          const packet = buildDualCardPacket(
-            {
-              current: {
-                stage: (pickedDepthStage ?? null) as any,
-                e_turn,
-                polarity,
-                sa,
-                basedOn,
-                confidence,
-              },
-              previous: null,
-              randomSeed: null,
+        const packet = buildDualCardPacket(
+          {
+            current: {
+              stage: (pickedDepthStage ?? null) as any,
+              e_turn,
+              polarity,
+              sa,
+              basedOn,
+              confidence,
             },
-            {
-              // chat では “未観測固定文” は使わない（seed優先）
-              currentUndetectablePolicy: 'null',
-            }
-          );
-
-          const raw = String(formatDualCardPacketForLLM(packet) ?? '').trim();
-
-          // 長すぎる場合の暴れを防ぐ：行数上限
-          const cardSeedText = clampLines(raw, 18).trim();
-
-          if (cardSeedText) {
-            internalPack = [
-              ip.trim(),
-              ['CARD180_SEED (DO NOT OUTPUT):', cardSeedText].join('\n'),
-            ]
-              .filter(Boolean)
-              .join('\n\n');
-
-            // ✅ “結果が見える化” ログ（head も出す）
-            console.log('[IROS/rephraseEngine][CARD_SEEDIN] card180_seed_appended', {
-              traceId: debug.traceId,
-              conversationId: debug.conversationId,
-              userCode: debug.userCode,
-              inputKind: inputKindForSeed,
-              len: cardSeedText.length,
-              head: cardSeedText.slice(0, 220),
-              pickedDepthStage: pickedDepthStage ?? null,
-              e_turn: e_turn ?? null,
-              polarity: polarity ?? null,
-              sa: sa ?? null,
-              confidence: confidence ?? null,
-            });
-          } else {
-            console.warn('[IROS/rephraseEngine][CARD_SEEDIN] card180_seed_empty(chat)', {
-              traceId: debug.traceId,
-              conversationId: debug.conversationId,
-              userCode: debug.userCode,
-              inputKind: inputKindForSeed,
-              pickedDepthStage: pickedDepthStage ?? null,
-              e_turn: e_turn ?? null,
-              polarity: polarity ?? null,
-            });
+            previous: null,
+            randomSeed: null,
+          },
+          {
+            currentUndetectablePolicy: 'null',
           }
+        );
+
+        const raw = String(formatDualCardPacketForLLM(packet) ?? '').trim();
+        const flowSeedText = clampLines(raw, 18).trim();
+
+        if (flowSeedText) {
+          console.log('[IROS/rephraseEngine][FLOW_SEEDIN] skipped_for_writer', {
+            traceId: debug.traceId,
+            conversationId: debug.conversationId,
+            userCode: debug.userCode,
+            inputKind: inputKindForSeed,
+            len: flowSeedText.length,
+            head: flowSeedText.slice(0, 220),
+            pickedDepthStage: pickedDepthStage ?? null,
+            e_turn: e_turn ?? null,
+            polarity: polarity ?? null,
+            sa: sa ?? null,
+            confidence: confidence ?? null,
+            skipped: true,
+            reason: 'FLOW_MOVED_TO_STATE_CUES_V3',
+          });
         }
       }
     }
-  } catch (e) {
-    console.warn('[IROS/rephraseEngine][CARD_SEEDIN] card180_seed_error(chat)', {
-      traceId: debug.traceId,
-      conversationId: debug.conversationId,
-      userCode: debug.userCode,
-      inputKind: inputKindForSeed,
-      err: String(e),
-    });
-  }
-
-  if (disableCardSeedin) {
-    // env で full card seed（card180）を止めている（lite は止めない）
-    try {
-      console.log('[IROS/rephraseEngine][CARD_SEEDIN] disabled_by_env', {
-        traceId: debug.traceId,
-        conversationId: debug.conversationId,
-        userCode: debug.userCode,
-        wantsCardByText,
-      });
-    } catch {}
   } else if (inputKindForSeed === 'card') {
     // inputKind=card のときだけ full seed を作る（card180）
     try {
@@ -3083,23 +3036,25 @@ const injectCardUndetectableRule = (reason: string) => {
       );
 
       const raw = String(formatDualCardPacketForLLM(packet) ?? '').trim();
-      const cardSeedText = clampLines(raw, 15).trim();
+      const flowSeedText = clampLines(raw, 15).trim();
 
-      if (cardSeedText) {
-        internalPack = [String(internalPack ?? '').trim(), cardSeedText]
+      if (flowSeedText) {
+        internalPack = [
+          String(internalPack ?? '').trim(),
+          ['FLOW180_SEED (DO NOT OUTPUT):', flowSeedText].join('\n'),
+        ]
           .filter(Boolean)
           .join('\n\n');
 
-        console.log('[IROS/rephraseEngine][CARD_SEEDIN] appended', {
+        console.log('[IROS/rephraseEngine][FLOW_SEEDIN] appended', {
           traceId: debug.traceId,
           conversationId: debug.conversationId,
           userCode: debug.userCode,
-          len: cardSeedText.length,
+          len: flowSeedText.length,
         });
       } else {
-        // ✅ card なのに seed が空 → 未観測に落とす（適当返答防止）
         try {
-          console.warn('[IROS/rephraseEngine][CARD_SEEDIN] empty_seed', {
+          console.warn('[IROS/rephraseEngine][FLOW_SEEDIN] empty_seed', {
             traceId: debug.traceId,
             conversationId: debug.conversationId,
             userCode: debug.userCode,
@@ -3108,8 +3063,7 @@ const injectCardUndetectableRule = (reason: string) => {
         injectCardUndetectableRule('empty_seed');
       }
     } catch (e) {
-      console.warn('[IROS/rephraseEngine][CARD_SEEDIN] error', e);
-      // ✅ 例外 → 未観測に落とす（エラーで落とさない）
+      console.warn('[IROS/rephraseEngine][FLOW_SEEDIN] error', e);
       injectCardUndetectableRule('error');
     }
   } else {
@@ -3232,7 +3186,7 @@ const rawTail = Array.isArray(rawTurnsForWriter)
   ? rawTurnsForWriter.slice(-MAX_TURNS_FOR_WRITER)
   : [];
 
-  const turnsForWriter: any[] = rawTail
+const turnsForWriterBase: any[] = rawTail
   .map((t: any) => {
     const role =
       t?.role === 'assistant'
@@ -3242,10 +3196,13 @@ const rawTail = Array.isArray(rawTurnsForWriter)
           : null;
     if (!role) return null;
 
-    // ✅ ここでは user を潰さない（writerCalls.ts 側が「過去userはマスク／最後userだけ生」を担当）
+    // ✅ user はここでは placeholder を作らない
+    // - 空なら捨てる
+    // - 最後の user 保証は writerCalls.ts 側に一本化する
     if (role === 'user') {
       const content = String(t?.content ?? '').trim();
-      return { role: 'user', content: content || '（入力なし）' };
+      if (!content) return null;
+      return { role: 'user', content };
     }
 
     const content = String(t?.content ?? '').trim();
@@ -3253,6 +3210,15 @@ const rawTail = Array.isArray(rawTurnsForWriter)
     return { role: 'assistant', content };
   })
   .filter(Boolean);
+
+// ✅ latest user の正本は writerCalls.ts の args.userText に一本化する
+// - turnsForWriter には「履歴だけ」を渡す
+// - 末尾が user の場合は current turn 混入の可能性が高いため 1件落とす
+const turnsForWriter: any[] =
+  turnsForWriterBase.length > 0 &&
+  turnsForWriterBase[turnsForWriterBase.length - 1]?.role === 'user'
+    ? turnsForWriterBase.slice(0, -1)
+    : turnsForWriterBase;
 
 // ✅ buildFirstPassMessages が持っている “会話線” をちゃんと渡す
 // ✅ さらに ctxPack/extra を渡して writerCalls 側の COORD/CARDS 注入を確実に発火させる
@@ -3262,25 +3228,31 @@ const ctxPackForWriter =
   (opts as any)?.userContext?.ctxPackV1 ??
   null;
 
-let messages = buildFirstPassMessages({
-  systemPrompt,
-  internalPack,
-  turns: turnsForWriter,
-  seedDraft,
-  topicDigest: topicDigestForWriter,
-  conversationLine: conversationLineForWriter,
+  let messages = buildFirstPassMessages({
+    systemPrompt,
+    internalPack,
+    turns: turnsForWriter,
+    seedDraft,
+    topicDigest: topicDigestForWriter,
+    conversationLine: conversationLineForWriter,
 
-  // ✅ 追加：writerCalls.ts が拾える「正本」
-  ctxPack: ctxPackForWriter,
+    // ✅ writerCalls.ts が最優先で拾う正本
+    qCode: pickedQCode ?? null,
+    depthStage: pickedDepthStage ?? null,
+    phase: pickedPhase ?? null,
+    e_turn: pickedETurn ?? null,
 
-  // ✅ 追加：meta.extra.ctxPack 経路も生かす（どっちで拾ってもOKにする）
-  meta: { extra: { ctxPack: ctxPackForWriter } },
+    // ✅ NEW: 末尾 user の正本
+    userText: String((opts as any)?.userText ?? ''),
 
-  // ✅ 追加：logの null を消す用途（writerCalls 内で使う可能性がある）
-  traceId: debug.traceId ?? null,
-  conversationId: debug.conversationId ?? null,
-  userCode: debug.userCode ?? null,
-});
+    // ✅ 既存の経路も残す
+    ctxPack: ctxPackForWriter,
+    meta: { extra: { ctxPack: ctxPackForWriter } },
+
+    traceId: debug.traceId ?? null,
+    conversationId: debug.conversationId ?? null,
+    userCode: debug.userCode ?? null,
+  });
 
   // ✅ HistoryDigest v1（外から渡された場合のみ注入）
   // - 生成はここではしない（生成元は本線側に固定）
@@ -3414,16 +3386,16 @@ let messages = buildFirstPassMessages({
     } as any);
 
     // -------------------------------------------------------
-    // deepReadBoost（RETURN streak>=2 のときだけ “1段だけ” 許可を上げる）
-    // - 目的：命名ではなく「構造説明」を少し増やす余地を作る
-    // - 実装：allow.strength を +1（上限3）にするだけ（他は触らない）
+    // deepReadBoost
+    // - RETURN streak>=2 のときだけ “1段だけ” 許可を上げる
+    // - stingLevel=HIGH のときも “1段だけ” 許可を上げる
+    // - 実装：allow.strength を加算するだけ（上限3）
     // -------------------------------------------------------
     const flowDeltaNow =
       String(flowDigest ?? '').toLowerCase().includes('return') ? 'RETURN' : null;
 
     // seed_text（例: '流れ:RETURN / 戻り:2'）から戻り回数を読む。無ければ 0。
     const returnStreakNow = (() => {
-      // ctxPack はこの位置ではまだ宣言されていないので、opts から直接取る
       const src = String(
         ((opts as any)?.userContext?.ctxPack?.seed_text ?? '') ||
           (flowDigest ?? '')
@@ -3432,15 +3404,40 @@ let messages = buildFirstPassMessages({
       const n = m ? Number(m[1]) : 0;
       return Number.isFinite(n) ? n : 0;
     })();
+
+    const stingLevelNow = (() => {
+      const raw =
+        (opts as any)?.userContext?.ctxPack?.stingLevel ??
+        (opts as any)?.userContext?.stingLevel ??
+        null;
+      const s = String(raw ?? '').trim().toUpperCase();
+      return s === 'HIGH' || s === 'MID' || s === 'LOW' ? s : null;
+    })();
+
     if (allowObj && typeof allowObj === 'object') {
+      let boost = 0;
+
       if (flowDeltaNow === 'RETURN' && returnStreakNow >= 2) {
+        boost += 1;
+      }
+      if (stingLevelNow === 'HIGH') {
+        boost += 1;
+      } else if (stingLevelNow === 'MID') {
+        boost += 0;
+      }
+
+      if (boost > 0) {
         const cur = Number((allowObj as any).strength ?? 2);
-        const next = Number.isFinite(cur) ? cur + 1 : 3;
+        const next = Number.isFinite(cur) ? cur + boost : 3;
         (allowObj as any).strength = Math.min(next, 3);
-        (allowObj as any).__deepReadBoost = { flowDeltaNow, returnStreakNow }; // ログ確認用（露出しない）
+        (allowObj as any).__deepReadBoost = {
+          flowDeltaNow,
+          returnStreakNow,
+          stingLevelNow,
+          boost,
+        }; // ログ確認用（露出しない）
       }
     }
-
     allowText = formatAllowSystemText(allowObj as any);
 
     console.log('[IROS/rephraseEngine][ALLOW]', {
@@ -4371,7 +4368,13 @@ raw = await (async () => {
   const alreadyHasStateCues = baseMsgs.some((m) => {
     const roleOk = String(m?.role ?? '') === 'assistant';
     const c = String(m?.content ?? '');
-    return roleOk && c.includes('STATE_CUES (DO NOT OUTPUT)');
+    return (
+      roleOk &&
+      (
+        c.includes('STATE_CUES (DO NOT OUTPUT)') ||
+        c.includes('STATE_CUES_V3 (DO NOT OUTPUT)')
+      )
+    );
   });
 
   const pastStateNoteText = String(
@@ -4623,19 +4626,64 @@ raw = await (async () => {
         internalPack.includes('質問はしない。') ||
         internalPack.includes('文末を「?」で終えない。'));
 
-        const noQuestions = forceNoQuestionsByGoal || forceNoQuestionsByPack;
+    const noQuestions = forceNoQuestionsByGoal || forceNoQuestionsByPack;
     if (!noQuestions) return t;
 
-    // ✅ 行は落とさない。末尾の ?/？ だけ句点化して “質問っぽさ” を消す。
-    const lines = t.split('\n');
+    const lines = t
+      .split('\n')
+      .map((ln) => String(ln ?? '').replace(/\s+$/g, ''))
+      .filter((ln, idx, arr) => !(idx === arr.length - 1 && ln.trim() === ''));
 
-    const normalizeLine = (ln: string) => {
-      const s = ln.replace(/\s+$/g, '');
-      return s.replace(/[?？]\s*$/g, '。');
+    if (!lines.length) return t;
+
+    const isQuestionLikeLine = (ln: string) => {
+      const s = String(ln ?? '').trim();
+      if (!s) return false;
+
+      // 末尾が ? / ？ で終わる
+      if (/[?？]\s*$/.test(s)) return true;
+
+      // ? の後ろに補足カッコが付いて終わる
+      // 例: 〜固まりやすい？（探す/応募/面談）
+      if (/[?？]\s*[)）】〕］〉》」』】].*\s*$/.test(s)) return true;
+      if (/[?？]\s*[（(][\s\S]*[)）]\s*$/.test(s)) return true;
+
+      // 文末疑問表現
+      if (/(ですか|ますか|でしょうか|どうですか|どれですか|何ですか|なんですか)\s*$/.test(s)) return true;
+
+      return false;
     };
 
-    const out = lines.map(normalizeLine).join('\n').trim();
-    return out;
+    const softenQuestionToStatement = (ln: string) => {
+      let s = String(ln ?? '').trim();
+      if (!s) return s;
+
+      s = s.replace(/[?？]\s*$/g, '');
+      s = s.replace(/(ですか|ますか|でしょうか)\s*$/g, 'です。');
+      s = s.replace(/(何ですか|なんですか)\s*$/g, 'です。');
+      s = s.replace(/(どうですか)\s*$/g, 'です。');
+      s = s.replace(/(どれですか)\s*$/g, 'です。');
+
+      if (!/[。.!！]$/.test(s)) s += '。';
+      return s;
+    };
+
+    const last = lines[lines.length - 1] ?? '';
+
+    // 末尾が質問なら、複数行のときは末尾行ごと落とす
+    if (isQuestionLikeLine(last)) {
+      if (lines.length >= 2) {
+        const trimmed = lines.slice(0, -1).join('\n').trim();
+        if (trimmed) return trimmed;
+      }
+
+      // 1行しかない場合は、質問を言い切りに変換して残す
+      return softenQuestionToStatement(last);
+    }
+
+    // 末尾以外に ? が残っていても、noQuestions 時は句点化して弱める
+    const normalized = lines.map((ln) => ln.replace(/[?？]\s*$/g, '。')).join('\n').trim();
+    return normalized;
   };
   let candidate = makeCandidate(rawGuarded, maxLines, renderEngine);
 
@@ -4656,7 +4704,7 @@ raw = await (async () => {
     }
   }
 
-  // ✅ 最終確定直前：問いを物理的に落とす（inputKind=question のときだけ）
+  // ✅ 最終確定直前：問いを物理的に落とす（いったん元に戻す）
   candidate = sanitizeNoQuestions(candidate);
 
   if (scaffoldActive && scaffoldMissingAfterRestore.length > 0 && seedFromSlots) {
@@ -5028,6 +5076,98 @@ raw = await (async () => {
   const shortReplyOk = pol.shortReplyOk;
 
   const shiftKind = pol.shiftKind;
+  const emotionalTemperatureNow = (() => {
+    const raw = String(
+      (opts as any)?.userContext?.ctxPack?.emotionalTemperature ??
+        (opts as any)?.userContext?.emotionalTemperature ??
+        ''
+    )
+      .trim()
+      .toLowerCase();
+
+    return raw === 'low' || raw === 'mid' || raw === 'high' || raw === 'volatile'
+      ? raw
+      : null;
+  })();
+
+  const shouldSuppressQuestionByShift = (() => {
+    const sk = String(shiftKind ?? '').trim();
+    const temp = String(emotionalTemperatureNow ?? '').trim();
+
+    if (sk === 'clarify_shift') return true;
+    if (sk === 'stabilize_shift') return true;
+    if (sk === 'distance_shift') return true;
+
+    if (temp === 'high' || temp === 'volatile') return true;
+
+    return false;
+  })();
+
+  if (shouldSuppressQuestionByShift) {
+    const before = String(candidate ?? '');
+
+    const suppressQuestionTail = (src: string): string => {
+      const lines = src
+        .replace(/\r\n/g, '\n')
+        .split('\n')
+        .map((s) => String(s ?? '').trim());
+
+      const kept: string[] = [];
+
+      for (const line of lines) {
+        if (!line) continue;
+
+        // 1) 明示的な質問文は落とす
+        if (/[?？]/u.test(line)) continue;
+
+        // 2) stabilize / distance 系では問いかけ文も落とす
+        if (
+          /(?:どれ|なに|何|どう|どこ|どんな|どの|ありますか|でしょうか|近い|戻る)$/u.test(
+            line.replace(/[。！!]+$/u, '').trim()
+          )
+        ) {
+          continue;
+        }
+
+        kept.push(line);
+      }
+
+      // 全部落ちたら、元文の先頭1行だけを安全に返す
+      if (kept.length === 0) {
+        const first = String(src ?? '')
+          .replace(/\r\n/g, '\n')
+          .split('\n')
+          .map((s) => String(s ?? '').trim())
+          .find(Boolean);
+
+        if (!first) return '';
+
+        return first
+          .replace(/[?？].*$/u, '')
+          .replace(/（[^）]*$/u, '')
+          .replace(/\([^)]*$/u, '')
+          .trim();
+      }
+
+      return kept.join('\n').trim();
+    };
+
+    const after = suppressQuestionTail(before);
+
+    if (after && after !== before) {
+      candidate = after;
+    }
+
+    console.log('[IROS/rephraseEngine][QUESTION_SUPPRESSED_BY_SHIFT]', {
+      traceId: debug.traceId,
+      shiftKind: shiftKind || null,
+      emotionalTemperature: emotionalTemperatureNow,
+      applied: after !== before,
+      beforeHead: before.slice(0, 120),
+      afterHead: after.slice(0, 120),
+    });
+  }
+
   const isTConcretize = pol.isTConcretize;
   const isIdeaBand = pol.isIdeaBand;
   // ---------------------------------------------
@@ -5185,7 +5325,54 @@ raw = await (async () => {
     scaffoldActive,
     isDirectTask,
   });
+  // ✅ Phase 2: 最終採用直前の質問抑制
+  // - WARN accept / OK no retry の return より前で必ず最終形にかける
+  if (shouldSuppressQuestionByShift) {
+    const beforeFinal = String(candidate ?? '');
 
+    const lines = beforeFinal
+      .replace(/\r\n/g, '\n')
+      .split('\n')
+      .map((s) => String(s ?? '').trim())
+      .filter(Boolean);
+
+    const keptFinal = lines.filter((line) => {
+      if (/[?？]/u.test(line)) return false;
+
+      const tail = line.replace(/[。！!]+$/u, '').trim();
+      if (/(?:どれ|なに|何|どう|どこ|どんな|どの|ありますか|でしょうか)$/u.test(tail)) {
+        return false;
+      }
+
+      return true;
+    });
+
+    const afterFinal =
+      keptFinal.length > 0
+        ? keptFinal.join('\n').trim()
+        : beforeFinal
+            .replace(/\r\n/g, '\n')
+            .split('\n')
+            .map((s) => String(s ?? '').trim())
+            .find(Boolean)
+            ?.replace(/[?？].*$/u, '')
+            .replace(/（[^）]*$/u, '')
+            .replace(/\([^)]*$/u, '')
+            .trim() ?? '';
+
+    if (afterFinal && afterFinal !== beforeFinal) {
+      candidate = afterFinal;
+    }
+
+    console.log('[IROS/rephraseEngine][QUESTION_SUPPRESSED_BY_SHIFT][FINAL]', {
+      traceId: debug.traceId,
+      shiftKind: shiftKind || null,
+      emotionalTemperature: emotionalTemperatureNow,
+      applied: afterFinal !== beforeFinal,
+      beforeHead: beforeFinal.slice(0, 120),
+      afterHead: afterFinal.slice(0, 120),
+    });
+  }
   if (vLevel === 'WARN' && naturalTextReady) {
     return adoptAsSlots(candidate, 'FLAGSHIP_ACCEPT_AS_FINAL', {
       scaffoldActive,
@@ -5214,7 +5401,9 @@ raw = await (async () => {
   // ---------------------------------------------
   // FATAL → 1回だけ再生成（2ndは“編集/復元+整形”）
   // ---------------------------------------------
-
+  if ((v as any)?.ok === true) {
+    return adoptAsSlots(candidate, 'FLAGSHIP_OK_NO_RETRY', { scaffoldActive });
+  }
   // ✅ OK は retry しない（ここで確定して返す）
   if ((v as any)?.ok === true) {
     return adoptAsSlots(candidate, 'FLAGSHIP_OK_NO_RETRY', { scaffoldActive });

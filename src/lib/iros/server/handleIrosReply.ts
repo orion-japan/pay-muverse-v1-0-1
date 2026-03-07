@@ -45,6 +45,7 @@ import {
 import { updateMemoryPriorityV1 } from '@/lib/iros/memory/longTermMemory.priority';
 import { decayUnusedMemoriesV1 } from '@/lib/iros/memory/longTermMemory.decay';
 import { selectLongTermMemoriesV1 } from '@/lib/iros/memory/longTermMemory.selector';
+import { loadIrosMemoryState } from '@/lib/iros/memoryState';
 
 import {
   // ✅ assistant保存はしない
@@ -2291,68 +2292,100 @@ try {
   // - writer に渡す履歴だけを “短くする”
   // ---------------------------------------------------------
   const maxMsgsRaw =
-    Number(process.env.IROS_REPHRASE_LAST_TURNS_MAX) ||
-    Number(process.env.IROS_WRITER_HISTORY_MAX) ||
-    6; // デフォルトは6（= 2〜3往復）
+  Number(process.env.IROS_REPHRASE_LAST_TURNS_MAX) ||
+  Number(process.env.IROS_WRITER_HISTORY_MAX) ||
+  2; // デフォルトは2（= 直近1往復ぶん）
 
-  const maxMsgs = maxMsgsRaw > 0 ? Math.floor(maxMsgsRaw) : 6;
+const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
 
   // roleバランスを崩さず末尾から取る（user/assistantが片寄らないように）
-  const takeTailWithBalanceLocal = (arr: any[], n: number) => {
-    const picked: any[] = [];
+  const shouldDropAssistantHistory = (role: string | null, content: string) => {
+    if (role !== 'assistant') return false;
+
+    const s = String(content ?? '').trim();
+    if (!s) return true;
+
+    return /(?:^|[\s「『（(])入力なし(?:[\s」』）):,，。.!！?？]|$)|（入力なし）/.test(s);
+  };
+
+  // historyForWriter は「履歴のみ」を保存する
+  // - latest user の正本は writer 実行時の userText に一本化済み
+  // - ここでは current user を再注入しない
+  const pickHistoryOnlyTail = (arr: any[], n: number) => {
     const need = Math.max(1, n);
+    const src = Array.isArray(arr) ? arr : [];
 
-    let hasU = 0;
-    let hasA = 0;
+    const normalized = src
+      .map((m) => {
+        const role =
+          m?.role === 'assistant' ? 'assistant' : m?.role === 'user' ? 'user' : null;
+        const content =
+          typeof (m?.text ?? m?.content) === 'string'
+            ? String(m.text ?? m.content).trim()
+            : '';
+        if (!role || !content) return null;
+        return { role, content };
+      })
+      .filter(Boolean) as Array<{ role: 'user' | 'assistant'; content: string }>;
 
-    for (let i = arr.length - 1; i >= 0 && picked.length < need; i--) {
-      const m = arr[i];
-      const role = m?.role === 'assistant' ? 'assistant' : m?.role === 'user' ? 'user' : null;
-      const content =
-        typeof (m?.text ?? m?.content) === 'string' ? String(m.text ?? m.content).trim() : '';
+    if (normalized.length === 0) return [];
 
-      if (!role || !content) continue;
+    // ✅ 末尾が user の場合は current turn 混入とみなし、保存用履歴から落とす
+    const historyOnly =
+      normalized.length > 0 && normalized[normalized.length - 1].role === 'user'
+        ? normalized.slice(0, -1)
+        : normalized;
 
-      // できるだけ user/assistant の両方を拾う
-      if (picked.length < need - 1) {
-        picked.push({ role, content });
-        if (role === 'user') hasU++;
-        if (role === 'assistant') hasA++;
-        continue;
-      }
+        if (historyOnly.length === 0) return [];
 
-      // 最後の1枠は「欠けてる側」を優先して埋める
-      if (hasU === 0 && role === 'user') {
-        picked.push({ role, content });
-        hasU++;
-      } else if (hasA === 0 && role === 'assistant') {
-        picked.push({ role, content });
-        hasA++;
-      } else if (picked.length < need) {
-        picked.push({ role, content });
-      }
-    }
+        const last = historyOnly[historyOnly.length - 1];
 
-    return picked.reverse();
+        // ✅ assistantだけ2件にならないよう、
+        //   直近assistantに対応するuserを優先して拾う
+        if (need <= 1) {
+          return last ? [last] : [];
+        }
+
+        if (last?.role === 'assistant') {
+          for (let i = historyOnly.length - 2; i >= 0; i--) {
+            if (historyOnly[i]?.role === 'user') {
+              return [historyOnly[i], last];
+            }
+          }
+          return [last];
+        }
+
+        if (last?.role === 'user') {
+          for (let i = historyOnly.length - 2; i >= 0; i--) {
+            if (historyOnly[i]?.role === 'assistant') {
+              return [historyOnly[i], last];
+            }
+          }
+          return [last];
+        }
+
+        return historyOnly.slice(-need);
   };
 
   const hs = Array.isArray(historyForTurn) ? (historyForTurn as any[]) : [];
-  const tail = takeTailWithBalanceLocal(hs, maxMsgs);
+
+  let tail: Array<{ role: 'user' | 'assistant'; content: string }> = pickHistoryOnlyTail(hs, maxMsgs)
+    .map((m) => {
+      const role = m?.role === 'assistant' ? 'assistant' : m?.role === 'user' ? 'user' : null;
+      const content =
+        typeof m?.content === 'string' ? String(m.content).trim() : '';
+      if (!role || !content) return null;
+      return { role, content };
+    })
+    .filter((m): m is { role: 'user' | 'assistant'; content: string } => Boolean(m));
+
+  // 最大件数に再調整
+  tail = tail.slice(-Math.max(1, maxMsgs));
 
   // ✅ 最小形（role/content のみ）で保存：metaは持たない（太るので）
   exAny.historyForWriter = tail;
   exAny.rememberTextForIros = typeof rememberTextForIros === 'string' ? rememberTextForIros : null;
   exAny.historyForWriterAt = new Date().toISOString();
-
-  // デバッグ（必要なら）
-  if (process.env.IROS_DEBUG_EXTRA === '1') {
-    console.log('[IROS/HistoryForWriter] trimmed', {
-      maxMsgs,
-      src_len: hs.length,
-      out_len: Array.isArray(exAny.historyForWriter) ? exAny.historyForWriter.length : 0,
-    });
-  }
-
   // =========================================================
   // ✅ FlowTape / FlowDigest（LLM-facing tiny continuity）
   // - “禁止/縛り” は入れない（ログとして素直に刻むだけ）
@@ -2452,7 +2485,7 @@ try {
 // - 既に入ってるなら触らない
 if (!(mf.extra as any).historyDigestV1) {
   try {
-// const { buildHistoryDigestV1 } = await import('@/lib/iros/history/historyDigestV1');
+    // const { buildHistoryDigestV1 } = await import('@/lib/iros/history/historyDigestV1');
 
     const lastUserCore =
       String((ctx as any)?.continuity?.last_user_core ?? (ctx as any)?.lastUserCore ?? '').trim() || '';
@@ -2460,6 +2493,16 @@ if (!(mf.extra as any).historyDigestV1) {
       String((ctx as any)?.continuity?.last_assistant_core ?? (ctx as any)?.lastAssistantCore ?? '').trim() || '';
 
     const repeatSignal = !!(ctx as any)?.repeatSignalSame || !!(ctx as any)?.repeat_signal || false;
+
+    // ✅ 最新 user を最優先
+    const latestSummary = lastUserCore.slice(0, 120);
+    const fallbackSummary = String((ctx as any)?.situationSummary ?? '').trim().slice(0, 120);
+    const situationSummaryForDigest = latestSummary || fallbackSummary;
+
+    // ✅ 古い topic に強く引っ張られないよう、一旦ニュートラル寄りに戻す
+    const rawTopic = String((ctx as any)?.situationTopic ?? '').trim();
+    const situationTopicForDigest =
+      latestSummary.length > 0 ? 'その他・ライフ全般' : (rawTopic || 'その他・ライフ全般');
 
     (mf.extra as any).historyDigestV1 = buildHistoryDigestV1({
       fixedNorth: { key: 'SUN', phrase: '成長 / 進化 / 希望 / 歓喜' },
@@ -2470,8 +2513,8 @@ if (!(mf.extra as any).historyDigestV1) {
       depthStage: (ctx as any)?.memoryState?.depthStage ?? (ctx as any)?.depthStage ?? 'F1',
       phase: (ctx as any)?.memoryState?.phase ?? (ctx as any)?.phase ?? 'Inner',
 
-      situationTopic: String((ctx as any)?.situationTopic ?? 'その他・ライフ全般'),
-      situationSummary: String((ctx as any)?.situationSummary ?? '').slice(0, 120),
+      situationTopic: situationTopicForDigest,
+      situationSummary: situationSummaryForDigest,
 
       lastUserCore: lastUserCore.slice(0, 120),
       lastAssistantCore: lastAssistantCore.slice(0, 120),
@@ -2480,9 +2523,7 @@ if (!(mf.extra as any).historyDigestV1) {
   } catch {
     // keep silent
   }
-}
-  }
-}
+}}}
 
 
 // ---- ctxPack.flow (minimal, with prev from history) ----
@@ -2506,6 +2547,87 @@ if (!extra2.ctxPack || typeof extra2.ctxPack !== 'object') {
   extra2.ctxPack = {};
 }
 
+// ---- stingLevel (state-derived; minimal) ----
+// 方針：
+// - depthStage / repeatSignal / intensity / returnStreak だけで決める
+// - ここでは軽量計算のみ
+// - 正本は extra.stingLevel / extra.ctxPack.stingLevel
+const normalizeDepthBandForSting = (depthRaw: any): 'F' | 'S' | 'R' | 'C' | 'I' | 'T' => {
+  const s = String(depthRaw ?? '').trim().toUpperCase();
+  const head = s.charAt(0);
+  if (head === 'F' || head === 'S' || head === 'R' || head === 'C' || head === 'I' || head === 'T') {
+    return head as 'F' | 'S' | 'R' | 'C' | 'I' | 'T';
+  }
+  return 'F';
+};
+
+const bumpStingLevel = (v: 'LOW' | 'MID' | 'HIGH'): 'LOW' | 'MID' | 'HIGH' => {
+  if (v === 'LOW') return 'MID';
+  if (v === 'MID') return 'HIGH';
+  return 'HIGH';
+};
+
+const pickNumberForSting = (...vals: any[]): number | null => {
+  for (const v of vals) {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string' && v.trim() !== '') {
+      const n = Number(v);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return null;
+};
+
+const depthStageForSting =
+  (extra2.ctxPack as any)?.depthStage ??
+  (mf2 as any)?.depthStage ??
+  (ctx as any)?.memoryState?.depthStage ??
+  (ctx as any)?.depthStage ??
+  'F1';
+
+const repeatSignalForSting =
+  !!(ctx as any)?.repeatSignalSame ||
+  !!(ctx as any)?.repeat_signal ||
+  !!(extra2.ctxPack as any)?.repeatSignal ||
+  false;
+
+const returnStreakForSting = (() => {
+  const n = pickNumberForSting(
+    (extra2.ctxPack as any)?.flow?.returnStreak,
+    (extra2 as any)?.flow?.returnStreak,
+    (mf2 as any)?.flow?.returnStreak,
+    (ctx as any)?.instant?.flow?.returnStreak,
+    (ctx as any)?.flow?.returnStreak,
+  );
+  return n ?? 0;
+})();
+
+const intensityForSting = (() => {
+  const n = pickNumberForSting(
+    (ctx as any)?.mirror?.intensity,
+    (ctx as any)?.extra?.mirror?.intensity,
+    (ctx as any)?.extra?.mirrorFlowV1?.mirror?.intensity,
+    (mf2 as any)?.mirror?.intensity,
+    (extra2 as any)?.mirror?.intensity,
+    (extra2 as any)?.mirrorFlowV1?.mirror?.intensity,
+    (extra2.ctxPack as any)?.resonanceState?.instant?.mirror?.intensity,
+  );
+  return n ?? 0;
+})();
+
+let stingLevel2: 'LOW' | 'MID' | 'HIGH' = 'LOW';
+
+const depthBandForSting = normalizeDepthBandForSting(depthStageForSting);
+if (depthBandForSting === 'C' || depthBandForSting === 'I' || depthBandForSting === 'T') {
+  stingLevel2 = 'HIGH';
+}
+if (returnStreakForSting >= 3) stingLevel2 = bumpStingLevel(stingLevel2);
+if (repeatSignalForSting) stingLevel2 = bumpStingLevel(stingLevel2);
+if (intensityForSting > 0.6) stingLevel2 = bumpStingLevel(stingLevel2);
+
+(extra2 as any).stingLevel = stingLevel2;
+(extra2.ctxPack as any).stingLevel = stingLevel2;
+
 // ---- ctxPack restore (minimal; from history) ----
 // 目的：前ターン assistant.meta.extra.ctxPack を「今回の ctxPack 初期値」として復元する。
 // 注意：重いキーや演出系は継続禁止。最小キーだけ戻す。
@@ -2527,9 +2649,16 @@ const restoreCtxPackFromHistory = (historyForTurn: any[]): any | null => {
       depthStage: typeof ctx.depthStage === 'string' ? ctx.depthStage : null,
       phase: typeof ctx.phase === 'string' ? ctx.phase : null,
       conversationLine: typeof ctx.conversationLine === 'string' ? ctx.conversationLine : null,
+      stingLevel: typeof ctx.stingLevel === 'string' ? ctx.stingLevel : null,
     };
 
-    if (restored.qCode || restored.depthStage || restored.phase || restored.conversationLine) {
+    if (
+      restored.qCode ||
+      restored.depthStage ||
+      restored.phase ||
+      restored.conversationLine ||
+      restored.stingLevel
+    ) {
       return restored;
     }
   }
@@ -2603,24 +2732,54 @@ if (prevAtIso) {
   }
 }
 
-// ✅ ここで「今回の returnStreak」を確定させる（拾えた prev を必ず継承）
+// ✅ ここで「今回の returnStreak」を確定させる
+// 方針：
+// - まず current 正本（extra.flow.returnStreak）を最優先
+// - 無いときだけ history(prev) から再計算
 {
   const deltaNow =
     (out as any)?.metaForSave?.extra?.flow?.delta ??
     (out as any)?.metaForSave?.extra?.flow?.flowDelta ??
+    (extra2 as any)?.flow?.delta ??
+    (extra2 as any)?.flow?.flowDelta ??
     (extra2.ctxPack as any)?.flow?.delta ??
     (extra2.ctxPack as any)?.flow?.flowDelta ??
     null;
+
+  const pickNum = (...vals: any[]): number | null => {
+    for (const v of vals) {
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+      if (typeof v === 'string' && v.trim() !== '') {
+        const n = Number(v);
+        if (Number.isFinite(n)) return n;
+      }
+    }
+    return null;
+  };
+
+  const currentRs = pickNum(
+    (out as any)?.metaForSave?.extra?.flow?.returnStreak,
+    (out as any)?.metaForSave?.extra?.flow?.return_streak,
+    (extra2 as any)?.flow?.returnStreak,
+    (extra2 as any)?.flow?.return_streak,
+    (out as any)?.metaForSave?.extra?.mirrorFlowV1?.flow?.returnStreak,
+    (out as any)?.metaForSave?.extra?.flowMirror?.returnStreak,
+    (out as any)?.metaForSave?.extra?.resonanceState?.flow_returnStreak,
+  );
 
   const prevRs =
     typeof prevReturnStreak === 'number' && Number.isFinite(prevReturnStreak)
       ? prevReturnStreak
       : 0;
 
-  // RETURN なら prev+1、RETURN 以外は 0（※ここは設計に合わせて変更可）
-  const rsNow = String(deltaNow || '').toUpperCase() === 'RETURN' ? prevRs + 1 : 0;
+  const fallbackRs =
+    String(deltaNow || '').toUpperCase() === 'RETURN'
+      ? prevRs + 1
+      : 0;
 
-  // ctxPack.flow は「正本」なので、ここで stamp
+  const rsNow = currentRs ?? fallbackRs;
+
+  // ctxPack.flow は current 正本に揃えて stamp
   (extra2.ctxPack as any).flow = {
     ...((extra2.ctxPack as any).flow ?? {}),
     at: nowIso2,
@@ -2741,24 +2900,41 @@ if (typeof preDeltaRaw === 'string' && preDeltaRaw.trim().length > 0) {
 // 正規化（比較と stamp を揃える）
 const flowDeltaNorm = flowDelta ? String(flowDelta).toUpperCase().trim() : null;
 
-// ✅ returnStreak は「既に計算済みがあればそれを正本」として採用し、無い時だけ prev+delta で算出
-const preReturnStreakRaw =
-  (mf2 as any)?.flow?.returnStreak ??
-  (mf2 as any)?.extra?.flow?.returnStreak ??
-  (mf2 as any)?.extra?.ctxPack?.flow?.returnStreak ??
-  (mf2 as any)?.ctxPack?.flow?.returnStreak ??
-  null;
+// ✅ returnStreak は「current 正本を最優先」として採用し、無い時だけ prev+delta で算出
+const pickNumeric = (...vals: any[]): number | null => {
+  for (const v of vals) {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string' && v.trim() && Number.isFinite(Number(v))) {
+      return Number(v);
+    }
+  }
+  return null;
+};
+
+const preReturnStreakRaw = pickNumeric(
+  // 1) current 正本を最優先
+  (mf2 as any)?.extra?.flow?.returnStreak,
+  (mf2 as any)?.extra?.flow?.return_streak,
+
+  // 2) ctxPack 側
+  (mf2 as any)?.extra?.ctxPack?.flow?.returnStreak,
+  (mf2 as any)?.extra?.ctxPack?.flow?.return_streak,
+  (mf2 as any)?.ctxPack?.flow?.returnStreak,
+  (mf2 as any)?.ctxPack?.flow?.return_streak,
+
+  // 3) 互換の最後
+  (mf2 as any)?.flow?.returnStreak,
+  (mf2 as any)?.flow?.return_streak,
+);
 
 let returnStreak: number = 0;
 
-if (typeof preReturnStreakRaw === 'number' && Number.isFinite(preReturnStreakRaw)) {
+if (preReturnStreakRaw != null) {
   returnStreak = preReturnStreakRaw;
-} else if (typeof preReturnStreakRaw === 'string' && preReturnStreakRaw.trim() && Number.isFinite(Number(preReturnStreakRaw))) {
-  returnStreak = Number(preReturnStreakRaw);
 } else {
   const prevRs =
     typeof prevReturnStreak === 'number' && Number.isFinite(prevReturnStreak) ? prevReturnStreak : 0;
-  returnStreak = flowDelta === 'RETURN' ? prevRs + 1 : 0;
+  returnStreak = flowDeltaNorm === 'RETURN' ? prevRs + 1 : 0;
 }
 
 // ✅ ctxPack.flow を毎ターン stamp（正本）
@@ -2780,7 +2956,6 @@ if (!extra2.flow || typeof extra2.flow !== 'object') extra2.flow = {};
 (extra2.flow as any).confidence = (extra2.flow as any).confidence ?? flowConfidence ?? null;
 (extra2.flow as any).returnStreak = (extra2.flow as any).returnStreak ?? returnStreak;
 (extra2.flow as any).sessionBreak = (extra2.flow as any).sessionBreak ?? false;
-
 // ctxPack にも historyForWriter を同期（循環参照を避ける最小形）
 const hfw = Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
   ? (out.metaForSave as any).extra.historyForWriter
@@ -2809,111 +2984,226 @@ if ((extra2.ctxPack as any).historyDigestV1 == null && digestV1Raw) {
   (extra2.ctxPack as any).historyDigestV1 = digestV1Raw;
 }
 
-// ✅ ctxPack に phase / depthStage / qCode も同期（rephraseEngine が拾う）
-// 優先：metaForSave → unified（あれば）→ null
+// ✅ Phase 2-1: personal SHIFT 用の軽量推定を ctxPack 正本へ stamp
+// - 断定診断ではなく "hint" として保持
+// - relation / temperature / shiftKind をまず先に入れる
 {
-  const m = (out.metaForSave as any) ?? {};
-  const u = (m.unified as any) ?? {};
+  const cp: any = (extra2.ctxPack as any);
 
-  // phase
-  const phaseRaw = m.phase ?? u.phase ?? null;
-  if (
-    (extra2.ctxPack as any).phase == null &&
-    (phaseRaw === 'Inner' || phaseRaw === 'Outer')
-  ) {
-    (extra2.ctxPack as any).phase = phaseRaw;
-  }
+  const shift2_pickText = (...vals: any[]): string => {
+    for (const v of vals) {
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    return '';
+  };
 
-  // depthStage
-  const depthRaw = m.depthStage ?? u.depthStage ?? m.depth ?? u?.depth?.stage ?? null;
-  if ((extra2.ctxPack as any).depthStage == null && typeof depthRaw === 'string' && depthRaw) {
-    (extra2.ctxPack as any).depthStage = depthRaw;
-  }
+  const shift2_norm = (s: any): string => String(s ?? '').trim();
 
-  // qCode
-  const qRaw = m.qCode ?? u.qCode ?? m.q ?? u?.q?.current ?? null;
-  if ((extra2.ctxPack as any).qCode == null && typeof qRaw === 'string' && qRaw) {
-    (extra2.ctxPack as any).qCode = qRaw;
-  }
-}
-// ✅ ctxPack に slotPlanPolicy / slots / framePlan も同期（rephraseEngine / convEvidence が拾う）
-// - 正本は framePlan（推定しない）
-// - slotPlanPolicy は framePlan.slotPlanPolicy を最優先
-// - slotPlan（本文スロット実体）は framePlan.slotPlan → meta.slotPlan の順で拾う
-{
-  const m = (out.metaForSave as any) ?? {};
-  const fp = (m.framePlan as any) ?? null;
+  const shift2_srcText = shift2_pickText(
+    cp?.latestUserText,
+    cp?.userText,
+    cp?.conversationLine,
+    cp?.topicDigest,
+    (out.metaForSave as any)?.input,
+    ''
+  );
 
-  // ✅ framePlan 自体を ctxPack に同期（SHIFT枠が無いと extractSlots が崩れる）
-  if ((extra2.ctxPack as any).framePlan == null && fp && typeof fp === 'object') {
-    (extra2.ctxPack as any).framePlan = fp;
-  }
+  const shift2_text = shift2_norm(shift2_srcText);
+  const shift2_textLc = shift2_text.toLowerCase();
 
-  // slotPlanPolicy（正本：framePlan）
-  const policyRaw = (fp as any)?.slotPlanPolicy ?? m.slotPlanPolicy ?? null;
-  if (
-    (extra2.ctxPack as any).slotPlanPolicy == null &&
-    typeof policyRaw === 'string' &&
-    policyRaw.trim()
-  ) {
-    (extra2.ctxPack as any).slotPlanPolicy = policyRaw.trim();
-  }
+  const shift2_flowDelta = shift2_norm(
+    cp?.flow?.delta ??
+      cp?.flow?.flowDelta ??
+      (extra2 as any)?.flow?.delta ??
+      (extra2 as any)?.flow?.flowDelta ??
+      flowDelta ??
+      ''
+  ).toUpperCase();
 
-  // ✅ goalKind（BLOCK_PLAN の stabilize 縮退が効くように ctxPack に同期）
-  // 注意：ctxPack.replyGoal は「文字列（permit_density 等）」として既に使うので触らない
-  const goalKindRaw = m.targetKind ?? m.target_kind ?? m.goalKind ?? null;
-  if (
-    (extra2.ctxPack as any).goalKind == null &&
-    typeof goalKindRaw === 'string' &&
-    goalKindRaw.trim()
-  ) {
-    (extra2.ctxPack as any).goalKind = goalKindRaw.trim();
-  }
-  // ✅ replyGoal / repeatSignal を ctxPack に同期（writer の OBS_CARD で (none) を出さない）
-  // - replyGoal: 'permit_density' | 'reduce_scatter' | 'reflect_position'
-  // - repeatSignal: 'same_phrase' | null
-  const itxStepRaw = String(
-    (extra2.ctxPack as any)?.itxStep ??
-      (extra2.ctxPack as any)?.tLayerHint ??
-      (extra2.ctxPack as any)?.itx_step ??
+  const shift2_returnStreak = (() => {
+    const raw =
+      cp?.flow?.returnStreak ??
+      (extra2 as any)?.flow?.returnStreak ??
+      returnStreak ??
+      0;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  })();
+
+  const shift2_stingLevel = String(
+    cp?.stingLevel ??
+      (extra2 as any)?.stingLevel ??
+      ''
+  )
+    .trim()
+    .toUpperCase();
+
+  const shift2_goalKind = String(
+    cp?.goalKind ??
+      (out.metaForSave as any)?.targetKind ??
+      (out.metaForSave as any)?.target_kind ??
       ''
   ).trim();
 
-  const tLayerModeActive = /^T[123]$/u.test(itxStepRaw);
+  const shift2_repeatSignal = String(cp?.repeatSignal ?? '').trim();
 
-  // repeat は upstream の boolean シグナル（repeatSignalSame）を最優先で拾う
-  const repeatSame =
-    Boolean((extra2 as any)?.repeatSignalSame) ||
-    Boolean((extra2.ctxPack as any)?.repeatSignalSame) ||
-    false;
+  const hasAny = (...needles: string[]) =>
+    needles.some((n) => shift2_text.includes(n) || shift2_textLc.includes(n.toLowerCase()));
 
-  if ((extra2.ctxPack as any).repeatSignal == null) {
-    (extra2.ctxPack as any).repeatSignal = repeatSame ? 'same_phrase' : null;
-  }
+  // -----------------------------
+  // relationFocus（軽量）
+  // -----------------------------
+  const relationFocus = (() => {
+    const looksRelation = hasAny(
+      '相手',
+      '恋愛',
+      '関係',
+      '連絡',
+      '既読',
+      '未読',
+      '距離',
+      '気持ち',
+      '追いかけ',
+      '避け',
+      '好き',
+      '別れ',
+      '会いたい'
+    );
 
-  if ((extra2.ctxPack as any).replyGoal == null) {
-    (extra2.ctxPack as any).replyGoal = tLayerModeActive
-      ? 'permit_density'
-      : repeatSame
-        ? 'reduce_scatter'
-        : 'reflect_position';
-  }
-  // slotPlan（本文スロット実体）
-  const slotsRaw =
-    ((fp as any)?.slotPlan && Array.isArray((fp as any).slotPlan) ? (fp as any).slotPlan : null) ??
-    (m.slotPlan && Array.isArray(m.slotPlan) ? m.slotPlan : null) ??
-    null;
+    if (!looksRelation) return null;
 
-  // ctxPack 側のキー名は “slotPlan” に揃える
-  if ((extra2.ctxPack as any).slotPlan == null && Array.isArray(slotsRaw) && slotsRaw.length) {
-    (extra2.ctxPack as any).slotPlan = slotsRaw;
-  }
+    let selfPosition: string | null = null;
+    let otherPosition: string | null = null;
+    let powerBalance: 'weaker' | 'balanced' | 'stronger' | 'unknown' | null = 'unknown';
+    let distanceLevel: 'too_close' | 'close' | 'unstable' | 'far' | 'unknown' | null = 'unknown';
+    let certaintyLevel: 'low' | 'mid' | 'high' | 'unknown' | null = 'unknown';
 
-  // ✅ exprMeta も ctxPack に同期（正本：metaForSave.extra.ctxPack.exprMeta）
-  const exprMetaRaw = (m.extra as any)?.ctxPack?.exprMeta ?? (m.extra as any)?.exprMeta ?? null;
-  if ((extra2.ctxPack as any).exprMeta == null && exprMetaRaw && typeof exprMetaRaw === 'object') {
-    (extra2.ctxPack as any).exprMeta = exprMetaRaw;
-  }
+    if (hasAny('自分でもわからない', 'どうしたいかわからない', '続けたいのかわからない')) {
+      selfPosition = 'unclear';
+    } else if (hasAny('続けたい', '会いたい', '連絡したい')) {
+      selfPosition = 'approach';
+    } else if (hasAny('距離を置きたい', '離れたい', 'もう無理')) {
+      selfPosition = 'withdraw';
+    }
+
+    if (hasAny('相手の気持ちがわからない', '相手が何を考えてるかわからない', 'どう思ってるかわからない')) {
+      otherPosition = 'unreadable';
+      certaintyLevel = 'low';
+    } else if (hasAny('脈あり', '好かれてる', '向こうから来る')) {
+      otherPosition = 'approaching';
+      if (certaintyLevel === 'unknown') certaintyLevel = 'mid';
+    } else if (hasAny('距離を置かれてる', '避けられてる', '冷たい', '返信が来ない')) {
+      otherPosition = 'distancing';
+      certaintyLevel = 'low';
+    }
+
+    if (hasAny('立場が弱い', '相手次第', '振り回される', '追いかけてしまう')) {
+      powerBalance = 'weaker';
+    } else if (hasAny('主導している', '自分が決めている')) {
+      powerBalance = 'stronger';
+    } else if (looksRelation) {
+      powerBalance = 'balanced';
+    }
+
+    if (hasAny('近すぎて苦しい', '重い', 'しんどい', '息苦しい')) {
+      distanceLevel = 'too_close';
+    } else if (hasAny('距離を置かれてる', '離れてる', '遠い', '会えない')) {
+      distanceLevel = 'far';
+    } else if (hasAny('近づいたり離れたり', '不安定', '揺れる', '曖昧')) {
+      distanceLevel = 'unstable';
+    } else if (looksRelation) {
+      distanceLevel = 'close';
+    }
+
+    if (certaintyLevel === 'unknown') {
+      if (hasAny('迷ってる', 'わからない', '不安')) certaintyLevel = 'low';
+      else certaintyLevel = 'mid';
+    }
+
+    return {
+      selfPosition,
+      otherPosition,
+      powerBalance,
+      distanceLevel,
+      certaintyLevel,
+    };
+  })();
+
+  // -----------------------------
+  // emotionalTemperature（軽量）
+  // -----------------------------
+  const emotionalTemperature = (() => {
+    const volatileHit =
+      hasAny('わからない', '揺れる', 'ぐるぐる', '混乱', 'まとまらない') &&
+      (shift2_returnStreak >= 2 || shift2_repeatSignal === 'same_phrase');
+
+    if (volatileHit) return 'volatile' as const;
+
+    if (
+      shift2_stingLevel === 'HIGH' ||
+      shift2_returnStreak >= 3 ||
+      hasAny('苦しい', 'つらい', '怖い', 'しんどい', '限界')
+    ) {
+      return 'high' as const;
+    }
+
+    if (
+      shift2_stingLevel === 'MID' ||
+      hasAny('迷う', '不安', '止まる', '動けない', 'どうしよう')
+    ) {
+      return 'mid' as const;
+    }
+
+    return 'low' as const;
+  })();
+
+  // -----------------------------
+  // shiftKind（第二段の主ルーティング）
+  // -----------------------------
+  const shiftKind = (() => {
+    if (hasAny('って何', 'とは', '意味', '違い', '定義')) return 'clarify_shift' as const;
+
+    if (relationFocus) {
+      if (
+        relationFocus.distanceLevel === 'far' ||
+        relationFocus.distanceLevel === 'too_close' ||
+        relationFocus.distanceLevel === 'unstable'
+      ) {
+        return 'distance_shift' as const;
+      }
+
+      if (hasAny('仲直り', '修復', '戻りたい', 'やり直したい')) {
+        return 'repair_shift' as const;
+      }
+    }
+
+    if (hasAny('決められない', '行くべきか', 'やめるべきか', '迷ってる', '選べない')) {
+      return 'decide_shift' as const;
+    }
+
+    if (
+      hasAny('何から', 'わからない', '焦点', '整理したい', '何が不安かわからない') &&
+      shift2_goalKind !== 'clarify'
+    ) {
+      return 'narrow_shift' as const;
+    }
+
+    if (
+      shift2_flowDelta === 'RETURN' ||
+      emotionalTemperature === 'high' ||
+      emotionalTemperature === 'volatile' ||
+      hasAny('戻ってきた', '動けない', '止まる', 'しんどい')
+    ) {
+      return 'stabilize_shift' as const;
+    }
+
+    return 'narrow_shift' as const;
+  })();
+
+  // ctxPack 正本へ stamp
+  if (cp.relationFocus == null) cp.relationFocus = relationFocus;
+  if (cp.emotionalTemperature == null) cp.emotionalTemperature = emotionalTemperature;
+  if (cp.shiftKind == null) cp.shiftKind = shiftKind;
 }
 
 
@@ -3651,8 +3941,10 @@ const disableRephraseBridgeWriterBase =
   (out.metaForSave as any)?.extra?.persistedByRoute === true ||
   (out.metaForSave as any)?.extra?.persistAssistantMessage === false;
 
-// ✅ “空っぽ系”だけは bridge writer を許可（穴を塞ぐ）
-const disableRephraseBridgeWriter = disableRephraseBridgeWriterBase && !(seedOnlyNow || emptyLikeNow);
+// ✅ /reply では writer を _impl/rephrase.ts 側に完全一本化する
+// - emptyLike / seedOnly でも bridge 側では writer を走らせない
+// - 二重呼び防止を最優先にする
+const disableRephraseBridgeWriter = disableRephraseBridgeWriterBase;
 console.log('[IROS/rephraseBridge][DISABLE_DBG_V1]', {
   disableRephraseBridgeWriterBase,
   seedOnlyNow,
@@ -3966,6 +4258,69 @@ if (shouldRunWriter) {
           delete ctxPackPrev.blockPlanTriggerText;
         } catch {}
 
+        const loadedMemoryState =
+          typeof _userCode === 'string' && _userCode.trim().length > 0
+            ? await loadIrosMemoryState(supabase as any, _userCode)
+            : null;
+
+            const memoryStateSnapshot = loadedMemoryState
+            ? {
+                intentAnchor: loadedMemoryState.intentAnchor ?? null,
+                qPrimary: loadedMemoryState.qPrimary ?? null,
+                depthStage: loadedMemoryState.depthStage ?? null,
+                phase: loadedMemoryState.phase ?? null,
+                selfAcceptance: loadedMemoryState.selfAcceptance ?? null,
+                intentLayer: loadedMemoryState.intentLayer ?? null,
+                intentConfidence: loadedMemoryState.intentConfidence ?? null,
+                yLevel: loadedMemoryState.yLevel ?? null,
+                hLevel: loadedMemoryState.hLevel ?? null,
+                spinLoop: loadedMemoryState.spinLoop ?? null,
+                spinStep: loadedMemoryState.spinStep ?? null,
+                descentGate: loadedMemoryState.descentGate ?? null,
+                itxStep: loadedMemoryState.itxStep ?? null,
+                itxAnchorEventType: loadedMemoryState.itxAnchorEventType ?? null,
+                itxReason: loadedMemoryState.itxReason ?? null,
+                itxLastAt: loadedMemoryState.itxLastAt ?? null,
+                summary: loadedMemoryState.summary ?? null,
+                sentimentLevel: loadedMemoryState.sentimentLevel ?? null,
+                situationSummary: loadedMemoryState.situationSummary ?? null,
+                situationTopic: loadedMemoryState.situationTopic ?? null,
+                updatedAt: loadedMemoryState.updatedAt ?? null,
+              }
+            : null;
+
+            const memoryStateNoteText = memoryStateSnapshot
+            ? [
+                'MEMORY_STATE:',
+                memoryStateSnapshot.summary
+                  ? `- summary: ${String(memoryStateSnapshot.summary).slice(0, 180)}`
+                  : null,
+                memoryStateSnapshot.situationSummary
+                  ? `- situation_summary: ${String(memoryStateSnapshot.situationSummary).slice(0, 180)}`
+                  : null,
+                memoryStateSnapshot.situationTopic
+                  ? `- situation_topic: ${String(memoryStateSnapshot.situationTopic).slice(0, 120)}`
+                  : null,
+                memoryStateSnapshot.qPrimary
+                  ? `- q_primary: ${memoryStateSnapshot.qPrimary}`
+                  : null,
+                memoryStateSnapshot.depthStage
+                  ? `- depth_stage: ${memoryStateSnapshot.depthStage}`
+                  : null,
+                memoryStateSnapshot.phase
+                  ? `- phase: ${memoryStateSnapshot.phase}`
+                  : null,
+                memoryStateSnapshot.intentLayer
+                  ? `- intent_layer: ${memoryStateSnapshot.intentLayer}`
+                  : null,
+                memoryStateSnapshot.sentimentLevel
+                  ? `- sentiment_level: ${memoryStateSnapshot.sentimentLevel}`
+                  : null,
+              ]
+                .filter((v) => typeof v === 'string' && v.trim().length > 0)
+                .join('\n')
+            : null;
+
         const longTermRows =
           typeof _userCode === 'string' && _userCode.trim().length > 0
             ? await loadDurableMemoriesForTurnV1({
@@ -3974,35 +4329,74 @@ if (shouldRunWriter) {
               })
             : [];
 
-            const selectedLongTermRows = selectLongTermMemoriesV1({
-              rows: longTermRows,
-              userText: typeof text === 'string' ? text : '',
-              maxItems: 4,
-            });
+        const selectedLongTermRows = selectLongTermMemoriesV1({
+          rows: longTermRows,
+          userText: typeof text === 'string' ? text : '',
+          maxItems: 4,
+        });
 
-            const longTermBuilt = buildLongTermMemoryNoteTextV1({
-              rows: selectedLongTermRows,
-              maxItems: 4,
-            });
-            await updateMemoryPriorityV1({
-              rows: longTermBuilt.picked,
-            });
+        const longTermBuilt = buildLongTermMemoryNoteTextV1({
+          rows: selectedLongTermRows,
+          maxItems: 4,
+        });
 
-            await decayUnusedMemoriesV1({
-              allRows: longTermRows,
-              usedRowIds: longTermBuilt.picked.map((r) => r.id),
-            });
+        await updateMemoryPriorityV1({
+          rows: longTermBuilt.picked,
+        });
+
+        await decayUnusedMemoriesV1({
+          allRows: longTermRows,
+          usedRowIds: longTermBuilt.picked.map((r) => r.id),
+        });
 
         const longTermMemoryNoteText =
           typeof longTermBuilt.noteText === 'string' && longTermBuilt.noteText.trim().length > 0
             ? longTermBuilt.noteText
             : null;
-            console.log('[IROS/LTM][SELECTED]', {
-              count: selectedLongTermRows?.length ?? 0,
-              keys: (selectedLongTermRows ?? []).map((r) => r.key),
-              clusters: (selectedLongTermRows ?? []).map((r) => r.cluster_key),
-              types: (selectedLongTermRows ?? []).map((r) => r.memory_type),
-            });
+
+        console.log('[IROS/LTM][SELECTED]', {
+          count: selectedLongTermRows?.length ?? 0,
+          keys: (selectedLongTermRows ?? []).map((r) => r.key),
+          clusters: (selectedLongTermRows ?? []).map((r) => r.cluster_key),
+          types: (selectedLongTermRows ?? []).map((r) => r.memory_type),
+        });
+
+        console.log('[IROS/STATE][CTX_ATTACHED]', {
+          userCode: _userCode ?? null,
+          hasMemoryState: Boolean(memoryStateSnapshot),
+          qPrimary: memoryStateSnapshot?.qPrimary ?? null,
+          depthStage: memoryStateSnapshot?.depthStage ?? null,
+          phase: memoryStateSnapshot?.phase ?? null,
+          summaryHead:
+            typeof memoryStateSnapshot?.summary === 'string'
+              ? String(memoryStateSnapshot.summary).slice(0, 80)
+              : null,
+          selfAcceptance: memoryStateSnapshot?.selfAcceptance ?? null,
+          intentLayer: memoryStateSnapshot?.intentLayer ?? null,
+          sentimentLevel: memoryStateSnapshot?.sentimentLevel ?? null,
+          situationSummaryHead:
+            typeof memoryStateSnapshot?.situationSummary === 'string'
+              ? String(memoryStateSnapshot.situationSummary).slice(0, 80)
+              : null,
+          situationTopic: memoryStateSnapshot?.situationTopic ?? null,
+          hasMemoryStateNoteText: Boolean(memoryStateNoteText),
+        });
+
+        const shiftKindNow =
+          String((out.metaForSave as any)?.extra?.ctxPack?.shiftKind ?? '').trim() || null;
+
+        const pastStateTriggerKindNow =
+          typeof (out.metaForSave as any)?.extra?.pastStateTriggerKind === 'string'
+            ? String((out.metaForSave as any).extra.pastStateTriggerKind).trim()
+            : null;
+
+        const shouldHideHistoryForResponse =
+          shiftKindNow === 'narrow_shift' ||
+          shiftKindNow === 'stabilize_shift' ||
+          pastStateTriggerKindNow === 'none';
+
+        const historyForWriterForResponse = shouldHideHistoryForResponse ? [] : turns;
+
         return {
           conversationId: _conversationId ?? null,
           userCode: _userCode ?? null,
@@ -4027,22 +4421,45 @@ if (shouldRunWriter) {
               : null,
 
           longTermMemoryNoteText,
+          memoryStateSnapshot,
+          memoryStateNoteText,
 
-          historyForWriter: turns,
+          historyForWriter: historyForWriterForResponse,
 
           ctxPack: {
             ...ctxPackPrev,
 
-            qCode: (out.metaForSave as any)?.q ?? (ctxPackPrev as any)?.qCode ?? null,
-            depthStage: (out.metaForSave as any)?.depth ?? (ctxPackPrev as any)?.depthStage ?? null,
-            phase: (out.metaForSave as any)?.phase ?? (ctxPackPrev as any)?.phase ?? null,
+            qCode:
+              (out.metaForSave as any)?.q ??
+              memoryStateSnapshot?.qPrimary ??
+              (ctxPackPrev as any)?.qCode ??
+              null,
+
+            depthStage:
+              (out.metaForSave as any)?.depth ??
+              memoryStateSnapshot?.depthStage ??
+              (ctxPackPrev as any)?.depthStage ??
+              null,
+
+            phase:
+              (out.metaForSave as any)?.phase ??
+              memoryStateSnapshot?.phase ??
+              (ctxPackPrev as any)?.phase ??
+              null,
 
             traceId: traceIdCanon,
             inputKind: inputKindCanon,
-            historyForWriter: turns,
+            historyForWriter: historyForWriterForResponse,
             slotPlanPolicy,
             exprMeta: exprMetaCanon,
             longTermMemoryNoteText,
+            memoryStateNoteText,
+
+            memoryStateSnapshot,
+            memoryStateSummary: memoryStateSnapshot?.summary ?? null,
+            memoryStateSituationSummary: memoryStateSnapshot?.situationSummary ?? null,
+            memoryStateSituationTopic: memoryStateSnapshot?.situationTopic ?? null,
+            memoryStateSentimentLevel: memoryStateSnapshot?.sentimentLevel ?? null,
           },
 
           slotPlanPolicy,

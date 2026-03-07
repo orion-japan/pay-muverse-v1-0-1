@@ -807,9 +807,12 @@ const intentBandForCtx =
 
   // upstream を尊重しつつ、不足分だけ補完
   if (ctxPack.turns == null) ctxPack.turns = normalizedHistory.length ? normalizedHistory : undefined;
-  if (ctxPack.historyForWriter == null) ctxPack.historyForWriter = normalizedHistory.length ? normalizedHistory : undefined;
-  if (isBlankLike(ctxPack.slotPlanPolicy)) ctxPack.slotPlanPolicy = slotPlanPolicyForCtx;
 
+  // historyForWriter はここで先行注入しない
+  // - clarify_meaning / stabilize_shift で「今の入力」を優先するため
+  // - 必要な場合だけ後段（1149以降の guard 後）で入れる
+
+  if (isBlankLike(ctxPack.slotPlanPolicy)) ctxPack.slotPlanPolicy = slotPlanPolicyForCtx;
   if (isBlankLike(ctxPack.itxStep)) ctxPack.itxStep = itxStepForCtx;
   if (isBlankLike(ctxPack.itxReason)) ctxPack.itxReason = itxReasonForCtx;
   if (isBlankLike(ctxPack.intentBand)) ctxPack.intentBand = intentBandForCtx;
@@ -818,11 +821,41 @@ const intentBandForCtx =
   if (ctxPack.tLayerModeActive == null) ctxPack.tLayerModeActive = tLayerModeActiveForCtx;
 
   // ★3点セット（空文字でも補完する）
-  if (isBlankLike(ctxPack.topicDigest)) ctxPack.topicDigest = topicDigestForCtx;
-  if (isBlankLike(ctxPack.conversationLine)) ctxPack.conversationLine = conversationLineForCtx; // ✅ 追加
-  if (isBlankLike(ctxPack.replyGoal)) ctxPack.replyGoal = replyGoalForCtx;
-  if (isBlankLike(ctxPack.repeatSignal)) ctxPack.repeatSignal = repeatSignalForCtx;
+  const slotPlanForTopicGuard = Array.isArray((ctxPack as any)?.slotPlan)
+    ? (ctxPack as any).slotPlan
+    : [];
 
+  const shiftSlotForTopicGuard = slotPlanForTopicGuard.find(
+    (s: any) => String(s?.key ?? '').toUpperCase() === 'SHIFT',
+  );
+
+  const shiftTextForTopicGuard = String(
+    shiftSlotForTopicGuard?.content ?? shiftSlotForTopicGuard?.text ?? '',
+  ).trim();
+
+  const isClarifyMeaningTopicGuard =
+    shiftTextForTopicGuard.includes('"hint":"clarify_meaning_v1"') ||
+    (
+      shiftTextForTopicGuard.includes('"kind":"clarify"') &&
+      shiftTextForTopicGuard.includes('"meaning_kind":"define"')
+    );
+
+    const isStabilizeShiftTopicGuard =
+    shiftTextForTopicGuard.includes('"hint":"stabilize_shift_v1"') ||
+    shiftTextForTopicGuard.includes('"kind":"stabilize_shift"');
+
+    if (isClarifyMeaningTopicGuard || isStabilizeShiftTopicGuard) {
+      // 今回入力を優先するターンでは、topic系だけでなく stale history も local ctxPack から落とす
+      (ctxPack as any).topicDigest = undefined;
+      (ctxPack as any).conversationLine = undefined;
+      delete (ctxPack as any).historyForWriter;
+      delete (ctxPack as any).turnsForWriter;
+    } else {
+      if (isBlankLike(ctxPack.topicDigest)) ctxPack.topicDigest = topicDigestForCtx;
+      if (isBlankLike(ctxPack.conversationLine)) ctxPack.conversationLine = conversationLineForCtx;
+    }
+
+  if (isBlankLike(ctxPack.replyGoal)) ctxPack.replyGoal = replyGoalForCtx;
   // phase / depthStage / qCode を ctxPack にも載せるための “確証つき” 値
   const phaseForCtx =
     (memoryStateForCtx as any)?.phase ??
@@ -1096,8 +1129,53 @@ try {
     (Array.isArray(hfwRaw) && hfwRaw.length > 0 ? hfwRaw : null) ??
     (Array.isArray(hfwFromTurns) && hfwFromTurns.length > 0 ? hfwFromTurns : null);
 
+  // clarify_meaning_v1 / stabilize_shift_v1 は「今の入力」を優先する
+  // - userContext.ctxPack.slotPlan が未同期でも、
+  //   直前に組んだ ctxPack / meta 側の stamp を見て判定できるようにする
+  const slotPlanForGuard =
+    (Array.isArray((userContext as any)?.ctxPack?.slotPlan) &&
+    (userContext as any).ctxPack.slotPlan.length > 0)
+      ? (userContext as any).ctxPack.slotPlan
+      : (Array.isArray((ctxPack as any)?.slotPlan) && (ctxPack as any).slotPlan.length > 0)
+        ? (ctxPack as any).slotPlan
+        : (Array.isArray((meta as any)?.slotPlan) && (meta as any).slotPlan.length > 0)
+          ? (meta as any).slotPlan
+          : (Array.isArray((meta as any)?.extra?.slotPlan) && (meta as any).extra.slotPlan.length > 0)
+            ? (meta as any).extra.slotPlan
+            : (Array.isArray((meta as any)?.framePlan?.slotPlan) && (meta as any).framePlan.slotPlan.length > 0)
+              ? (meta as any).framePlan.slotPlan
+              : [];
+
+  const shiftSlotForGuard = slotPlanForGuard.find(
+    (s: any) => String(s?.key ?? '').toUpperCase() === 'SHIFT',
+  );
+
+  const shiftTextForGuard = normText(
+    shiftSlotForGuard?.content ?? shiftSlotForGuard?.text ?? '',
+  );
+
+  const isClarifyMeaningNow =
+    shiftTextForGuard.includes('"hint":"clarify_meaning_v1"') ||
+    (
+      shiftTextForGuard.includes('"kind":"clarify"') &&
+      shiftTextForGuard.includes('"meaning_kind":"define"')
+    );
+
+  const isStabilizeShiftNow =
+    shiftTextForGuard.includes('"hint":"stabilize_shift_v1"') ||
+    shiftTextForGuard.includes('"kind":"stabilize_shift"');
+
   // 3) 「配列でない」または「空配列」を未設定扱いとして救済（ctxPackに同期）
-  if (Array.isArray(hfwEffective) && hfwEffective.length > 0 && (!Array.isArray(curHfw) || curLen === 0)) {
+  // - clarify: 定義/意味の即答を優先
+  // - stabilize_shift: 古い文脈混線を切って “今の一点” を優先
+  if (isClarifyMeaningNow || isStabilizeShiftNow) {
+    delete (userContext.ctxPack as any).historyForWriter;
+    delete (userContext as any).turnsForWriter;
+  } else if (
+    Array.isArray(hfwEffective) &&
+    hfwEffective.length > 0 &&
+    (!Array.isArray(curHfw) || curLen === 0)
+  ) {
     (userContext.ctxPack as any).historyForWriter = hfwEffective;
 
     // rephraseEngine 優先口：turnsForWriter をここで必ず作る（user生文も通す）

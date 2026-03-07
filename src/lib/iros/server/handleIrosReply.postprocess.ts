@@ -831,40 +831,67 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
 
     const limit = typeof args.pastStateLimit === 'number' && Number.isFinite(args.pastStateLimit) ? args.pastStateLimit : 3;
 
-    const forceFallback =
-      typeof args.forceRecentTopicFallback === 'boolean' ? args.forceRecentTopicFallback : Boolean(topicLabel);
+    const shiftKind =
+      String((metaForSave as any)?.extra?.ctxPack?.shiftKind ?? '').trim() || null;
 
-      const recall = await preparePastStateNoteForTurn({
-        client: supabase,
-        userCode,
-        userText,
-        topicLabel,
-        limit,
-        conversationLine:
-          String((metaForSave as any)?.extra?.ctxPack?.conversationLine ?? '').trim() || null,
-        topicDigest:
-          String(
-            (metaForSave as any)?.extra?.ctxPack?.topicDigest ??
-              (metaForSave as any)?.extra?.topicDigest ??
-              '',
-          ).trim() || null,
-        situationTopic:
-          String(
-            (metaForSave as any)?.extra?.ctxPack?.situationTopic ??
-              (metaForSave as any)?.situation_topic ??
-              (metaForSave as any)?.situationTopic ??
-              topicLabel ??
-              '',
-          ).trim() || null,
-        depthStage:
-          String(
-            (metaForSave as any)?.extra?.ctxPack?.depthStage ??
-              (metaForSave as any)?.depth_stage ??
-              (metaForSave as any)?.depthStage ??
-              '',
-          ).trim() || null,
-        forceRecentTopicFallback: forceFallback,
-      });
+    const slotPlanArr =
+      Array.isArray((metaForSave as any)?.slotPlan)
+        ? (metaForSave as any).slotPlan
+        : Array.isArray((metaForSave as any)?.framePlan?.slotPlan)
+          ? (metaForSave as any).framePlan.slotPlan
+          : Array.isArray((metaForSave as any)?.framePlan?.slotPlan?.slots)
+            ? (metaForSave as any).framePlan.slotPlan.slots
+            : [];
+
+    const shiftSlot = slotPlanArr.find(
+      (s: any) => String(s?.key ?? s?.id ?? '').toUpperCase() === 'SHIFT',
+    );
+
+    const shiftText = String(
+      shiftSlot?.content ?? shiftSlot?.text ?? '',
+    ).trim();
+
+    const isStabilizeLike =
+      shiftKind === 'narrow_shift' ||
+      shiftKind === 'stabilize_shift' ||
+      shiftText.includes('"hint":"stabilize_shift_v1"') ||
+      shiftText.includes('"kind":"stabilize_shift"');
+
+    const forceFallback =
+      typeof args.forceRecentTopicFallback === 'boolean'
+        ? args.forceRecentTopicFallback
+        : !isStabilizeLike && Boolean(topicLabel);
+    const recall = await preparePastStateNoteForTurn({
+      client: supabase,
+      userCode,
+      userText,
+      topicLabel,
+      limit,
+      conversationLine:
+        String((metaForSave as any)?.extra?.ctxPack?.conversationLine ?? '').trim() || null,
+      topicDigest:
+        String(
+          (metaForSave as any)?.extra?.ctxPack?.topicDigest ??
+            (metaForSave as any)?.extra?.topicDigest ??
+            '',
+        ).trim() || null,
+      situationTopic:
+        String(
+          (metaForSave as any)?.extra?.ctxPack?.situationTopic ??
+            (metaForSave as any)?.situation_topic ??
+            (metaForSave as any)?.situationTopic ??
+            topicLabel ??
+            '',
+        ).trim() || null,
+      depthStage:
+        String(
+          (metaForSave as any)?.extra?.ctxPack?.depthStage ??
+            (metaForSave as any)?.depth_stage ??
+            (metaForSave as any)?.depthStage ??
+            '',
+        ).trim() || null,
+      forceRecentTopicFallback: forceFallback,
+    });
 
     metaForSave.extra.pastStateNoteText = recall?.pastStateNoteText ?? null;
     metaForSave.extra.pastStateTriggerKind = recall?.triggerKind ?? null;
@@ -1924,11 +1951,17 @@ console.log('[IROS/PP][RS_SNAPSHOT]', {
       (state as any)?.instant?.flow?.delta ??
       null;
 
-    if (rr != null || dd != null) {
-      (metaForSave as any).flow = (metaForSave as any).flow ?? {};
-      if ((metaForSave as any).flow.delta == null && dd != null) (metaForSave as any).flow.delta = dd;
-      if ((metaForSave as any).flow.returnStreak == null && rr != null) (metaForSave as any).flow.returnStreak = rr;
-    }
+      if (rr != null || dd != null) {
+        (metaForSave as any).flow = (metaForSave as any).flow ?? {};
+
+        // ✅ root meta.flow は互換だが、値ズレを残さないため毎回 正本で同期する
+        if (dd != null) {
+          (metaForSave as any).flow.delta = dd;
+        }
+        if (rr != null) {
+          (metaForSave as any).flow.returnStreak = rr;
+        }
+      }
   }
 
 
