@@ -1060,27 +1060,10 @@ if (isNonForwardButEmpty) {
             ? String((meta as any).extra.pastStateTriggerKind).trim()
             : null;
 
-        const shouldHideHistoryForResponse =
-          shiftKindNow === 'narrow_shift' ||
-          shiftKindNow === 'stabilize_shift' ||
-          pastStateTriggerKindNow === 'none';
-
-        if (shouldHideHistoryForResponse) {
-          (meta as any).extra = (meta as any).extra ?? {};
-
-          if (Array.isArray((meta as any).extra.historyForWriter)) {
-            (meta as any).extra.historyForWriter = [];
-          }
-
-          if (
-            (meta as any).extra.ctxPack &&
-            typeof (meta as any).extra.ctxPack === 'object'
-          ) {
-            if (Array.isArray((meta as any).extra.ctxPack.historyForWriter)) {
-              (meta as any).extra.ctxPack.historyForWriter = [];
-            }
-          }
-        }
+        // historyForWriter は内部の writer / rephrase 用の文脈でも使うため、
+        // route.ts では破壊的に空配列へ上書きしない。
+        // ユーザー向けレスポンスで隠す必要がある場合は、
+        // handleIrosReply.ts 側の response 組み立て時にのみ制御する。
       }
 
       // 三軸 next step
@@ -1119,31 +1102,7 @@ if (isNonForwardButEmpty) {
         memoryStateForCtx = null;
       }
 
-      // meta extra merge（handle側→SoTへ寄せる）
-      try {
-        const metaAny = (irosResult as any)?.metaForSave ?? (irosResult as any)?.meta ?? null;
-        const metaExtraA = (metaAny as any)?.extra ?? null;
-        const metaExtraB = (irosResult as any)?.extraForHandle ?? null;
-        const metaExtraC = (irosResult as any)?.extra ?? null;
-        const metaExtraD = (irosResult as any)?.metaExtra ?? null;
-
-        const hasObj = (x: any) => x && typeof x === 'object';
-
-        const mergedFromMeta =
-          hasObj(metaExtraA) || hasObj(metaExtraB) || hasObj(metaExtraC) || hasObj(metaExtraD)
-            ? {
-                ...(hasObj(metaExtraA) ? metaExtraA : {}),
-                ...(hasObj(metaExtraB) ? metaExtraB : {}),
-                ...(hasObj(metaExtraC) ? metaExtraC : {}),
-                ...(hasObj(metaExtraD) ? metaExtraD : {}),
-                ...(extraSoT ?? {}),
-              }
-            : null;
-
-        if (mergedFromMeta) extraSoT = mergedFromMeta;
-      } catch (e) {
-        console.warn('[IROS/pipe][META_EXTRA_MERGED][ERROR]', e);
-      }
+// meta extra merge（handle
 
 // ✅ DEV用：header で強制 retry を有効化（本番は無効）
 {

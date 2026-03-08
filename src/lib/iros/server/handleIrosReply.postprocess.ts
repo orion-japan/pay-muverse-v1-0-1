@@ -499,24 +499,16 @@ function renderSlotPlanText(slotPlan: any[]): string {
       push(content);
       continue;
     }
+
     if (text) {
       push(text);
       continue;
     }
 
-    if (lns) {
+    if (lns && lns.length > 0) {
       for (const l of lns) push(l);
-      if (lines.length > 0) continue;
+      continue;
     }
-
-    const hint =
-      typeof obj.hint === 'string'
-        ? obj.hint.trim()
-        : typeof obj.prompt === 'string'
-          ? obj.prompt.trim()
-          : typeof obj.message === 'string'
-            ? obj.message.trim()
-            : '';
 
     const looksLikeFramePlanSlotDef =
       typeof obj.id === 'string' &&
@@ -527,10 +519,15 @@ function renderSlotPlanText(slotPlan: any[]): string {
       !lns;
 
     // framePlan の “スロット定義” は混ぜない
-    if (hint && !looksLikeFramePlanSlotDef) {
-      push(hint);
+    if (looksLikeFramePlanSlotDef) {
       continue;
     }
+
+    // ✅ IMPORTANT:
+    // hint / prompt / message は seed fallback に使わない
+    // ここを許すと clarify_meaning_v1 / clarify_truth_structure_v1 など
+    // 「ヒント名 or 説明文」へ収束して、slot の実体ではなく fallback が採用される
+    // 事故が起きるため、slotPlanText では content/text/lines のみを正本とする
 
     const seedLike =
       typeof obj.seed_text === 'string'
@@ -2261,7 +2258,7 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
     head: String(directiveV1 ?? '').slice(0, 96),
   });
 
-  // ✅ meta.extra を一度で確定（IIFEは禁止）
+  // ✅ meta.extra を一度で確定
   metaForSave.extra = {
     ...prevExtra,
 
@@ -2278,23 +2275,27 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
       directiveV1_reason,
     },
 
-/* =========================================
- * [置換] src/lib/iros/server/handleIrosReply.postprocess.ts
- * 範囲: 1296〜1310 を丸ごと置き換え
- * 目的:
- * - prefaceLine/prefaceHead を「正本 ctxPack」に必ず載せる
- * - renderGateway / systemPrompt どちらの拾い方でも落ちないようにする
- * ========================================= */
-    // ✅ 正本：handleIrosReply.ts がここから同期する
-      // ✅ NEW: Mirror（e_turn/polarity/confidence）を ctxPack 正本へ
-      // rephraseEngine 側は ctxPack.mirror を優先的に読む
-      mirror: (mirrorObj && typeof mirrorObj === 'object') ? mirrorObj : (prevCtxPack as any)?.mirror ?? null,
+    // ✅ 正本：Mirror（e_turn / polarity / confidence）を extra へ保持
+    mirror:
+      mirrorObj && typeof mirrorObj === 'object'
+        ? mirrorObj
+        : (prevExtra as any)?.mirror ?? null,
 
-      // ✅ NEW: 互換（将来カードseed側が top-level を読む場合に備える）
-      e_turn: (mirrorObj as any)?.e_turn ?? (prevCtxPack as any)?.e_turn ?? null,
-      polarity: (mirrorObj as any)?.polarity ?? (prevCtxPack as any)?.polarity ?? null,
-      mirrorConfidence:
-        (mirrorObj as any)?.confidence ?? (mirrorObj as any)?.polarity_confidence ?? (prevCtxPack as any)?.mirrorConfidence ?? null,
+    e_turn:
+      (mirrorObj as any)?.e_turn ??
+      (prevExtra as any)?.e_turn ??
+      null,
+
+    polarity:
+      (mirrorObj as any)?.polarity ??
+      (prevExtra as any)?.polarity ??
+      null,
+
+    mirrorConfidence:
+      (mirrorObj as any)?.confidence ??
+      (mirrorObj as any)?.polarity_confidence ??
+      (prevExtra as any)?.mirrorConfidence ??
+      null,
 
     // 従来の保存（ログ/診断用）
     exprDecision: {

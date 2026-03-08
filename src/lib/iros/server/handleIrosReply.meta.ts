@@ -173,16 +173,22 @@ export function canonicalizeIrosMeta(args: {
   const hLevel = hNum == null ? null : clampInt(hNum, 0, 3);
 
   // ---- situation summary/topic ----
+  // ---- situation summary/topic ----
+  // 重要:
+  // canonical meta では userText を situationSummary に昇格させない。
+  // ここで userText fallback を許すと、
+  // - 「なんの話をしているかわかる？」
+  // - 「実際の所、どうなの？」
+  // のような確認文そのものが memory state の主題として保存され、
+  // topic_recall が自己汚染する。
   const summaryCandidate =
     toStr(m.situationSummary) ??
     toStr(m.situation_summary) ??
     toStr(unified?.situation?.summary) ??
     null;
 
-  const userText = toStr(args?.userText ?? null);
   const situationSummary =
-    normalizeTextForSummary(summaryCandidate, 200) ??
-    (userText ? normalizeTextForSummary(userText, 200) : null);
+    normalizeTextForSummary(summaryCandidate, 200) ?? null;
 
   const topicCandidate =
     toStr(m.situationTopic) ??
@@ -194,7 +200,6 @@ export function canonicalizeIrosMeta(args: {
     null;
 
   const situationTopic = topicCandidate ? topicCandidate.trim() : null;
-
   // ---- intent_anchor canonical ----
   const iaRaw =
     (isObj(m.intent_anchor) ? m.intent_anchor : null) ??

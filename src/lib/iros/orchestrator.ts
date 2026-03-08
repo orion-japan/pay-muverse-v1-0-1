@@ -1666,47 +1666,46 @@ if (typeof process !== 'undefined' && process.env.DEBUG_IROS_FALLBACK_DIAG === '
 }
 
 
-  if (shouldFallbackNormalChat) {
-    const lastSummary =
-      (ms as any)?.situation_summary ??
-      (ms as any)?.situationSummary ??
-      (memoryState as any)?.situation_summary ??
-      (memoryState as any)?.situationSummary ??
-      (mergedBaseMeta as any)?.situation_summary ??
-      (mergedBaseMeta as any)?.situationSummary ??
-      null;
+if (shouldFallbackNormalChat) {
+  const lastSummary =
+    (ms as any)?.situation_summary ??
+    (ms as any)?.situationSummary ??
+    (memoryState as any)?.situation_summary ??
+    (memoryState as any)?.situationSummary ??
+    (mergedBaseMeta as any)?.situation_summary ??
+    (mergedBaseMeta as any)?.situationSummary ??
+    null;
 
-// ✅ IntentBridge laneKey を確定させてから normalChat fallback に渡す
-// - ここは「slotPlan を組む直前」なので downstream（normalChat）が確実に拾える
-// - userText はログに出さない（intentBridge 側が担保）
-// - fixedNorth と intent_anchor を混線させない：fixedNorth.key を優先
-{
-  const ex =
-    meta && typeof meta === 'object' && (meta as any).extra && typeof (meta as any).extra === 'object'
-      ? (meta as any).extra
-      : ((meta as any).extra = {});
+  // ✅ IntentBridge laneKey を確定させてから normalChat fallback に渡す
+  // - ここは「slotPlan を組む直前」なので downstream（normalChat）が確実に拾える
+  // - userText はログに出さない（intentBridge 側が担保）
+  // - fixedNorth と intent_anchor を混線させない：fixedNorth.key を優先
+  {
+    const ex =
+      meta && typeof meta === 'object' && (meta as any).extra && typeof (meta as any).extra === 'object'
+        ? (meta as any).extra
+        : ((meta as any).extra = {});
 
-  const depthStageNow =
-    (meta as any)?.depthStage ?? (meta as any)?.depth ?? null;
+    const depthStageNow =
+      (meta as any)?.depthStage ?? (meta as any)?.depth ?? null;
 
-  const phaseNow =
-    (meta as any)?.phase ?? null;
+    const phaseNow =
+      (meta as any)?.phase ?? null;
 
-  const fixedNorthKeyNow =
-    typeof (meta as any)?.fixedNorth?.key === 'string'
-      ? String((meta as any).fixedNorth.key)
-      : typeof (meta as any)?.fixedNorth === 'string'
-        ? String((meta as any).fixedNorth)
-        : null;
+    const fixedNorthKeyNow =
+      typeof (meta as any)?.fixedNorth?.key === 'string'
+        ? String((meta as any).fixedNorth.key)
+        : typeof (meta as any)?.fixedNorth === 'string'
+          ? String((meta as any).fixedNorth)
+          : null;
 
-  // deepenOk は取れれば渡す（取れない場合は undefined）
-  const deepenOkNow =
-    (meta as any)?.itTrigger?.flags?.deepenOk ??
-    (meta as any)?.it?.flags?.deepenOk ??
-    (meta as any)?.itx?.flags?.deepenOk ??
-    (meta as any)?.deepenOk ??
-    undefined;
-
+    // deepenOk は取れれば渡す（取れない場合は undefined）
+    const deepenOkNow =
+      (meta as any)?.itTrigger?.flags?.deepenOk ??
+      (meta as any)?.it?.flags?.deepenOk ??
+      (meta as any)?.itx?.flags?.deepenOk ??
+      (meta as any)?.deepenOk ??
+      undefined;
 
     if (typeof process !== 'undefined' && process.env.DEBUG_IROS_INTENTBRIDGE === '1') {
       console.log('[IROS/IntentBridge][RAW_INPUTS]', {
@@ -1716,156 +1715,201 @@ if (typeof process !== 'undefined' && process.env.DEBUG_IROS_FALLBACK_DIAG === '
         it_flags: (meta as any)?.it?.flags ?? null,
         itx_flags: (meta as any)?.itx?.flags ?? null,
         meta_deepenOk: (meta as any)?.deepenOk ?? null,
+        depthStageNow,
+        phaseNow,
+        fixedNorthKeyNow,
+        deepenOkNow,
       });
     }
 
-
-  // lane判定入力（存在する値だけ拾う／無ければ false）
-  // ✅ 優先順位：IT_TRIGGER(itTrigger) → it → itx → flags → その他
-  // ※ flags が先だと「false が先に拾われ」IT_TRIGGER の true を潰す
-  const hasCoreNow =
-    (meta as any)?.itTrigger?.flags?.hasCore ??
-    (meta as any)?.it?.flags?.hasCore ??
-    (meta as any)?.itx?.flags?.hasCore ??
-    (meta as any)?.flags?.hasCore ??
-    (meta as any)?.core?.hasCore ??
-    (meta as any)?.hasCore ??
-    false;
+    // lane判定入力（存在する値だけ拾う／無ければ false）
+    // ✅ 優先順位：IT_TRIGGER(itTrigger) → it → itx → flags → その他
+    // ※ flags が先だと「false が先に拾われ」IT_TRIGGER の true を潰す
+    const hasCoreNow =
+      (meta as any)?.itTrigger?.flags?.hasCore ??
+      (meta as any)?.it?.flags?.hasCore ??
+      (meta as any)?.itx?.flags?.hasCore ??
+      (meta as any)?.flags?.hasCore ??
+      (meta as any)?.core?.hasCore ??
+      (meta as any)?.hasCore ??
+      false;
 
     const laneKeyNowRaw =
-    (meta as any)?.extra?.intentBridge?.laneKey ??
-    (meta as any)?.intentBridge?.laneKey ??
-    null;
-
-  // ✅ テスト用：文頭に "tc:" があれば T_CONCRETIZE を強制（本番仕様には影響しない）
-  const forceTConcretize =
-    typeof text === 'string' && /^\s*tc\s*:/i.test(text);
-
-  // ---- ✅ stall probe（メタ優先＋入力補助）
-  // hard のときだけ T_CONCRETIZE を禁止して IDEA_BAND に倒す（会話の流れ復旧を優先）
-  const stallMeta = (() => {
-    // repeatSignal は rephrase 側（ctxPack）で先に見えていることがあるので、ここで拾ってメタに同期する
-    const ctxPack =
-      (meta as any)?.ctxPack ??
-      (meta as any)?.extra?.ctxPack ??
+      (meta as any)?.extra?.intentBridge?.laneKey ??
+      (meta as any)?.intentBridge?.laneKey ??
       null;
 
-    const rs =
-      (meta as any)?.repeatSignal ??
-      (meta as any)?.extra?.repeatSignal ??
-      ctxPack?.repeatSignal ??
-      null;
+    // ✅ テスト用：文頭に "tc:" があれば T_CONCRETIZE を強制（本番仕様には影響しない）
+    const forceTConcretize =
+      typeof text === 'string' && /^\s*tc\s*:/i.test(text);
 
-    // computeStallSignal は meta.ctxPack / meta.extra.ctxPack を見に行くので、両方に寄せる
-    const ex =
-      meta && typeof meta === 'object' && (meta as any).extra && typeof (meta as any).extra === 'object'
-        ? (meta as any).extra
-        : ((meta as any).extra = {});
+    // ---- ✅ stall probe（メタ優先＋入力補助）
+    // hard のときだけ T_CONCRETIZE を禁止して IDEA_BAND に倒す（会話の流れ復旧を優先）
+    const stallMeta = (() => {
+      // repeatSignal は rephrase 側（ctxPack）で先に見えていることがあるので、ここで拾ってメタに同期する
+      const ctxPack =
+        (meta as any)?.ctxPack ??
+        (meta as any)?.extra?.ctxPack ??
+        null;
 
-    if (ctxPack && !(meta as any).ctxPack) (meta as any).ctxPack = ctxPack;
-    if (ctxPack && !ex.ctxPack) ex.ctxPack = ctxPack;
-    if (typeof rs === 'string' && rs.trim()) {
-      if (!(meta as any).repeatSignal) (meta as any).repeatSignal = rs;
-      if (!ex.repeatSignal) ex.repeatSignal = rs;
-    }
+      const rs =
+        (meta as any)?.repeatSignal ??
+        (meta as any)?.extra?.repeatSignal ??
+        ctxPack?.repeatSignal ??
+        null;
 
-    return meta;
-  })();
+      // computeStallSignal は meta.ctxPack / meta.extra.ctxPack を見に行くので、両方に寄せる
+      const ex2 =
+        meta && typeof meta === 'object' && (meta as any).extra && typeof (meta as any).extra === 'object'
+          ? (meta as any).extra
+          : ((meta as any).extra = {});
 
-  const stall = computeStallSignal({
-    userText: String(textForCounsel ?? ''),
-    history,
-    meta: stallMeta,
-  });
+      if (ctxPack && !(meta as any).ctxPack) (meta as any).ctxPack = ctxPack;
+      if (ctxPack && !ex2.ctxPack) ex2.ctxPack = ctxPack;
+      if (typeof rs === 'string' && rs.trim()) {
+        if (!(meta as any).repeatSignal) (meta as any).repeatSignal = rs;
+        if (!ex2.repeatSignal) ex2.repeatSignal = rs;
+      }
 
+      return meta;
+    })();
 
-  const laneKeyNowBase = forceTConcretize ? 'T_CONCRETIZE' : laneKeyNowRaw;
+    const stall = computeStallSignal({
+      userText: String(textForCounsel ?? ''),
+      history,
+      meta: stallMeta,
+    });
 
-  const focusLabelNow =
-    (meta as any)?.extra?.intentBridge?.focusLabel ??
-    (meta as any)?.intentBridge?.focusLabel ??
-    undefined;
+    const laneKeyNowBase = forceTConcretize ? 'T_CONCRETIZE' : laneKeyNowRaw;
+
+    const focusLabelNow =
+      (meta as any)?.extra?.intentBridge?.focusLabel ??
+      (meta as any)?.intentBridge?.focusLabel ??
+      undefined;
 
     const hasFocusLabelNow =
-    typeof focusLabelNow === 'string' && focusLabelNow.trim().length > 0;
+      typeof focusLabelNow === 'string' && focusLabelNow.trim().length > 0;
 
-// ✅ stall は lane を変えない（lane は IntentBridge の責務）
-// - 迷い/同語反復は「counsel 優先」のシグナルとして扱う（別の分岐で吸う）
-const stallHardNow = stall.severity === 'hard' && !hasFocusLabelNow;
+    // ✅ stall は lane を変えない（lane は IntentBridge の責務）
+    // - 迷い/同語反復は「counsel 優先」のシグナルとして扱う（別の分岐で吸う）
+    const stallHardNow = stall.severity === 'hard' && !hasFocusLabelNow;
 
-// ✅ postprocess(ExpressionLane) が参照する場所に同期しておく
-// - handleIrosReply.postprocess.ts は metaForSave.extra.stallHard を見ている
-// - ここで立てておけば「候補を出しますか？」等の preface 注入が動く
-try {
-  const ex =
-    meta && typeof meta === 'object' && (meta as any).extra && typeof (meta as any).extra === 'object'
-      ? (meta as any).extra
-      : ((meta as any).extra = {});
-  ex.stallHard = stallHardNow;
+    // ✅ postprocess(ExpressionLane) が参照する場所に同期しておく
+    // - handleIrosReply.postprocess.ts は metaForSave.extra.stallHard を見ている
+    // - ここで立てておけば「候補を出しますか？」等の preface 注入が動く
+    try {
+      const ex3 =
+        meta && typeof meta === 'object' && (meta as any).extra && typeof (meta as any).extra === 'object'
+          ? (meta as any).extra
+          : ((meta as any).extra = {});
+      ex3.stallHard = stallHardNow;
 
-  // 既存の監査情報（stall）も残す
-  ex.stall = {
-    ...(ex.stall ?? {}),
-    ...(stall ?? {}),
-    hardNow: stallHardNow,
-    at: Date.now(),
-  };
-} catch {}
+      // 既存の監査情報（stall）も残す
+      ex3.stall = {
+        ...(ex3.stall ?? {}),
+        ...(stall ?? {}),
+        hardNow: stallHardNow,
+        at: Date.now(),
+      };
+    } catch {}
 
-const laneKeyNow = laneKeyNowBase;
+    const laneKeyNow = laneKeyNowBase;
 
-console.log('[IROS/T_CONCRETIZE][FORCE_SWITCH_CHECK]', {
-  forceTConcretize,
-  laneKeyNowRaw,
-  laneKeyNowBase,
-  laneKeyNow,
-  stall,
-  hasFocusLabelNow,
-  focusLabelHead: hasFocusLabelNow ? String(focusLabelNow).slice(0, 40) : null,
-  userHead: String(textForCounsel ?? '').slice(0, 40),
-});
+    console.log('[IROS/T_CONCRETIZE][FORCE_SWITCH_CHECK]', {
+      forceTConcretize,
+      laneKeyNowRaw,
+      laneKeyNowBase,
+      laneKeyNow,
+      stall,
+      hasCoreNow,
+      hasFocusLabelNow,
+      focusLabelHead: hasFocusLabelNow ? String(focusLabelNow).slice(0, 40) : null,
+      userHead: String(textForCounsel ?? '').slice(0, 40),
+    });
 
-  // ✅ intentBridge を single source of truth にする
-  // - null のときは laneKey を渡さない（IDEA_BAND に落とさない）
-  // - T/IDEA が明示されている時だけ渡す
-  const resolvedLaneKeyForNormalChat =
-    laneKeyNow === 'T_CONCRETIZE'
-      ? 'T_CONCRETIZE'
-      : laneKeyNow === 'IDEA_BAND'
-        ? 'IDEA_BAND'
-        : undefined;
+    // ✅ intentBridge を single source of truth にする
+    // - null のときは laneKey を渡さない（IDEA_BAND に落とさない）
+    // - T/IDEA が明示されている時だけ渡す
+    const resolvedLaneKeyForNormalChat =
+      laneKeyNow === 'T_CONCRETIZE'
+        ? 'T_CONCRETIZE'
+        : laneKeyNow === 'IDEA_BAND'
+          ? 'IDEA_BAND'
+          : undefined;
 
-  // ✅ normalChat に「直近ユーザー発話」を渡す（observeFlow の lastUserText を正しく効かせる）
-  // - history は message 配列（role/text|content を持つ）なので、userだけ抽出して末尾だけ渡す
-  const historyArrForNormalChat = Array.isArray(history) ? (history as any[]) : [];
-  const recentUserTextsForNormalChat = historyArrForNormalChat
-    .filter((m) => String(m?.role ?? '').toLowerCase() === 'user')
-    .map((m) => {
-      const v = m?.text ?? m?.content ?? null;
-      return typeof v === 'string' ? v : '';
-    })
-    .map((s) => String(s).replace(/\r\n/g, '\n').trim())
-    .filter(Boolean)
-    .slice(-6);
+    // ✅ normalChat に「直近ユーザー発話」を渡す（observeFlow の lastUserText を正しく効かせる）
+    // - history は message 配列（role/text|content を持つ）なので、userだけ抽出して末尾だけ渡す
+    const historyArrForNormalChat = Array.isArray(history) ? (history as any[]) : [];
+    const recentUserTextsForNormalChat = historyArrForNormalChat
+      .filter((m) => String(m?.role ?? '').toLowerCase() === 'user')
+      .map((m) => {
+        const v = m?.text ?? m?.content ?? null;
+        return typeof v === 'string' ? v : '';
+      })
+      .map((s) => String(s).replace(/\r\n/g, '\n').trim())
+      .filter(Boolean)
+      .slice(-6);
 
-  const fallback = buildNormalChatSlotPlan({
-    userText: textForCounsel,
-    laneKey: resolvedLaneKeyForNormalChat,
+    const currentUserTextForNormalChat = String(textForCounsel ?? '').trim();
 
-    // ✅ 固定文言はやめて、選択された “一点” を渡す
-    focusLabel: laneKeyNow === 'T_CONCRETIZE' ? focusLabelNow : undefined,
+    const earlyResolvedAskForNormalChat = (() => {
+      const lc = currentUserTextForNormalChat.toLowerCase();
 
-    context: {
-      lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
-      recentUserTexts: recentUserTextsForNormalChat,
-    },
-  });
+      const hasAnyInUser = (...needles: string[]) =>
+        needles.some(
+          (n) =>
+            currentUserTextForNormalChat.includes(n) ||
+            lc.includes(n.toLowerCase()),
+        );
 
-  if (shouldFallbackNormalChat) {
+      const hasTruthLike =
+        hasAnyInUser('真実', '事実', '本当') ||
+        /真実|事実|本当/u.test(currentUserTextForNormalChat);
+
+      const hasStructureLike =
+        hasAnyInUser('構造的', '構造') ||
+        /構造的|構造/u.test(currentUserTextForNormalChat);
+
+      const hasHumanCreationLike =
+        /地球外生命体.*人間.*(作った|創った)/u.test(currentUserTextForNormalChat) ||
+        /人間.*地球外生命体.*(作った|創った)/u.test(currentUserTextForNormalChat) ||
+        /宇宙人.*人間.*(作った|創った)/u.test(currentUserTextForNormalChat) ||
+        /人間.*宇宙人.*(作った|創った)/u.test(currentUserTextForNormalChat);
+
+      if (hasHumanCreationLike && (hasTruthLike || hasStructureLike)) {
+        return {
+          topic: '地球外生命体が人間を作ったのか',
+          askType: 'truth_structure',
+          replyMode: 'direct_answer_first',
+          sourceUserText: currentUserTextForNormalChat,
+        };
+      }
+
+      return null;
+    })();
+
+    const earlyShiftKindForNormalChat =
+      earlyResolvedAskForNormalChat?.askType === 'truth_structure'
+        ? 'clarify_shift'
+        : null;
+
+    const ctxPackForNormalChat = {
+      ...(((meta as any)?.extra?.ctxPack ?? {}) as any),
+      ...(earlyShiftKindForNormalChat ? { shiftKind: earlyShiftKindForNormalChat } : {}),
+      ...(earlyResolvedAskForNormalChat ? { resolvedAsk: earlyResolvedAskForNormalChat } : {}),
+    };
+
     const fallback = buildNormalChatSlotPlan({
       userText: textForCounsel,
       laneKey: resolvedLaneKeyForNormalChat,
+
+      // ✅ 固定文言はやめて、選択された “一点” を渡す
       focusLabel: laneKeyNow === 'T_CONCRETIZE' ? focusLabelNow : undefined,
+
+      // ✅ 上流で確定した判定を normalChat へ渡す
+      ctxPack: ctxPackForNormalChat,
+      meta,
+
       context: {
         lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
         recentUserTexts: recentUserTextsForNormalChat,
@@ -1879,13 +1923,8 @@ console.log('[IROS/T_CONCRETIZE][FORCE_SWITCH_CHECK]', {
     slotPlanPolicy = typeof fp === 'string' && fp.trim() ? fp.trim() : 'FINAL';
 
     (meta as any).slotPlanFallback = 'normalChat';
-  } else {
-    if ((meta as any).slotPlanFallback === 'normalChat') {
-      delete (meta as any).slotPlanFallback;
-    }
   }
 
-}}
   // =========================================================
   // ✅ A) normalChat → flagReply 自動切替（仮置き一点の安全装置）
   // =========================================================
@@ -1942,7 +1981,6 @@ console.log('[IROS/T_CONCRETIZE][FORCE_SWITCH_CHECK]', {
         forceOnePoint: false,
       });
 
-
       slotsArr = Array.isArray(flagSlots) ? flagSlots : [];
       slotPlanPolicy = slotPlanPolicy || 'FINAL';
       (meta as any).slotPlanFallback = 'flagReply';
@@ -1957,30 +1995,31 @@ console.log('[IROS/T_CONCRETIZE][FORCE_SWITCH_CHECK]', {
     }
   }
 } else {
-// ✅ ir診断ターン：normalChat/flagReply/counsel で上書きしない
-// ただし upstream が slot を返さない場合があるので、最低限の seed slot をここで補完する
-const slotsEmpty_ir = !Array.isArray(slotsArr) || slotsArr.length === 0;
-const policyEmpty_ir = !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
+  // ✅ ir診断ターン：normalChat/flagReply/counsel で上書きしない
+  // ただし upstream が slot を返さない場合があるので、最低限の seed slot をここで補完する
+  const slotsEmpty_ir = !Array.isArray(slotsArr) || slotsArr.length === 0;
+  const policyEmpty_ir = !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
 
-if (slotsEmpty_ir) {
-  const raw = String(text ?? '').trim();
+  if (slotsEmpty_ir) {
+    const raw = String(text ?? '').trim();
 
-  // "ir診断 自分" / "ir診断 ひろみの母" などからラベルを拾う（無ければ self）
-  let label = 'self';
-  if (raw.startsWith('ir診断')) {
-    const rest = raw.slice('ir診断'.length).trim();
-    if (rest) label = rest;
-  }
+    // "ir診断 自分" / "ir診断 ひろみの母" などからラベルを拾う（無ければ self）
+    let label = 'self';
+    if (raw.startsWith('ir診断')) {
+      const rest = raw.slice('ir診断'.length).trim();
+      if (rest) label = rest;
+    }
 
-  // ✅ irDiagnosis: diagnosisEngine に接続（src/lib/iros/diagnosis/* を通す）
-  const diag = diagnosisEngine({
-    targetLabel: label,
-    meta: meta as any,
-    slots: null,
-    conversationId: null,
-    userCode: (userCode as any) ?? null,
-    traceId: null,
-  });
+    // ✅ irDiagnosis: diagnosisEngine に接続（src/lib/iros/diagnosis/* を通す）
+    const diag = diagnosisEngine({
+      targetLabel: label,
+      meta: meta as any,
+      slots: null,
+      conversationId: null,
+      userCode: (userCode as any) ?? null,
+      traceId: null,
+    });
+
 
   const seedText =
     diag.ok
@@ -2619,4 +2658,5 @@ return {
   content: '',
   meta,
 };
+}
 }

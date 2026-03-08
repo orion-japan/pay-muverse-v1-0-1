@@ -2382,10 +2382,32 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
   // 最大件数に再調整
   tail = tail.slice(-Math.max(1, maxMsgs));
 
-  // ✅ 最小形（role/content のみ）で保存：metaは持たない（太るので）
-  exAny.historyForWriter = tail;
-  exAny.rememberTextForIros = typeof rememberTextForIros === 'string' ? rememberTextForIros : null;
-  exAny.historyForWriterAt = new Date().toISOString();
+  const slotPlanArr =
+    Array.isArray((out.metaForSave as any)?.slotPlan)
+      ? (out.metaForSave as any).slotPlan
+      : Array.isArray((out.metaForSave as any)?.framePlan?.slotPlan)
+        ? (out.metaForSave as any).framePlan.slotPlan
+        : Array.isArray((out.metaForSave as any)?.framePlan?.slotPlan?.slots)
+          ? (out.metaForSave as any).framePlan.slotPlan.slots
+          : [];
+
+  const shiftSlot = slotPlanArr.find(
+    (s: any) => String(s?.key ?? s?.id ?? '').toUpperCase() === 'SHIFT',
+  );
+
+  const shiftText = String(
+    shiftSlot?.content ?? shiftSlot?.text ?? '',
+  ).trim();
+
+  const isTopicRecallTurn =
+    shiftText.includes('"meaning_kind":"topic_recall"');
+
+  if (!isTopicRecallTurn) {
+    // ✅ 最小形（role/content のみ）で保存：metaは持たない（太るので）
+    exAny.historyForWriter = tail;
+    exAny.rememberTextForIros = typeof rememberTextForIros === 'string' ? rememberTextForIros : null;
+    exAny.historyForWriterAt = new Date().toISOString();
+  }
   // =========================================================
   // ✅ FlowTape / FlowDigest（LLM-facing tiny continuity）
   // - “禁止/縛り” は入れない（ログとして素直に刻むだけ）
@@ -2957,33 +2979,54 @@ if (!extra2.flow || typeof extra2.flow !== 'object') extra2.flow = {};
 (extra2.flow as any).returnStreak = (extra2.flow as any).returnStreak ?? returnStreak;
 (extra2.flow as any).sessionBreak = (extra2.flow as any).sessionBreak ?? false;
 // ctxPack にも historyForWriter を同期（循環参照を避ける最小形）
-const hfw = Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
-  ? (out.metaForSave as any).extra.historyForWriter
+const hfwCandidates = [
+  (out.metaForSave as any)?.extra?.historyForWriter,
+  (out.extraForHandle as any)?.historyForWriter,
+  (out.extraForHandle as any)?.ctxPack?.historyForWriter,
+  (extra2.ctxPack as any)?.historyForWriter,
+];
+
+const hfw = hfwCandidates.find(
+  (v) => Array.isArray(v) && v.length > 0,
+) ?? [];
+
+const normalizedHfw = Array.isArray(hfw)
+  ? (hfw as any[])
+      .map((m) => ({
+        role: m?.role === 'assistant' ? 'assistant' : 'user',
+        content: String((m as any)?.content ?? '').trim(),
+      }))
+      .filter((m) => m.content.length > 0)
   : [];
 
-// ✅ 重要：
-// - 既存が空のときだけでなく、既存が「より長い」場合も上書きして “縮める”
-// - これをやらないと、一度30で入ったら永久に30のままになる
-const curHfw = (extra2.ctxPack as any)?.historyForWriter;
-const curLen = Array.isArray(curHfw) ? curHfw.length : 0;
+// ✅ 重要：空でない historyForWriter が見つかったら、ctxPack 正本へ必ず同期
+if (normalizedHfw.length > 0) {
+  (extra2.ctxPack as any).historyForWriter = normalizedHfw;
+}
 
-if (hfw.length && (!Array.isArray(curHfw) || curLen === 0 || curLen > hfw.length)) {
-  (extra2.ctxPack as any).historyForWriter = (hfw as any[]).map((m) => ({
-    role: m?.role === 'assistant' ? 'assistant' : 'user',
-    content: String((m as any)?.content ?? '').trim(),
-  }));
+// ✅ historyForWriterAt も同様に同期
+const hfwAt =
+  (out.metaForSave as any)?.extra?.historyForWriterAt ??
+  (out.extraForHandle as any)?.historyForWriterAt ??
+  (out.extraForHandle as any)?.ctxPack?.historyForWriterAt ??
+  (extra2.ctxPack as any)?.historyForWriterAt ??
+  null;
+
+if (hfwAt != null) {
+  (extra2.ctxPack as any).historyForWriterAt = hfwAt;
 }
 
 // ✅ ctxPack にも historyDigestV1 を同期（存在しているものだけ）
 const digestV1Raw =
   (out.metaForSave as any)?.extra?.historyDigestV1 ??
+  (out.extraForHandle as any)?.historyDigestV1 ??
+  (out.extraForHandle as any)?.ctxPack?.historyDigestV1 ??
   (extra2 as any)?.historyDigestV1 ??
   null;
 
-if ((extra2.ctxPack as any).historyDigestV1 == null && digestV1Raw) {
+if (digestV1Raw) {
   (extra2.ctxPack as any).historyDigestV1 = digestV1Raw;
 }
-
 // ✅ Phase 2-1: personal SHIFT 用の軽量推定を ctxPack 正本へ stamp
 // - 断定診断ではなく "hint" として保持
 // - relation / temperature / shiftKind をまず先に入れる
@@ -3175,19 +3218,50 @@ if ((extra2.ctxPack as any).historyDigestV1 == null && digestV1Raw) {
     const hasAnyInUser = (...needles: string[]) =>
       needles.some((n) => currentUserText.includes(n) || currentUserTextLc.includes(n.toLowerCase()));
 
-    // ✅ 話題修正ターンを最優先で拾う
-    // 例:
-    // - 地球外生命体の話ですよ
-    // - その話です
-    // - ○○のことです
-    // - さっきから言ってるのは○○です
+    const resolvedAskEarly = (() => {
+      const hasTruthLike =
+        hasAnyInUser('真実', '事実', '本当') ||
+        /真実|事実|本当/u.test(currentUserText);
+
+      const hasStructureLike =
+        hasAnyInUser('構造的', '構造', '並び', '当てる', '当てはめる', '置き換える', '解釈') ||
+        /構造的|構造|並び|当てる|当てはめる|置き換える|解釈/u.test(currentUserText);
+
+      const hasHumanCreationLike =
+        /地球外生命体.*人間.*(作った|創った)/u.test(currentUserText) ||
+        /人間.*地球外生命体.*(作った|創った)/u.test(currentUserText) ||
+        /宇宙人.*人間.*(作った|創った)/u.test(currentUserText) ||
+        /人間.*宇宙人.*(作った|創った)/u.test(currentUserText);
+
+      const hasAlienTopicLike =
+        hasAnyInUser('地球外生命体', '宇宙人') ||
+        /地球外生命体|宇宙人/u.test(currentUserText);
+
+      if (
+        (hasHumanCreationLike && (hasTruthLike || hasStructureLike)) ||
+        (hasAlienTopicLike && hasStructureLike)
+      ) {
+        return {
+          topic: hasHumanCreationLike ? '地球外生命体が人間を作ったのか' : '地球外生命体',
+          askType: 'truth_structure',
+          replyMode: 'direct_answer_first',
+          sourceUserText: currentUserText,
+        } as const;
+      }
+
+      return null;
+    })();
+
+    if (resolvedAskEarly?.askType === 'truth_structure') {
+      return 'clarify_shift' as const;
+    }
+
     const topicCorrection =
       /(.+?)の話ですよ/u.test(currentUserText) ||
       /(.+?)のことです/u.test(currentUserText) ||
       /(その話です|そのことです|その件です)/u.test(currentUserText) ||
       /(さっきから言ってるのは.+です)/u.test(currentUserText);
 
-    // ✅ correction turn では stabilize に落とさず、話題固定の clarify に倒す
     if (topicCorrection) {
       return 'clarify_shift' as const;
     }
@@ -3235,6 +3309,89 @@ if ((extra2.ctxPack as any).historyDigestV1 == null && digestV1Raw) {
   if (cp.relationFocus == null) cp.relationFocus = relationFocus;
   if (cp.emotionalTemperature == null) cp.emotionalTemperature = emotionalTemperature;
   if (cp.shiftKind == null) cp.shiftKind = shiftKind;
+
+  const resolvedAskNow = (() => {
+    const currentUserText = String(text ?? '').trim();
+    const currentUserTextLc = currentUserText.toLowerCase();
+
+    const hasAnyInUser = (...needles: string[]) =>
+      needles.some((n) => currentUserText.includes(n) || currentUserTextLc.includes(n.toLowerCase()));
+
+    const prev = (cp as any)?.resolvedAsk ?? null;
+
+    const topicCorrectionOnly =
+      /(.+?)の話ですよ/u.test(currentUserText) ||
+      /(.+?)のことです/u.test(currentUserText) ||
+      /(その話です|そのことです|その件です)/u.test(currentUserText) ||
+      /(さっきから言ってるのは.+です)/u.test(currentUserText);
+
+    const explicitAlienHumanCreate =
+      /地球外生命体.*人間.*作/u.test(currentUserText) ||
+      /人間.*地球外生命体.*作/u.test(currentUserText) ||
+      /宇宙人.*人間.*作/u.test(currentUserText) ||
+      /人間.*宇宙人.*作/u.test(currentUserText);
+
+    const explicitTruthStructure =
+      (hasAnyInUser('真実', '構造的') && hasAnyInUser('地球外生命体', '宇宙人', '人間')) ||
+      explicitAlienHumanCreate;
+
+    const structureFollowOnAlienTopic =
+      hasAnyInUser('地球外生命体', '宇宙人') &&
+      hasAnyInUser('並び', '構造', '当てる', '当てはめる', '置き換える', '解釈');
+
+    if (explicitTruthStructure) {
+      return {
+        topic: '地球外生命体が人間を作ったのか',
+        askType: 'truth_structure',
+        replyMode: 'direct_answer_first',
+        sourceUserText: currentUserText,
+      };
+    }
+
+    if (
+      structureFollowOnAlienTopic &&
+      prev &&
+      typeof prev === 'object' &&
+      String((prev as any).askType ?? '').trim() === 'truth_structure'
+    ) {
+      return {
+        ...prev,
+        replyMode: 'direct_answer_first',
+        sourceUserText: currentUserText,
+      };
+    }
+
+    if (topicCorrectionOnly && prev && typeof prev === 'object') {
+      return {
+        ...prev,
+        sourceUserText: currentUserText,
+      };
+    }
+
+    if (structureFollowOnAlienTopic) {
+      return {
+        topic: '地球外生命体が人間を作ったのか',
+        askType: 'truth_structure',
+        replyMode: 'direct_answer_first',
+        sourceUserText: currentUserText,
+      };
+    }
+
+    if (hasAnyInUser('地球外生命体', '宇宙人') && !prev) {
+      return {
+        topic: '地球外生命体',
+        askType: 'topic_clarify',
+        replyMode: 'stay_on_topic',
+        sourceUserText: currentUserText,
+      };
+    }
+
+    return prev;
+  })();
+
+  if (resolvedAskNow) {
+    (cp as any).resolvedAsk = resolvedAskNow;
+  }
 }
 
 
@@ -4421,78 +4578,112 @@ if (shouldRunWriter) {
             ? String((out.metaForSave as any).extra.pastStateTriggerKind).trim()
             : null;
 
-        const shouldHideHistoryForResponse =
-          shiftKindNow === 'narrow_shift' ||
-          shiftKindNow === 'stabilize_shift' ||
-          pastStateTriggerKindNow === 'none';
+            const shouldHideHistoryForResponse =
+            shiftKindNow === 'narrow_shift' ||
+            shiftKindNow === 'stabilize_shift' ||
+            pastStateTriggerKindNow === 'none';
 
-        const historyForWriterForResponse = shouldHideHistoryForResponse ? [] : turns;
+          // UI表示用と、次ターン内部保持用を分離する
+          const historyForWriterInternal =
+            Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
+              ? (out.metaForSave as any).extra.historyForWriter
+              : Array.isArray((out.metaForSave as any)?.extra?.ctxPack?.historyForWriter)
+                ? (out.metaForSave as any).extra.ctxPack.historyForWriter
+                : Array.isArray(turns)
+                  ? turns
+                  : [];
 
-        return {
-          conversationId: _conversationId ?? null,
-          userCode: _userCode ?? null,
-          traceId: traceIdCanon,
-          inputKind: inputKindCanon,
+          const historyForWriterForResponse = shouldHideHistoryForResponse
+            ? []
+            : historyForWriterInternal;
 
-          exprMeta: exprMetaCanon,
+          const historyForWriterAtInternal =
+            (out.metaForSave as any)?.extra?.historyForWriterAt ??
+            ((out.metaForSave as any)?.extra?.ctxPack as any)?.historyForWriterAt ??
+            (ctxPackPrev as any)?.historyForWriterAt ??
+            null;
 
-          pastStateNoteText:
-            typeof (out.metaForSave as any)?.extra?.pastStateNoteText === 'string'
-              ? (out.metaForSave as any).extra.pastStateNoteText
-              : null,
+          const historyDigestV1Internal =
+            (out.metaForSave as any)?.extra?.historyDigestV1 ??
+            ((out.metaForSave as any)?.extra?.ctxPack as any)?.historyDigestV1 ??
+            (ctxPackPrev as any)?.historyDigestV1 ??
+            null;
 
-          pastStateTriggerKind:
-            typeof (out.metaForSave as any)?.extra?.pastStateTriggerKind === 'string'
-              ? (out.metaForSave as any).extra.pastStateTriggerKind
-              : null,
-
-          pastStateKeyword:
-            typeof (out.metaForSave as any)?.extra?.pastStateKeyword === 'string'
-              ? (out.metaForSave as any).extra.pastStateKeyword
-              : null,
-
-          longTermMemoryNoteText,
-          memoryStateSnapshot,
-          memoryStateNoteText,
-
-          historyForWriter: historyForWriterForResponse,
-
-          ctxPack: {
-            ...ctxPackPrev,
-
-            qCode:
-              (out.metaForSave as any)?.q ??
-              memoryStateSnapshot?.qPrimary ??
-              (ctxPackPrev as any)?.qCode ??
-              null,
-
-            depthStage:
-              (out.metaForSave as any)?.depth ??
-              memoryStateSnapshot?.depthStage ??
-              (ctxPackPrev as any)?.depthStage ??
-              null,
-
-            phase:
-              (out.metaForSave as any)?.phase ??
-              memoryStateSnapshot?.phase ??
-              (ctxPackPrev as any)?.phase ??
-              null,
-
+          return {
+            conversationId: _conversationId ?? null,
+            userCode: _userCode ?? null,
             traceId: traceIdCanon,
             inputKind: inputKindCanon,
-            historyForWriter: historyForWriterForResponse,
-            slotPlanPolicy,
+
             exprMeta: exprMetaCanon,
+
+            pastStateNoteText:
+              typeof (out.metaForSave as any)?.extra?.pastStateNoteText === 'string'
+                ? (out.metaForSave as any).extra.pastStateNoteText
+                : null,
+
+            pastStateTriggerKind:
+              typeof (out.metaForSave as any)?.extra?.pastStateTriggerKind === 'string'
+                ? (out.metaForSave as any).extra.pastStateTriggerKind
+                : null,
+
+            pastStateKeyword:
+              typeof (out.metaForSave as any)?.extra?.pastStateKeyword === 'string'
+                ? (out.metaForSave as any).extra.pastStateKeyword
+                : null,
+
             longTermMemoryNoteText,
+            memoryStateSnapshot,
             memoryStateNoteText,
 
-            memoryStateSnapshot,
-            memoryStateSummary: memoryStateSnapshot?.summary ?? null,
-            memoryStateSituationSummary: memoryStateSnapshot?.situationSummary ?? null,
-            memoryStateSituationTopic: memoryStateSnapshot?.situationTopic ?? null,
-            memoryStateSentimentLevel: memoryStateSnapshot?.sentimentLevel ?? null,
-          },
+            // ここは UI 向けだけ隠す
+            historyForWriter: historyForWriterForResponse,
 
+            ctxPack: {
+              ...(ctxPackPrev as any),
+              ...(((out.metaForSave as any)?.extra?.ctxPack ?? {}) as any),
+
+              qCode:
+                (out.metaForSave as any)?.q ??
+                (out.metaForSave as any)?.qCode ??
+                memoryStateSnapshot?.qPrimary ??
+                ((out.metaForSave as any)?.extra?.ctxPack as any)?.qCode ??
+                (ctxPackPrev as any)?.qCode ??
+                null,
+
+              depthStage:
+                (out.metaForSave as any)?.depth ??
+                (out.metaForSave as any)?.depthStage ??
+                memoryStateSnapshot?.depthStage ??
+                ((out.metaForSave as any)?.extra?.ctxPack as any)?.depthStage ??
+                (ctxPackPrev as any)?.depthStage ??
+                null,
+
+              phase:
+                (out.metaForSave as any)?.phase ??
+                memoryStateSnapshot?.phase ??
+                ((out.metaForSave as any)?.extra?.ctxPack as any)?.phase ??
+                (ctxPackPrev as any)?.phase ??
+                null,
+
+              traceId: traceIdCanon,
+              inputKind: inputKindCanon,
+
+              // UIでは隠しても、次ターン内部用は保持する
+              historyForWriter: historyForWriterInternal,
+              historyForWriterAt: historyForWriterAtInternal,
+              historyDigestV1: historyDigestV1Internal,
+
+              slotPlanPolicy,
+              exprMeta: exprMetaCanon,
+              longTermMemoryNoteText,
+              memoryStateNoteText,
+
+              memoryStateSnapshot,
+              memoryStateSummary: memoryStateSnapshot?.summary ?? null,
+              memoryStateSituationSummary: memoryStateSnapshot?.situationSummary ?? null,
+              memoryStateSituationTopic: memoryStateSnapshot?.situationTopic ?? null,
+            },
           slotPlanPolicy,
 
           flowDigest: (out.metaForSave as any)?.extra?.flowDigest ?? null,

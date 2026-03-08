@@ -230,7 +230,8 @@ function buildClarify(
   userText: string,
   laneKey?: LaneKey,
   flowDelta?: string | null,
-  flow?: { delta?: string; confidence?: number; returnStreak?: number } | null
+  flow?: { delta?: string; confidence?: number; returnStreak?: number } | null,
+  resolvedAskTypeArg?: string | null
 ): NormalChatSlot[] {
   const lane = laneKey;
   const isT = lane === 'T_CONCRETIZE';
@@ -250,8 +251,38 @@ function buildClarify(
   const delta = flowDelta ? String(flowDelta) : null;
   const conf = typeof flow?.confidence === 'number' ? flow.confidence : undefined;
 
-  const buildClarifyMeaningV1 = (text: string): { kind: 'define' | 'reframe' | 'structure'; line: string; source: string } => {
+  const buildClarifyMeaningV1 = (
+    text: string,
+  ): {
+    kind: 'define' | 'reframe' | 'structure' | 'topic_recall';
+    line: string;
+    source: string;
+  } => {
     const t = norm(text);
+
+    if (
+      /(構造から|構造で|構造に|構造へ)/.test(t) ||
+      /(置き換える|置換|写像|翻訳|言い換える)/.test(t) ||
+      /(外因|内因|因果|因果配置|事実層|物語層|意味層)/.test(t)
+    ) {
+      return {
+        kind: 'structure',
+        line: 'いま必要なのは題材そのものの賛否ではなく、その話を因果配置や層の違いに分けて構造語へ写し直すこと',
+        source: 'question_pattern',
+      };
+    }
+
+    if (
+      /(なんの話|何の話|この話|その話|今の話|さっきの話|いまの話|今の流れ|この流れ|その流れ)/.test(t) ||
+      /(それじゃなくて|それじゃない|そうじゃなくて|そのこと|その件|これのこと|それのこと)/.test(t) ||
+      (/わかる/.test(t) && /(話|流れ|こと)/.test(t))
+    ) {
+      return {
+        kind: 'topic_recall',
+        line: 'いまの問いでは、確認や位置合わせではなく、直前まで何について話していたかを一発で言い直す',
+        source: 'topic_recall',
+      };
+    }
 
     if (/(刺さるSHIFT|刺さるシフト)/i.test(t)) {
       return {
@@ -347,7 +378,40 @@ function buildClarify(
     String(flow?.delta ?? flowDelta ?? '').toUpperCase() === 'RETURN' &&
     Number((flow as any)?.returnStreak ?? 0) >= 2;
 
-  return [
+  const normalizedUserText = norm(userText);
+  const resolvedAskType =
+    String(resolvedAskTypeArg ?? '').trim() ||
+    (
+      /(地球外生命体|宇宙人)/.test(normalizedUserText) &&
+      /(人間|人類)/.test(normalizedUserText) &&
+      /(作った|作られた|介入)/.test(normalizedUserText) &&
+      /(構造)/.test(normalizedUserText)
+    )
+      ? 'truth_structure'
+      : '';
+
+      const shiftIntentBase =
+      isT
+        ? 'implement_next_step'
+        : resolvedAskType === 'truth_structure'
+          ? 'answer_truth_structure'
+          : 'answer_user_meaning';
+
+    const shiftHintBase =
+      isT
+        ? 'clarify_t_concretize_v1'
+        : resolvedAskType === 'truth_structure'
+          ? 'clarify_truth_structure_v1'
+          : 'clarify_meaning_v1';
+
+    const shiftLineBase =
+      isT
+        ? null
+        : resolvedAskType === 'truth_structure'
+          ? '結論をぼかさず先に核を答え、そのあとで構造（論点分解・検証条件・どこまで言えるか）を短く添える'
+          : clarifyMeaning.line;
+
+    return [
     obs,
     {
       key: 'SHIFT',
@@ -355,23 +419,58 @@ function buildClarify(
       style: 'neutral',
       content: m('SHIFT', {
         kind: isT ? 't_concretize' : 'clarify',
-        intent: isT ? 'implement_next_step' : 'answer_user_meaning',
-        hint: isT ? 'clarify_t_concretize_v1' : 'clarify_meaning_v1',
-        line: isT ? null : clarifyMeaning.line,
-        source: isT ? 't_concretize' : clarifyMeaning.source,
-        meaning_kind: isT ? null : clarifyMeaning.kind,
+        intent: shiftIntentBase,
+        hint: shiftHintBase,
+        line: shiftLineBase,
+        source: isT
+          ? 't_concretize'
+          : resolvedAskType === 'truth_structure'
+            ? 'resolved_ask'
+            : clarifyMeaning.source,
+        meaning_kind: isT
+          ? null
+          : resolvedAskType === 'truth_structure'
+            ? 'truth_structure'
+            : clarifyMeaning.kind,
         contract: isT
-        ? pickRandom(contractsT)
-        : isDefinitionQuestion
-          ? ['answer_in_one_shot', 'first_line_is_definition_or_pointing', 'no_meta_explain', 'plain_words', 'no_boilerplate']
-          : pickRandom(contractsClarify.slice(1)),
+          ? pickRandom(contractsT)
+          : resolvedAskType === 'truth_structure'
+            ? [
+                'answer_in_one_shot',
+                'first_line_is_core_answer',
+                'then_structure_brief',
+                'no_meta_explain',
+                'plain_words',
+                'no_boilerplate',
+              ]
+            : clarifyMeaning.kind === 'topic_recall'
+              ? [
+                  'answer_in_one_shot',
+                  'first_line_names_last_topic_directly',
+                  'prefer_topic_restatement_over_interpretation',
+                  'no_meta_explain',
+                  'plain_words',
+                  'no_boilerplate',
+                ]
+              : isDefinitionQuestion
+                ? ['answer_in_one_shot', 'first_line_is_definition_or_pointing', 'no_meta_explain', 'plain_words', 'no_boilerplate']
+                : pickRandom(contractsClarify.slice(1)),
         rules: {
           ...(shiftPreset?.rules ?? {}),
-          answer_user_meaning: true,
+          answer_user_meaning: resolvedAskType !== 'truth_structure',
+          answer_truth_structure: resolvedAskType === 'truth_structure',
           keep_it_simple: true,
           no_flow_lecture: true,
           no_meta_explain: true,
-          questions_max: isT ? 0 : isDefinitionQuestion ? 0 : 1,
+          questions_max: isT
+            ? 0
+            : resolvedAskType === 'truth_structure'
+              ? 0
+              : clarifyMeaning.kind === 'topic_recall'
+                ? 0
+                : isDefinitionQuestion
+                  ? 0
+                  : 1,
           ...(deepReadBoost ? { no_definition: false } : {}),
         },
         allow: {
@@ -386,7 +485,6 @@ function buildClarify(
     buildNextHintSlot({ userText, laneKey: lane, flowDelta: delta }),
   ];
 }
-
 // ✅ HowTo/方法質問（QuestionSlots）を normalChat に合わせて「@行だけ」に正規化
 function buildQuestion(
   userText: string,
@@ -596,6 +694,10 @@ function buildFlowReply(args: {
 
   // ✅ A案：上流が「いま触る1点（対象）」を渡せる差し込み口
   focusLabel?: string;
+
+  // ✅ 上流で確定した shiftKind / resolvedAsk を拾うための差し込み口
+  ctxPack?: any;
+  meta?: any;
 }): NormalChatSlot[] {
   function buildShiftMeaningV1(input: {
     userText: string;
@@ -729,77 +831,94 @@ function buildFlowReply(args: {
 
     return 'low' as const;
   })();
-
-  const shiftKind2 = (() => {
-    // ✅ 上流で確定した shiftKind を最優先
-    const stampedShiftKind =
-      String((args as any)?.context?.ctxPack?.shiftKind ?? '').trim() ||
+  console.log('[IROS/NORMAL_CHAT][SHIFT_INPUTS]', {
+    stampedShiftKind:
       String((args as any)?.ctxPack?.shiftKind ?? '').trim() ||
+      String((args as any)?.meta?.extra?.ctxPack?.shiftKind ?? '').trim() ||
+      '',
+    resolvedAskType:
+      String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
+      String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
+      '',
+    hasCtxPack: !!(args as any)?.ctxPack,
+    hasMeta: !!(args as any)?.meta,
+    userHead: String(args.userText ?? '').slice(0, 60),
+  });
+  const shiftKind2 = (() => {
+    const stampedShiftKind =
+      String((args as any)?.ctxPack?.shiftKind ?? '').trim() ||
+      String((args as any)?.meta?.extra?.ctxPack?.shiftKind ?? '').trim() ||
       '';
 
+    const resolvedAskType =
+      String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
+      String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
+      '';
+
+    // ① 上流で確定した shiftKind を最優先
     if (
       stampedShiftKind === 'clarify_shift' ||
       stampedShiftKind === 'stabilize_shift' ||
       stampedShiftKind === 'distance_shift' ||
       stampedShiftKind === 'repair_shift' ||
-      stampedShiftKind === 'decide_shift'
+      stampedShiftKind === 'decide_shift' ||
+      stampedShiftKind === 'narrow_shift'
     ) {
       return stampedShiftKind as
         | 'clarify_shift'
         | 'stabilize_shift'
         | 'distance_shift'
         | 'repair_shift'
-        | 'decide_shift';
+        | 'decide_shift'
+        | 'narrow_shift';
     }
 
-    // ✅ 話題修正ターンは clarify を優先
-    const topicCorrection =
-      /(.+?)の話ですよ/u.test(t) ||
-      /(.+?)のことです/u.test(t) ||
-      /(その話です|そのことです|その件です)/u.test(t) ||
-      /(さっきから言ってるのは.+です)/u.test(t);
-
-    if (topicCorrection) {
+    // ② resolvedAsk が truth/meaning 系なら clarify を優先
+    if (
+      resolvedAskType === 'truth_structure' ||
+      resolvedAskType === 'meaning' ||
+      resolvedAskType === 'definition' ||
+      resolvedAskType === 'topic_clarify'
+    ) {
       return 'clarify_shift' as const;
     }
 
-    if (hasAny('って何', 'とは', '意味', '違い', '定義')) {
-      return 'clarify_shift' as const;
-    }
+    // ③ ここから下だけ旧ローカル判定
+    if (isClarify(t)) return 'clarify_shift' as const;
 
     if (
-      delta === 'RETURN' ||
-      hasAny('戻ってきた', '動けない', '止まる', 'しんどい', 'また同じところ') ||
-      emotionalTemperature2 === 'high' ||
-      emotionalTemperature2 === 'volatile'
+      hasAny('また同じところ', '戻ってきた', '動けない', '止まる', 'しんどい') ||
+      String((args as any)?.flowDelta ?? '').toUpperCase() === 'RETURN'
     ) {
       return 'stabilize_shift' as const;
     }
 
-    if (
-      hasAny('相手', '恋愛', '関係', '距離', '気持ち', '連絡', '既読', '未読') &&
-      hasAny('距離を置かれてる', '遠い', '近すぎる', '追いかけ', '避け', 'わからない')
-    ) {
+    if (hasAny('距離', '近すぎる', '離れたい', '遠い', '重い')) {
       return 'distance_shift' as const;
     }
 
-    if (hasAny('仲直り', '修復', '戻りたい', 'やり直したい')) {
+    if (hasAny('仲直り', '修復', 'やり直したい', '戻りたい')) {
       return 'repair_shift' as const;
     }
 
-    if (hasAny('決められない', '行くべきか', 'やめるべきか', '迷ってる', '選べない')) {
+    if (hasAny('決められない', '迷ってる', '選べない', 'やめるべきか', '行くべきか')) {
       return 'decide_shift' as const;
-    }
-
-    if (hasAny('何から', '何が不安かわからない', '整理したい', '焦点')) {
-      return 'narrow_shift' as const;
     }
 
     return 'narrow_shift' as const;
   })();
 
   const shiftHint2 = (() => {
-    if (shiftKind2 === 'clarify_shift') return 'clarify_meaning_v2';
+    const resolvedAskType =
+      String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
+      String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
+      '';
+
+    if (shiftKind2 === 'clarify_shift') {
+      if (resolvedAskType === 'truth_structure') return 'clarify_truth_structure_v1';
+      return 'clarify_meaning_v2';
+    }
+
     if (shiftKind2 === 'stabilize_shift') return 'stabilize_shift_v1';
     if (shiftKind2 === 'distance_shift') return 'distance_shift_v1';
     if (shiftKind2 === 'repair_shift') return 'repair_shift_v1';
@@ -808,7 +927,16 @@ function buildFlowReply(args: {
   })();
 
   const shiftIntent2 = (() => {
-    if (shiftKind2 === 'clarify_shift') return 'meaning_reframe';
+    const resolvedAskType =
+      String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
+      String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
+      '';
+
+    if (shiftKind2 === 'clarify_shift') {
+      if (resolvedAskType === 'truth_structure') return 'answer_truth_structure';
+      return 'meaning_reframe';
+    }
+
     if (shiftKind2 === 'stabilize_shift') return 'stabilize_direction';
     if (shiftKind2 === 'distance_shift') return 'distance_tuning';
     if (shiftKind2 === 'repair_shift') return 'repair_entry';
@@ -817,6 +945,11 @@ function buildFlowReply(args: {
   })();
 
   const shiftLine2 = (() => {
+    const resolvedAskType =
+      String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
+      String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
+      '';
+
     if (shiftKind2 === 'clarify_shift') {
       const isTopicCorrection =
         t.length <= 24 &&
@@ -826,6 +959,10 @@ function buildFlowReply(args: {
 
       const isDefinitionQuestion2 =
         /(?:って何|とは|意味|違い|定義)/.test(t) || /[?？]/.test(t);
+
+      if (resolvedAskType === 'truth_structure') {
+        return '結論をぼかさず先に核を答え、そのあとで構造（論点分解・検証条件・どこまで言えるか）を短く添える';
+      }
 
       if (isTopicCorrection) {
         return '話題の補正として受け取り、何の話かを勝手に広げず、その話題の中で確認する';
@@ -934,10 +1071,13 @@ function safeLaneKey(v: unknown): LaneKey | null {
 
 
 // ✅ 置き換え 3) buildNormalChatSlotPlan を関数まるごと差し替え
+// ✅ 置き換え 3) buildNormalChatSlotPlan を関数まるごと差し替え
 export function buildNormalChatSlotPlan(args: {
   userText: string;
   laneKey?: LaneKey;
   focusLabel?: string;
+  ctxPack?: any;
+  meta?: any;
   context?: {
     recentUserTexts?: string[];
     lastSummary?: string | null;
@@ -1019,57 +1159,48 @@ export function buildNormalChatSlotPlan(args: {
   } else {
     const d = flow?.delta ? String(flow.delta) : 'FORWARD';
     reason = `flow:${d}`;
-    slots = buildFlowReply({ userText, laneKey, flow, lastUserText, focusLabel: args.focusLabel });
+    slots = buildFlowReply({
+      userText,
+      laneKey,
+      flow,
+      lastUserText,
+      focusLabel: args.focusLabel,
+      ctxPack: args.ctxPack,
+      meta: args.meta,
+    });
   }
 
   const normalized = normalizeSlots(slots);
   if (normalized.length === 0) {
     reason = 'guard:no_slots_after_normalize';
-    slots = [buildNextHintSlot({ userText, laneKey: laneKeyArg, flowDelta: flowDelta ?? 'FORWARD' })];
+    slots = [
+      buildNextHintSlot({
+        userText,
+        laneKey: laneKeyArg,
+        flowDelta: flowDelta ?? 'FORWARD',
+      }),
+    ];
   } else {
     slots = normalized;
-  }
-
-  // --------------------------------------------------
-  // ✅ recall-must-include の差し込み（slot数は増やさない）
-  // - rephraseEngine は SHIFT を seed に混ぜるので、ここに @RESTORE/@Q を追加すると拾える
-  // --------------------------------------------------
-  const buildRecallAppend = (): string => {
-    const lines: string[] = [];
-
-    // (A) RESTORE：復元したい“前の一文”が context.lastSummary に入ってる場合だけ
-    //  トリガーは最低限（戻して/復元/もう一回/さっき/前の）
-    const lastSummary = norm(String(args.context?.lastSummary ?? ''));
-    const wantsRestore = /戻(して|す)|復元|もう一回|さっき|前の/.test(userText);
-    if (wantsRestore && lastSummary) {
-      lines.push(`@RESTORE ${JSON.stringify({ last: clamp(lastSummary, 220) })}`);
-    }
-
-    // (B) Q：質問系（QuestionSlots or Clarify or "？/?"）のときだけ
-    const wantsQ = usedQuestionSlots || usedClarify || /[?？]/.test(userText);
-    if (wantsQ) {
-      lines.push(`@Q ${JSON.stringify({ ask: clamp(userText, 220) })}`);
-    }
-
-    return lines.length ? `\n${lines.join('\n')}` : '';
-  };
-
-  const recallAppend = buildRecallAppend();
-  if (recallAppend) {
-    slots = slots.map((s) => {
-      if (s?.key !== 'SHIFT') return s;
-      const c = String(s.content ?? '');
-      // 念のため二重付与しない
-      if (c.includes('@RESTORE') || c.includes('@Q ')) return s;
-      return { ...s, content: c + recallAppend };
-    });
   }
 
   return {
     kind: 'normal-chat',
     stamp,
-    reason,
-    slotPlanPolicy: reason === 'empty' ? 'UNKNOWN' : 'FINAL',
+    reason: [
+      reason,
+      usedQuestionSlots ? 'usedQuestionSlots' : null,
+      usedClarify ? 'usedClarify' : null,
+      `flow:${flowDelta ?? 'FORWARD'}`,
+      `recent:${recent.length}`,
+      args.ctxPack?.shiftKind ? `shiftKind:${String(args.ctxPack.shiftKind)}` : null,
+      args.ctxPack?.resolvedAsk?.askType
+        ? `askType:${String(args.ctxPack.resolvedAsk.askType)}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(' / '),
+    slotPlanPolicy: 'FINAL',
     slots,
   };
 }

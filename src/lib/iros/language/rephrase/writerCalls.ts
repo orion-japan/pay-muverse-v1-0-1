@@ -697,11 +697,6 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
               ).slice(0, 220);
 
               const shiftMeaning = (() => {
-                const topicCorrectionLine =
-                  String((ctxPack as any)?.topicCorrectionGuard?.guardLine ?? '').trim() || '';
-
-                if (topicCorrectionLine) return topicCorrectionLine;
-
                 if (flowCurrentMeaning !== '(none)' && flowNextMeaning !== '(none)') {
                   return `${flowCurrentMeaning} → ${flowNextMeaning}`;
                 }
@@ -751,6 +746,54 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                 return inputKindNow === 'question' ? 'clarify_shift' : 'narrow_shift';
               })();
 
+              const topicCorrectionGuard = (() => {
+                const user = String((args as any)?.userText ?? '').trim();
+                const sk = String(shiftKindForSeed ?? '').trim();
+
+                const isTopicCorrection =
+                  sk === 'clarify_shift' &&
+                  user.length <= 24 &&
+                  !/[?？]/.test(user) &&
+                  (
+                    /.+の話(です|だ)?よ?$/.test(user) ||
+                    /.+のこと(です|だ)?よ?$/.test(user) ||
+                    /.+について(です|だ)?よ?$/.test(user) ||
+                    /話ですよ/.test(user)
+                  );
+
+                if (!isTopicCorrection) {
+                  return {
+                    active: false,
+                    coreTopic: '',
+                    guardLine: '(none)',
+                    rules: [] as string[],
+                  };
+                }
+
+                const coreTopic =
+                  user
+                    .replace(/(の話|のこと|について)(です|だ)?よ?$/g, '')
+                    .trim() || user;
+
+                const guardLine =
+                  `いまは話題補正の入力。核は「${coreTopic}」。この語を上位カテゴリへ一般化しない。`;
+
+                const rules = [
+                  `Keep the exact topic nucleus as "${coreTopic}".`,
+                  'Do not broaden to a parent topic.',
+                  'Do not add examples unless the user asked for them.',
+                  'Do not reinterpret into a nearby popular theme.',
+                  'Confirm only within the same topic.',
+                ];
+
+                return {
+                  active: true,
+                  coreTopic,
+                  guardLine,
+                  rules,
+                };
+              })();
+
               const relationMeaning = (() => {
                 const rf = relationFocusForSeed;
                 if (!rf) return '(none)';
@@ -791,6 +834,10 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                 const rf = relationFocusForSeed;
                 const sk = shiftKindForSeed;
                 const temp = emotionalTemperatureForSeed;
+
+                if (topicCorrectionGuard.active) {
+                  return `「${topicCorrectionGuard.coreTopic}」のまま確認し、別の話題へ広げない`;
+                }
 
                 if (sk === 'clarify_shift') {
                   return '説明で閉じる。広げず、意味をそのまま返す';
@@ -853,37 +900,23 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
               })();
 
               const cueLabels = (() => {
-                const summaryHead = String((ctxPack as any)?.situationSummary ?? '').trim() || '(none)';
+                if (topicCorrectionGuard.active) {
+                  return {
+                    currentMeaning: '(none)',
+                    shiftMeaning: topicCorrectionGuard.guardLine,
+                    nextMeaning: '(none)',
+                    flowBridge: '(suppressed_for_topic_correction)',
+                    whyItMatches: `user="${topicCorrectionGuard.coreTopic}" / shiftKind=clarify_shift / topic_correction=true`,
+                  };
+                }
 
                 if (shiftKindForSeed === 'clarify_shift') {
-                  const isTopicCorrectionCue =
-                    summaryHead !== '(none)' &&
-                    summaryHead.length <= 24 &&
-                    !/[?？]/.test(summaryHead) &&
-                    (
-                      summaryHead.includes('話ですよ') ||
-                      summaryHead.includes('の話') ||
-                      summaryHead.includes('のこと') ||
-                      summaryHead.includes('について') ||
-                      /.+の話(です|だ)?よ?$/.test(summaryHead)
-                    );
-
-                  if (isTopicCorrectionCue) {
-                    return {
-                      currentMeaning: '(none)',
-                      shiftMeaning: '話題の補正として受け取り、何の話かを勝手に広げず、その話題の中で確認する',
-                      nextMeaning: '(none)',
-                      flowBridge: '(suppressed_for_clarify)',
-                      whyItMatches: `user="${summaryHead}" / shiftKind=clarify_shift / topic_correction=true`,
-                    };
-                  }
-
                   return {
                     currentMeaning: '(none)',
                     shiftMeaning: '質問の向きをそのまま受け取り、話題を広げずにこのテーマのどこを知りたいのかを狭く確かめる',
                     nextMeaning: '(none)',
                     flowBridge: '(suppressed_for_clarify)',
-                    whyItMatches: `user="${summaryHead}" / shiftKind=clarify_shift`,
+                    whyItMatches: `user="${String((ctxPack as any)?.situationSummary ?? '').trim() || '(none)'}" / shiftKind=clarify_shift`,
                   };
                 }
 
@@ -896,147 +929,129 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                 };
               })();
 
-              const topicCorrectionGuard = (() => {
-                const user = String((args as any)?.userText ?? latestUserText ?? '').trim();
-                const sk = String(shiftKindForSeed ?? '').trim();
-
-                const isTopicCorrection =
-                  sk === 'clarify_shift' &&
-                  user.length <= 24 &&
-                  !/[?？]/.test(user) &&
-                  (
-                    /.+の話(です|だ)?よ?$/.test(user) ||
-                    /.+のこと(です|だ)?よ?$/.test(user) ||
-                    /.+について(です|だ)?よ?$/.test(user) ||
-                    /話ですよ/.test(user)
-                  );
-
-                if (!isTopicCorrection) {
-                  return {
-                    active: false,
-                    guardLine: '(none)',
-                    rules: [] as string[],
-                  };
-                }
-
-                const coreTopic =
-                  user.replace(/(の話|のこと|について)(です|だ)?よ?$/g, '').trim() || user;
-
-                const guardLine =
-                  `いまは話題補正の入力。核は「${coreTopic}」。この語を上位カテゴリへ一般化しない。`;
-
-                const rules = [
-                  `Keep the exact topic nucleus as "${coreTopic}".`,
-                  'Do not broaden to a parent topic.',
-                  'Do not add examples unless the user asked for them.',
-                  'Do not reinterpret into a nearby popular theme.',
-                  'Confirm only within the same topic.',
-                ];
-
-                return {
-                  active: true,
-                  guardLine,
-                  rules,
-                };
-              })();
-
-              const topicCorrectionGuardActive =
-                topicCorrectionGuard.active &&
-                shiftKindForSeed === 'clarify_shift' &&
-                cueLabels.shiftMeaning ===
-                  '話題の補正として受け取り、何の話かを勝手に広げず、その話題の中で確認する';
-
-              const topicCorrectionResponseRules = topicCorrectionGuardActive
+              const topicCorrectionResponseRules = topicCorrectionGuard.active
                 ? [
-                    '- Do not widen the topic with examples that the user did not mention.',
-                    '- Do not introduce branches such as UFO, science, biology, SF, sightings, definitions, or imagination unless the user already said them.',
-                    '- First line should simply confirm the corrected topic.',
-                    '- If clarification is needed, ask only what within that same topic they want to know.',
-                    '- Keep it to the same noun phrase the user used.',
-                    ...topicCorrectionGuard.rules,
+                    `- Keep the topic fixed to "${topicCorrectionGuard.coreTopic}".`,
+                    '- Do not widen the topic to parent categories.',
+                    '- Do not introduce extra branches or examples unless the user asked for them.',
+                    '- If you need to clarify, ask only what within that same topic the user wants to know.',
                   ]
                 : [];
 
-              const stateCueLines0 = [
-                'STATE_CUES_V3 (DO NOT OUTPUT):',
-                '',
+                const stateCueLines0 = [
+                  'STATE_CUES_V3 (DO NOT OUTPUT):',
+                  '',
 
-                'STATE_CORE:',
-                stateCore,
-                '',
+                  'STATE_CORE:',
+                  stateCore,
+                  '',
 
-                'CURRENT_MEANING:',
-                cueLabels.currentMeaning,
-                '',
+                  'CURRENT_MEANING:',
+                  cueLabels.currentMeaning,
+                  '',
 
-                'SHIFT_MEANING:',
-                cueLabels.shiftMeaning,
-                '',
+                  'SHIFT_MEANING:',
+                  cueLabels.shiftMeaning,
+                  '',
 
-                'NEXT_MEANING:',
-                cueLabels.nextMeaning,
-                '',
+                  'NEXT_MEANING:',
+                  cueLabels.nextMeaning,
+                  '',
 
-                'SAFE_MEANING:',
-                safeMeaning,
-                '',
+                  'SAFE_MEANING:',
+                  safeMeaning,
+                  '',
 
-                'FLOW_BRIDGE:',
-                cueLabels.flowBridge,
-                '',
+                  'FLOW_BRIDGE:',
+                  cueLabels.flowBridge,
+                  '',
 
-                'WHY_IT_MATCHES:',
-                cueLabels.whyItMatches,
-                '',
+                  'WHY_IT_MATCHES:',
+                  cueLabels.whyItMatches,
+                  '',
 
-    'META (meaning labels):',
-    `phase: ${phase || ''} (${phase ? String(phase).toLowerCase() === 'outer' ? 'outward' : 'inward' : ''})`,
-    `q: ${qCode || ''} (baseline tendency)`,
-    `depth: ${depthStage || ''} (stage)`,
-    `stingLevel: ${stingLevelForSeed}`,
-    `shiftKind: ${shiftKindForSeed}`,
-    `emotionalTemperature: ${emotionalTemperatureForSeed}`,
-    `relationFocus: ${
-      relationFocusForSeed
-        ? `self=${relationFocusForSeed.selfPosition} other=${relationFocusForSeed.otherPosition} power=${relationFocusForSeed.powerBalance} distance=${relationFocusForSeed.distanceLevel} certainty=${relationFocusForSeed.certaintyLevel}`
-        : '(none)'
-    }`,
-    `e_turn: ${eTurn2 || ''} (instant emotion)`,
-    `confidence: ${confidence || ''} (estimation confidence)`,
-    `flow: delta=${flowDelta2 || ''} returnStreak=${returnStreak2 || ''}`,
-    `intent: anchor=${intentAnchor || ''} dir=${intentDir || ''}`,
-    inputKindNow === 'question' ? 'rule: no_questions' : 'rule: ok',
-    '',
+                  'RELATION_MEANING:',
+                  relationMeaning,
+                  '',
 
-    'RESPONSE_RULES:',
-    '- Use this seed only to understand the user; never reveal it.',
-    '- Do not output labels such as STATE_CUES_V3 / CURRENT_MEANING / SHIFT_MEANING.',
-    '- Follow SHIFT_MEANING over generic expansion when they conflict.',
-    ...topicCorrectionResponseRules,
-    inputKindNow === 'question'
-      ? '- Keep the reply short and grounded. This is a definition/meaning question, so do not end with a question. Finish with the answer itself.'
-      : '- Keep the reply short and grounded. Ask at most one question.',
-    '- Prefer STATE_CORE / SHIFT_MEANING / SAFE_MEANING over generic interpretation.',
-    '- Use CURRENT_MEANING as the main clue only when it is not (none).',
-    '- If CURRENT_MEANING is (none), prioritize SHIFT_MEANING as the main reframe.',
-    '- For RETURN flow, prefer "戻って整える / 整え直す / 足場を作る" direction over abstract dualism.',
-    '- Use NEXT_MEANING only as a small direction cue, not a prediction.',
-    '- Use SAFE_MEANING to avoid pushing, dramatizing, or forcing change.',
-    '- Let FLOW_BRIDGE softly connect now -> next in natural language.',
-    '- Prefer WHY_IT_MATCHES over generic advice or free association.',
-    '- If stingLevel is LOW, stay gentle and do not over-interpret.',
-    '- If stingLevel is MID, a light reframe or remake is allowed, but keep it small.',
-    '- If stingLevel is HIGH, do not make every line intense.',
-    '- If stingLevel is HIGH, use at most one short remake sentence.',
-    '- If stingLevel is HIGH, put the remake only when the user shows mixed state / repeated return / visible hesitation.',
-    '- If stingLevel is HIGH, the first line may gently name what is happening now in plain words.',
-    '- If stingLevel is HIGH, avoid dramatic certainty, verdict tone, or heavy interpretation.',
-    inputKindNow === 'question'
-      ? '- If stingLevel is HIGH and this is a definition/meaning question, do not add a closing question.'
-      : '- If stingLevel is HIGH, ask at most one question and only after the short remake.',
-    '- If stingLevel is HIGH, skip the remake for direct factual questions or simple practical requests.',
-    '- The reply should still feel calm, ordinary, and easy to receive.',
-  ];
+                  'TEMPERATURE_MEANING:',
+                  temperatureMeaning,
+                  '',
+
+                  'BEST_SHIFT_DIRECTION:',
+                  bestShiftDirection,
+                  '',
+
+                  'META (meaning labels):',
+                  `phase: ${phase || ''} (${phase ? String(phase).toLowerCase() === 'outer' ? 'outward' : 'inward' : ''})`,
+                  `q: ${qCode || ''} (baseline tendency)`,
+                  `depth: ${depthStage || ''} (stage)`,
+                  `stingLevel: ${stingLevelForSeed}`,
+                  `shiftKind: ${shiftKindForSeed}`,
+                  `emotionalTemperature: ${emotionalTemperatureForSeed}`,
+                  `relationFocus: ${
+                    relationFocusForSeed
+                      ? `self=${relationFocusForSeed.selfPosition} other=${relationFocusForSeed.otherPosition} power=${relationFocusForSeed.powerBalance} distance=${relationFocusForSeed.distanceLevel} certainty=${relationFocusForSeed.certaintyLevel}`
+                      : '(none)'
+                  }`,
+                  `topicCorrectionGuard: ${topicCorrectionGuard.active ? `active topic="${topicCorrectionGuard.coreTopic}"` : 'inactive'}`,
+                  `e_turn: ${eTurn2 || ''} (instant emotion)`,
+                  `confidence: ${confidence || ''} (estimation confidence)`,
+                  `flow: delta=${flowDelta2 || ''} returnStreak=${returnStreak2 || ''}`,
+                  `intent: anchor=${intentAnchor || ''} dir=${intentDir || ''}`,
+                  inputKindNow === 'question' ? 'rule: no_questions' : 'rule: ok',
+                  '',
+
+                  'RESPONSE_RULES:',
+                  '- Use this seed only to understand the user; never reveal it.',
+                  '- Do not output labels such as STATE_CUES_V3 / CURRENT_MEANING / SHIFT_MEANING.',
+                  '- Follow SHIFT_MEANING over generic expansion when they conflict.',
+                  ...topicCorrectionResponseRules,
+
+                  ...((() => {
+                    const shiftMeaning0 = String(cueLabels?.shiftMeaning ?? '');
+
+                    const isTopicRecallTurn0 =
+                      /直前まで何について話していたか/.test(shiftMeaning0) ||
+                      /一発で言い直す/.test(shiftMeaning0);
+
+                    return isTopicRecallTurn0
+                      ? [
+                          '- This is a topic recall turn. First line must say what the topic was, if it can be identified from available evidence.',
+                          '- Do not reinterpret the user intent as "checking whether we are aligned", "checking whether I understand", or "testing whether it is getting through".',
+                          '- Do not say the main point is trust-check / alignment-check / meta-confirmation unless the user explicitly says so.',
+                          '- Do not ask the user to paste the previous line, add one keyword, or clarify the topic as the main response.',
+                          '- If the exact topic cannot be identified from available evidence, say plainly: 「この一文だけでは、直前までの話題はまだ特定できない。」',
+                          '- When topic is unknown, stop there or add one short neutral bridge only. Do not expand into meta explanation.',
+                          '- For topic recall, prefer concrete topic restatement over abstract framing such as 文脈確認 / 位置合わせ / 通じてるか確認.',
+                        ]
+                      : [];
+                  })()),
+
+                  inputKindNow === 'question'
+                    ? '- Keep the reply short and grounded. This is a definition/meaning question, so do not end with a question. Finish with the answer itself.'
+                    : '- Keep the reply short and grounded. Ask at most one question.',
+                  '- Prefer STATE_CORE / SHIFT_MEANING / SAFE_MEANING over generic interpretation.',
+                  '- Use CURRENT_MEANING as the main clue only when it is not (none).',
+                  '- If CURRENT_MEANING is (none), prioritize SHIFT_MEANING as the main reframe.',
+                  '- For RETURN flow, prefer "戻って整える / 整え直す / 足場を作る" direction over abstract dualism.',
+                  '- Use NEXT_MEANING only as a small direction cue, not a prediction.',
+                  '- Use SAFE_MEANING to avoid pushing, dramatizing, or forcing change.',
+                  '- Let FLOW_BRIDGE softly connect now -> next in natural language.',
+                  '- Prefer WHY_IT_MATCHES over generic advice or free association.',
+                  '- If stingLevel is LOW, stay gentle and do not over-interpret.',
+                  '- If stingLevel is MID, a light reframe or remake is allowed, but keep it small.',
+                  '- If stingLevel is HIGH, do not make every line intense.',
+                  '- If stingLevel is HIGH, use at most one short remake sentence.',
+                  '- If stingLevel is HIGH, put the remake only when the user shows mixed state / repeated return / visible hesitation.',
+                  '- If stingLevel is HIGH, the first line may gently name what is happening now in plain words.',
+                  '- If stingLevel is HIGH, avoid dramatic certainty, verdict tone, or heavy interpretation.',
+                  inputKindNow === 'question'
+                    ? '- If stingLevel is HIGH and this is a definition/meaning question, do not add a closing question.'
+                    : '- If stingLevel is HIGH, ask at most one question and only after the short remake.',
+                  '- If stingLevel is HIGH, skip the remake for direct factual questions or simple practical requests.',
+                  '- The reply should still feel calm, ordinary, and easy to receive.',
+                ];
   const stateCueSeed = clampLinesByLen(stateCueLines0, 30, 980).join('\n');
 
   const coordMinimal: string[] = [];
@@ -1087,29 +1102,56 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     });
   } catch {}
 
-  const shiftHintRaw = (() => {
+  const shiftMeta = (() => {
     const s = String(internalPackFixed ?? '');
 
     const mShift = s.match(/@SHIFT\s+(\{[\s\S]*?\})(?:\n|$)/);
     if (mShift?.[1]) {
       try {
         const j = JSON.parse(mShift[1]);
-        return String(j?.hint ?? '').trim();
+        return {
+          hint: String(j?.hint ?? '').trim(),
+          kind: String(j?.kind ?? '').trim(),
+          meaningKind: String(j?.meaning_kind ?? '').trim(),
+          intent: String(j?.intent ?? '').trim(),
+        };
       } catch {}
     }
 
-    return '';
+    return {
+      hint: '',
+      kind: '',
+      meaningKind: '',
+      intent: '',
+    };
   })();
 
-  const isClarifyMeaningTurn = shiftHintRaw === 'clarify_meaning_v1';
+  const shiftHintRaw = shiftMeta.hint;
+  const shiftKindRaw = shiftMeta.kind;
+  const meaningKindRaw = shiftMeta.meaningKind;
+  const shiftIntentRaw = shiftMeta.intent;
+
+  const isTopicRecallTurn =
+    meaningKindRaw === 'topic_recall';
+
+  const isStructureTurn =
+    meaningKindRaw === 'structure';
+
+  const isClarifyMeaningTurn =
+    !isTopicRecallTurn &&
+    !isStructureTurn &&
+    (
+      shiftHintRaw === 'clarify_meaning_v1' ||
+      (shiftKindRaw === 'clarify' && meaningKindRaw === 'define')
+    );
 
   const turnsRaw = turnsToMessages(args.turns, { maxTurnLen: 900, maxUserTurnLen: 900 });
 
-  // clarify_meaning_v1 では古い履歴汚染を避ける
+  // clarify_meaning_v1 / topic_recall では古い履歴汚染を避ける
   // - 直前1往復だけ残す
   // - ただし current turn は ensureEndsWithUser(args.userText) が後で正本を付ける
   const turns =
-    isClarifyMeaningTurn
+    (isClarifyMeaningTurn || isTopicRecallTurn)
       ? (() => {
           const tail = Array.isArray(turnsRaw) ? turnsRaw.slice(-2) : [];
           // 末尾 user は current turn 混入のことがあるので落とす
@@ -1120,15 +1162,31 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
         })()
       : turnsRaw;
 
-  const packMsg: WriterMessage | null = internalPackFixed
-    ? { role: 'assistant', content: internalPackFixed }
-    : null;
+      const packMsg: WriterMessage | null = internalPackFixed
+      ? { role: 'assistant', content: internalPackFixed }
+      : null;
 
-  let messages: WriterMessage[] = [
-    { role: 'system', content: systemOne },
-    ...(packMsg ? [packMsg] : []),
-    ...turns,
-  ];
+    const topicRecallNoEvidenceMsg: WriterMessage | null =
+      isTopicRecallTurn && (!Array.isArray(turns) || turns.length === 0)
+        ? {
+            role: 'assistant',
+            content: [
+              'TOPIC_RECALL_NO_EVIDENCE (DO NOT OUTPUT):',
+              '- This turn is topic_recall, but there is no usable prior turn evidence.',
+              '- Do NOT say the topic is "this interaction itself", "whether I understand", "alignment", or "meta confirmation".',
+              '- Do NOT ask for the previous line, a keyword, or extra clarification as the main answer.',
+              '- Output plainly: 「この一文だけでは、直前までの話題はまだ特定できない。」',
+              '- After that, you may add at most one short neutral bridge sentence.',
+            ].join('\n'),
+          }
+        : null;
+
+    let messages: WriterMessage[] = [
+      { role: 'system', content: systemOne },
+      ...(packMsg ? [packMsg] : []),
+      ...(topicRecallNoEvidenceMsg ? [topicRecallNoEvidenceMsg] : []),
+      ...turns,
+    ];
 
   messages = mergeConsecutiveSameRole(messages);
   messages = ensureEndsWithUser(messages, String(args.userText ?? ''));
@@ -1242,6 +1300,20 @@ export async function callWriterLLM(args: {
   // ✅ 互換で残す（この関数内では参照しない）
   allowRawUserText?: boolean | null;
 }): Promise<string> {
+
+  // ✅ topic_recall / no evidence は LLM に行かず固定返答で止める
+  try {
+    const hasTopicRecallNoEvidence = Array.isArray(args.messages)
+      && args.messages.some(
+        (m) =>
+          m?.role === 'assistant'
+          && /TOPIC_RECALL_NO_EVIDENCE \(DO NOT OUTPUT\):/.test(String(m?.content ?? '')),
+      );
+
+    if (hasTopicRecallNoEvidence) {
+      return 'この一文だけでは、直前までの話題はまだ特定できない。';
+    }
+  } catch {}
   // ✅ HistoryDigest v1 を注入（ある時だけ）
   const digest = (args.historyDigestV1 ?? null) as HistoryDigestV1 | null;
   const injected = digest ? (injectHistoryDigestV1({ messages: args.messages, digest }) as any) : null;
@@ -1325,7 +1397,7 @@ export async function callWriterLLM(args: {
     purpose: 'writer',
     model: args.model,
     temperature: args.temperature,
-    max_tokens: 700,
+    max_tokens: 1200,
     messages: messagesFinal,
     extraBody: args.extraBody ?? {},
     traceId: args.traceId ?? null,

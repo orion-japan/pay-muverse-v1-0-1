@@ -833,28 +833,34 @@ const intentBandForCtx =
     shiftSlotForTopicGuard?.content ?? shiftSlotForTopicGuard?.text ?? '',
   ).trim();
 
-  const isClarifyMeaningTopicGuard =
-    shiftTextForTopicGuard.includes('"hint":"clarify_meaning_v1"') ||
-    (
-      shiftTextForTopicGuard.includes('"kind":"clarify"') &&
-      shiftTextForTopicGuard.includes('"meaning_kind":"define"')
-    );
+  const isTopicRecallTopicGuard =
+    shiftTextForTopicGuard.includes('"kind":"clarify"') &&
+    shiftTextForTopicGuard.includes('"meaning_kind":"topic_recall"');
 
-    const isStabilizeShiftTopicGuard =
+  const isClarifyMeaningTopicGuard =
+    (
+      shiftTextForTopicGuard.includes('"hint":"clarify_meaning_v1"') ||
+      (
+        shiftTextForTopicGuard.includes('"kind":"clarify"') &&
+        shiftTextForTopicGuard.includes('"meaning_kind":"define"')
+      )
+    ) &&
+    !isTopicRecallTopicGuard;
+
+  const isStabilizeShiftTopicGuard =
     shiftTextForTopicGuard.includes('"hint":"stabilize_shift_v1"') ||
     shiftTextForTopicGuard.includes('"kind":"stabilize_shift"');
 
-    if (isClarifyMeaningTopicGuard || isStabilizeShiftTopicGuard) {
-      // 今回入力を優先するターンでは、topic系だけでなく stale history も local ctxPack から落とす
-      (ctxPack as any).topicDigest = undefined;
-      (ctxPack as any).conversationLine = undefined;
-      delete (ctxPack as any).historyForWriter;
-      delete (ctxPack as any).turnsForWriter;
-    } else {
-      if (isBlankLike(ctxPack.topicDigest)) ctxPack.topicDigest = topicDigestForCtx;
-      if (isBlankLike(ctxPack.conversationLine)) ctxPack.conversationLine = conversationLineForCtx;
-    }
-
+  if (isClarifyMeaningTopicGuard || isStabilizeShiftTopicGuard) {
+    // 今回入力を優先するターンでは、topic系だけでなく stale history も local ctxPack から落とす
+    (ctxPack as any).topicDigest = undefined;
+    (ctxPack as any).conversationLine = undefined;
+    delete (ctxPack as any).historyForWriter;
+    delete (ctxPack as any).turnsForWriter;
+  } else {
+    if (isBlankLike(ctxPack.topicDigest)) ctxPack.topicDigest = topicDigestForCtx;
+    if (isBlankLike(ctxPack.conversationLine)) ctxPack.conversationLine = conversationLineForCtx;
+  }
   if (isBlankLike(ctxPack.replyGoal)) ctxPack.replyGoal = replyGoalForCtx;
   // phase / depthStage / qCode を ctxPack にも載せるための “確証つき” 値
   const phaseForCtx =
@@ -1154,46 +1160,343 @@ try {
     shiftSlotForGuard?.content ?? shiftSlotForGuard?.text ?? '',
   );
 
+  const isTopicRecallNow =
+    shiftTextForGuard.includes('"meaning_kind":"topic_recall"');
+
+  const isStructureMapNow =
+    shiftTextForGuard.includes('"meaning_kind":"structure"') ||
+    /(構造から|構造で|構造に|構造へ)/.test(userText) ||
+    /(置き換える|置換|写像|翻訳|言い換える)/.test(userText) ||
+    /(外因|内因|因果|因果配置|事実層|物語層|意味層)/.test(userText);
+
   const isClarifyMeaningNow =
-    shiftTextForGuard.includes('"hint":"clarify_meaning_v1"') ||
+    !isTopicRecallNow &&
+    !isStructureMapNow &&
     (
-      shiftTextForGuard.includes('"kind":"clarify"') &&
-      shiftTextForGuard.includes('"meaning_kind":"define"')
+      shiftTextForGuard.includes('"hint":"clarify_meaning_v1"') ||
+      (
+        shiftTextForGuard.includes('"kind":"clarify"') &&
+        shiftTextForGuard.includes('"meaning_kind":"define"')
+      )
     );
 
   const isStabilizeShiftNow =
-    shiftTextForGuard.includes('"hint":"stabilize_shift_v1"') ||
-    shiftTextForGuard.includes('"kind":"stabilize_shift"');
+    !isTopicRecallNow &&
+    !isStructureMapNow &&
+    (
+      shiftTextForGuard.includes('"hint":"stabilize_shift_v1"') ||
+      shiftTextForGuard.includes('"kind":"stabilize_shift"')
+    );
 
-  // 3) 「配列でない」または「空配列」を未設定扱いとして救済（ctxPackに同期）
-  // - clarify: 定義/意味の即答を優先
-  // - stabilize_shift: 古い文脈混線を切って “今の一点” を優先
+  console.log('[IROS/_impl/rephrase.ts][HFW_GUARD_INPUT]', {
+    conversationId,
+    userCode,
+    traceId: traceId ?? null,
+    isClarifyMeaningNow,
+    isTopicRecallNow,
+    isStabilizeShiftNow,
+    curHfw_isArray: Array.isArray(curHfw),
+    curHfw_len: Array.isArray(curHfw) ? curHfw.length : 0,
+    hfwEffective_isArray: Array.isArray(hfwEffective),
+    hfwEffective_len: Array.isArray(hfwEffective) ? hfwEffective.length : 0,
+    userContext_ctxPack_hasHistoryForWriter: Array.isArray((userContext as any)?.ctxPack?.historyForWriter),
+    userContext_ctxPack_historyForWriter_len: Array.isArray((userContext as any)?.ctxPack?.historyForWriter)
+      ? (userContext as any).ctxPack.historyForWriter.length
+      : 0,
+  });
+
+  const normalizeTurnLite = (t: any): { role: 'assistant' | 'user'; content: string } | null => {
+    const role =
+      t?.role === 'assistant' ? 'assistant' :
+      t?.role === 'user' ? 'user' :
+      null;
+    if (!role) return null;
+
+    const raw = normText(t?.content ?? t?.text ?? '');
+    if (!raw) return null;
+
+    return {
+      role,
+      content: trimLite(raw, 260),
+    };
+  };
+
+  const isGenericMetaQuestion = (s: string): boolean => {
+    const x = normText(s);
+    if (!x) return false;
+
+    return (
+      /^(?:実際の所、?どうなの|結局どうなの|どういうこと|で、?どうなの|要するに|つまり)[？?]?$/.test(x) ||
+      /^わかる[？?]?$/.test(x) ||
+      /^それで[？?]?$/.test(x) ||
+      /何の話/.test(x) ||
+      /なんの話/.test(x)
+    );
+  };
+  const isStructureMapQuestion = (s: string): boolean => {
+    const x = normText(s);
+    if (!x) return false;
+
+    return (
+      /(構造から|構造で|構造に|構造へ)/.test(x) ||
+      /(置き換える|置換|写像|翻訳|言い換える)/.test(x) ||
+      /(外因|内因|因果|因果配置|事実層|物語層|意味層)/.test(x)
+    );
+  };
+
+  const isGenericMetaReply = (s: string): boolean => {
+    const x = normText(s);
+    if (!x) return false;
+
+    return (
+      // 既存
+      /進んでる部分もある/.test(x) ||
+      /止まって見える部分もある/.test(x) ||
+      /判断が宙に浮いてる/.test(x) ||
+      /戻って整える/.test(x) ||
+      /地面を作り直す/.test(x) ||
+      /仕事[？?].*人間関係[？?]/.test(x) ||
+      /自分の気持ちの状態/.test(x) ||
+
+      // 既存 topic_recall 系
+      /わからなさ/.test(x) ||
+      /掴めなさ/.test(x) ||
+      /位置合わせ/.test(x) ||
+      /同じ場所を見て話せてる/.test(x) ||
+      /ちゃんと受け取れてるか/.test(x) ||
+      /私が.*掴めてるか確かめてる/.test(x) ||
+      /前後の文脈が.*見えていない/.test(x) ||
+      /前後の文脈が.*ない/.test(x) ||
+      /内容そのもの.*断定できない/.test(x) ||
+      /話題そのもの.*当ててほしい/.test(x) ||
+      /何の話題か.*当てる/.test(x) ||
+      /いま私たち、どこにいる/.test(x) ||
+
+      // 追加: 今回の実ログで落としたい “汎用メタ整え返し”
+      /ちゃんとついてきてるか/.test(x) ||
+      /ついてきてるか/.test(x) ||
+      /話が途切れ(?:たり)?/.test(x) ||
+      /噛み合ってない感じ/.test(x) ||
+      /噛み合ってない/.test(x) ||
+      /焦点を戻したい/.test(x) ||
+      /焦点を戻す/.test(x) ||
+      /同じ場所を見て話(?:せてる|してる)/.test(x) ||
+      /話の核をひとことだけ置いて/.test(x) ||
+      /具体語を1つだけ置いて/.test(x) ||
+      /具体語をひとつだけ置いて/.test(x) ||
+      /話の核/.test(x) ||
+      /具体語を1つだけ/.test(x) ||
+      /具体語をひとつだけ/.test(x) ||
+
+      // 追加: “いま何を確認しているか” を説明するだけの返し
+      /いま確認したいのは/.test(x) ||
+      /確認したいのは/.test(x) ||
+      /確かめたいのは/.test(x) ||
+      /いま見ているのは/.test(x) ||
+      /いま見たいのは/.test(x) ||
+      /どこを見ているか/.test(x) ||
+      /何を見ているか/.test(x) ||
+      /何を確認したいか/.test(x) ||
+
+      // 追加: topic を言わず “会話の位置” だけ整える返し
+      /同じ話をしているか/.test(x) ||
+      /同じ話題を見ているか/.test(x) ||
+      /どの話題を見てるか/.test(x) ||
+      /いまどの話をしているか/.test(x) ||
+      /何の話をしてるかを確認/.test(x) ||
+      /何の話かを確認/.test(x) ||
+      /話のズレ/.test(x) ||
+      /ズレを整え/.test(x) ||
+      /すれ違いを整え/.test(x) ||
+      /文脈をちゃんと掴めてるか/.test(x) ||
+      /文脈を掴めてるか/.test(x) ||
+      /通じてるか/.test(x) ||
+      /直前の会話が見えていない/.test(x) ||
+      /直前のやりとりがこちらには見えていない/.test(x) ||
+      /どの話題のことか.*当てられない/.test(x) ||
+      /どの話題のことか.*特定できない/.test(x) ||
+      /直前の一文.*教えて/.test(x) ||
+      /キーワード1つ.*教えて/.test(x) ||
+      /キーワード1つでも/.test(x) ||
+      /いまのこのやりとり自体の話/.test(x) ||
+      /話題が見えなくなった瞬間の確認/.test(x) ||
+      /いま何の話をしてるのかを確認する話/.test(x) ||
+      /直前に頭にあったキーワードを1つだけ/.test(x) ||
+      /直前に浮かんでた単語を1つだけ/.test(x) ||
+      /そこから同じ線に戻れる/.test(x) ||
+      /そこからつなぎ直す/.test(x) ||
+      /話題が見えなくなった/.test(x) ||
+
+      // 追加: topic_recall 直前に出がちな “汎用整理文”
+      /整理すると/.test(x) ||
+      /整えて言うと/.test(x) ||
+      /言い換えると/.test(x) ||
+      /いったん整理すると/.test(x) ||
+      /いったん整えると/.test(x) ||
+
+      // 追加: structure_map で落としたい “整え見出し/土台返し”
+      /今ここを揃える/.test(x) ||
+      /見方の土台/.test(x) ||
+      /土台をきれいに並べ直/.test(x) ||
+      /足場を作りたい/.test(x) ||
+      /足場を作る/.test(x) ||
+      /呼吸を整える/.test(x) ||
+      /いったん受け止める/.test(x) ||
+      /どこを触れば流れが変わるか/.test(x)
+    );
+  };
+
+  const buildHfwForWriter = (src: any[]): { role: 'assistant' | 'user'; content: string }[] => {
+    const preview = src.map((t: any) => ({
+      role: t?.role ?? null,
+      contentHead: normText(t?.content ?? t?.text ?? '').slice(0, 80),
+    }));
+
+    console.log('[IROS/_impl/rephrase.ts][HFW_BEFORE_NORMALIZE]', {
+      conversationId,
+      userCode,
+      traceId: traceId ?? null,
+      isTopicRecallNow,
+      srcLen: src.length,
+      srcPreview: preview,
+    });
+
+    let out = src
+      .map(normalizeTurnLite)
+      .filter((v): v is { role: 'assistant' | 'user'; content: string } => Boolean(v));
+
+    console.log('[IROS/_impl/rephrase.ts][HFW_AFTER_NORMALIZE]', {
+      conversationId,
+      userCode,
+      traceId: traceId ?? null,
+      hfwForWriterLen_beforeDrop: out.length,
+      hfwForWriterPreview_beforeDrop: out.map((t) => ({
+        role: t.role,
+        contentHead: t.content.slice(0, 80),
+      })),
+    });
+
+    const structureMapNow = isStructureMapQuestion(userText);
+
+    if ((isTopicRecallNow || structureMapNow) && out.length >= 2) {
+      let trimmed = [...out];
+
+      // topic_recall: 末尾1往復の generic を落とす
+      const last = trimmed[trimmed.length - 1];
+      const prev = trimmed[trimmed.length - 2];
+
+      const shouldDropLastGenericPair =
+        prev?.role === 'user' &&
+        last?.role === 'assistant' &&
+        isGenericMetaQuestion(prev.content) &&
+        isGenericMetaReply(last.content);
+
+      console.log('[IROS/_impl/rephrase.ts][HFW_TOPIC_RECALL_DROP_CHECK]', {
+        conversationId,
+        userCode,
+        traceId: traceId ?? null,
+        prevHead: prev?.content?.slice(0, 80) ?? null,
+        lastHead: last?.content?.slice(0, 80) ?? null,
+        shouldDropLastGenericPair,
+        structureMapNow,
+      });
+
+      if (shouldDropLastGenericPair) {
+        trimmed = trimmed.slice(0, -2);
+      }
+
+      // structure_map:
+      // 1) 最新の「構造で/置き換える」user の後ろにぶら下がった assistant 群を切る
+      // 2) そのうえで汎用整えassistantを落とす
+      if (structureMapNow && trimmed.length > 0) {
+        let lastStructureUserIdx = -1;
+        for (let i = trimmed.length - 1; i >= 0; i -= 1) {
+          const t = trimmed[i];
+          if (t?.role === 'user' && isStructureMapQuestion(t.content)) {
+            lastStructureUserIdx = i;
+            break;
+          }
+        }
+
+        if (lastStructureUserIdx >= 0) {
+          let cutEnd = trimmed.length;
+          for (let i = lastStructureUserIdx + 1; i < trimmed.length; i += 1) {
+            const t = trimmed[i];
+            if (t?.role === 'assistant') {
+              cutEnd = i;
+              break;
+            }
+          }
+
+          if (cutEnd < trimmed.length) {
+            trimmed = trimmed.slice(0, cutEnd);
+          }
+        }
+
+        trimmed = trimmed.filter((t) => {
+          if (t.role !== 'assistant') return true;
+          return !isGenericMetaReply(t.content);
+        });
+
+        console.log('[IROS/_impl/rephrase.ts][HFW_STRUCTURE_FILTERED]', {
+          conversationId,
+          userCode,
+          traceId: traceId ?? null,
+          lastStructureUserIdx,
+          filteredLen: trimmed.length,
+          filteredPreview: trimmed.map((t) => ({
+            role: t.role,
+            contentHead: t.content.slice(0, 80),
+          })),
+        });
+      }
+      out = trimmed;
+    }
+
+    console.log('[IROS/_impl/rephrase.ts][HFW_FINAL_ASSIGN]', {
+      conversationId,
+      userCode,
+      traceId: traceId ?? null,
+      hfwForWriterLen_final: out.length,
+      hfwForWriterPreview_final: out.map((t) => ({
+        role: t.role,
+        contentHead: t.content.slice(0, 80),
+      })),
+    });
+
+    return out;
+  };
+
+  // 3) historyForWriter の扱い
+  // - clarify / stabilize_shift は今の入力優先
+  // - topic_recall / structure_map は normalize + trim を通す
   if (isClarifyMeaningNow || isStabilizeShiftNow) {
     delete (userContext.ctxPack as any).historyForWriter;
     delete (userContext as any).turnsForWriter;
+  } else if (isTopicRecallNow || isStructureMapQuestion(userText)) {
+    const src: any[] =
+      Array.isArray(curHfw) && curHfw.length > 0
+        ? curHfw
+        : Array.isArray(hfwEffective) && hfwEffective.length > 0
+          ? hfwEffective
+          : [];
+
+    if (src.length > 0) {
+      const hfwForWriter = buildHfwForWriter(src);
+      (userContext.ctxPack as any).historyForWriter = hfwForWriter;
+    }
   } else if (
     Array.isArray(hfwEffective) &&
     hfwEffective.length > 0 &&
     (!Array.isArray(curHfw) || curLen === 0)
   ) {
-    (userContext.ctxPack as any).historyForWriter = hfwEffective;
-
-    // rephraseEngine 優先口：turnsForWriter をここで必ず作る（user生文も通す）
-    (userContext as any).turnsForWriter = hfwEffective
-      .map((t: any) => {
-        const role = t?.role === 'assistant' ? 'assistant' : t?.role === 'user' ? 'user' : null;
-        if (!role) return null;
-
-        const raw = normText(t?.content ?? t?.text ?? '');
-        if (!raw) return null;
-
-        const content = trimLite(raw, 260);
-        return { role, content };
-      })
-      .filter(Boolean);
+    const hfwForWriter = buildHfwForWriter(hfwEffective);
+    (userContext.ctxPack as any).historyForWriter = hfwForWriter;
+    (userContext as any).turnsForWriter = hfwForWriter;
   }
-} catch {}
-
+} catch (e) {
+  console.warn('[IROS/_impl/rephrase.ts][HFW_ASSIGN][WARN]', e);
+}
 const __hfw = (userContext as any)?.ctxPack?.historyForWriter;
 const __hfwLen = Array.isArray(__hfw) ? __hfw.length : 0;
 const __t4w = (userContext as any)?.turnsForWriter;
@@ -1259,11 +1562,9 @@ try {
     rawHead: (res as any)?.meta?.rawHead ?? '',
   });
 
-  // 正本：res.meta.extra（AFTER_ATTACH）側
   const resExtra =
     (res as any)?.meta?.extra ?? (res as any)?.metaForSave?.extra ?? (res as any)?.extra ?? null;
 
-  // blocks が空でも head だけは先に反映（fallback で user seed を拾わせない）
   const resHead = TRIM((resExtra as any)?.rephraseHead ?? '');
   if (resHead) {
     (extraMerged as any).rephraseHead = TRIM((extraMerged as any).rephraseHead) || resHead;
@@ -1273,7 +1574,6 @@ try {
     };
   }
 
-  // blocks 探索：res.meta.extra（正本）→ 互換 → 直下互換
   const blocksAny =
     (resExtra as any)?.rephraseBlocks ??
     (resExtra as any)?.rephrase?.blocks ??
@@ -1290,7 +1590,6 @@ try {
 
   const blocksRaw: any[] | null = Array.isArray(blocksAny) ? blocksAny : null;
 
-  // ✅ blocks を“安全化”する：空 / 内部マーカー(@OBS/@SHIFT...) だけなら捨てる
   const toText = (b: any) =>
     TRIM(typeof b === 'string' ? b : (b?.text ?? b?.content ?? b?.message ?? ''));
 
@@ -1309,37 +1608,26 @@ try {
     }
   }
 
-  // ✅ 最重要：blocks が “ある” でも、中身が無効なら fallback 扱いにする
   if (!safeBlocks.length) {
-    // ★最優先：rephraseEngine が blocks を返さない/使えないケースでも、
-    // “内部マーカー(@OBS/@SHIFT...)” を本文扱いして attach しない（micro事故の根）
     const safeFromRes = pickSafeAssistantText({
       candidates: [
-        // res 本体
         (res as any)?.out?.text,
         (res as any)?.out?.content,
         (res as any)?.raw,
         (res as any)?.text,
         (res as any)?.content,
-
-        // meta 側
         (res as any)?.meta?.out?.text,
         (res as any)?.meta?.out?.content,
         (res as any)?.meta?.raw,
         (res as any)?.meta?.text,
         (res as any)?.meta?.content,
-
-        // note / extra head を追加（rawHead しか無い事故の救済）
         (res as any)?.meta?.note,
         (resExtra as any)?.rephraseHead,
-
-        // rawHead は “最後の手段”（internal 判定で弾かれるので安全）
         (res as any)?.meta?.rawHead,
       ],
     });
 
     if (safeFromRes) {
-      // ✅ 内部センチネルは絶対にUIへ出さない
       const isSentinel =
         /^MICRO_LIKE_SKIP_REPHRASE\b/.test(String(safeFromRes)) ||
         /^REPHRASE_/i.test(String(safeFromRes));
@@ -1348,18 +1636,14 @@ try {
         attachBlocksFromTextOrSkip(safeFromRes, 'REPHRASE_TEXT_FALLBACK_SAFE');
         return;
       }
-      // sentinel だったら「テキスト無し扱い」にして次の fallback へ落とす
     }
 
-    // それでも無理なら assistant 側の候補だけ（userText には逃げない）
     const fallbackText = pickSafeAssistantText({
       candidates: [
-        // ✅ 追加：seedOnly/emptyLike でも最終UI文の種が先にここに入ることがある
         (extraMerged as any)?.slotPlanSeedHead,
         (extraMerged as any)?.slotPlanSeed,
         (meta as any)?.extra?.slotPlanSeedHead,
         (meta as any)?.extra?.slotPlanSeed,
-
         (extraMerged as any)?.finalAssistantTextCandidate,
         (extraMerged as any)?.finalAssistantText,
         (extraMerged as any)?.assistantText,
@@ -1376,7 +1660,6 @@ try {
     return;
   }
 
-  // ✅ OK: safeBlocks を採用
   (extraMerged as any).rephraseBlocks = safeBlocks;
   (extraMerged as any).rephraseBlocksAttached = true;
   (extraMerged as any).rephraseLLMApplied = true;
