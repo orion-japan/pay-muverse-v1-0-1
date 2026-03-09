@@ -231,7 +231,8 @@ function buildClarify(
   laneKey?: LaneKey,
   flowDelta?: string | null,
   flow?: { delta?: string; confidence?: number; returnStreak?: number } | null,
-  resolvedAskTypeArg?: string | null
+  resolvedAskTypeArg?: string | null,
+  questionArg?: any,
 ): NormalChatSlot[] {
   const lane = laneKey;
   const isT = lane === 'T_CONCRETIZE';
@@ -250,6 +251,28 @@ function buildClarify(
   const seedText = clamp(norm(userText), 240);
   const delta = flowDelta ? String(flowDelta) : null;
   const conf = typeof flow?.confidence === 'number' ? flow.confidence : undefined;
+
+  const questionType = String(questionArg?.questionType ?? '').trim();
+  const tMode = String(questionArg?.tState?.mode ?? '').trim();
+  const outputPolicy = questionArg?.outputPolicy ?? null;
+
+  const focusCandidateRaw = Array.isArray(questionArg?.iframe?.focusCandidate)
+    ? questionArg.iframe.focusCandidate
+    : [];
+  const questionFocus =
+    focusCandidateRaw.length > 0 ? String(focusCandidateRaw[0] ?? '').trim() : '';
+
+  const usePastReframe = !!outputPolicy?.usePastReframe;
+  const splitFactHypothesis = !!outputPolicy?.splitFactHypothesis;
+  const avoidPrematureClosure = !!outputPolicy?.avoidPrematureClosure;
+
+  const questionSuggestsTruthStructure =
+    questionType === 'structure' || questionType === 'truth';
+
+  const questionSuggestsPastReframe =
+    questionType === 'unresolved_release' ||
+    tMode === 'reobserve_past' ||
+    usePastReframe;
 
   const buildClarifyMeaningV1 = (
     text: string,
@@ -389,36 +412,48 @@ function buildClarify(
     )
       ? 'truth_structure'
       : '';
-      console.log('[IROS/NORMAL_CHAT][BUILD_CLARIFY_TRACE]', {
-        userHead: String(userText ?? '').slice(0, 80),
-        resolvedAskTypeArg: String(resolvedAskTypeArg ?? ''),
-        resolvedAskType,
-        lane,
-        isT,
-        normalizedUserText: normalizedUserText.slice(0, 120),
-      });
-      const shiftIntentBase =
-      isT
-        ? 'implement_next_step'
-        : resolvedAskType === 'truth_structure'
+
+  console.log('[IROS/NORMAL_CHAT][BUILD_CLARIFY_TRACE]', {
+    userHead: String(userText ?? '').slice(0, 80),
+    resolvedAskTypeArg: String(resolvedAskTypeArg ?? ''),
+    resolvedAskType,
+    lane,
+    isT,
+    normalizedUserText: normalizedUserText.slice(0, 120),
+    questionType,
+    tMode,
+    questionFocus: questionFocus || null,
+    usePastReframe,
+    splitFactHypothesis,
+    avoidPrematureClosure,
+  });
+
+  const shiftIntentBase =
+    isT
+      ? 'implement_next_step'
+      : questionSuggestsPastReframe
+        ? 'answer_past_reframe'
+        : resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure
           ? 'answer_truth_structure'
           : 'answer_user_meaning';
 
-    const shiftHintBase =
-      isT
-        ? 'clarify_t_concretize_v1'
-        : resolvedAskType === 'truth_structure'
-          ? 'clarify_truth_structure_v1'
-          : 'clarify_meaning_v1';
+  const shiftHintBase =
+    isT
+      ? 'clarify_t_concretize_v1'
+      : resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure
+        ? 'clarify_truth_structure_v1'
+        : 'clarify_meaning_v1';
 
-    const shiftLineBase =
-      isT
-        ? null
-        : resolvedAskType === 'truth_structure'
+  const shiftLineBase =
+    isT
+      ? null
+      : questionSuggestsPastReframe
+        ? 'いま必要なのは解決を急いで断定することではなく、戻ってきた未完了の型を見つけて、未完了テーマ・反復パターン・再配置の順で見直すこと'
+        : resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure
           ? '結論をぼかさず先に核を答え、そのあとで構造（論点分解・検証条件・どこまで言えるか）を短く添える'
           : clarifyMeaning.line;
 
-    return [
+  return [
     obs,
     {
       key: 'SHIFT',
@@ -431,53 +466,83 @@ function buildClarify(
         line: shiftLineBase,
         source: isT
           ? 't_concretize'
-          : resolvedAskType === 'truth_structure'
-            ? 'resolved_ask'
-            : clarifyMeaning.source,
+          : questionSuggestsPastReframe
+            ? 'question_engine'
+            : resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure
+              ? 'resolved_ask'
+              : clarifyMeaning.source,
         meaning_kind: isT
           ? null
-          : resolvedAskType === 'truth_structure'
-            ? 'truth_structure'
-            : clarifyMeaning.kind,
+          : questionSuggestsPastReframe
+            ? 'past_reframe'
+            : resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure
+              ? 'truth_structure'
+              : clarifyMeaning.kind,
+        question_type: questionType || null,
+        t_mode: tMode || null,
+        question_focus: questionFocus || null,
+        question_policy: {
+          usePastReframe,
+          splitFactHypothesis,
+          avoidPrematureClosure,
+        },
         contract: isT
           ? pickRandom(contractsT)
-          : resolvedAskType === 'truth_structure'
+          : questionSuggestsPastReframe
             ? [
                 'answer_in_one_shot',
-                'first_line_is_core_answer',
-                'then_structure_brief',
-                'no_meta_explain',
+                'first_line_names_unfinished_theme_or_pattern',
+                'prefer_past_reframe_over_advice',
+                'no_premature_closure',
                 'plain_words',
                 'no_boilerplate',
               ]
-            : clarifyMeaning.kind === 'topic_recall'
+            : resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure
               ? [
                   'answer_in_one_shot',
-                  'first_line_names_last_topic_directly',
-                  'prefer_topic_restatement_over_interpretation',
+                  'first_line_is_core_answer',
+                  'then_structure_brief',
                   'no_meta_explain',
                   'plain_words',
                   'no_boilerplate',
                 ]
-              : isDefinitionQuestion
-                ? ['answer_in_one_shot', 'first_line_is_definition_or_pointing', 'no_meta_explain', 'plain_words', 'no_boilerplate']
-                : pickRandom(contractsClarify.slice(1)),
+              : clarifyMeaning.kind === 'topic_recall'
+                ? [
+                    'answer_in_one_shot',
+                    'first_line_names_last_topic_directly',
+                    'prefer_topic_restatement_over_interpretation',
+                    'no_meta_explain',
+                    'plain_words',
+                    'no_boilerplate',
+                  ]
+                : isDefinitionQuestion
+                  ? ['answer_in_one_shot', 'first_line_is_definition_or_pointing', 'no_meta_explain', 'plain_words', 'no_boilerplate']
+                  : pickRandom(contractsClarify.slice(1)),
         rules: {
           ...(shiftPreset?.rules ?? {}),
-          answer_user_meaning: resolvedAskType !== 'truth_structure',
-          answer_truth_structure: resolvedAskType === 'truth_structure',
+          answer_user_meaning:
+            !questionSuggestsPastReframe &&
+            resolvedAskType !== 'truth_structure' &&
+            !questionSuggestsTruthStructure,
+          answer_truth_structure:
+            resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure,
+          use_past_reframe: questionSuggestsPastReframe,
+          split_fact_hypothesis: splitFactHypothesis,
+          avoid_premature_closure: avoidPrematureClosure,
           keep_it_simple: true,
           no_flow_lecture: true,
           no_meta_explain: true,
           questions_max: isT
             ? 0
-            : resolvedAskType === 'truth_structure'
+            : questionSuggestsPastReframe
               ? 0
-              : clarifyMeaning.kind === 'topic_recall'
+              : resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure
                 ? 0
-                : isDefinitionQuestion
+                : clarifyMeaning.kind === 'topic_recall'
                   ? 0
-                  : 1,
+                  : isDefinitionQuestion
+                    ? 0
+                    : 1,
           ...(deepReadBoost ? { no_definition: false } : {}),
         },
         allow: {
@@ -1138,6 +1203,11 @@ export function buildNormalChatSlotPlan(args: {
     String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
     '';
 
+  const question =
+    (args as any)?.meta?.extra?.question ??
+    (args as any)?.ctxPack?.question ??
+    null;
+
   let reason = 'flow';
   let slots: NormalChatSlot[] = [];
 
@@ -1164,6 +1234,7 @@ export function buildNormalChatSlotPlan(args: {
       flowDelta,
       flow as any,
       resolvedAskType,
+      question,
     );
   } else if (isCompose(userText)) {
     reason = 'compose';

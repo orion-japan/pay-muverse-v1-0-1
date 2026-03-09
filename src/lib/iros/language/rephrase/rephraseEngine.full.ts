@@ -1511,9 +1511,7 @@ function readItOkFromContext(userContext: unknown): boolean {
   if (!userContext || typeof userContext !== 'object') return false;
   const uc: any = userContext as any;
 
-  // ✅ このターンの itOk は「このターンの扉」だけを見る
-  // - itTriggered（過去の状態）や tLayerModeActive（濃度モード）は itOk の代替にしない
-  // - orchestrator が meta.itTrigger.ok（camel/snake）を供給している前提
+  // 1) 今ターンの明示 itOk を最優先
   const ok =
     tryGet(uc, ['itTrigger', 'ok']) ??
     tryGet(uc, ['it_trigger', 'ok']) ??
@@ -1525,7 +1523,91 @@ function readItOkFromContext(userContext: unknown): boolean {
     tryGet(uc, ['ctx_pack', 'it_trigger', 'ok']) ??
     null;
 
-  return ok === true;
+  if (ok === true) return true;
+
+  // 2) 明示クリアがある時は継続しない
+  const clearExplicit =
+    tryGet(uc, ['clearItx']) === true ||
+    tryGet(uc, ['itxClear']) === true ||
+    tryGet(uc, ['meta', 'clearItx']) === true ||
+    tryGet(uc, ['meta', 'itxClear']) === true ||
+    tryGet(uc, ['ctxPack', 'clearItx']) === true ||
+    tryGet(uc, ['ctxPack', 'itxClear']) === true ||
+    tryGet(uc, ['ctx_pack', 'clearItx']) === true ||
+    tryGet(uc, ['ctx_pack', 'itxClear']) === true;
+
+  if (clearExplicit) return false;
+
+  // 3) 18日向け: 前回IT継続を許可
+  // - 今ターンで新規 trigger がなくても、
+  //   既存 itxStep + reason/anchor が残っていれば writer では itOk 扱いに寄せる
+  const stepRaw =
+    tryGet(uc, ['itxStep']) ??
+    tryGet(uc, ['itx_step']) ??
+    tryGet(uc, ['meta', 'itxStep']) ??
+    tryGet(uc, ['meta', 'itx_step']) ??
+    tryGet(uc, ['ctxPack', 'itxStep']) ??
+    tryGet(uc, ['ctxPack', 'itx_step']) ??
+    tryGet(uc, ['ctx_pack', 'itxStep']) ??
+    tryGet(uc, ['ctx_pack', 'itx_step']) ??
+    tryGet(uc, ['memoryState', 'itxStep']) ??
+    tryGet(uc, ['memoryState', 'itx_step']) ??
+    tryGet(uc, ['orchestratorState', 'itxStep']) ??
+    tryGet(uc, ['orchestratorState', 'itx_step']) ??
+    tryGet(uc, ['last_state', 'itxStep']) ??
+    tryGet(uc, ['last_state', 'itx_step']) ??
+    null;
+
+  const reasonRaw =
+    tryGet(uc, ['itxReason']) ??
+    tryGet(uc, ['itx_reason']) ??
+    tryGet(uc, ['meta', 'itxReason']) ??
+    tryGet(uc, ['meta', 'itx_reason']) ??
+    tryGet(uc, ['ctxPack', 'itxReason']) ??
+    tryGet(uc, ['ctxPack', 'itx_reason']) ??
+    tryGet(uc, ['ctx_pack', 'itxReason']) ??
+    tryGet(uc, ['ctx_pack', 'itx_reason']) ??
+    tryGet(uc, ['memoryState', 'itxReason']) ??
+    tryGet(uc, ['memoryState', 'itx_reason']) ??
+    tryGet(uc, ['orchestratorState', 'itxReason']) ??
+    tryGet(uc, ['orchestratorState', 'itx_reason']) ??
+    tryGet(uc, ['last_state', 'itxReason']) ??
+    tryGet(uc, ['last_state', 'itx_reason']) ??
+    null;
+
+  const anchorRaw =
+    tryGet(uc, ['intentAnchor']) ??
+    tryGet(uc, ['intent_anchor']) ??
+    tryGet(uc, ['meta', 'intentAnchor']) ??
+    tryGet(uc, ['meta', 'intent_anchor']) ??
+    tryGet(uc, ['ctxPack', 'intentAnchor']) ??
+    tryGet(uc, ['ctxPack', 'intent_anchor']) ??
+    tryGet(uc, ['ctx_pack', 'intentAnchor']) ??
+    tryGet(uc, ['ctx_pack', 'intent_anchor']) ??
+    tryGet(uc, ['memoryState', 'intentAnchor']) ??
+    tryGet(uc, ['memoryState', 'intent_anchor']) ??
+    tryGet(uc, ['orchestratorState', 'intentAnchor']) ??
+    tryGet(uc, ['orchestratorState', 'intent_anchor']) ??
+    tryGet(uc, ['last_state', 'intentAnchor']) ??
+    tryGet(uc, ['last_state', 'intent_anchor']) ??
+    null;
+
+  const step = String(stepRaw ?? '').trim().toUpperCase();
+  const reason = String(reasonRaw ?? '').trim();
+
+  const anchorKey =
+    typeof anchorRaw === 'string'
+      ? anchorRaw.trim()
+      : anchorRaw && typeof anchorRaw === 'object' && typeof (anchorRaw as any).key === 'string'
+        ? String((anchorRaw as any).key).trim()
+        : '';
+
+  const hasCarryStep = /^(T1|T2|T3)$/u.test(step);
+  const hasCarryReason =
+    reason.includes('IT_TRIGGER_OK') || reason.includes('IT_HOLD');
+  const hasCarryAnchor = anchorKey.length > 0;
+
+  return hasCarryStep && (hasCarryReason || hasCarryAnchor);
 }
 
 function extractIntentBandFromContext(userContext: unknown): {
@@ -3277,6 +3359,25 @@ const ctxPackForWriter =
   (opts as any)?.userContext?.ctxPackV1 ??
   null;
 
+  try {
+    console.log('[IROS/rephraseEngine][QUESTION_SOURCE_CHECK]', {
+      traceId: debug.traceId ?? null,
+      conversationId: debug.conversationId ?? null,
+      userCode: debug.userCode ?? null,
+
+      extra_question: (opts as any)?.extra?.question ?? null,
+      userContext_question: (opts as any)?.userContext?.question ?? null,
+      userContext_meta_extra_question:
+        (opts as any)?.userContext?.meta?.extra?.question ?? null,
+      meta_extra_question:
+        (opts as any)?.meta?.extra?.question ?? null,
+      ctxPack_question:
+        (opts as any)?.ctxPack?.question ??
+        (opts as any)?.userContext?.ctxPack?.question ??
+        null,
+    });
+  } catch {}
+
   let messages = buildFirstPassMessages({
     systemPrompt,
     internalPack,
@@ -3294,9 +3395,99 @@ const ctxPackForWriter =
     // ✅ NEW: 末尾 user の正本
     userText: String((opts as any)?.userText ?? ''),
 
+    // ✅ NEW: buildFirstPassMessages / writerCalls.ts が直接拾える経路
+    extra: {
+      question:
+        ((opts as any)?.extra?.question) ??
+        ((opts as any)?.userContext?.question) ??
+        ((opts as any)?.userContext?.meta?.extra?.question) ??
+        null,
+      pastStateNoteText:
+        ((opts as any)?.extra?.pastStateNoteText) ??
+        ((opts as any)?.userContext?.pastStateNoteText) ??
+        ((opts as any)?.userContext?.meta?.extra?.pastStateNoteText) ??
+        null,
+      pastStateTriggerKind:
+        ((opts as any)?.extra?.pastStateTriggerKind) ??
+        ((opts as any)?.userContext?.pastStateTriggerKind) ??
+        ((opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind) ??
+        null,
+      pastStateKeyword:
+        ((opts as any)?.extra?.pastStateKeyword) ??
+        ((opts as any)?.userContext?.pastStateKeyword) ??
+        ((opts as any)?.userContext?.meta?.extra?.pastStateKeyword) ??
+        null,
+    },
+
+    userContext: {
+      ...(((opts as any)?.userContext && typeof (opts as any).userContext === 'object')
+        ? (opts as any).userContext
+        : {}),
+      question:
+        ((opts as any)?.extra?.question) ??
+        ((opts as any)?.userContext?.question) ??
+        ((opts as any)?.userContext?.meta?.extra?.question) ??
+        null,
+      meta: {
+        ...((((opts as any)?.userContext?.meta && typeof (opts as any).userContext.meta === 'object')
+          ? (opts as any).userContext.meta
+          : {})),
+        extra: {
+          ...(((((opts as any)?.userContext?.meta?.extra) && typeof (opts as any).userContext.meta.extra === 'object')
+            ? (opts as any).userContext.meta.extra
+            : {})),
+          question:
+            ((opts as any)?.extra?.question) ??
+            ((opts as any)?.userContext?.question) ??
+            ((opts as any)?.userContext?.meta?.extra?.question) ??
+            null,
+          pastStateNoteText:
+            ((opts as any)?.extra?.pastStateNoteText) ??
+            ((opts as any)?.userContext?.pastStateNoteText) ??
+            ((opts as any)?.userContext?.meta?.extra?.pastStateNoteText) ??
+            null,
+          pastStateTriggerKind:
+            ((opts as any)?.extra?.pastStateTriggerKind) ??
+            ((opts as any)?.userContext?.pastStateTriggerKind) ??
+            ((opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind) ??
+            null,
+          pastStateKeyword:
+            ((opts as any)?.extra?.pastStateKeyword) ??
+            ((opts as any)?.userContext?.pastStateKeyword) ??
+            ((opts as any)?.userContext?.meta?.extra?.pastStateKeyword) ??
+            null,
+          ctxPack: ctxPackForWriter,
+        },
+      },
+    },
+
     // ✅ 既存の経路も残す
     ctxPack: ctxPackForWriter,
-    meta: { extra: { ctxPack: ctxPackForWriter } },
+    meta: {
+      extra: {
+        ctxPack: ctxPackForWriter,
+        question:
+          ((opts as any)?.extra?.question) ??
+          ((opts as any)?.userContext?.question) ??
+          ((opts as any)?.userContext?.meta?.extra?.question) ??
+          null,
+        pastStateNoteText:
+          ((opts as any)?.extra?.pastStateNoteText) ??
+          ((opts as any)?.userContext?.pastStateNoteText) ??
+          ((opts as any)?.userContext?.meta?.extra?.pastStateNoteText) ??
+          null,
+        pastStateTriggerKind:
+          ((opts as any)?.extra?.pastStateTriggerKind) ??
+          ((opts as any)?.userContext?.pastStateTriggerKind) ??
+          ((opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind) ??
+          null,
+        pastStateKeyword:
+          ((opts as any)?.extra?.pastStateKeyword) ??
+          ((opts as any)?.userContext?.pastStateKeyword) ??
+          ((opts as any)?.userContext?.meta?.extra?.pastStateKeyword) ??
+          null,
+      },
+    },
 
     traceId: debug.traceId ?? null,
     conversationId: debug.conversationId ?? null,
@@ -4447,6 +4638,52 @@ raw = await (async () => {
     ''
   ).trim();
 
+  const questionForWriter =
+    (opts as any)?.extra?.question ??
+    (opts as any)?.userContext?.question ??
+    (opts as any)?.userContext?.meta?.extra?.question ??
+    null;
+
+  const questionDomainForWriter = String(
+    (questionForWriter as any)?.domain ?? ''
+  ).trim();
+
+  const questionTypeForWriter = String(
+    (questionForWriter as any)?.questionType ?? ''
+  ).trim();
+
+  const questionTModeForWriter = String(
+    (questionForWriter as any)?.tState?.mode ?? ''
+  ).trim();
+
+  const questionFocusForWriter = String(
+    ((questionForWriter as any)?.tState?.focus ??
+      (Array.isArray((questionForWriter as any)?.iframe?.focusCandidate)
+        ? (questionForWriter as any).iframe.focusCandidate[0]
+        : '')) ?? ''
+  ).trim();
+
+  const questionPolicyForWriter = (() => {
+    const p = (questionForWriter as any)?.outputPolicy;
+    if (!p || typeof p !== 'object') return null;
+    try {
+      return safeHead(JSON.stringify(p), 280);
+    } catch {
+      return safeHead(String(p), 280);
+    }
+  })();
+
+  const questionIFrameKeysForWriter = (() => {
+    const hs = Array.isArray((questionForWriter as any)?.iframe?.hypothesisSpace)
+      ? (questionForWriter as any).iframe.hypothesisSpace
+      : [];
+    const keys = hs
+      .map((x: any) => String(x?.key ?? '').trim())
+      .filter(Boolean)
+      .slice(0, 6);
+    return keys.length > 0 ? keys : [];
+  })();
+
   const stateCuesText = (() => {
     // CORE（確証つき値）
     const coreBits = [
@@ -4511,6 +4748,15 @@ raw = await (async () => {
     if (topicRaw) lines.push(`TOPIC_RAW: ${topicRaw}`);
     if (cardsBits) lines.push(`CARDS: ${cardsBits}`);
 
+    if (questionDomainForWriter) lines.push(`QUESTION_DOMAIN: ${safeHead(questionDomainForWriter, 80)}`);
+    if (questionTypeForWriter) lines.push(`QUESTION_TYPE: ${safeHead(questionTypeForWriter, 80)}`);
+    if (questionTModeForWriter) lines.push(`QUESTION_T_MODE: ${safeHead(questionTModeForWriter, 80)}`);
+    if (questionFocusForWriter) lines.push(`QUESTION_FOCUS: ${safeHead(questionFocusForWriter, 120)}`);
+    if (questionPolicyForWriter) lines.push(`QUESTION_POLICY: ${questionPolicyForWriter}`);
+    if (questionIFrameKeysForWriter.length > 0) {
+      lines.push(`QUESTION_IFRAME_KEYS: ${questionIFrameKeysForWriter.join(', ')}`);
+    }
+
     if (pastStateNoteText) {
       lines.push('PAST_STATE_RECALL: enabled');
       if (pastStateTriggerKind) lines.push(`PAST_STATE_TRIGGER: ${safeHead(pastStateTriggerKind, 80)}`);
@@ -4559,7 +4805,7 @@ raw = await (async () => {
           String(
             (messagesForWriter.find((m) => String(m?.content ?? '').includes('STATE_CUES (DO NOT OUTPUT)')) as any)?.content ?? ''
           ),
-          220
+          1600
         ),
 
         // ✅ NEW: digest中身（continuity）をログで可視化（話題核の強さ判定）
@@ -4572,44 +4818,88 @@ raw = await (async () => {
         digest_repeat_signal: (historyDigestV1 as any)?.continuity?.repeat_signal ?? null,
       });
 
-  return await callWriterLLM({
-    model: opts.model ?? 'gpt-5',
-    temperature: opts.temperature ?? 0.7,
-    messages: messagesForWriter,
+      return await callWriterLLM({
+        model: opts.model ?? 'gpt-5',
+        temperature: opts.temperature ?? 0.7,
+        messages: messagesForWriter,
 
-    // ✅ 追加：冒頭オウム返しガード用（messagesには入れない。比較専用）
-    echoGuardUserText: String((opts as any)?.userText ?? ''),
+        // ✅ 追加：冒頭オウム返しガード用（messagesには入れない。比較専用）
+        echoGuardUserText: String((opts as any)?.userText ?? ''),
 
-    traceId: debug.traceId ?? null,
-    conversationId: debug.conversationId ?? null,
-    userCode: debug.userCode ?? null,
+        traceId: debug.traceId ?? null,
+        conversationId: debug.conversationId ?? null,
+        userCode: debug.userCode ?? null,
 
-    // ✅ 重要：拾ってるだけだった digest を “実際に渡す”
-    historyDigestV1,
+        // ✅ 重要：拾ってるだけだった digest を “実際に渡す”
+        historyDigestV1,
 
-    // ✅ task のときだけ raw user を許可（writerCalls.ts 側で判定に使う）
-    // - directTask が true なら許可
-    // - inputKind が task なら許可
-    allowRawUserText: Boolean(isDirectTask || String(inputKind ?? '').toLowerCase() === 'task'),
+        // ✅ NEW: writerCalls.ts で question / pastState を参照できるように渡す
+        extra: {
+          ...(((opts as any)?.extra && typeof (opts as any).extra === 'object') ? (opts as any).extra : {}),
+          question:
+            ((opts as any)?.extra?.question) ??
+            ((opts as any)?.userContext?.question) ??
+            ((opts as any)?.userContext?.meta?.extra?.question) ??
+            null,
+          pastStateNoteText:
+            ((opts as any)?.extra?.pastStateNoteText) ??
+            ((opts as any)?.userContext?.pastStateNoteText) ??
+            ((opts as any)?.userContext?.meta?.extra?.pastStateNoteText) ??
+            null,
+          pastStateTriggerKind:
+            ((opts as any)?.extra?.pastStateTriggerKind) ??
+            ((opts as any)?.userContext?.pastStateTriggerKind) ??
+            ((opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind) ??
+            null,
+          pastStateKeyword:
+            ((opts as any)?.extra?.pastStateKeyword) ??
+            ((opts as any)?.userContext?.pastStateKeyword) ??
+            ((opts as any)?.userContext?.meta?.extra?.pastStateKeyword) ??
+            null,
+        },
 
-    audit: {
-      mode: 'rephrase',
-      slotPlanPolicy: slotPlanPolicyResolved,
+        userContext: {
+          ...(((opts as any)?.userContext && typeof (opts as any).userContext === 'object') ? (opts as any).userContext : {}),
+          meta: {
+            ...((((opts as any)?.userContext?.meta && typeof (opts as any).userContext.meta === 'object')
+              ? (opts as any).userContext.meta
+              : {})),
+            extra: {
+              ...(((((opts as any)?.userContext?.meta?.extra) && typeof (opts as any).userContext.meta.extra === 'object')
+                ? (opts as any).userContext.meta.extra
+                : {})),
+              question:
+                ((opts as any)?.extra?.question) ??
+                ((opts as any)?.userContext?.question) ??
+                ((opts as any)?.userContext?.meta?.extra?.question) ??
+                null,
+            },
+          },
+        },
 
-      // ✅ “確証つき” の値をそのまま使う
-      qCode: (typeof pickedQCode !== 'undefined' ? pickedQCode : null) as any,
-      depthStage: (typeof pickedDepthStage !== 'undefined' ? pickedDepthStage : null) as any,
-      phase: (typeof pickedPhase !== 'undefined' ? pickedPhase : null) as any,
+        // ✅ task のときだけ raw user を許可（writerCalls.ts 側で判定に使う）
+        // - directTask が true なら許可
+        // - inputKind が task なら許可
+        allowRawUserText: Boolean(isDirectTask || String(inputKind ?? '').toLowerCase() === 'task'),
 
-      // ✅ NEW: writerCalls.ts の inputKind 判定の正本
-      inputKind: (inputKind ?? null) as any,
-      directTask: Boolean(isDirectTask),
+        audit: {
+          mode: 'rephrase',
+          slotPlanPolicy: slotPlanPolicyResolved,
 
-      // ✅ ログ
-      hasDigest: Boolean(historyDigestV1),
-      historyDigestV1Head: historyDigestV1 ? safeHead(String(historyDigestV1), 140) : null,
-    },
-  });
+          // ✅ “確証つき” の値をそのまま使う
+          qCode: (typeof pickedQCode !== 'undefined' ? pickedQCode : null) as any,
+          depthStage: (typeof pickedDepthStage !== 'undefined' ? pickedDepthStage : null) as any,
+          phase: (typeof pickedPhase !== 'undefined' ? pickedPhase : null) as any,
+
+          // ✅ NEW: writerCalls.ts の inputKind 判定の正本
+          inputKind: (inputKind ?? null) as any,
+          directTask: Boolean(isDirectTask),
+
+          // ✅ ログ
+          hasDigest: Boolean(historyDigestV1),
+          historyDigestV1Head: historyDigestV1 ? safeHead(String(historyDigestV1), 140) : null,
+        },
+      });
 })();
 
   // ---------------------------------------------

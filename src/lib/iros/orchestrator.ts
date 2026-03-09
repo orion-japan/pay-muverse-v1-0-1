@@ -64,6 +64,7 @@ import { detectAnchorEntry } from '@/lib/iros/anchor/AnchorEntryDetector';
 import { observeFlow } from '@/lib/iros/input/flowObserver';
 import { computeStallSignal } from '@/lib/iros/conversation/stallProbe';
 import { shouldUseQuestionSlots } from './slotPlans/QuestionSlots';
+import { runQuestionEngine } from './question';
 
 // Person Intent Memory（ir診断）
 import { savePersonIntentState } from './memory/savePersonIntent';
@@ -767,9 +768,26 @@ const prevActive =
     // ✅ Single source：IT結果を “camel + snake” に同時反映（矛盾ゼロ）
     // =========================================================
     // ✅ 今ターンの「扉(itOk)」は reason で決める
-    // - IT_ALREADY_COMMITTED は「状態はT3だが、今ターンの扉は開いていない」
-    const itOk = it.ok === true && it.reason === 'IT_TRIGGER_OK';
+    // - 通常は IT_TRIGGER_OK のときだけ true
+    // - ただし今回は試験的に、
+    //   確定済みT3 + IT_ALREADY_COMMITTED のときだけ carry-open を許す
     const itReason = it.reason ?? null;
+
+    const committedStep =
+      (meta as any)?.itx_step ??
+      (meta as any)?.itxStep ??
+      (ms as any)?.itx_step ??
+      (ms as any)?.itxStep ??
+      null;
+
+    const isCommittedT3 = committedStep === 'T3';
+
+    const carryOpenCommittedT3 =
+      isCommittedT3 && it.ok === true && it.reason === 'IT_ALREADY_COMMITTED';
+
+    const itOk =
+      (it.ok === true && it.reason === 'IT_TRIGGER_OK') ||
+      carryOpenCommittedT3;
 
     // ✅ IT flags を meta に露出（IntentBridge の lane 判定入力に使う）
     // - ここが無いと hasCore/deepenOk が downstream で常に false/null になる
@@ -795,22 +813,17 @@ const prevActive =
       ok: itOk,
       reason: itReason,
       flags: (it as any).flags ?? null,
-      tLayerModeActive: (it as any).tLayerModeActive === true,
-      tLayerHint: (it as any).tLayerHint ?? null,
+      tLayerModeActive:
+        carryOpenCommittedT3 ? true : (it as any).tLayerModeActive === true,
+      tLayerHint:
+        carryOpenCommittedT3
+          ? ((it as any).tLayerHint ?? 'T3')
+          : ((it as any).tLayerHint ?? null),
       tVector: (it as any).tVector ?? null,
     };
 
     // ✅ T3確定（commit済み）なら：probe で確定領域は上書きしない
-    // ただし「今ターンの扉」は開かない（itTriggered/tLayerHint を立てない）
-    const committedStep =
-      (meta as any)?.itx_step ??
-      (meta as any)?.itxStep ??
-      (ms as any)?.itx_step ??
-      (ms as any)?.itxStep ??
-      null;
-
-    const isCommittedT3 = committedStep === 'T3';
-
+    // ただし今回は carry-open のときだけ「表現用の扉」を開ける
     if (isCommittedT3) {
       // ✅ 再発防止ログ用：そのターンの判定理由（確定状態は維持）
       (meta as any).itxDecisionReason = itReason;
@@ -823,9 +836,9 @@ const prevActive =
       (meta as any).itxWriteMode = 'keep';
       (meta as any).itx_write_mode = 'keep';
 
-      // ✅ 今ターンの扉は開かない（ここが重要）
-      (meta as any).itTriggered = false;
-      (meta as any).it_triggered = false;
+      // ✅ carry-open のときだけ今ターンの扉を開く
+      (meta as any).itTriggered = carryOpenCommittedT3;
+      (meta as any).it_triggered = carryOpenCommittedT3;
 
       // itxReason / itx_reason は「確定値」を維持（ここでは代入しない）
     } else {
@@ -858,8 +871,14 @@ const prevActive =
 
     // Tレーン：sticky禁止（毎ターン決定）
     // ✅ Tレイヤーは「今ターンの扉(itOk)」が開いたときだけ有効
-    const tActive = itOk && it.tLayerModeActive === true;
-    const tHint = tActive ? (it.tLayerHint ?? 'T2') : null;
+    const tActive =
+      carryOpenCommittedT3
+        ? true
+        : itOk && it.tLayerModeActive === true;
+    const tHint =
+      tActive
+        ? (carryOpenCommittedT3 ? (it.tLayerHint ?? 'T3') : (it.tLayerHint ?? 'T2'))
+        : null;
     const tVector = tActive ? (it.tVector ?? null) : null;
 
     // camel + snake
@@ -903,6 +922,7 @@ const prevActive =
         tVector,
         isCommittedT3,
         committedStep,
+        carryOpenCommittedT3,
 
         // 既存互換：probe理由
         itx_probe_reason: (meta as any).itx_probe_reason ?? null,
@@ -1632,7 +1652,63 @@ if (!isIrDiagnosisTurn_here && !isGreetingTurn) {
     }
   }
 
+  // ----------------------------------------------------------------
+  // QuestionEngine（問い構造）
+  // - IntentTransition の後 / slotPlan fallback 判定の前に実行する
+  // - 初版は meta.extra.question に保存するだけ（slotPlan を直接変更しない）
+  // ----------------------------------------------------------------
+  {
+    const ex =
+      meta && typeof meta === 'object' && (meta as any).extra && typeof (meta as any).extra === 'object'
+        ? (meta as any).extra
+        : ((meta as any).extra = {});
 
+    const eTurnNow =
+      (meta as any)?.extra?.e_turn ??
+      (meta as any)?.extra?.mirror?.e_turn ??
+      (meta as any)?.e_turn ??
+      null;
+
+    const signalsNow =
+      (meta as any)?.extra?.signals ??
+      (meta as any)?.signals ??
+      null;
+
+    const intentLineNow =
+      (meta as any)?.intentLine ??
+      (meta as any)?.extra?.intentLine ??
+      null;
+
+    const intentTransitionNow =
+      (meta as any)?.intentTransition ??
+      (meta as any)?.extra?.intentTransition ??
+      null;
+
+    const lastSummaryForQuestion =
+      (ms as any)?.situation_summary ??
+      (ms as any)?.situationSummary ??
+      (memoryState as any)?.situation_summary ??
+      (memoryState as any)?.situationSummary ??
+      (mergedBaseMeta as any)?.situation_summary ??
+      (mergedBaseMeta as any)?.situationSummary ??
+      null;
+
+    ex.question =
+      ex.question ??
+      runQuestionEngine({
+        userText: textForCounsel,
+        qCode: (meta as any)?.qCode ?? null,
+        eTurn: eTurnNow,
+        signals: signalsNow,
+        context: {
+          conversationId: args.conversationId ?? null,
+          topicHint: (signalsNow as any)?.topicHint ?? null,
+          situationSummary: typeof lastSummaryForQuestion === 'string' ? lastSummaryForQuestion : null,
+        },
+        intentLine: intentLineNow,
+        intentTransition: intentTransitionNow,
+      });
+  }
 
   const slotsEmpty =
     !Array.isArray(slotsArr) || (Array.isArray(slotsArr) && slotsArr.length === 0);

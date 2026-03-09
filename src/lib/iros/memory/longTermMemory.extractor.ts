@@ -8,6 +8,20 @@ import {
 } from './longTermMemory.types';
 import { matchLongTermMemoryClusterV1 } from './longTermMemory.cluster';
 
+const EPISODIC_PATTERNS = [
+  /前に/,
+  /以前/,
+  /前回/,
+  /あの時/,
+  /あの頃/,
+  /同じような/,
+  /比べる/,
+  /思い出す/,
+  /引っかかった/,
+  /戻れないかも/,
+  /失敗したら/,
+];
+
 const RULE_PATTERNS = [
   /今後/,
   /これから/,
@@ -18,6 +32,10 @@ const RULE_PATTERNS = [
   /前提にして/,
   /このルール/,
 ];
+
+function looksLikeEpisodicEvent(text: string) {
+  return EPISODIC_PATTERNS.some((r) => r.test(text));
+}
 
 function normalizeText(text: string) {
   return text
@@ -37,6 +55,9 @@ function detectMemoryType(text: string) {
 
   if (text.includes('Tailwind') || text.includes('日本語'))
     return 'preference';
+
+  if (looksLikeEpisodicEvent(text))
+    return 'episodic_event';
 
   if (text.includes('IROS') || text.includes('Muverse'))
     return 'project_context';
@@ -88,11 +109,11 @@ export function extractDurableMemoriesV1(
           ? 'working_rule'
           : inferredMemoryType;
 
-      const shouldKeep =
-        lineHasRuleSignal ||
-        looksLikeRule(line) ||
-        memoryType === 'working_rule';
-
+          const shouldKeep =
+          lineHasRuleSignal ||
+          looksLikeRule(line) ||
+          memoryType === 'working_rule' ||
+          memoryType === 'episodic_event';
       if (!shouldKeep) continue;
 
       const cluster = matchLongTermMemoryClusterV1({

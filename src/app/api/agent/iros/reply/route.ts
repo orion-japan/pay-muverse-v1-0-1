@@ -261,8 +261,11 @@ const body = (await req.json().catch(() => ({} as any))) as IrosReplyBody;
 // Request meta passthrough (debug-safe)
 // - 入力 meta.extra を後段の正規化/上書きから守るために退避
 // ------------------------------
-const reqMetaRaw: any = (body as any)?.meta ?? null;
-
+let reqMetaRaw: any = (body as any)?.meta ?? null;
+(reqMetaRaw ??= {}).longTermMemoryNoteText =
+  reqMetaRaw?.longTermMemoryNoteText ??
+  reqMetaRaw?.extra?.longTermMemoryNoteText ??
+  null;
 const reqSpeechActRaw =
   (reqMetaRaw as any)?.extra?.speechAct ??
   (reqMetaRaw as any)?.speechAct ??
@@ -1126,71 +1129,83 @@ if (isNonForwardButEmpty) {
     });
   }
 }
+// =========================================================
+// ✅ LTM / memoryStateNoteText を extraSoT に確実に含める
+// =========================================================
+extraSoT = {
+  ...(extraSoT ?? {}),
 
+  // MemoryState
+  memoryStateForCtx, // route.ts で取得済みの state
+  memoryStateNoteText: memoryStateForCtx?.noteText ?? null,
+  longTermMemoryNoteText: memoryStateForCtx?.longTermNoteText ?? null,
 
-      // render engine apply（single entry）
-      // render engine apply（single entry）
-      {
-        const upperMode = String(effectiveMode ?? '').toUpperCase();
-        const enableRenderEngine = extraSoT?.renderEngine === true || extraSoT?.renderEngineGate === true;
-        const isIT = upperMode === 'IT' || Boolean((meta as any)?.extra?.renderReplyForcedIT);
+  // 既存の rephrase / render 指示を保持
+  renderEngine: extraSoT?.renderEngine === true,
+  renderEngineGate: extraSoT?.renderEngineGate === true,
+};
 
-        const applied = await applyRenderEngineIfEnabled({
-          enableRenderEngine,
-          isIT,
-          conversationId,
-          userCode,
-          userText: userTextClean,
-          extraForHandle: extraSoT ?? null,
-          meta,
-          resultObj: result as any,
-          historyMessages: Array.isArray(chatHistory) ? chatHistory : null,
-        });
+// render engine apply（single entry）
+{
+  const upperMode = String(effectiveMode ?? '').toUpperCase();
+  const enableRenderEngine = extraSoT?.renderEngine === true || extraSoT?.renderEngineGate === true;
+  const isIT = upperMode === 'IT' || Boolean((meta as any)?.extra?.renderReplyForcedIT);
 
-        meta = applied.meta;
-        extraSoT = applied.extraForHandle ?? extraSoT;
+  const applied = await applyRenderEngineIfEnabled({
+    enableRenderEngine,
+    isIT,
+    conversationId,
+    userCode,
+    userText: userTextClean,
+    extraForHandle: extraSoT ?? null,
+    meta,
+    resultObj: result as any,
+    historyMessages: Array.isArray(chatHistory) ? chatHistory : null,
+  });
 
-        // =========================================================
-        // ✅ FIX: render-v2 が付与した rephraseBlocks/head を metaForSave 側へ同期
-        // - UI本文(result.content)は既に正本化済みだが、
-        //   viewer/監査(/api/iros-logs)が metaForSave.meta を読む経路で rb=0 になり得るため
-        // - “存在するものだけ”を同期し、空は上書きしない
-        // =========================================================
-        try {
-          const mfs: any = metaForSave as any;
-          const mfsExtra: any = (mfs?.extra ?? {}) as any;
+  meta = applied.meta;
+  extraSoT = applied.extraForHandle ?? extraSoT;
 
-          const metaAny: any = meta as any;
-          const metaExtra: any = (metaAny?.extra ?? {}) as any;
+  // =========================================================
+  // ✅ FIX: render-v2 が付与した rephraseBlocks/head を metaForSave 側へ同期
+  // - UI本文(result.content)は既に正本化済みだが、
+  //   viewer/監査(/api/iros-logs)が metaForSave.meta を読む経路で rb=0 になり得るため
+  // - “存在するものだけ”を同期し、空は上書きしない
+  // =========================================================
+  try {
+    const mfs: any = metaForSave as any;
+    const mfsExtra: any = (mfs?.extra ?? {}) as any;
 
-          const sotAny: any = (extraSoT ?? {}) as any;
+    const metaAny: any = meta as any;
+    const metaExtra: any = (metaAny?.extra ?? {}) as any;
 
-          const rbFromMeta =
-            Array.isArray(metaExtra?.rephraseBlocks) && metaExtra.rephraseBlocks.length > 0 ? metaExtra.rephraseBlocks : null;
+    const sotAny: any = (extraSoT ?? {}) as any;
 
-          const rbFromSoT =
-            Array.isArray(sotAny?.rephraseBlocks) && sotAny.rephraseBlocks.length > 0 ? sotAny.rephraseBlocks : null;
+    const rbFromMeta =
+      Array.isArray(metaExtra?.rephraseBlocks) && metaExtra.rephraseBlocks.length > 0 ? metaExtra.rephraseBlocks : null;
 
-          const rbFinal = rbFromMeta ?? rbFromSoT ?? null;
+    const rbFromSoT =
+      Array.isArray(sotAny?.rephraseBlocks) && sotAny.rephraseBlocks.length > 0 ? sotAny.rephraseBlocks : null;
 
-          const headFromMeta = String(metaExtra?.rephraseHead ?? '').trim();
-          const headFromSoT = String(sotAny?.rephraseHead ?? '').trim();
-          const headFinal = headFromMeta || headFromSoT || '';
+    const rbFinal = rbFromMeta ?? rbFromSoT ?? null;
 
-          const nextExtra: any = { ...mfsExtra };
+    const headFromMeta = String(metaExtra?.rephraseHead ?? '').trim();
+    const headFromSoT = String(sotAny?.rephraseHead ?? '').trim();
+    const headFinal = headFromMeta || headFromSoT || '';
 
-          if (rbFinal) nextExtra.rephraseBlocks = rbFinal;
-          if (headFinal) nextExtra.rephraseHead = headFinal;
+    const nextExtra: any = { ...mfsExtra };
 
-          // traceId もあれば寄せる（API側が meta から拾う経路の揺れを減らす）
-          const traceIdFinal =
-            String(metaExtra?.traceId ?? metaExtra?.trace_id ?? sotAny?.traceId ?? sotAny?.trace_id ?? '').trim() || '';
-          if (traceIdFinal && !nextExtra.traceId && !nextExtra.trace_id) nextExtra.traceId = traceIdFinal;
+    if (rbFinal) nextExtra.rephraseBlocks = rbFinal;
+    if (headFinal) nextExtra.rephraseHead = headFinal;
 
-          mfs.extra = nextExtra;
-        } catch {}
-      }
+    // traceId もあれば寄せる（API側が meta から拾う経路の揺れを減らす）
+    const traceIdFinal =
+      String(metaExtra?.traceId ?? metaExtra?.trace_id ?? sotAny?.traceId ?? sotAny?.trace_id ?? '').trim() || '';
+    if (traceIdFinal && !nextExtra.traceId && !nextExtra.trace_id) nextExtra.traceId = traceIdFinal;
 
+    mfs.extra = nextExtra;
+  } catch {}
+}
       // sanitize header
       {
         const before = String((result as any)?.content ?? '');

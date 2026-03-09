@@ -4370,6 +4370,8 @@ if (shouldRunWriter) {
 
     return ctxKind || null;
   })();
+
+
   const rr = await rephraseSlotsFinal(
     extracted,
     {
@@ -4415,6 +4417,13 @@ if (shouldRunWriter) {
       } as any,
 
       userContext: await (async () => {
+        console.log('[IROS/USER_CONTEXT][ENTER]', {
+          traceId: traceIdCanon,
+          conversationId: _conversationId ?? null,
+          userCode: _userCode ?? null,
+          hasHistoryForWriter: Array.isArray((out.metaForSave as any)?.extra?.historyForWriter),
+        });
+
         const turns: Array<{ role: 'user' | 'assistant'; content: string }> = Array.isArray(
           (out.metaForSave as any)?.extra?.historyForWriter,
         )
@@ -4446,69 +4455,88 @@ if (shouldRunWriter) {
           delete ctxPackPrev.blockPlanTriggerText;
         } catch {}
 
+        console.log('[IROS/LTM][PRE_ENTER]', {
+          traceId: traceIdCanon,
+          conversationId: _conversationId ?? null,
+          userCode: _userCode ?? null,
+          hasText: typeof text === 'string' && text.trim().length > 0,
+          ctxPackKeys:
+            out?.metaForSave?.extra?.ctxPack && typeof out.metaForSave.extra.ctxPack === 'object'
+              ? Object.keys(out.metaForSave.extra.ctxPack)
+              : [],
+          extraKeys:
+            out?.metaForSave?.extra && typeof out.metaForSave.extra === 'object'
+              ? Object.keys(out.metaForSave.extra)
+              : [],
+        });
+
         const loadedMemoryState =
           typeof _userCode === 'string' && _userCode.trim().length > 0
             ? await loadIrosMemoryState(supabase as any, _userCode)
             : null;
 
-            const memoryStateSnapshot = loadedMemoryState
-            ? {
-                intentAnchor: loadedMemoryState.intentAnchor ?? null,
-                qPrimary: loadedMemoryState.qPrimary ?? null,
-                depthStage: loadedMemoryState.depthStage ?? null,
-                phase: loadedMemoryState.phase ?? null,
-                selfAcceptance: loadedMemoryState.selfAcceptance ?? null,
-                intentLayer: loadedMemoryState.intentLayer ?? null,
-                intentConfidence: loadedMemoryState.intentConfidence ?? null,
-                yLevel: loadedMemoryState.yLevel ?? null,
-                hLevel: loadedMemoryState.hLevel ?? null,
-                spinLoop: loadedMemoryState.spinLoop ?? null,
-                spinStep: loadedMemoryState.spinStep ?? null,
-                descentGate: loadedMemoryState.descentGate ?? null,
-                itxStep: loadedMemoryState.itxStep ?? null,
-                itxAnchorEventType: loadedMemoryState.itxAnchorEventType ?? null,
-                itxReason: loadedMemoryState.itxReason ?? null,
-                itxLastAt: loadedMemoryState.itxLastAt ?? null,
-                summary: loadedMemoryState.summary ?? null,
-                sentimentLevel: loadedMemoryState.sentimentLevel ?? null,
-                situationSummary: loadedMemoryState.situationSummary ?? null,
-                situationTopic: loadedMemoryState.situationTopic ?? null,
-                updatedAt: loadedMemoryState.updatedAt ?? null,
-              }
-            : null;
+        const memoryStateSnapshot = loadedMemoryState
+          ? {
+              intentAnchor: loadedMemoryState.intentAnchor ?? null,
+              qPrimary: loadedMemoryState.qPrimary ?? null,
+              depthStage: loadedMemoryState.depthStage ?? null,
+              phase: loadedMemoryState.phase ?? null,
+              selfAcceptance: loadedMemoryState.selfAcceptance ?? null,
+              intentLayer: loadedMemoryState.intentLayer ?? null,
+              intentConfidence: loadedMemoryState.intentConfidence ?? null,
+              yLevel: loadedMemoryState.yLevel ?? null,
+              hLevel: loadedMemoryState.hLevel ?? null,
+              spinLoop: loadedMemoryState.spinLoop ?? null,
+              spinStep: loadedMemoryState.spinStep ?? null,
+              descentGate: loadedMemoryState.descentGate ?? null,
+              itxStep: loadedMemoryState.itxStep ?? null,
+              itxAnchorEventType: loadedMemoryState.itxAnchorEventType ?? null,
+              itxReason: loadedMemoryState.itxReason ?? null,
+              itxLastAt: loadedMemoryState.itxLastAt ?? null,
+              summary: loadedMemoryState.summary ?? null,
+              sentimentLevel: loadedMemoryState.sentimentLevel ?? null,
+              situationSummary: loadedMemoryState.situationSummary ?? null,
+              situationTopic: loadedMemoryState.situationTopic ?? null,
+              updatedAt: loadedMemoryState.updatedAt ?? null,
+            }
+          : null;
 
-            const memoryStateNoteText = memoryStateSnapshot
-            ? [
-                'MEMORY_STATE:',
-                memoryStateSnapshot.summary
-                  ? `- summary: ${String(memoryStateSnapshot.summary).slice(0, 180)}`
-                  : null,
-                memoryStateSnapshot.situationSummary
-                  ? `- situation_summary: ${String(memoryStateSnapshot.situationSummary).slice(0, 180)}`
-                  : null,
-                memoryStateSnapshot.situationTopic
-                  ? `- situation_topic: ${String(memoryStateSnapshot.situationTopic).slice(0, 120)}`
-                  : null,
-                memoryStateSnapshot.qPrimary
-                  ? `- q_primary: ${memoryStateSnapshot.qPrimary}`
-                  : null,
-                memoryStateSnapshot.depthStage
-                  ? `- depth_stage: ${memoryStateSnapshot.depthStage}`
-                  : null,
-                memoryStateSnapshot.phase
-                  ? `- phase: ${memoryStateSnapshot.phase}`
-                  : null,
-                memoryStateSnapshot.intentLayer
-                  ? `- intent_layer: ${memoryStateSnapshot.intentLayer}`
-                  : null,
-                memoryStateSnapshot.sentimentLevel
-                  ? `- sentiment_level: ${memoryStateSnapshot.sentimentLevel}`
-                  : null,
-              ]
-                .filter((v) => typeof v === 'string' && v.trim().length > 0)
-                .join('\n')
-            : null;
-
+        const memoryStateNoteText = memoryStateSnapshot
+          ? [
+              'MEMORY_STATE:',
+              memoryStateSnapshot.summary
+                ? `- summary: ${String(memoryStateSnapshot.summary).slice(0, 180)}`
+                : null,
+              memoryStateSnapshot.situationSummary
+                ? `- situation_summary: ${String(memoryStateSnapshot.situationSummary).slice(0, 180)}`
+                : null,
+              memoryStateSnapshot.situationTopic
+                ? `- situation_topic: ${String(memoryStateSnapshot.situationTopic).slice(0, 120)}`
+                : null,
+              memoryStateSnapshot.qPrimary
+                ? `- q_primary: ${memoryStateSnapshot.qPrimary}`
+                : null,
+              memoryStateSnapshot.depthStage
+                ? `- depth_stage: ${memoryStateSnapshot.depthStage}`
+                : null,
+              memoryStateSnapshot.phase
+                ? `- phase: ${memoryStateSnapshot.phase}`
+                : null,
+              memoryStateSnapshot.intentLayer
+                ? `- intent_layer: ${memoryStateSnapshot.intentLayer}`
+                : null,
+              memoryStateSnapshot.sentimentLevel
+                ? `- sentiment_level: ${memoryStateSnapshot.sentimentLevel}`
+                : null,
+            ]
+              .filter((v) => typeof v === 'string' && v.trim().length > 0)
+              .join('\n')
+          : null;
+            console.log('[IROS/LTM][LOAD_ENTER]', {
+              traceId: traceIdCanon,
+              userCode: _userCode ?? null,
+              hasText: typeof text === 'string' && text.trim().length > 0,
+            });
         const longTermRows =
           typeof _userCode === 'string' && _userCode.trim().length > 0
             ? await loadDurableMemoriesForTurnV1({
@@ -4523,17 +4551,50 @@ if (shouldRunWriter) {
           maxItems: 4,
         });
 
+        console.log('[IROS/LTM][BEFORE_BUILD]', {
+          selectedCount: selectedLongTermRows?.length ?? 0,
+          totalCount: longTermRows?.length ?? 0,
+          selectedKeys: (selectedLongTermRows ?? []).map((r) => r.key),
+        });
+
         const longTermBuilt = buildLongTermMemoryNoteTextV1({
           rows: selectedLongTermRows,
           maxItems: 4,
+        });
+
+        console.log('[IROS/LTM][AFTER_BUILD]', {
+          pickedCount: longTermBuilt?.picked?.length ?? 0,
+          pickedIds: (longTermBuilt?.picked ?? []).map((r) => r.id),
+          noteTextLen:
+            typeof longTermBuilt?.noteText === 'string'
+              ? longTermBuilt.noteText.length
+              : 0,
+        });
+
+        console.log('[IROS/LTM][BEFORE_PRIORITY]', {
+          pickedCount: longTermBuilt?.picked?.length ?? 0,
         });
 
         await updateMemoryPriorityV1({
           rows: longTermBuilt.picked,
         });
 
+        console.log('[IROS/LTM][AFTER_PRIORITY]', {
+          pickedCount: longTermBuilt?.picked?.length ?? 0,
+        });
+
+        console.log('[IROS/LTM][BEFORE_DECAY]', {
+          totalCount: longTermRows?.length ?? 0,
+          usedRowIds: longTermBuilt.picked.map((r) => r.id),
+        });
+
         await decayUnusedMemoriesV1({
           allRows: longTermRows,
+          usedRowIds: longTermBuilt.picked.map((r) => r.id),
+        });
+
+        console.log('[IROS/LTM][AFTER_DECAY]', {
+          totalCount: longTermRows?.length ?? 0,
           usedRowIds: longTermBuilt.picked.map((r) => r.id),
         });
 
@@ -4548,7 +4609,32 @@ if (shouldRunWriter) {
           clusters: (selectedLongTermRows ?? []).map((r) => r.cluster_key),
           types: (selectedLongTermRows ?? []).map((r) => r.memory_type),
         });
+        // ✅ LTM / MemoryState を route 側へ渡す正本
+        out.metaForSave = out.metaForSave ?? {};
+        (out.metaForSave as any).extra = (out.metaForSave as any).extra ?? {};
 
+        const exAny: any = (out.metaForSave as any).extra;
+
+        exAny.longTermMemoryNoteText = longTermMemoryNoteText;
+        exAny.memoryStateNoteText = memoryStateNoteText;
+        exAny.memoryStateSnapshot = memoryStateSnapshot;
+
+        exAny.ctxPack = exAny.ctxPack && typeof exAny.ctxPack === 'object' ? exAny.ctxPack : {};
+        exAny.ctxPack.longTermMemoryNoteText = longTermMemoryNoteText;
+        exAny.ctxPack.memoryStateNoteText = memoryStateNoteText;
+        exAny.ctxPack.memoryStateSnapshot = memoryStateSnapshot;
+
+        console.log('[IROS/LTM][STAMPED_FOR_ROUTE]', {
+          traceId: traceIdCanon,
+          conversationId: _conversationId ?? null,
+          userCode: _userCode ?? null,
+          longTermMemoryNoteTextLen:
+            typeof longTermMemoryNoteText === 'string' ? longTermMemoryNoteText.length : 0,
+          memoryStateNoteTextLen:
+            typeof memoryStateNoteText === 'string' ? memoryStateNoteText.length : 0,
+          hasMemoryStateSnapshot: Boolean(memoryStateSnapshot),
+          ctxPackKeys: Object.keys(exAny.ctxPack ?? {}),
+        });
         console.log('[IROS/STATE][CTX_ATTACHED]', {
           userCode: _userCode ?? null,
           hasMemoryState: Boolean(memoryStateSnapshot),
@@ -4602,7 +4688,14 @@ if (shouldRunWriter) {
             ((out.metaForSave as any)?.extra?.ctxPack as any)?.historyForWriterAt ??
             (ctxPackPrev as any)?.historyForWriterAt ??
             null;
-
+            console.log('[IROS/USER_CONTEXT][EXIT_READY]', {
+              traceId: traceIdCanon,
+              conversationId: _conversationId ?? null,
+              userCode: _userCode ?? null,
+              hasMemoryStateNoteText: Boolean(memoryStateNoteText),
+              hasLongTermMemoryNoteText: Boolean(longTermMemoryNoteText),
+              selectedLongTermCount: selectedLongTermRows?.length ?? 0,
+            });
           const historyDigestV1Internal =
             (out.metaForSave as any)?.extra?.historyDigestV1 ??
             ((out.metaForSave as any)?.extra?.ctxPack as any)?.historyDigestV1 ??

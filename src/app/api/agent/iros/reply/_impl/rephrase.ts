@@ -912,8 +912,41 @@ const intentBandForCtx =
 
     turns: normalizedHistory.length ? normalizedHistory : undefined,
 
+    // ✅ LTM / MemoryState を root に載せる
+    longTermMemoryNoteText:
+      (extraMerged as any)?.longTermMemoryNoteText ??
+      (meta as any)?.extra?.longTermMemoryNoteText ??
+      null,
+
+    memoryStateNoteText:
+      (extraMerged as any)?.memoryStateNoteText ??
+      (meta as any)?.extra?.memoryStateNoteText ??
+      null,
+
+    memoryStateSnapshot:
+      (extraMerged as any)?.memoryStateSnapshot ??
+      (meta as any)?.extra?.memoryStateSnapshot ??
+      null,
+
     // ✅ 継承＋補完済みの ctxPack を使う（上書き生成しない）
-    ctxPack,
+    ctxPack: {
+      ...(ctxPack && typeof ctxPack === 'object' ? ctxPack : {}),
+      longTermMemoryNoteText:
+        (ctxPack as any)?.longTermMemoryNoteText ??
+        (extraMerged as any)?.longTermMemoryNoteText ??
+        (meta as any)?.extra?.longTermMemoryNoteText ??
+        null,
+      memoryStateNoteText:
+        (ctxPack as any)?.memoryStateNoteText ??
+        (extraMerged as any)?.memoryStateNoteText ??
+        (meta as any)?.extra?.memoryStateNoteText ??
+        null,
+      memoryStateSnapshot:
+        (ctxPack as any)?.memoryStateSnapshot ??
+        (extraMerged as any)?.memoryStateSnapshot ??
+        (meta as any)?.extra?.memoryStateSnapshot ??
+        null,
+    },
 
     historyMessages: normalizedHistory.length ? normalizedHistory : undefined,
   };
@@ -1527,7 +1560,41 @@ console.log('[IROS/_impl/rephrase.ts][USERCTX_KEYS]', {
   conversationId,
   userCode,
 });
+console.log('[IROS/LTM][BEFORE_REPHRASE_CALL]', {
+  traceId,
+  conversationId,
+  userCode,
 
+  userContextKeys:
+    userContext && typeof userContext === 'object'
+      ? Object.keys(userContext)
+      : [],
+
+  userContext_longTermMemoryNoteText:
+    typeof (userContext as any)?.longTermMemoryNoteText === 'string'
+      ? String((userContext as any).longTermMemoryNoteText).slice(0, 200)
+      : null,
+
+  userContext_longTermMemoryNoteTextLen:
+    typeof (userContext as any)?.longTermMemoryNoteText === 'string'
+      ? String((userContext as any).longTermMemoryNoteText).length
+      : 0,
+
+  userContext_ctxPackKeys:
+    userContext?.ctxPack && typeof userContext.ctxPack === 'object'
+      ? Object.keys(userContext.ctxPack)
+      : [],
+
+  userContext_ctxPack_longTermMemoryNoteText:
+    typeof (userContext as any)?.ctxPack?.longTermMemoryNoteText === 'string'
+      ? String((userContext as any).ctxPack.longTermMemoryNoteText).slice(0, 200)
+      : null,
+
+  userContext_ctxPack_longTermMemoryNoteTextLen:
+    typeof (userContext as any)?.ctxPack?.longTermMemoryNoteText === 'string'
+      ? String((userContext as any).ctxPack.longTermMemoryNoteText).length
+      : 0,
+});
 try {
   const slotPlanPolicyForRephrase =
     (userContext as any)?.ctxPack?.slotPlanPolicy ??
@@ -1544,7 +1611,96 @@ try {
       qCode: qCodeForLLM,
       depthStage: depthForLLM,
       inputKind: inputKindForLLM,
-      userContext,
+      userContext: {
+        ...(userContext && typeof userContext === 'object' ? userContext : {}),
+        question:
+          (extraMerged as any)?.question ??
+          (meta as any)?.extra?.question ??
+          (userContext as any)?.question ??
+          (userContext as any)?.meta?.extra?.question ??
+          null,
+        pastStateNoteText:
+          (extraMerged as any)?.pastStateNoteText ??
+          (meta as any)?.extra?.pastStateNoteText ??
+          (userContext as any)?.pastStateNoteText ??
+          (userContext as any)?.meta?.extra?.pastStateNoteText ??
+          null,
+        pastStateTriggerKind:
+          (extraMerged as any)?.pastStateTriggerKind ??
+          (meta as any)?.extra?.pastStateTriggerKind ??
+          (userContext as any)?.pastStateTriggerKind ??
+          (userContext as any)?.meta?.extra?.pastStateTriggerKind ??
+          null,
+        pastStateKeyword:
+          (extraMerged as any)?.pastStateKeyword ??
+          (meta as any)?.extra?.pastStateKeyword ??
+          (userContext as any)?.pastStateKeyword ??
+          (userContext as any)?.meta?.extra?.pastStateKeyword ??
+          null,
+        meta: {
+          ...((((userContext as any)?.meta && typeof (userContext as any).meta === 'object')
+            ? (userContext as any).meta
+            : {})),
+          extra: {
+            ...(((((userContext as any)?.meta?.extra) && typeof (userContext as any).meta.extra === 'object')
+              ? (userContext as any).meta.extra
+              : {})),
+            question:
+              (extraMerged as any)?.question ??
+              (meta as any)?.extra?.question ??
+              (userContext as any)?.question ??
+              (userContext as any)?.meta?.extra?.question ??
+              null,
+            pastStateNoteText:
+              (extraMerged as any)?.pastStateNoteText ??
+              (meta as any)?.extra?.pastStateNoteText ??
+              (userContext as any)?.pastStateNoteText ??
+              (userContext as any)?.meta?.extra?.pastStateNoteText ??
+              null,
+            pastStateTriggerKind:
+              (extraMerged as any)?.pastStateTriggerKind ??
+              (meta as any)?.extra?.pastStateTriggerKind ??
+              (userContext as any)?.pastStateTriggerKind ??
+              (userContext as any)?.meta?.extra?.pastStateTriggerKind ??
+              null,
+            pastStateKeyword:
+              (extraMerged as any)?.pastStateKeyword ??
+              (meta as any)?.extra?.pastStateKeyword ??
+              (userContext as any)?.pastStateKeyword ??
+              (userContext as any)?.meta?.extra?.pastStateKeyword ??
+              null,
+          },
+        },
+      },
+
+      // ✅ NEW: rephraseEngine 側が top-level / extra どちらでも拾えるようにする
+      extra: {
+        ...(((extraMerged as any) && typeof extraMerged === 'object') ? extraMerged : {}),
+        question:
+          (extraMerged as any)?.question ??
+          (meta as any)?.extra?.question ??
+          (userContext as any)?.question ??
+          (userContext as any)?.meta?.extra?.question ??
+          null,
+        pastStateNoteText:
+          (extraMerged as any)?.pastStateNoteText ??
+          (meta as any)?.extra?.pastStateNoteText ??
+          (userContext as any)?.pastStateNoteText ??
+          (userContext as any)?.meta?.extra?.pastStateNoteText ??
+          null,
+        pastStateTriggerKind:
+          (extraMerged as any)?.pastStateTriggerKind ??
+          (meta as any)?.extra?.pastStateTriggerKind ??
+          (userContext as any)?.pastStateTriggerKind ??
+          (userContext as any)?.meta?.extra?.pastStateTriggerKind ??
+          null,
+        pastStateKeyword:
+          (extraMerged as any)?.pastStateKeyword ??
+          (meta as any)?.extra?.pastStateKeyword ??
+          (userContext as any)?.pastStateKeyword ??
+          (userContext as any)?.meta?.extra?.pastStateKeyword ??
+          null,
+      },
 
       // ✅ audit/分岐のために明示的に渡す
       slotPlanPolicy: slotPlanPolicyForRephrase,

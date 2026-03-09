@@ -26,6 +26,8 @@ function typeLabel(type: LongTermMemoryType): string {
       return 'project_context';
     case 'durable_fact':
       return 'durable_fact';
+    case 'episodic_event':
+      return 'episodic_event';
     default:
       return 'durable_fact';
   }

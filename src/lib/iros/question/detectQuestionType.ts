@@ -1,0 +1,211 @@
+// src/lib/iros/question/detectQuestionType.ts
+// IROS QuestionEngine v1
+// Phase2: question type detection (rule-based / safe-first)
+
+import type { DetectQuestionTypeInput, DomainType, QuestionType } from './types';
+
+type QuestionTypeScoreMap = Record<QuestionType, number>;
+
+const INITIAL_SCORES = (): QuestionTypeScoreMap => ({
+  truth: 0,
+  structure: 0,
+  cause: 0,
+  choice: 0,
+  meaning: 0,
+  future_design: 0,
+  unresolved_release: 0,
+});
+
+function normalizeText(input: string): string {
+  return String(input ?? '').trim().toLowerCase();
+}
+
+function addIfMatched(
+  scores: QuestionTypeScoreMap,
+  text: string,
+  qtype: QuestionType,
+  patterns: RegExp[],
+  weight = 1,
+) {
+  for (const pattern of patterns) {
+    if (pattern.test(text)) {
+      scores[qtype] += weight;
+    }
+  }
+}
+
+function pickQuestionType(scores: QuestionTypeScoreMap): QuestionType {
+  const entries = Object.entries(scores) as Array<[QuestionType, number]>;
+  const sorted = [...entries].sort((a, b) => b[1] - a[1]);
+
+  const top = sorted[0];
+  const second = sorted[1];
+
+  if (!top || top[1] <= 0) return 'structure';
+
+  // 完全拮抗は structure に寄せる
+  if (second && second[1] > 0 && top[1] === second[1]) {
+    return 'structure';
+  }
+
+  return top[0];
+}
+
+function applyDomainBias(
+  scores: QuestionTypeScoreMap,
+  domain: DomainType | null | undefined,
+  text: string,
+) {
+  if (!domain) return;
+
+  if (domain === 'cosmology') {
+    if (/起源|介入|作った|作られた|仮説|地球外生命体|非人間知性/.test(text)) {
+      scores.truth += 2;
+      scores.structure += 1;
+      scores.cause += 1;
+    }
+  }
+
+  if (domain === 'practical') {
+    if (/どうやる|どうすれば|進める|手順|実装|設計/.test(text)) {
+      scores.future_design += 2;
+      scores.choice += 1;
+    }
+  }
+
+  if (domain === 'personal') {
+    if (/意味|なんのため|どう受け取れば|なぜ自分は/.test(text)) {
+      scores.meaning += 2;
+    }
+    if (/未完了|引っかかる|終わっていない|解消したい|手放したい/.test(text)) {
+      scores.unresolved_release += 2;
+    }
+  }
+}
+
+export function detectQuestionType(input: DetectQuestionTypeInput): QuestionType {
+  const userText = normalizeText(input.userText ?? '');
+  const topicHint = normalizeText(String(input.context?.topicHint ?? ''));
+  const situationSummary = normalizeText(String(input.context?.situationSummary ?? ''));
+  const contextText = [topicHint, situationSummary].filter(Boolean).join('\n');
+
+  if (!userText && !contextText) return 'structure';
+
+  const applyTypeRules = (text: string, contextWeight = 1): QuestionTypeScoreMap => {
+    const scores = INITIAL_SCORES();
+    if (!text) return scores;
+
+    addIfMatched(
+      scores,
+      text,
+      'truth',
+      [
+        /本当|事実|真実|正しい|誤り|本当に|ほんとうに/,
+        /なのか|かどうか|ありえるか|存在するか/,
+        /証拠|根拠|検証|実証/,
+      ],
+      2 * contextWeight,
+    );
+
+    addIfMatched(
+      scores,
+      text,
+      'structure',
+      [
+        /構造|構造的|整理|分解|切り分け|並び|地図|枠組み/,
+        /どう見える|どういう構造|どう捉える|俯瞰/,
+      ],
+      3 * contextWeight,
+    );
+
+    addIfMatched(
+      scores,
+      text,
+      'cause',
+      [
+        /なぜ|どうして|原因|きっかけ|由来|理由/,
+        /なぜ起きた|なぜそうなる|なぜそうなった/,
+      ],
+      2 * contextWeight,
+    );
+
+    addIfMatched(
+      scores,
+      text,
+      'choice',
+      [
+        /どれ|どちら|選ぶ|選択|比較|違い|向いてる/,
+        /AかBか|どっち|何を選べば/,
+      ],
+      2 * contextWeight,
+    );
+
+    addIfMatched(
+      scores,
+      text,
+      'meaning',
+      [
+        /意味|意義|どう受け取る|どう捉える|何を意味する/,
+        /自分にとって|どういう意味/,
+      ],
+      2 * contextWeight,
+    );
+
+    addIfMatched(
+      scores,
+      text,
+      'future_design',
+      [
+        /これから|今後|未来|次に|進めたい|作りたい|設計したい/,
+        /実装したい|形にしたい|どう進める|方針/,
+      ],
+      2 * contextWeight,
+    );
+
+    addIfMatched(
+      scores,
+      text,
+      'unresolved_release',
+      [
+        /未完了|引っかかる|残っている|終わっていない|解消したい/,
+        /手放したい|再配置したい|未消化/,
+      ],
+      3 * contextWeight,
+    );
+
+    if (/構造的に知りたい|構造で置き換える|構造として/.test(text)) {
+      scores.structure += 4 * contextWeight;
+    }
+
+    if (/本当か|事実か|真実か|かどうか知りたい/.test(text)) {
+      scores.truth += 3 * contextWeight;
+    }
+
+    if (/なぜ.*のか|どうして.*のか/.test(text)) {
+      scores.cause += 3 * contextWeight;
+    }
+
+    applyDomainBias(scores, input.domain, text);
+    return scores;
+  };
+
+  const mergeScores = (base: QuestionTypeScoreMap, add: QuestionTypeScoreMap) => {
+    (Object.keys(base) as Array<keyof QuestionTypeScoreMap>).forEach((k) => {
+      base[k] += add[k];
+    });
+    return base;
+  };
+
+  // ✅ 主判定は userText
+  const userScores = applyTypeRules(userText, 1);
+  const finalScores = { ...userScores };
+
+  // ✅ context は補助だけ
+  if (!userText && contextText) {
+    mergeScores(finalScores, applyTypeRules(contextText, 1));
+  } else if (userText && contextText) {
+    mergeScores(finalScores, applyTypeRules(contextText, 0.25));
+  }
+
+  return pickQuestionType(finalScores);
+}

@@ -5,7 +5,8 @@ export type LongTermMemoryType =
   | 'working_rule'
   | 'preference'
   | 'project_context'
-  | 'durable_fact';
+  | 'durable_fact'
+  | 'episodic_event';
 
 export type LongTermMemoryStatus =
   | 'active'

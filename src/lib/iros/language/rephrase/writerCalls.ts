@@ -19,6 +19,8 @@
 import { chatComplete } from '../../../llm/chatComplete';
 import type { HistoryDigestV1 } from '../../history/historyDigestV1';
 import { injectHistoryDigestV1 } from '../../history/historyDigestV1';
+import { decideRecallV1 } from '../../memory/recallGate';
+import { buildFlowMeaningV1 } from '../../memory/buildFlowMeaning';
 
 export type WriterMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 type TurnMsg = { role: 'user' | 'assistant'; content: string };
@@ -938,12 +940,484 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   ]
                 : [];
 
+                const questionMeta = (() => {
+                  const q =
+                  (args as any)?.extra?.question ??
+                  (args as any)?.userContext?.question ??
+                  (args as any)?.userContext?.meta?.extra?.question ??
+                    null;
+                  return q && typeof q === 'object' ? q : null;
+                })();
+
+                const questionDomain = String((questionMeta as any)?.domain ?? '').trim();
+                const questionType = String((questionMeta as any)?.questionType ?? '').trim();
+                const questionTMode = String((questionMeta as any)?.tState?.mode ?? '').trim();
+                const questionFocus = String((questionMeta as any)?.tState?.focus ?? '').trim();
+
+                const questionPolicy = (() => {
+                  const p = (questionMeta as any)?.outputPolicy;
+                  if (!p || typeof p !== 'object') return '(none)';
+                  try {
+                    return JSON.stringify({
+                      answerFirst: !!p.answerFirst,
+                      askBackAllowed: !!p.askBackAllowed,
+                      splitFactHypothesis: !!p.splitFactHypothesis,
+                      usePastReframe: !!p.usePastReframe,
+                      avoidPrematureClosure: !!p.avoidPrematureClosure,
+                    });
+                  } catch {
+                    return '(none)';
+                  }
+                })();
+
+                const recallDecision = (() => {
+                  const extraAny =
+                    ((args as any)?.extra && typeof (args as any).extra === 'object'
+                      ? (args as any).extra
+                      : {}) as any;
+
+                  const userCtx =
+                    ((args as any)?.userContext && typeof (args as any).userContext === 'object'
+                      ? (args as any).userContext
+                      : {}) as any;
+
+                  const ctxPack =
+                    (userCtx?.ctxPack && typeof userCtx.ctxPack === 'object'
+                      ? userCtx.ctxPack
+                      : extraAny?.ctxPack && typeof extraAny.ctxPack === 'object'
+                        ? extraAny.ctxPack
+                        : {}) as any;
+
+                  const historyDigestV1Any =
+                    (args as any)?.historyDigestV1 ??
+                    userCtx?.historyDigestV1 ??
+                    ctxPack?.historyDigestV1 ??
+                    null;
+
+                  const historyDigestTopic = String(
+                    (historyDigestV1Any as any)?.topic?.situationTopic ??
+                      (historyDigestV1Any as any)?.topic ??
+                      '',
+                  ).trim();
+
+                  const historyDigestSummary = String(
+                    (historyDigestV1Any as any)?.topic?.situationSummary ??
+                      (historyDigestV1Any as any)?.summary ??
+                      (historyDigestV1Any as any)?.shortSummary ??
+                      '',
+                  ).trim();
+
+                  const historyForWriterSource =
+                  (Array.isArray(userCtx?.historyForWriter) && userCtx.historyForWriter.length > 0
+                    ? userCtx.historyForWriter
+                    : Array.isArray(ctxPack?.historyForWriter) && ctxPack.historyForWriter.length > 0
+                      ? ctxPack.historyForWriter
+                      : Array.isArray((args as any)?.userContext?.turnsForWriter) &&
+                          (args as any).userContext.turnsForWriter.length > 0
+                        ? (args as any).userContext.turnsForWriter
+                        : Array.isArray((args as any)?.userContext?.ctxPack?.turnsForWriter) &&
+                            (args as any).userContext.ctxPack.turnsForWriter.length > 0
+                          ? (args as any).userContext.ctxPack.turnsForWriter
+                          : Array.isArray((args as any)?.userContext?.turns) &&
+                              (args as any).userContext.turns.length > 0
+                            ? (args as any).userContext.turns
+                            : []);
+
+                const historyForWriterLen = Array.isArray(historyForWriterSource)
+                  ? historyForWriterSource.length
+                  : 0;
+
+                    const longTermMemoryNoteText = String(
+                      userCtx?.longTermMemoryNoteText ??
+                        userCtx?.ctxPack?.longTermMemoryNoteText ??
+                        extraAny?.longTermMemoryNoteText ??
+                        extraAny?.ctxPack?.longTermMemoryNoteText ??
+                        '',
+                    ).trim();
+
+                    console.log('[IROS/LTM][ROUTE_PATH_CHECK]', {
+                      traceId:
+                        (args as any)?.traceId ??
+                        (args as any)?.extra?.traceId ??
+                        extraAny?.traceId ??
+                        null,
+                      questionType,
+                      questionDomain,
+
+                      longTermMemoryNoteText:
+                        typeof longTermMemoryNoteText === 'string'
+                          ? longTermMemoryNoteText.slice(0, 200)
+                          : null,
+
+                      longTermMemoryNoteTextLen:
+                        typeof longTermMemoryNoteText === 'string'
+                          ? longTermMemoryNoteText.length
+                          : 0,
+
+                      memoryStateNoteText:
+                        typeof userCtx?.memoryStateNoteText === 'string'
+                          ? String(userCtx.memoryStateNoteText).slice(0, 200)
+                          : typeof userCtx?.ctxPack?.memoryStateNoteText === 'string'
+                            ? String(userCtx.ctxPack.memoryStateNoteText).slice(0, 200)
+                            : typeof extraAny?.memoryStateNoteText === 'string'
+                              ? String(extraAny.memoryStateNoteText).slice(0, 200)
+                              : typeof extraAny?.ctxPack?.memoryStateNoteText === 'string'
+                                ? String(extraAny.ctxPack.memoryStateNoteText).slice(0, 200)
+                                : null,
+
+                      memoryStateNoteTextLen:
+                        typeof userCtx?.memoryStateNoteText === 'string'
+                          ? String(userCtx.memoryStateNoteText).length
+                          : typeof userCtx?.ctxPack?.memoryStateNoteText === 'string'
+                            ? String(userCtx.ctxPack.memoryStateNoteText).length
+                            : typeof extraAny?.memoryStateNoteText === 'string'
+                              ? String(extraAny.memoryStateNoteText).length
+                              : typeof extraAny?.ctxPack?.memoryStateNoteText === 'string'
+                                ? String(extraAny.ctxPack.memoryStateNoteText).length
+                                : 0,
+
+                      ctxPackKeys:
+                        userCtx?.ctxPack && typeof userCtx.ctxPack === 'object'
+                          ? Object.keys(userCtx.ctxPack)
+                          : [],
+
+                      extraKeys:
+                        extraAny && typeof extraAny === 'object'
+                          ? Object.keys(extraAny)
+                          : [],
+                    });
+
+
+                    const longTermMemoryTypes = (() => {
+                      const xs: string[] = [];
+                      if (/working_rule/i.test(longTermMemoryNoteText)) xs.push('working_rule');
+                      if (/project_context/i.test(longTermMemoryNoteText)) xs.push('project_context');
+                      if (/durable_fact/i.test(longTermMemoryNoteText)) xs.push('durable_fact');
+                      if (/preference/i.test(longTermMemoryNoteText)) xs.push('preference');
+                      if (/episodic_event/i.test(longTermMemoryNoteText)) xs.push('episodic_event');
+                      return xs;
+                    })();
+
+                    const hasEpisodicCandidate =
+                    longTermMemoryTypes.includes('episodic_event') ||
+                    /episodic_event/i.test(longTermMemoryNoteText);
+
+                    const flowDeltaForRecall = String(
+                      extraAny?.flowDelta ??
+                        extraAny?.flow?.delta ??
+                        extraAny?.flow?.flowDelta ??
+                        extraAny?.ctxPack?.flowDelta ??
+                        extraAny?.ctxPack?.flow?.delta ??
+                        extraAny?.ctxPack?.flow?.flowDelta ??
+                        ctxPack?.flowDelta ??
+                        ctxPack?.flow?.delta ??
+                        ctxPack?.flow?.flowDelta ??
+                        (args as any)?.flowDelta ??
+                        '',
+                    ).trim();
+
+                    const returnStreakForRecall = (() => {
+                      const raw =
+                        extraAny?.returnStreak ??
+                        extraAny?.flow?.returnStreak ??
+                        extraAny?.ctxPack?.returnStreak ??
+                        extraAny?.ctxPack?.flow?.returnStreak ??
+                        ctxPack?.returnStreak ??
+                        ctxPack?.flow?.returnStreak ??
+                        null;
+                      return typeof raw === 'number'
+                        ? raw
+                        : Number.isFinite(Number(raw))
+                          ? Number(raw)
+                          : null;
+                    })();
+                  const stingLevelForRecall = String(
+                    extraAny?.stingLevel ??
+                      ctxPack?.stingLevel ??
+                      stingLevelForSeed ??
+                      '',
+                  ).trim();
+
+                  const userTextForRecall = String(
+                    (args as any)?.userText ??
+                      (args as any)?.text ??
+                      userCtx?.userText ??
+                      extraAny?.userText ??
+                      '',
+                  ).trim();
+
+
+
+                  console.log('[IROS/writerCalls][RECALL_INPUT_DEBUG]', {
+                    traceId:
+                      (args as any)?.traceId ??
+                      (args as any)?.extra?.traceId ??
+                      extraAny?.traceId ??
+                      null,
+                    questionType,
+                    questionDomain,
+                    tLayerHint_candidates: {
+                      userContext_tLayerHint: (args as any)?.userContext?.tLayerHint ?? null,
+                      userContext_ctxPack_tLayerHint: (args as any)?.userContext?.ctxPack?.tLayerHint ?? null,
+                      userContext_uiCue_tLayerHint: (args as any)?.userContext?.uiCue?.tLayerHint ?? null,
+                      userContext_ctxPack_uiCue_tLayerHint:
+                        (args as any)?.userContext?.ctxPack?.uiCue?.tLayerHint ?? null,
+                      extra_tLayerHint: (args as any)?.extra?.tLayerHint ?? null,
+                      extra_uiCue_tLayerHint: (args as any)?.extra?.uiCue?.tLayerHint ?? null,
+                    },
+                    itxStep_candidates: {
+                      userContext_itxStep: (args as any)?.userContext?.itxStep ?? null,
+                      userContext_ctxPack_itxStep: (args as any)?.userContext?.ctxPack?.itxStep ?? null,
+                      userContext_uiCue_itxStep: (args as any)?.userContext?.uiCue?.itxStep ?? null,
+                      userContext_ctxPack_uiCue_itxStep:
+                        (args as any)?.userContext?.ctxPack?.uiCue?.itxStep ?? null,
+                      extra_itxStep: (args as any)?.extra?.itxStep ?? null,
+                      extra_uiCue_itxStep: (args as any)?.extra?.uiCue?.itxStep ?? null,
+                    },
+                    itTriggered_candidates: {
+                      userContext_itTriggered: (args as any)?.userContext?.itTriggered ?? null,
+                      userContext_it_triggered: (args as any)?.userContext?.it_triggered ?? null,
+                      userContext_ctxPack_itTriggered: (args as any)?.userContext?.ctxPack?.itTriggered ?? null,
+                      userContext_ctxPack_it_triggered:
+                        (args as any)?.userContext?.ctxPack?.it_triggered ?? null,
+                      userContext_ctxPack_qCounts_it_triggered_true:
+                        (args as any)?.userContext?.ctxPack?.qCounts?.it_triggered_true ?? null,
+                      userContext_ctxPack_qCounts_it_triggered:
+                        (args as any)?.userContext?.ctxPack?.qCounts?.it_triggered ?? null,
+                      userContext_uiCue_itTriggered: (args as any)?.userContext?.uiCue?.itTriggered ?? null,
+                      userContext_ctxPack_uiCue_itTriggered:
+                        (args as any)?.userContext?.ctxPack?.uiCue?.itTriggered ?? null,
+                      extra_itTriggered: (args as any)?.extra?.itTriggered ?? null,
+                      extra_it_triggered: (args as any)?.extra?.it_triggered ?? null,
+                      extra_qCounts_it_triggered_true:
+                        (args as any)?.extra?.qCounts?.it_triggered_true ?? null,
+                      extra_qCounts_it_triggered: (args as any)?.extra?.qCounts?.it_triggered ?? null,
+                      extra_uiCue_itTriggered: (args as any)?.extra?.uiCue?.itTriggered ?? null,
+                      extra_blockPlan_itTriggered: (args as any)?.extra?.blockPlan?.itTriggered ?? null,
+                    },
+                    episodic_candidates: {
+                      longTermMemoryNoteText,
+                      longTermMemoryTypes,
+                      hasEpisodicCandidate,
+                    },
+                    historyForWriterLen,
+                  });
+                  return decideRecallV1({
+                    userText: userTextForRecall,
+                    depthStage: depthStage || null,
+                    qCode: qCode || null,
+                    phase: phase || null,
+                    intentAnchor: String(
+                      extraAny?.intentAnchor ??
+                        ctxPack?.intentAnchor ??
+                        userCtx?.intentAnchor ??
+                        '',
+                    ).trim() || null,
+                    selfAcceptance:
+                      typeof extraAny?.selfAcceptance === 'number'
+                        ? extraAny.selfAcceptance
+                        : typeof ctxPack?.selfAcceptance === 'number'
+                          ? ctxPack.selfAcceptance
+                          : null,
+                    flowDelta: flowDeltaForRecall || null,
+                    returnStreak: returnStreakForRecall,
+                    stingLevel: stingLevelForRecall || null,
+                    flowDigest: String(
+                      extraAny?.flowDigest ??
+                        ctxPack?.flowDigest ??
+                        '',
+                    ).trim() || null,
+                    questionType: questionType || null,
+                    questionDomain: questionDomain || null,
+
+                    tLayerHint:
+                    String(
+                      (args as any)?.userContext?.tLayerHint ??
+                        (args as any)?.userContext?.ctxPack?.tLayerHint ??
+                        (args as any)?.userContext?.uiCue?.tLayerHint ??
+                        (args as any)?.userContext?.ctxPack?.uiCue?.tLayerHint ??
+                        (args as any)?.extra?.tLayerHint ??
+                        (args as any)?.extra?.uiCue?.tLayerHint ??
+                        '',
+                    ).trim() || null,
+                  itxStep:
+                    String(
+                      (args as any)?.userContext?.itxStep ??
+                        (args as any)?.userContext?.ctxPack?.itxStep ??
+                        (args as any)?.userContext?.uiCue?.itxStep ??
+                        (args as any)?.userContext?.ctxPack?.uiCue?.itxStep ??
+                        (args as any)?.extra?.itxStep ??
+                        (args as any)?.extra?.uiCue?.itxStep ??
+                        '',
+                    ).trim() || null,
+                    itTriggered:
+                    [
+                      (args as any)?.userContext?.itTriggered,
+                      (args as any)?.userContext?.it_triggered,
+                      (args as any)?.userContext?.ctxPack?.itTriggered,
+                      (args as any)?.userContext?.ctxPack?.it_triggered,
+                      (args as any)?.userContext?.ctxPack?.qCounts?.it_triggered_true,
+                      (args as any)?.userContext?.ctxPack?.qCounts?.it_triggered,
+                      (args as any)?.userContext?.uiCue?.itTriggered,
+                      (args as any)?.userContext?.ctxPack?.uiCue?.itTriggered,
+                      (args as any)?.extra?.itTriggered,
+                      (args as any)?.extra?.it_triggered,
+                      (args as any)?.extra?.qCounts?.it_triggered_true,
+                      (args as any)?.extra?.qCounts?.it_triggered,
+                      (args as any)?.extra?.uiCue?.itTriggered,
+                      (args as any)?.extra?.blockPlan?.itTriggered,
+                    ].some((v) => v === true),
+                    outputPolicy:
+                      questionMeta && typeof (questionMeta as any)?.outputPolicy === 'object'
+                        ? (questionMeta as any).outputPolicy
+                        : null,
+                    topicDigest:
+                      String(
+                        (args as any)?.topicDigest ??
+                          userCtx?.topicDigest ??
+                          ctxPack?.topicDigest ??
+                          '',
+                      ).trim() || null,
+                    conversationLine:
+                      String(
+                        (args as any)?.conversationLine ??
+                          userCtx?.conversationLine ??
+                          ctxPack?.conversationLine ??
+                          '',
+                      ).trim() || null,
+                    historyForWriterLen,
+                    historyDigestTopic: historyDigestTopic || null,
+                    historyDigestSummary: historyDigestSummary || null,
+                    hasPastStateNoteText: Boolean(
+                      extraAny?.pastStateNoteText ??
+                        userCtx?.pastStateNoteText ??
+                        userCtx?.meta?.extra?.pastStateNoteText,
+                    ),
+                    longTermMemoryTypes,
+                    hasEpisodicCandidate,
+                  });
+                })();
+
+                const memoryDecisionLines = [
+                  'MEMORY_DECISION_V1:',
+                  `RECALL_ELIGIBLE: ${recallDecision.recallEligible ? 'true' : 'false'}`,
+                  `RECALL_SCOPE: ${recallDecision.recallScope}`,
+                  `RECALL_REASON: ${recallDecision.recallReason || '(none)'}`,
+                  `RECALL_MODE: ${recallDecision.recallMode}`,
+                  `RECALL_SAFETY: ${recallDecision.recallSafety}`,
+                  `SELECTED_SOURCES: ${
+                    Array.isArray(recallDecision.selectedSources) &&
+                    recallDecision.selectedSources.length > 0
+                      ? recallDecision.selectedSources.join(', ')
+                      : '(none)'
+                  }`,
+                  `EVIDENCE_SCORE: ${String(recallDecision.evidenceScore ?? 0)}`,
+                  `DISALLOW_REASON: ${recallDecision.disallowReason || '(none)'}`,
+                ];
+
+                const flowMeaningV1 = buildFlowMeaningV1({
+                  userText: String(
+                    (args as any)?.userText ??
+                      (args as any)?.text ??
+                      (args as any)?.userContext?.userText ??
+                      '',
+                  ).trim(),
+                  depthStage: depthStage || null,
+                  qCode: qCode || null,
+                  phase: phase || null,
+                  flowDelta: String(
+                    ((args as any)?.extra?.flowDelta ??
+                      (args as any)?.userContext?.ctxPack?.flowDelta ??
+                      (args as any)?.extra?.flow?.delta ??
+                      (args as any)?.userContext?.ctxPack?.flow?.flowDelta ??
+                      '') || '',
+                  ).trim() || null,
+                  returnStreak: (() => {
+                    const raw =
+                      (args as any)?.extra?.returnStreak ??
+                      (args as any)?.userContext?.ctxPack?.returnStreak ??
+                      (args as any)?.extra?.flow?.returnStreak ??
+                      (args as any)?.userContext?.ctxPack?.flow?.returnStreak ??
+                      null;
+                    return typeof raw === 'number'
+                      ? raw
+                      : Number.isFinite(Number(raw))
+                        ? Number(raw)
+                        : null;
+                  })(),
+                  stingLevel: stingLevelForSeed || null,
+                  flowDigest: String(
+                    ((args as any)?.extra?.flowDigest ??
+                      (args as any)?.userContext?.ctxPack?.flowDigest ??
+                      '') || '',
+                  ).trim() || null,
+                  questionType: questionType || null,
+                  questionDomain: questionDomain || null,
+                  questionFocus: questionFocus || null,
+                  questionTMode: questionTMode || null,
+                  recallEligible: recallDecision.recallEligible,
+                  recallScope: recallDecision.recallScope,
+                  recallReason: recallDecision.recallReason,
+                  topicDigest: String(
+                    ((args as any)?.topicDigest ??
+                      (args as any)?.userContext?.topicDigest ??
+                      (args as any)?.userContext?.ctxPack?.topicDigest ??
+                      '') || '',
+                  ).trim() || null,
+                  historyForWriterLen: Array.isArray(
+                    (args as any)?.userContext?.historyForWriter ??
+                      (args as any)?.userContext?.ctxPack?.historyForWriter,
+                  )
+                    ? (
+                        (args as any)?.userContext?.historyForWriter ??
+                        (args as any)?.userContext?.ctxPack?.historyForWriter
+                      ).length
+                    : 0,
+                });
+
+                const questionIframeKeys = (() => {
+                  const hs = Array.isArray((questionMeta as any)?.iframe?.hypothesisSpace)
+                    ? (questionMeta as any).iframe.hypothesisSpace
+                    : [];
+                  const keys = hs
+                    .map((x: any) => String(x?.key ?? '').trim())
+                    .filter(Boolean)
+                    .slice(0, 8);
+                  return keys.length > 0 ? keys.join(', ') : '(none)';
+                })();
                 const stateCueLines0 = [
                   'STATE_CUES_V3 (DO NOT OUTPUT):',
                   '',
 
                   'STATE_CORE:',
                   stateCore,
+                  '',
+
+                  'QUESTION_META:',
+                  `QUESTION_DOMAIN: ${questionDomain || '(none)'}`,
+                  `QUESTION_TYPE: ${questionType || '(none)'}`,
+                  `QUESTION_T_MODE: ${questionTMode || '(none)'}`,
+                  `QUESTION_FOCUS: ${questionFocus || '(none)'}`,
+                  `QUESTION_POLICY: ${questionPolicy}`,
+                  `QUESTION_IFRAME_KEYS: ${questionIframeKeys}`,
+                  '',
+                  ...memoryDecisionLines,
+                  '',
+
+                  'FLOW_MEANING:',
+                  flowMeaningV1.flowMeaning,
+                  '',
+
+                  'THIS_TURN_HOOK:',
+                  flowMeaningV1.thisTurnHook,
+                  '',
+
+                  'CONTINUING_TENSION:',
+                  flowMeaningV1.continuingTension,
+                  '',
+
+                  'OPEN_LOOP:',
+                  flowMeaningV1.openLoop,
                   '',
 
                   'CURRENT_MEANING:',
@@ -1288,7 +1762,10 @@ export async function callWriterLLM(args: {
   traceId?: string | null;
   conversationId?: string | null;
   userCode?: string | null;
+
   extraBody?: any;
+  extra?: any;
+  userContext?: any;
   audit?: any;
 
   // ✅ 追加：HistoryDigest v1（存在する時だけ注入）
