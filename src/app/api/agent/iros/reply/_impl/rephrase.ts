@@ -496,7 +496,71 @@ export async function maybeAttachRephraseForRenderV2(args: {
   };
 
 
-  const extracted = extractSlotsForRephrase(extraForRender);
+  let extracted = extractSlotsForRephrase(extraForRender);
+
+  // ✅ 記憶系を通さず、その場の slotPlan / framePlan だけで再接続する
+  if (!extracted?.slots?.length) {
+    const directSlots =
+      (Array.isArray((extraMerged as any)?.slotPlan?.slots) && (extraMerged as any).slotPlan.slots) ||
+      (Array.isArray((meta as any)?.extra?.slotPlan?.slots) && (meta as any).extra.slotPlan.slots) ||
+      (Array.isArray((extraMerged as any)?.framePlan?.slots) && (extraMerged as any).framePlan.slots) ||
+      (Array.isArray((meta as any)?.extra?.framePlan?.slots) && (meta as any).extra.framePlan.slots) ||
+      [];
+
+    if (directSlots.length > 0) {
+      const slotPlanPolicyDirect =
+        String(
+          (extraMerged as any)?.slotPlan?.slotPlanPolicy ||
+            (meta as any)?.extra?.slotPlan?.slotPlanPolicy ||
+            (extraMerged as any)?.framePlan?.slotPlanPolicy ||
+            (meta as any)?.extra?.framePlan?.slotPlanPolicy ||
+            (extraMerged as any)?.slotPlanPolicy ||
+            (meta as any)?.extra?.slotPlanPolicy ||
+            'FINAL'
+        ).trim() || 'FINAL';
+
+      extracted = extractSlotsForRephrase({
+        ...extraForRender,
+        slotPlan: {
+          slotPlanPolicy: slotPlanPolicyDirect,
+          slots: directSlots,
+        },
+      });
+    }
+  }
+
+  // ✅ 最悪1スロットだけでも通す
+  if (!extracted?.slots?.length) {
+    const singleSlotText = pickSafeAssistantText({
+      candidates: [
+        (meta as any)?.extra?.slotPlanSeed,
+        (extraMerged as any)?.slotPlanSeed,
+        (meta as any)?.extra?.llmRewriteSeed,
+        (extraMerged as any)?.llmRewriteSeed,
+        (meta as any)?.extra?.finalAssistantText,
+        (extraMerged as any)?.finalAssistantText,
+        (meta as any)?.extra?.finalAssistantTextCandidate,
+        (extraMerged as any)?.finalAssistantTextCandidate,
+      ],
+    });
+
+    if (singleSlotText) {
+      extracted = extractSlotsForRephrase({
+        ...extraForRender,
+        slotPlan: {
+          slotPlanPolicy: 'FINAL',
+          slots: [
+            {
+              key: 'OBS',
+              role: 'assistant',
+              style: 'soft',
+              content: singleSlotText,
+            },
+          ],
+        },
+      });
+    }
+  }
 
   // slots が無いなら LLM rephrase はしないが、UI ブロックは assistant 側テキストのみから付ける
   if (!extracted?.slots?.length) {
@@ -504,10 +568,27 @@ export async function maybeAttachRephraseForRenderV2(args: {
       candidates: [
         (extraMerged as any)?.rephraseHead,
         (meta as any)?.extra?.rephraseHead,
+
+        // ✅ 短文マイクロ入力では、まず seed 系を優先して拾う
+        (meta as any)?.extra?.slotPlanSeed,
+        (extraMerged as any)?.slotPlanSeed,
+        (meta as any)?.extra?.llmRewriteSeed,
+        (extraMerged as any)?.llmRewriteSeed,
+        (meta as any)?.extra?.baseVisibleHead,
+        (extraMerged as any)?.baseVisibleHead,
+
+        // ✅ route.ts / handleIrosReply.ts が同期した SoT
+        (meta as any)?.extra?.extractedTextFromModel,
+        (meta as any)?.extra?.rawTextFromModel,
+        (meta as any)?.extra?.finalAssistantText,
+        (meta as any)?.extra?.finalAssistantTextCandidate,
+
+        // 既存の extraMerged 側
         (extraMerged as any)?.extractedTextFromModel,
         (extraMerged as any)?.rawTextFromModel,
         (extraMerged as any)?.finalAssistantText,
         (extraMerged as any)?.finalAssistantTextCandidate,
+
         (extraMerged as any)?.resolvedText,
         (extraMerged as any)?.assistantText,
         (extraMerged as any)?.content,

@@ -4037,8 +4037,28 @@ try {
       const slotTextCleanedLen = Number((ex as any)?.slotTextCleanedLen ?? NaN);
       const slotTextRawLen = Number((ex as any)?.slotTextRawLen ?? NaN);
 
-// 現時点の本文（最終的に '……' になっているケースがあるので、これだけに依存しない）
-const bodyNow = String(out.assistantText ?? (out as any)?.content ?? '').trim();
+// 現時点の本文
+// - assistantText/content が空でも、本文候補として既にある seed / final text を拾う
+// - マイクロ入力で本文マスク扱いにならないよう、広めに SoT を参照する
+const pickFirstNonBlank = (...xs: any[]) => {
+  for (const x of xs) {
+    const s = String(x ?? '').trim();
+    if (s) return s;
+  }
+  return '';
+};
+
+// 現時点の本文
+// - null/undefined だけでなく空文字も飛ばす
+// - マイクロ入力で seed / final text を本文候補として使えるようにする
+const bodyNow = pickFirstNonBlank(
+  out.assistantText,
+  (out as any)?.content,
+  (out.metaForSave as any)?.extra?.finalAssistantText,
+  (out.metaForSave as any)?.extra?.finalAssistantTextCandidate,
+  (out.metaForSave as any)?.extra?.slotPlanSeed,
+  (out.metaForSave as any)?.extra?.llmRewriteSeed,
+);
 
 // ✅ traceId をこの場で一回だけ正規化（alreadyHasBlocks 判定にも使う）
 const traceIdNow: string | null = (() => {
@@ -4129,10 +4149,12 @@ const disableRephraseBridgeWriterBase =
   (out.metaForSave as any)?.extra?.persistedByRoute === true ||
   (out.metaForSave as any)?.extra?.persistAssistantMessage === false;
 
-// ✅ /reply では writer を _impl/rephrase.ts 側に完全一本化する
-// - emptyLike / seedOnly でも bridge 側では writer を走らせない
-// - 二重呼び防止を最優先にする
-const disableRephraseBridgeWriter = disableRephraseBridgeWriterBase;
+// ✅ /reply では通常は _impl/rephrase.ts 側に writer を一本化する
+// - ただし seedOnly / emptyLike の「空っぽ系」は bridge 側の writer を許可する
+// - 二重呼び防止は維持しつつ、短い入力の fallback 落ちを防ぐ
+const disableRephraseBridgeWriter =
+  disableRephraseBridgeWriterBase && !(seedOnlyNow || emptyLikeNow);
+
 console.log('[IROS/rephraseBridge][DISABLE_DBG_V1]', {
   disableRephraseBridgeWriterBase,
   seedOnlyNow,
@@ -4148,6 +4170,16 @@ console.log('[IROS/rephraseBridge][DISABLE_DBG_V1]', {
     computed2: typeof disableRephraseBridgeWriter,
   },
 });
+
+const effectivePolicy =
+  String(
+    policy ||
+      (out.metaForSave as any)?.extra?.slotPlanPolicy_detected ||
+      (out.metaForSave as any)?.extra?.slotPlanPolicy ||
+      (out.metaForSave as any)?.slotPlanPolicy ||
+      ''
+  ).trim();
+
 const shouldRunWriter =
   (policy === 'SCAFFOLD' || policy === 'FINAL') &&
   (seedOnlyNow || emptyLikeNow) &&
@@ -4159,7 +4191,7 @@ if (seedOnlyNow || emptyLikeNow) {
   console.log('[IROS/rephraseBridge][ENTER]', {
     conversationId: _conversationId,
     userCode: _userCode,
-    policy,
+    policy: effectivePolicy,
     seedOnlyNow,
     emptyLikeNow,
     allowLLM_final: allowLLM_final_local,

@@ -1090,11 +1090,17 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
 
                     const longTermMemoryTypes = (() => {
                       const xs: string[] = [];
+
                       if (/working_rule/i.test(longTermMemoryNoteText)) xs.push('working_rule');
                       if (/project_context/i.test(longTermMemoryNoteText)) xs.push('project_context');
                       if (/durable_fact/i.test(longTermMemoryNoteText)) xs.push('durable_fact');
                       if (/preference/i.test(longTermMemoryNoteText)) xs.push('preference');
-                      if (/episodic_event/i.test(longTermMemoryNoteText)) xs.push('episodic_event');
+
+                      // LTM Note が存在する場合は episodic_event 扱い
+                      if (longTermMemoryNoteText && longTermMemoryNoteText.trim().length > 0) {
+                        xs.push('episodic_event');
+                      }
+
                       return xs;
                     })();
 

@@ -600,12 +600,18 @@ const obsCard = (() => {
     parts.push('', 'META:', clampLines(String(metaText), 8));
   }
 
-  // FLOW（短く）※生文/オブジェクト事故を落とす
-  const flowOne = sanitizeFlowDigest(flowDigest);
-  if (flowOne && flowOne.trim()) {
-    parts.push('', `FLOW: ${flowOne}`);
-  }
+// FLOW（短く）※生文/オブジェクト事故を落とす
+const flowOne = sanitizeFlowDigest(flowDigest);
+const flowStory = String(flowDigest ?? '').trim();
 
+if (flowOne && flowOne.trim()) {
+  parts.push('', `FLOW: ${flowOne}`);
+}
+
+// 会話の流れをLLMに渡す（長すぎる場合はカット）
+if (flowStory && flowStory.length < 120) {
+  parts.push('', `FLOW_STORY: ${flowStory}`);
+}
   // 重要フラグ（最小）
   if (args.goalKind) parts.push('', `goalKind=${String(args.goalKind)}`);
   if (args.itOk != null) parts.push(`itOk=${String(args.itOk)}`);
