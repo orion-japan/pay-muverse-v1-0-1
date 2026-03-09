@@ -163,7 +163,55 @@ function splitToLines(text: string): string[] {
 
   return rawLines;
 }
+function joinRenderBlocksPreserveSpacing(
+  blocks: Array<any> | null | undefined,
+  options?: {
+    dropInternalNextHint?: boolean;
+    trimEdge?: boolean;
+  },
+): string {
+  const dropInternalNextHint = options?.dropInternalNextHint !== false;
+  const trimEdge = options?.trimEdge !== false;
 
+  if (!Array.isArray(blocks) || blocks.length === 0) return '';
+
+  const out: string[] = [];
+  let prevWasBlank = false;
+
+  for (const block of blocks) {
+    const raw = String(block?.text ?? block?.content ?? block ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+    // block 内の右端空白だけ落とす。空行は意味として保持。
+    const lines = raw.split('\n').map((line) => line.replace(/[ \t]+$/g, ''));
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      if (dropInternalNextHint && trimmed.startsWith('@NEXT_HINT')) {
+        continue;
+      }
+
+      // 空行は最大1行まで保持
+      if (trimmed === '') {
+        if (!prevWasBlank) {
+          out.push('');
+          prevWasBlank = true;
+        }
+        continue;
+      }
+
+      out.push(trimmed);
+      prevWasBlank = false;
+    }
+  }
+
+  if (trimEdge) {
+    while (out.length > 0 && out[0] === '') out.shift();
+    while (out.length > 0 && out[out.length - 1] === '') out.pop();
+  }
+
+  return out.join('\n');
+}
 type SlotExtracted = { blocks: RenderBlock[]; source: string; keys: string[] } | null;
 
 function extractSlotBlocks(extra: any): SlotExtracted {
@@ -1255,7 +1303,12 @@ if (isIR && !allowRephraseBlocksInIR) {
   }
 
   const rbKept = cleanedBlocksText.length;
-  const rbKeptJoinedLen = norm(cleanedBlocksText.join('\n')).length;
+  const rbKeptJoinedLen = norm(
+    joinRenderBlocksPreserveSpacing(
+      cleanedBlocksText.map((t: string) => ({ text: t })),
+      { dropInternalNextHint: false, trimEdge: true },
+    ),
+  ).length;
 
   // ✅ “micro 1本だけ” 事故を防ぐ：attachSkipped でない限り、micro-only rb は採用しない
   const attachSkipped = Boolean((extraAny as any)?.rephraseAttachSkipped);
@@ -1794,10 +1847,17 @@ try {
 } catch {}
 
 
+const shouldDisableLineLimitForRephrase =
+  pickedFromForRender === 'rephraseBlocks' ||
+  pickedFromForRender === 'rephraseBlocks-forced' ||
+  Array.isArray((extraAny as any)?.rephraseBlocks) ||
+  Array.isArray((extraAny as any)?.rephrase?.blocks) ||
+  Array.isArray((extraAny as any)?.rephrase?.rephraseBlocks);
+
 let content = renderV2({
   blocks: blocksForRender,
-  maxLines: maxLinesForRender,
   fallbackText: fallbackTextForRender,
+  maxLines: shouldDisableLineLimitForRephrase ? undefined : maxLinesForRender,
 });
 
 pipe('after_renderV2', content);
@@ -2204,11 +2264,10 @@ try {
         : (meta as any)?.extra?.rephraseBlocks) ?? null;
 
     if (Array.isArray(rbAny) && rbAny.length > 0) {
-      const joined = rbAny
-        .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
-        .filter(Boolean)
-        .join('\n')
-        .trim();
+      const joined = joinRenderBlocksPreserveSpacing(rbAny, {
+        dropInternalNextHint: false,
+        trimEdge: true,
+      });
 
       if (joined.length > 0) {
         picked = joined;
@@ -2351,11 +2410,10 @@ if (String(content ?? '').trim() === '') {
       const rephraseBlocks = extraAny2?.rephraseBlocks ?? null;
 
       if (Array.isArray(rephraseBlocks) && rephraseBlocks.length > 0) {
-        const joined = rephraseBlocks
-          .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
-          .filter(Boolean)
-          .join('\n')
-          .trim();
+        const joined = joinRenderBlocksPreserveSpacing(rephraseBlocks, {
+          dropInternalNextHint: false,
+          trimEdge: true,
+        });
 
         // joined が取れたら、それを優先して rescueBase に採用
         if (joined.length > 0) {

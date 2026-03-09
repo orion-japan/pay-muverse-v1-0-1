@@ -1,454 +1,463 @@
 /* =======================================
    Chat Markdown 共通スタイル
-   （Iros / Sofia 専用）
+   （Iros / Sofia 専用 / 整理版）
    ======================================= */
-
-/* ▼ セクション見出し（🧿 / 🌀 / 🌱 など） */
-.sof-msgs .msgBody .iros-section-heading {
-  font-weight: 600;
-  font-size: 0.95rem;
-  color: #5738ff; /* アイキャッチ色 / サイドラベル */
-  margin: 18px 0 10px;
-  display: flex;
-  align-items: center;
-}
-
-.sof-msgs .msgBody .iros-section-heading .emoji {
-  margin-right: 6px;
-}
-
-/* ▼ セクションテキストブロック */
-.sof-msgs .msgBody .iros-section-block {
-  margin-bottom: 16px;
-  padding-left: 10px;
-  border-left: 3px solid #e2d7ff;
-}
-
-/* 通常本文 */
-.sof-msgs .msgBody .iros-section-block p {
-  color: #2e2a45;
-  line-height: 1.7;
-  margin: 6px 0;
-}
-
-/* 補足（カッコ書きなど）を薄く */
-.sof-msgs .msgBody .iros-section-block p small,
-.sof-msgs .msgBody .iros-section-block p em {
-  color: #6b6b6b;
-  font-style: normal;
-}
-
-/* =======================================
-   強調テキスト：共鳴スタイル
-   ======================================= */
-
-/* ベース：刺さる行動方向性の言葉 */
-.sof-msgs .msgBody .iros-emphasis {
-  font-weight: 600;
-}
-
-/* 🌌 Vision（青紫） */
-.sof-msgs .msgBody .iros-emphasis-vision {
-  color: #4b2fff !important;
-  background: none !important;
-}
-
-/* 🔥 通常（濃ピンク→濃青グラデ） */
-.sof-msgs .msgBody .iros-emphasis-normal {
-  /* 標準プロパティを先に書く → Lint 対策 */
-  background: linear-gradient(90deg, #c01880 0%, #002b99 100%);
-  background-clip: text;
-  color: transparent;
-
-  /* WebKit 系ブラウザ用（Safari / iOS） */
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-/* フォールバック（古いブラウザ / 特殊環境用） */
-@supports not (-webkit-background-clip: text) {
-  .sof-msgs .msgBody .iros-emphasis-normal {
-    color: #c01880 !important;
-  }
-}
-
-/* =======================================
-   Vision テーマ（msgBody 全体）
-   ======================================= */
-
-/* 🌌 Vision Mode 全体の雰囲気 */
-.sof-msgs .msgBody.vision-theme {
-  position: relative;
-  border-radius: 14px;
-  padding: 10px 12px;
-  margin: -2px -6px 0;
-  background: radial-gradient(
-      circle at 0% 0%,
-      rgba(75, 47, 255, 0.12),
-      transparent 55%
-    ),
-    radial-gradient(
-      circle at 100% 100%,
-      rgba(192, 132, 252, 0.16),
-      transparent 55%
-    );
-  border: 1px solid rgba(75, 47, 255, 0.22);
-}
-
-/* Vision + T層 Hint がアクティブなときの、すこしだけ光の粒感 */
-.sof-msgs .msgBody.vision-hint-theme {
-  box-shadow: 0 0 24px rgba(75, 47, 255, 0.25);
-}
-
-/* Vision でない通常モード時は、ボーダーや背景をリセットしておく保険 */
-.sof-msgs .msgBody:not(.vision-theme) {
-  border-radius: 0;
-  border: none;
-  background: transparent;
-  box-shadow: none;
-}
-
-/* =======================================
-   Headings / icons responsibility
-   - Icons are rendered ONLY by React (ChatMarkdown.tsx)
-   - CSS must NOT inject icons via ::before
-   ======================================= */
-
-/* --- HeadingLine (React) --- */
-.sof-msgs .msgBody .iros-heading-line {
-  display: flex;
-  align-items: center;
-  gap: 0.2em;
-  font-weight: 700;
-  font-size: 1.05rem;
-  letter-spacing: 0.02em;
-  margin: 1.15em 0 0.45em;
-  line-height: 1.35;
-}
-
-/* ✅ 見出しの右に薄い線（呼吸） */
-.sof-msgs .msgBody .iros-heading-line::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  margin-left: 0.7em;
-  opacity: 0.16;
-  background: currentColor;
-}
-
-/* ✅ 「二つの見方」などサブ見出し扱い（React側で iros-heading-sub を付ける） */
-.sof-msgs .msgBody .iros-heading-line.iros-heading-sub {
-  font-size: 0.96rem;
-  font-weight: 650;
-  margin-top: 0.75em;
-  margin-bottom: 0.35em;
-  opacity: 0.92;
-}
-
-/* --- Keep regular markdown heading layout minimal (avoid double margins) --- */
-.sof-msgs .msgBody h1,
-.sof-msgs .msgBody h2,
-.sof-msgs .msgBody h3,
-.sof-msgs .msgBody h4 {
-  margin: 0.2em 0; /* ← HeadingLine の margin に一本化するため抑える */
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-
-/* --- Legacy section heading class (if used elsewhere): style only, NO icon --- */
-.sof-msgs .msgBody .iros-section-heading,
-.msgBody .iros-section-heading {
-  display: block;
-  margin: 1.2em 0 0.4em;
-  font-size: 1.05rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-
-/* Optional: if you render an explicit icon span in markup */
-.sof-msgs .msgBody .iros-section-heading-icon,
-.msgBody .iros-section-heading-icon {
-  display: inline-block;
-  margin-right: 6px;
-}
 
 /* =========================================================
-   HARD STOP: kill ALL pseudo-icon injection (duplicated legacy)
+   base
    ========================================================= */
-.sof-msgs .msgBody h1::before,
-.sof-msgs .msgBody h2::before,
-.sof-msgs .msgBody h3::before,
-.sof-msgs .msgBody h4::before,
-.sof-msgs .msgBody strong::before,
-.sof-msgs .msgBody.vision-theme h1::before,
-.sof-msgs .msgBody.vision-theme h2::before,
-.sof-msgs .msgBody.vision-theme h3::before,
-.sof-msgs .msgBody.vision-theme h4::before,
-.sof-msgs .msgBody.vision-theme strong::before,
-.msgBody .iros-section-heading::before,
-.msgBody.vision-theme .iros-section-heading::before,
-.iros-section-heading::before,
-.irox-section-heading::before {
-  content: none !important;
-  display: none !important;
-}
 
-/* =========================================================
-   FIX: ordered list numbering (keep as-is)
-   ========================================================= */
-.sof-msgs .msgBody ol {
-  list-style: decimal !important;
-  list-style-position: outside;
-  padding-left: 1.25em;
-  margin: 0.25em 0 0.6em;
-}
-
-.sof-msgs .msgBody ol > li::before {
-  content: none !important;
-}
-
-.sof-msgs .msgBody ol > li {
-  padding-left: 0 !important;
-}
-
-/* =========================
-   iros typography (unified)
-   ========================= */
-
-/* 段落：行間と余白をここで一本化 */
-.sof-msgs .msgBody .iros-p {
-  margin: 0 0 0.9em;
-  line-height: 1.95;
-  white-space: pre-wrap;
-}
-
-/* 段落アイコン（3段以上時だけ付くやつ） */
-.sof-msgs .msgBody .iros-picon {
-  display: inline-block;
-  margin-right: 0.45em;
-  font-size: 1.05rem;
-  vertical-align: baseline;
-  opacity: 0.9;
-}
-
-/* 罫線（--- や ***）の見た目 */
-.sof-msgs .msgBody hr {
-  border: 0;
-  border-top: 1px solid rgba(0, 0, 0, 0.12);
-  margin: 1.05em 0;
-}
-
-/* “枠/区切り” を入れたい場合：Markdownの引用（> ）を箱として使う */
-.sof-msgs .msgBody blockquote {
-  margin: 0.9em 0;
-  padding: 0.75em 0.9em;
-  border-left: 3px solid rgba(87, 56, 255, 0.28);
-  background: rgba(87, 56, 255, 0.06);
-  border-radius: 10px;
-}
-
-.sof-msgs .msgBody blockquote p {
-  margin: 0.45em 0;
-}
-
-/* =========================
-   iros typography (fallback: .msgBody direct)
-   ========================= */
-
-.msgBody .iros-p {
-  margin: 0 0 0.9em;
-  line-height: 1.95;
-  white-space: pre-wrap;
-}
-
-.msgBody .iros-picon {
-  display: inline-block;
-  margin-right: 0.45em;
-  font-size: 1.05rem;
-  vertical-align: baseline;
-  opacity: 0.9;
-}
-
-.msgBody .iros-heading-line {
-  display: flex;
-  align-items: center;
-  gap: 0.2em;
-  font-weight: 700;
-  font-size: 1.05rem;
-  letter-spacing: 0.02em;
-  margin: 1.15em 0 0.45em;
-  line-height: 1.35;
-}
-
-.msgBody .iros-heading-line::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  margin-left: 0.7em;
-  opacity: 0.16;
-  background: currentColor;
-}
-
-.msgBody .iros-heading-line.iros-heading-sub {
-  font-size: 0.96rem;
-  font-weight: 650;
-  margin-top: 0.75em;
-  margin-bottom: 0.35em;
-  opacity: 0.92;
-}
-
-/* h1-h4 の余白は抑える（HeadingLine優先） */
-.msgBody h1,
-.msgBody h2,
-.msgBody h3,
-.msgBody h4 {
-  margin: 0.2em 0;
-}
-
-.msgBody hr {
-  border: 0;
-  border-top: 1px solid rgba(0, 0, 0, 0.12);
-  margin: 1.05em 0;
-}
-
-.msgBody blockquote {
-  margin: 0.9em 0;
-  padding: 0.75em 0.9em;
-  border-left: 3px solid rgba(87, 56, 255, 0.28);
-  background: rgba(87, 56, 255, 0.06);
-  border-radius: 10px;
-}
-
-.msgBody blockquote p {
-  margin: 0.45em 0;
-}
-
-/* 太字が「見た目で弱い」場合の保険 */
-.msgBody strong {
-  font-weight: 700;
-}
-
-/* =========================
-   段落の呼吸を強める
-   ========================= */
-
-   .sof-msgs .msgBody p,
-   .msgBody p {
-     margin: 0 0 1.2em;   /* ← ここが段落間余白 */
-     line-height: 2.05;   /* ← 少しだけ広げる */
+   .sof-msgs .msgBody,
+   .msgBody,
+   .sof-msgs .msgBody .iros-markdown,
+   .msgBody .iros-markdown {
+     font-size: 16.5px;
+     line-height: 1.92;
+     letter-spacing: 0.01em;
+     color: rgb(51, 51, 51);
    }
 
-   /* =========================
-      見出しの上下の呼吸
-      ========================= */
+   /* =========================================================
+      paragraphs
+      ========================================================= */
+
+   .sof-msgs .msgBody .iros-p,
+   .msgBody .iros-p,
+   .sof-msgs .msgBody p,
+   .msgBody p {
+     margin: 0 0 1.05em 0 !important;
+     line-height: 1.92 !important;
+     white-space: pre-wrap;
+   }
+
+   .sof-msgs .msgBody .iros-p:last-child,
+   .msgBody .iros-p:last-child,
+   .sof-msgs .msgBody p:last-child,
+   .msgBody p:last-child {
+     margin-bottom: 0 !important;
+   }
+
+   /* 段落アイコン */
+   .sof-msgs .msgBody .iros-picon,
+   .msgBody .iros-picon {
+     display: inline-block;
+     margin-right: 0.45em;
+     font-size: 1.05rem;
+     vertical-align: baseline;
+     opacity: 0.9;
+   }
+
+   .sof-msgs .msgBody .iros-ptext,
+   .msgBody .iros-ptext {
+     display: inline;
+   }
+
+   /* br にも少し呼吸を与える */
+   .sof-msgs .msgBody .iros-p br,
+   .msgBody .iros-p br {
+     display: block;
+     content: "";
+     margin-top: 0.65em;
+   }
+
+   /* =========================================================
+      headings
+      - Icons are rendered ONLY by React
+      ========================================================= */
 
    .sof-msgs .msgBody .iros-heading-line,
    .msgBody .iros-heading-line {
-     margin-top: 1.6em;    /* 上を広げる */
-     margin-bottom: 0.6em; /* 下も少し広げる */
+     display: flex;
+     align-items: center;
+     gap: 0.2em;
+     margin: 1.05em 0 0.5em 0 !important;
+     line-height: 1.5 !important;
+     font-weight: 700;
+     font-size: 1.06em;
+     letter-spacing: 0.01em;
+     color: rgb(36, 36, 36);
    }
 
-   /* =========================
-      セクション間の空気
-      ========================= */
-
-   .sof-msgs .msgBody .iros-p + .iros-heading-line {
-     margin-top: 1.8em;
+   .sof-msgs .msgBody .iros-heading-line::after,
+   .msgBody .iros-heading-line::after {
+     content: '';
+     flex: 1;
+     height: 1px;
+     margin-left: 0.7em;
+     opacity: 0.16;
+     background: currentColor;
    }
+
+   .sof-msgs .msgBody .iros-heading-line.iros-heading-sub,
+   .msgBody .iros-heading-line.iros-heading-sub {
+     font-size: 0.96rem;
+     font-weight: 650;
+     margin-top: 0.75em !important;
+     margin-bottom: 0.35em !important;
+     opacity: 0.92;
+   }
+
+   /* h1-h4 の既定余白は抑える */
+   .sof-msgs .msgBody h1,
+   .sof-msgs .msgBody h2,
+   .sof-msgs .msgBody h3,
+   .sof-msgs .msgBody h4,
+   .msgBody h1,
+   .msgBody h2,
+   .msgBody h3,
+   .msgBody h4 {
+     margin: 0.2em 0 !important;
+     font-weight: 700;
+     letter-spacing: 0.02em;
+   }
+
+   .sof-msgs .msgBody h1,
+   .msgBody h1 {
+     font-size: 1.16em;
+   }
+
+   .sof-msgs .msgBody h2,
+   .sof-msgs .msgBody h3,
+   .sof-msgs .msgBody h4,
+   .msgBody h2,
+   .msgBody h3,
+   .msgBody h4 {
+     font-size: 1.06em;
+   }
+
+   /* legacy section heading */
+   .sof-msgs .msgBody .iros-section-heading,
+   .msgBody .iros-section-heading,
+   .iros-section-heading {
+     display: block;
+     margin: 1.2em 0 0.4em;
+     font-size: 1.05rem;
+     font-weight: 700;
+     letter-spacing: 0.02em;
+     color: #5738ff;
+   }
+
+   .sof-msgs .msgBody .iros-section-heading-icon,
+   .msgBody .iros-section-heading-icon {
+     display: inline-block;
+     margin-right: 6px;
+   }
+
+   /* =========================================================
+      section blocks
+      ========================================================= */
+
+   .sof-msgs .msgBody .iros-section-block,
+   .msgBody .iros-section-block {
+     margin-bottom: 16px;
+     padding-left: 10px;
+     border-left: 3px solid #e2d7ff;
+   }
+
+   .sof-msgs .msgBody .iros-section-block p,
+   .msgBody .iros-section-block p {
+     color: #2e2a45;
+     line-height: 1.7;
+     margin: 6px 0;
+   }
+
+   .sof-msgs .msgBody .iros-section-block p small,
+   .sof-msgs .msgBody .iros-section-block p em,
+   .msgBody .iros-section-block p small,
+   .msgBody .iros-section-block p em {
+     color: #6b6b6b;
+     font-style: normal;
+   }
+
+   /* =========================================================
+      emphasis
+      ========================================================= */
+
+   .sof-msgs .msgBody .iros-emphasis,
+   .msgBody .iros-emphasis,
+   .sof-msgs .msgBody strong,
+   .sof-msgs .msgBody b,
+   .msgBody strong,
+   .msgBody b {
+     font-weight: 700;
+     color: rgb(28, 28, 28);
+   }
+
+   .sof-msgs .msgBody .iros-emphasis-vision,
+   .msgBody .iros-emphasis-vision {
+     color: #4b2fff !important;
+     background: none !important;
+   }
+
+   .sof-msgs .msgBody .iros-emphasis-normal,
+   .msgBody .iros-emphasis-normal {
+     background: linear-gradient(90deg, #c01880 0%, #002b99 100%);
+     background-clip: text;
+     color: transparent;
+     -webkit-background-clip: text;
+     -webkit-text-fill-color: transparent;
+   }
+
+   @supports not (-webkit-background-clip: text) {
+     .sof-msgs .msgBody .iros-emphasis-normal,
+     .msgBody .iros-emphasis-normal {
+       color: #c01880 !important;
+     }
+   }
+
+   .sof-msgs .msgBody em,
+   .msgBody em {
+     font-style: normal;
+     opacity: 0.92;
+   }
+
+   /* =========================================================
+      lists
+      ========================================================= */
+
+   .sof-msgs .msgBody ul,
+   .sof-msgs .msgBody ol,
+   .msgBody ul,
+   .msgBody ol {
+     margin: 0.5em 0 1.05em 0 !important;
+     padding-left: 1.35em !important;
+   }
+
+   .sof-msgs .msgBody li,
+   .msgBody li {
+     margin: 0.28em 0 !important;
+     line-height: 1.88 !important;
+   }
+
+   /* ordered list numbering fix */
+   .sof-msgs .msgBody ol,
+   .msgBody ol {
+     list-style: decimal !important;
+     list-style-position: outside;
+   }
+
+   .sof-msgs .msgBody ol > li::before,
+   .msgBody ol > li::before {
+     content: none !important;
+   }
+
+   .sof-msgs .msgBody ol > li,
+   .msgBody ol > li {
+     padding-left: 0 !important;
+   }
+
+   /* =========================================================
+      quote / hr / code
+      ========================================================= */
+
+   .sof-msgs .msgBody blockquote,
+   .msgBody blockquote {
+     margin: 0.8em 0 1em 0 !important;
+     padding: 0.7em 0.9em !important;
+     border-left: 3px solid rgba(140, 125, 220, 0.35);
+     background: rgba(248, 246, 255, 0.72);
+     border-radius: 10px;
+   }
+
+   .sof-msgs .msgBody blockquote p,
+   .msgBody blockquote p {
+     margin: 0.45em 0;
+   }
+
+   .sof-msgs .msgBody hr,
+   .msgBody hr {
+     border: 0;
+     border-top: 1px solid rgba(120, 120, 160, 0.18);
+     margin: 1.1em 0;
+   }
+
+   .sof-msgs .msgBody code,
+   .msgBody code {
+     font-size: 0.92em;
+   }
+
+   /* =========================================================
+      vision theme
+      ========================================================= */
+
+   .sof-msgs .msgBody.vision-theme,
+   .msgBody.vision-theme {
+     position: relative;
+     border-radius: 14px;
+     padding: 10px 12px;
+     margin: -2px -6px 0;
+     background:
+       radial-gradient(circle at 0% 0%, rgba(75, 47, 255, 0.12), transparent 55%),
+       radial-gradient(circle at 100% 100%, rgba(192, 132, 252, 0.16), transparent 55%);
+     border: 1px solid rgba(75, 47, 255, 0.22);
+   }
+
+   .sof-msgs .msgBody.vision-hint-theme,
+   .msgBody.vision-hint-theme {
+     box-shadow: 0 0 24px rgba(75, 47, 255, 0.25);
+   }
+
+   .sof-msgs .msgBody:not(.vision-theme),
+   .msgBody:not(.vision-theme) {
+     border-radius: 0;
+     border: none;
+     background: transparent;
+     box-shadow: none;
+   }
+
+   /* =========================================================
+      bubble
+      ========================================================= */
+
    .bubble {
-    padding: 18px 20px; /* 今より少し広く */
-  }
-/* Markdown本文の基本 */
-.sof-msgs .msgBody,
-.msgBody {
-  letter-spacing: 0.02em;
-}
-
-/* 段落：行間と余白 */
-.sof-msgs .msgBody .iros-p,
-.msgBody .iros-p {
-  margin: 0 0 1.2em;
-  line-height: 2.05;
-  white-space: pre-wrap;
-}
-
-/* 見出し（HeadingLine） */
-.sof-msgs .msgBody .iros-heading-line,
-.msgBody .iros-heading-line {
-  margin: 1.6em 0 0.6em;
-  line-height: 1.35;
-  font-weight: 700;
-}
-
-/* 太字の“刺さり” */
-.sof-msgs .msgBody .iros-emphasis,
-.msgBody .iros-emphasis {
-  font-weight: 700;
-}
-
-/* 罫線 / 引用も “場” を作る */
-.sof-msgs .msgBody hr,
-.msgBody hr {
-  border: 0;
-  border-top: 1px solid rgba(0,0,0,0.12);
-  margin: 1.1em 0;
-}
-
-.sof-msgs .msgBody blockquote,
-.msgBody blockquote {
-  margin: 1.0em 0;
-  padding: 0.8em 1.0em;
-  border-left: 3px solid rgba(87, 56, 255, 0.28);
-  background: rgba(87, 56, 255, 0.06);
-  border-radius: 10px;
-}
-
-/* =========================================================
-   FORCE: paragraph spacing for ChatMarkdown
-   - defeats msgBody inline line-height + IrosChat.css rules
-   ========================================================= */
-   .sof-msgs .msgBody p.iros-p,
-   .msgBody p.iros-p {
-     line-height: 2.05 !important;
-     margin: 0 0 1.2em !important;
+     padding: 18px 20px;
    }
 
-   /* 段落が連続する場合は少しだけ詰めたいなら（任意）
-   .sof-msgs .msgBody p.iros-p + p.iros-p,
-   .msgBody p.iros-p + p.iros-p {
+   /* =========================================================
+      hard stop: pseudo icon injection off
+      ========================================================= */
+
+   .sof-msgs .msgBody h1::before,
+   .sof-msgs .msgBody h2::before,
+   .sof-msgs .msgBody h3::before,
+   .sof-msgs .msgBody h4::before,
+   .sof-msgs .msgBody strong::before,
+   .sof-msgs .msgBody.vision-theme h1::before,
+   .sof-msgs .msgBody.vision-theme h2::before,
+   .sof-msgs .msgBody.vision-theme h3::before,
+   .sof-msgs .msgBody.vision-theme h4::before,
+   .sof-msgs .msgBody.vision-theme strong::before,
+   .msgBody .iros-section-heading::before,
+   .msgBody.vision-theme .iros-section-heading::before,
+   .iros-section-heading::before,
+   .irox-section-heading::before {
+     content: none !important;
+     display: none !important;
+   }
+
+   /* =========================================================
+      first / last child cleanup
+      ========================================================= */
+
+   .sof-msgs .msgBody > *:first-child,
+   .msgBody > *:first-child {
      margin-top: 0 !important;
    }
-   */
 
+   .sof-msgs .msgBody > *:last-child,
+   .msgBody > *:last-child {
+     margin-bottom: 0 !important;
+   }
+/* =========================================================
+   iros atmosphere pack v1
+   - 本文を壊さず、見た目だけ iros に寄せる
+   - ChatMarkdown.css の最後に置く
+   ========================================================= */
 
-/* 改行（<br>）にも余白を与える：1改行でも見た目が開く */
-.sof-msgs .msgBody .iros-p br,
-.msgBody .iros-p br {
-  display: block;
-  content: "";
-  margin-top: 0.65em;
-}
-/* =========================================
-   ブロック単位の余白（見出し＋本文）
-   ========================================= */
-.sof-msgs .msgBody[style]{
-  line-height: 2.3 !important;
-}
-/* --- Sofia breathing paragraphs --- */
-.sof-msgs .msgBody {
-  line-height: 2.05;            /* 行の呼吸（好みで 1.9〜2.2） */
-  letter-spacing: 0.02em;
-}
+   .sof-msgs .msgBody,
+   .msgBody {
+     position: relative;
+   }
 
-/* 段落の余白＝呼吸 */
-.sof-msgs .msgBody p,
-.sof-msgs .msgBody .iros-p {
-  margin: 0;                    /* まずリセット */
-  margin-block: 0 1.15em;       /* 下だけ余白（好みで 0.9〜1.4em） */
-}
+   /* 本文にごく薄い空気感 */
+   .sof-msgs .msgBody::before,
+   .msgBody::before {
+     content: "";
+     position: absolute;
+     inset: 0;
+     pointer-events: none;
+     border-radius: 14px;
+     background:
+       radial-gradient(circle at 0% 0%, rgba(116, 92, 255, 0.06), transparent 42%),
+       radial-gradient(circle at 100% 100%, rgba(197, 143, 255, 0.05), transparent 46%);
+     opacity: 1;
+   }
 
-/* 最後の段落だけ余白が残るのが嫌なら消す */
-.sof-msgs .msgBody p:last-child,
-.sof-msgs .msgBody .iros-p:last-child {
-  margin-bottom: 0;
-}
+   /* 本文は装飾レイヤーより前へ */
+   .sof-msgs .msgBody > *,
+   .msgBody > * {
+     position: relative;
+     z-index: 1;
+   }
+
+   /* 見出しを iros らしく */
+   .sof-msgs .msgBody .iros-heading-line,
+   .msgBody .iros-heading-line {
+     color: #2f2850;
+   }
+
+   .sof-msgs .msgBody .iros-heading-line::after,
+   .msgBody .iros-heading-line::after {
+     height: 1px;
+     opacity: 0.32;
+     background: linear-gradient(
+       90deg,
+       rgba(103, 80, 220, 0.32) 0%,
+       rgba(103, 80, 220, 0.12) 48%,
+       rgba(103, 80, 220, 0.02) 100%
+     );
+   }
+
+   /* 段落先頭のアイコンを“浮かせる” */
+   .sof-msgs .msgBody .iros-picon,
+   .msgBody .iros-picon {
+     width: 1.3em;
+     text-align: center;
+     margin-right: 0.5em;
+     opacity: 0.92;
+     filter: drop-shadow(0 0 6px rgba(122, 96, 255, 0.14));
+   }
+
+   /* 太字に少しだけ刺さりを出す */
+   .sof-msgs .msgBody strong,
+   .sof-msgs .msgBody b,
+   .sof-msgs .msgBody .iros-emphasis,
+   .msgBody strong,
+   .msgBody b,
+   .msgBody .iros-emphasis {
+     color: #1f1a38;
+     font-weight: 700;
+     text-shadow: 0 0 0 rgba(0, 0, 0, 0);
+   }
+
+   /* blockquote を “静かな箱” に */
+   .sof-msgs .msgBody blockquote,
+   .msgBody blockquote {
+     border-left: 3px solid rgba(112, 92, 224, 0.34);
+     background:
+       linear-gradient(180deg, rgba(248, 246, 255, 0.95), rgba(244, 241, 255, 0.82));
+     box-shadow:
+       inset 0 1px 0 rgba(255, 255, 255, 0.7),
+       0 8px 22px rgba(92, 75, 180, 0.06);
+   }
+
+   /* hr を無機質な線ではなく、息継ぎの線に */
+   .sof-msgs .msgBody hr,
+   .msgBody hr {
+     height: 1px;
+     border: 0;
+     background: linear-gradient(
+       90deg,
+       rgba(120, 102, 220, 0) 0%,
+       rgba(120, 102, 220, 0.24) 18%,
+       rgba(120, 102, 220, 0.24) 82%,
+       rgba(120, 102, 220, 0) 100%
+     );
+   }
+
+   /* 段落間の空気を少しだけ柔らかく */
+   .sof-msgs .msgBody .iros-p + .iros-p,
+   .msgBody .iros-p + .iros-p,
+   .sof-msgs .msgBody p + p,
+   .msgBody p + p {
+     margin-top: 0.06em;
+   }
+
+   /* リストにも iros の整い感 */
+   .sof-msgs .msgBody ul li::marker,
+   .sof-msgs .msgBody ol li::marker,
+   .msgBody ul li::marker,
+   .msgBody ol li::marker {
+     color: rgba(96, 76, 210, 0.78);
+     font-weight: 700;
+   }

@@ -187,11 +187,15 @@ function makeTraceId(req: NextRequest, extraReq: any | null, fallbackEarly: stri
 }
 
 function stripInternalLines(s0: string) {
-  const s = String(s0 ?? '');
+  const s = String(s0 ?? '').replace(/\r\n/g, '\n');
+
   const lines = s.split('\n').filter((ln) => {
     const t = ln.trim();
-    if (!t) return false;
 
+    // ✅ 空行は保持する
+    if (!t) return true;
+
+    // ✅ 内部 directive 行だけ落とす
     if (t.startsWith('@OBS')) return false;
     if (t.startsWith('@SHIFT')) return false;
     if (t.startsWith('@NEXT')) return false;
@@ -203,9 +207,9 @@ function stripInternalLines(s0: string) {
     return true;
   });
 
-  return lines.join('\n').trim();
+  // ✅ 先頭末尾だけ余分な空行を落とす（段落間の空行は残す）
+  return lines.join('\n').replace(/^\n+|\n+$/g, '');
 }
-
 function blocksToText(bs: any[]) {
   const parts = bs
     .map((b) => {
@@ -1488,28 +1492,27 @@ const fromBlocks = stripInternalLines(blocksJoinedCleaned);
 const fromResultObj = stripInternalLines(resultObjFinalRaw);
 
 const contentForPersist = (() => {
-  const shiftKindNow = String(
-    (metaForSaveExtraAny?.ctxPack as any)?.shiftKind ??
-      (metaForSaveExtraAny as any)?.ctxPack?.shiftKind ??
-      ''
-  ).trim();
+  // ✅ SoT固定:
+  // まず「UIに実際返した本文(result.content)」を最優先で保存する
+  // UI本文 = DB本文 を完全一致させる
+  if (!isEffectivelyEmptyText(uiReturnText) && uiReturnText.length > 0) {
+    return uiReturnText;
+  }
 
-  const shouldPreferBlocks =
-    shiftKindNow === 'stabilize_shift' ||
-    shiftKindNow === 'distance_shift' ||
-    shiftKindNow === 'clarify_shift';
+  // 次に、同期済み meta の最終本文
+  if (!isEffectivelyEmptyText(uiResolvedText) && uiResolvedText.length > 0) {
+    return uiResolvedText;
+  }
 
-  // ✅ Phase 2: personal SHIFT が効いているターンでは rephraseBlocks(clean) を最優先
-  if (shouldPreferBlocks && !isEffectivelyEmptyText(fromBlocks) && fromBlocks.length > 0) {
+  // blocks は UI正本が空のときだけ救済に使う
+  if (!isEffectivelyEmptyText(fromBlocks) && fromBlocks.length > 0) {
     return fromBlocks;
   }
 
-  if (!isEffectivelyEmptyText(uiReturnText) && uiReturnText.length > 0) return uiReturnText;
-  if (!isEffectivelyEmptyText(uiResolvedText) && uiResolvedText.length > 0) return uiResolvedText;
-
   // 以下は “正本が空” の救済
-  if (!isEffectivelyEmptyText(fromBlocks) && fromBlocks.length > 0) return fromBlocks;
-  if (!isEffectivelyEmptyText(fromResultObj) && fromResultObj.length > 0) return fromResultObj;
+  if (!isEffectivelyEmptyText(fromResultObj) && fromResultObj.length > 0) {
+    return fromResultObj;
+  }
 
   // ❌ userEcho には落とさない（オウム再発防止）
   return '……';
@@ -1518,10 +1521,8 @@ const contentForPersist = (() => {
 const pickedFromForLog = (() => {
   if (!isEffectivelyEmptyText(uiReturnText) && uiReturnText.length > 0) return 'uiResultContent';
   if (!isEffectivelyEmptyText(uiResolvedText) && uiResolvedText.length > 0) return 'metaResolvedUiText';
-
   if (!isEffectivelyEmptyText(fromBlocks) && fromBlocks.length > 0) return 'rephraseBlocks';
   if (!isEffectivelyEmptyText(fromResultObj) && fromResultObj.length > 0) return 'resultObjFinalRaw';
-
   return 'dots';
 })();
 

@@ -48,7 +48,9 @@ function normKey(s: string): string {
  *
  * 重要:
  * - Markdown の「行末2スペース（ハード改行）」は保持する
- *   （trim() で消すと UI 側の改行が潰れて “途中までしか出ない” 症状を誘発しうる）
+ * - block 先頭の空行は落とす
+ * - block 末尾の空行は落とす
+ *   ※ block間の余白は renderV2 本体で管理する
  */
 function normalizeLines(raw: string, opts?: { keepOneBlank?: boolean }): string[] {
   const keepOneBlank = opts?.keepOneBlank === true;
@@ -57,37 +59,54 @@ function normalizeLines(raw: string, opts?: { keepOneBlank?: boolean }): string[
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n');
 
-  const s = s0.trim();
-  if (!s) return [];
+  if (s0 === '') return [];
 
-  const lines0 = s.split('\n');
+  const lines0 = s0.split('\n');
 
   const out: string[] = [];
   let blankAdded = false;
+  let seenNonBlank = false;
 
   for (const x of lines0) {
-    // 1) 全角空白だけを端から除去（半角は残しうる：markdown用）
+    // 全角空白だけ端から除去（見た目事故を防ぐ）
     const t0 = String(x ?? '').replace(/^\u3000+|\u3000+$/g, '');
 
-    // 2) markdown ハード改行（行末 "  "）は保持
+    // markdown ハード改行（行末2スペース）は保持
     const hasMdHardBreak = / {2}$/.test(t0);
 
-    // 3) “中身判定”は半角空白を落として行う（空行判定を正確にする）
-    const core = t0.trim();
+    // 空行判定
+    const isBlank = t0.trim().length === 0;
 
-    if (!core) {
-      if (keepOneBlank && !blankAdded && out.length > 0) {
+    if (isBlank) {
+      // block先頭の空行は出さない
+      if (!seenNonBlank) continue;
+
+      if (keepOneBlank) {
+        if (!blankAdded && out.length > 0) {
+          out.push('');
+          blankAdded = true;
+        }
+      } else {
         out.push('');
-        blankAdded = true;
       }
       continue;
     }
 
-    // 4) 出力用：末尾空白は基本落とすが、ハード改行だけ戻す
-    const lineOut = hasMdHardBreak ? `${core}  ` : core;
+    // 行頭スペースは残す
+    // 行末スペースは markdown hard break 以外だけ除去
+    let lineOut = t0.replace(/[ \t]+$/g, '');
+    if (hasMdHardBreak) {
+      lineOut = lineOut.replace(/[ \t]+$/g, '') + '  ';
+    }
 
     out.push(lineOut);
+    seenNonBlank = true;
     blankAdded = false;
+  }
+
+  // block末尾の空行だけ落とす
+  while (out.length > 0 && out[out.length - 1] === '') {
+    out.pop();
   }
 
   return out;
@@ -111,7 +130,7 @@ export function renderV2(input: RenderV2Input): string {
   const maxLinesRaw = Number(input?.maxLines);
   const hasLineLimit = Number.isFinite(maxLinesRaw) && maxLinesRaw > 0;
 
-  // ✅ maxLines は「非空行」の上限として扱う（空行は呼吸として許可するが枠は食わせない）
+  // maxLines は「非空行」の上限として扱う
   const maxNonBlankLines = hasLineLimit ? Math.floor(maxLinesRaw) : Infinity;
 
   const seen = new Set<string>();
@@ -131,7 +150,8 @@ export function renderV2(input: RenderV2Input): string {
     if (!canAddMoreNonBlank()) return false;
 
     if (!shouldSkipDedupe(line)) {
-      // dedupe は “表示差分” だけ潰す。markdown 末尾2スペースは比較から除外
+      // dedupe は “表示差分” だけ潰す
+      // markdown 末尾2スペースは比較から除外
       const lineForKey = String(line).replace(/ {2}$/, '');
       const k = normKey(lineForKey);
       if (seen.has(k)) return true; // 追加しないが処理は継続
@@ -143,33 +163,46 @@ export function renderV2(input: RenderV2Input): string {
     return true;
   };
 
-  // blocks → 整形して忠実に反映
-  for (const b of blocks) {
-    if (!canAddMoreNonBlank()) break;
+  /**
+   * block 単位で流し込む
+   * - block内の空行は normalizeLines 側で整理
+   * - block間の余白はここで 1つだけ付ける
+   */
+  const renderBlockLines = (lines: string[]) => {
+    if (!Array.isArray(lines) || lines.length === 0) return;
 
-    const raw = String((b as any)?.text ?? '');
-    const lines = normalizeLines(raw, { keepOneBlank: true });
+    let insertedBlockGap = false;
 
     for (const line of lines) {
       if (line === '') {
         pushBlankIfOk();
         continue;
       }
+
+      // ✅ block先頭の本文行の前に、前blockとの区切り余白を1つだけ入れる
+      if (!insertedBlockGap && out.length > 0 && out[out.length - 1] !== '') {
+        pushBlankIfOk();
+      }
+
+      insertedBlockGap = true;
+
       if (!pushLine(line)) break;
     }
+  };
+
+  // blocks → 整形して忠実に反映
+  for (const b of blocks) {
+    if (!canAddMoreNonBlank()) break;
+
+    const raw = String((b as any)?.text ?? '');
+    const lines = normalizeLines(raw, { keepOneBlank: true });
+    renderBlockLines(lines);
   }
 
   // blocks が完全に空の場合のみ fallback を使う
   if (out.length === 0 && input?.fallbackText && canAddMoreNonBlank()) {
     const fbLines = normalizeLines(String(input.fallbackText), { keepOneBlank: true });
-
-    for (const line of fbLines) {
-      if (line === '') {
-        pushBlankIfOk();
-        continue;
-      }
-      if (!pushLine(line)) break;
-    }
+    renderBlockLines(fbLines);
   }
 
   // 末尾の空行だけ落とす（意味改変ではなく見た目調整）

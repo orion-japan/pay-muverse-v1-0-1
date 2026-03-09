@@ -209,7 +209,7 @@ export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
   let pIndex = 0;
 
   return (
-    <div className={className}>
+    <div className={`iros-markdown ${className ?? ''}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -218,7 +218,6 @@ export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
             const idx = pIndex++;
             const shouldDecorate = enableParaDecor && idx <= 2 && raw.trim() && !hasLeadingEmoji(raw);
 
-            // 先頭3段落だけ：🧿 → 🌀 → 🌱（強すぎない）
             const icon = idx === 0 ? '🧿' : idx === 1 ? '🌀' : '🌱';
 
             return (
@@ -228,12 +227,11 @@ export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
                     {icon}
                   </span>
                 )}
-                {children}
+                <span className="iros-ptext">{children}</span>
               </p>
             );
           },
 
-          // ✅ 見出し：children を plainText で
           h1: ({ children }) => <HeadingLine title={plainTextFromChildren(children)} level={1} />,
           h2: ({ children }) => <HeadingLine title={plainTextFromChildren(children)} level={2} />,
           h3: ({ children }) => <HeadingLine title={plainTextFromChildren(children)} level={3} />,
@@ -264,5 +262,4 @@ export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
         {normalized}
       </ReactMarkdown>
     </div>
-  );
-}
+  );}

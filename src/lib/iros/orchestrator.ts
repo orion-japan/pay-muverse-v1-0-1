@@ -1862,6 +1862,15 @@ if (shouldFallbackNormalChat) {
             lc.includes(n.toLowerCase()),
         );
 
+        const inheritedResolvedAskForNormalChat =
+        (((meta as any)?.ctxPack?.resolvedAsk ??
+          (meta as any)?.extra?.ctxPack?.resolvedAsk ??
+          null) as any) || null;
+
+      const recentJoinedForNormalChat = Array.isArray(recentUserTextsForNormalChat)
+        ? recentUserTextsForNormalChat.join('\n')
+        : '';
+
       const hasTruthLike =
         hasAnyInUser('真実', '事実', '本当') ||
         /真実|事実|本当/u.test(currentUserTextForNormalChat);
@@ -1871,10 +1880,51 @@ if (shouldFallbackNormalChat) {
         /構造的|構造/u.test(currentUserTextForNormalChat);
 
       const hasHumanCreationLike =
-        /地球外生命体.*人間.*(作った|創った)/u.test(currentUserTextForNormalChat) ||
-        /人間.*地球外生命体.*(作った|創った)/u.test(currentUserTextForNormalChat) ||
-        /宇宙人.*人間.*(作った|創った)/u.test(currentUserTextForNormalChat) ||
-        /人間.*宇宙人.*(作った|創った)/u.test(currentUserTextForNormalChat);
+        /地球外生命体.*人間.*(作った|創った|作られた|介入)/u.test(currentUserTextForNormalChat) ||
+        /人間.*地球外生命体.*(作った|創った|作られた|介入)/u.test(currentUserTextForNormalChat) ||
+        /宇宙人.*人間.*(作った|創った|作られた|介入)/u.test(currentUserTextForNormalChat) ||
+        /人間.*宇宙人.*(作った|創った|作られた|介入)/u.test(currentUserTextForNormalChat);
+
+      const hasHumanCreationLikeRecent =
+        /地球外生命体.*人間.*(作った|創った|作られた|介入)/u.test(recentJoinedForNormalChat) ||
+        /人間.*地球外生命体.*(作った|創った|作られた|介入)/u.test(recentJoinedForNormalChat) ||
+        /宇宙人.*人間.*(作った|創った|作られた|介入)/u.test(recentJoinedForNormalChat) ||
+        /人間.*宇宙人.*(作った|創った|作られた|介入)/u.test(recentJoinedForNormalChat);
+
+      const isReferentialTruthFollowup =
+        /その(並び|話|構造)/u.test(currentUserTextForNormalChat) ||
+        /この(並び|話|構造)/u.test(currentUserTextForNormalChat) ||
+        /あの(並び|話|構造)/u.test(currentUserTextForNormalChat) ||
+        /(その|この|あの).*(地球外生命体|宇宙人).*(話|構造)/u.test(currentUserTextForNormalChat);
+
+      if (
+        inheritedResolvedAskForNormalChat?.askType === 'truth_structure' &&
+        isReferentialTruthFollowup
+      ) {
+        return {
+          topic: String(
+            inheritedResolvedAskForNormalChat.topic ?? '地球外生命体が人間を作ったのか'
+          ),
+          askType: 'truth_structure',
+          replyMode: String(
+            inheritedResolvedAskForNormalChat.replyMode ?? 'direct_answer_first'
+          ),
+          sourceUserText: currentUserTextForNormalChat,
+        };
+      }
+
+      if (
+        isReferentialTruthFollowup &&
+        hasHumanCreationLikeRecent &&
+        (hasTruthLike || hasStructureLike || /並び/u.test(currentUserTextForNormalChat))
+      ) {
+        return {
+          topic: '地球外生命体が人間を作ったのか',
+          askType: 'truth_structure',
+          replyMode: 'direct_answer_first',
+          sourceUserText: currentUserTextForNormalChat,
+        };
+      }
 
       if (hasHumanCreationLike && (hasTruthLike || hasStructureLike)) {
         return {

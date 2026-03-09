@@ -389,7 +389,14 @@ function buildClarify(
     )
       ? 'truth_structure'
       : '';
-
+      console.log('[IROS/NORMAL_CHAT][BUILD_CLARIFY_TRACE]', {
+        userHead: String(userText ?? '').slice(0, 80),
+        resolvedAskTypeArg: String(resolvedAskTypeArg ?? ''),
+        resolvedAskType,
+        lane,
+        isT,
+        normalizedUserText: normalizedUserText.slice(0, 120),
+      });
       const shiftIntentBase =
       isT
         ? 'implement_next_step'
@@ -1065,12 +1072,6 @@ function safeLaneKey(v: unknown): LaneKey | null {
   return v === 'IDEA_BAND' || v === 'T_CONCRETIZE' ? v : null;
 }
 
-// ✅ 置き換え 2) buildNextHintSlot の JSON.stringify 内「laneKey」行だけ置き換え
-// 変更前: laneKey,
-// 変更後:
-
-
-// ✅ 置き換え 3) buildNormalChatSlotPlan を関数まるごと差し替え
 // ✅ 置き換え 3) buildNormalChatSlotPlan を関数まるごと差し替え
 export function buildNormalChatSlotPlan(args: {
   userText: string;
@@ -1132,6 +1133,11 @@ export function buildNormalChatSlotPlan(args: {
 
   const flowDelta = flow?.delta ? String(flow.delta) : null;
 
+  const resolvedAskType =
+    String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
+    String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
+    '';
+
   let reason = 'flow';
   let slots: NormalChatSlot[] = [];
 
@@ -1152,7 +1158,13 @@ export function buildNormalChatSlotPlan(args: {
   } else if (isClarify(userText) && /[?？]/.test(userText)) {
     reason = 'clarify';
     usedClarify = true;
-    slots = buildClarify(userText, laneKeyArg, flowDelta, flow as any);
+    slots = buildClarify(
+      userText,
+      laneKeyArg,
+      flowDelta,
+      flow as any,
+      resolvedAskType,
+    );
   } else if (isCompose(userText)) {
     reason = 'compose';
     slots = buildCompose(userText, laneKeyArg, flowDelta);

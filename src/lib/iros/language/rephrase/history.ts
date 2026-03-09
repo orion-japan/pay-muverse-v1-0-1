@@ -295,10 +295,13 @@ export function extractLastTurnsFromContext(userContext: unknown): TurnMsg[] {
   const maxMsgs = maxMsgsRaw > 0 ? Math.floor(maxMsgsRaw) : 4;
 
   const rawTurns =
+    pickArray(ctx?.turnsForWriter) ||
     pickArray(ctx?.turns) ||
     pickArray(ctx?.chat) ||
+    pickArray(ctx?.ctxPack?.turnsForWriter) ||
     pickArray(ctx?.ctxPack?.turns) ||
     pickArray(ctx?.ctxPack?.chat) ||
+    pickArray(ctx?.ctx_pack?.turnsForWriter) ||
     pickArray(ctx?.ctx_pack?.turns) ||
     pickArray(ctx?.ctx_pack?.chat) ||
     null;

@@ -668,14 +668,47 @@ function safeHead(s: string, n = 80) {
 }
 
 function clampLines(text: string, maxLines: number): string {
-  const t = norm(text);
+  const t = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
   if (!t) return '';
-  const lines = t
-    .split('\n')
-    .map((x) => x.trim())
-    .filter(Boolean);
-  if (lines.length <= maxLines) return lines.join('\n');
-  return lines.slice(0, Math.max(1, maxLines)).join('\n');
+
+  const rawLines = t.split('\n');
+
+  // 余白は意味として残す。
+  // ただし連続空行が暴走しないよう、空行は最大1行までに正規化する。
+  const normalizedLines: string[] = [];
+  let prevWasBlank = false;
+
+  for (const line of rawLines) {
+    const trimmed = String(line ?? '').trim();
+
+    if (!trimmed) {
+      if (!prevWasBlank) {
+        normalizedLines.push('');
+        prevWasBlank = true;
+      }
+      continue;
+    }
+
+    normalizedLines.push(trimmed);
+    prevWasBlank = false;
+  }
+
+  // 先頭/末尾の空行は落とす
+  while (normalizedLines.length > 0 && normalizedLines[0] === '') normalizedLines.shift();
+  while (normalizedLines.length > 0 && normalizedLines[normalizedLines.length - 1] === '') normalizedLines.pop();
+
+  if (normalizedLines.length === 0) return '';
+
+  if (normalizedLines.length <= maxLines) {
+    return normalizedLines.join('\n');
+  }
+
+  const sliced = normalizedLines.slice(0, Math.max(1, maxLines));
+
+  // 末尾が空行で終わらないように整える
+  while (sliced.length > 0 && sliced[sliced.length - 1] === '') sliced.pop();
+
+  return sliced.join('\n').trimEnd();
 }
 
 function clampChars(text: string, maxChars: number): string {
@@ -1920,10 +1953,27 @@ export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: Rephra
 
   const mode = String(process.env.IROS_REPHRASE_FINAL_MODE ?? 'LLM').trim().toUpperCase();
 
+  const hintedMaxLines =
+    typeof (opts as any)?.maxLinesHint === 'number' && Number.isFinite((opts as any).maxLinesHint)
+      ? Math.floor((opts as any).maxLinesHint)
+      : 8;
+      console.log('[IROS/rephraseEngine][MAXLINES_INIT]', {
+        traceId: (debug as any)?.traceId ?? null,
+        conversationId: (debug as any)?.conversationId ?? null,
+        userCode: (debug as any)?.userCode ?? null,
+        envMaxLines: Number(process.env.IROS_REPHRASE_FINAL_MAXLINES) > 0
+          ? Math.floor(Number(process.env.IROS_REPHRASE_FINAL_MAXLINES))
+          : null,
+        optsMaxLinesHint:
+          typeof (opts as any)?.maxLinesHint === 'number' && Number.isFinite((opts as any).maxLinesHint)
+            ? Math.floor((opts as any).maxLinesHint)
+            : null,
+        hintedMaxLines,
+      });
   let maxLines =
     Number(process.env.IROS_REPHRASE_FINAL_MAXLINES) > 0
       ? Math.floor(Number(process.env.IROS_REPHRASE_FINAL_MAXLINES))
-      : Math.max(4, Math.min(12, Math.floor(opts.maxLinesHint ?? 8)));
+      : Math.max(8, Math.min(80, hintedMaxLines));
 
   const inKeys = extracted.keys;
 
@@ -2568,13 +2618,12 @@ const lastTurnsSafe = (() => {
   // 直近を少し広めに取る
   let tail = t.slice(-6);
 
-  // internalPack が user 固定なので、turns の先頭が user だと user,user 連投になる。
-  // 先頭が user で、後ろに assistant がいるなら、先頭側の user を落として assistant 始まりへ寄せる。
-  while (tail.length > 0 && tail[0].role === 'user' && tail.some((x) => x.role === 'assistant')) {
-    tail.shift();
+  // 末尾 user はこのターンの user と二重になるので落とす
+  if (tail.length > 0 && tail[tail.length - 1]?.role === 'user') {
+    tail = tail.slice(0, -1);
   }
 
-  // 最終的に最大4メッセージ
+  // 最大4メッセージ
   return tail.slice(-4);
 })();
 
@@ -4703,7 +4752,30 @@ raw = await (async () => {
       candidate = makeCandidate(restoredAfterClamp, maxLines, renderEngine);
     }
   }
+  console.log('[IROS/rephraseEngine][CANDIDATE_LEN_TRACE]', {
+    traceId: debug.traceId,
+    conversationId: debug.conversationId,
+    userCode: debug.userCode,
+    rawLen: String(raw ?? '').length,
+    rawGuardedLen: String(rawGuarded ?? '').length,
+    candidateAfterMakeLen: String(candidate ?? '').length,
+    candidateAfterMakeHead: safeHead(String(candidate ?? ''), 160),
+    maxLines,
+  });
 
+  const candidateBeforeSanitize = String(candidate ?? '');
+  candidate = sanitizeNoQuestions(candidate);
+
+  console.log('[IROS/rephraseEngine][CANDIDATE_AFTER_SANITIZE]', {
+    traceId: debug.traceId,
+    conversationId: debug.conversationId,
+    userCode: debug.userCode,
+    beforeLen: candidateBeforeSanitize.length,
+    afterLen: String(candidate ?? '').length,
+    changed: candidateBeforeSanitize !== String(candidate ?? ''),
+    beforeHead: safeHead(candidateBeforeSanitize, 160),
+    afterHead: safeHead(String(candidate ?? ''), 160),
+  });
   // ✅ 最終確定直前：問いを物理的に落とす（いったん元に戻す）
   candidate = sanitizeNoQuestions(candidate);
 

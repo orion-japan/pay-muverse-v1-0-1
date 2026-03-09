@@ -1472,7 +1472,20 @@ try {
   // - topic_recall / structure_map は normalize + trim を通す
   if (isClarifyMeaningNow || isStabilizeShiftNow) {
     delete (userContext.ctxPack as any).historyForWriter;
-    delete (userContext as any).turnsForWriter;
+
+    const src: any[] =
+      Array.isArray(hfwEffective) && hfwEffective.length > 0
+        ? hfwEffective
+        : Array.isArray(curHfw) && curHfw.length > 0
+          ? curHfw
+          : [];
+
+    if (src.length > 0) {
+      const hfwForWriter = buildHfwForWriter(src);
+      (userContext as any).turnsForWriter = hfwForWriter;
+    } else {
+      delete (userContext as any).turnsForWriter;
+    }
   } else if (isTopicRecallNow || isStructureMapQuestion(userText)) {
     const src: any[] =
       Array.isArray(curHfw) && curHfw.length > 0
@@ -1522,29 +1535,52 @@ try {
     (meta as any)?.slotPlanPolicy ??
     null;
 
-  const res = await rephraseSlotsFinal(extracted, {
-    model,
-    conversationId,
-    userCode,
-    traceId,
-    userText,
-    qCode: qCodeForLLM,
-    depthStage: depthForLLM,
-    inputKind: inputKindForLLM,
-    userContext,
+    const res = await rephraseSlotsFinal(extracted, {
+      model,
+      conversationId,
+      userCode,
+      traceId,
+      userText,
+      qCode: qCodeForLLM,
+      depthStage: depthForLLM,
+      inputKind: inputKindForLLM,
+      userContext,
 
-    // ✅ audit/分岐のために明示的に渡す
-    slotPlanPolicy: slotPlanPolicyForRephrase,
+      // ✅ audit/分岐のために明示的に渡す
+      slotPlanPolicy: slotPlanPolicyForRephrase,
 
-    // ✅ NEW: route.ts から来る forceRetry を rephraseEngine へ配線
-    forceRetry: !!((extraMerged as any)?.forceRetry ?? (meta as any)?.extra?.forceRetry),
+      // ✅ NEW: route.ts から来る forceRetry を rephraseEngine へ配線
+      forceRetry: !!((extraMerged as any)?.forceRetry ?? (meta as any)?.extra?.forceRetry),
 
-    // ✅ 本丸：rephraseEngine が必ず拾える top-level 配線（ctxPackが薄くなっても死なない）
-    topicDigest: topicDigestForCtx,
-    conversationLine: conversationLineForCtx,
-    replyGoal: replyGoalForCtx,
-    repeatSignal: repeatSignalForCtx,
-  } as any);
+      // ✅ NEW: maxLinesHint を _impl 経路でも必ず渡す
+      // - rephraseBlocks が既にあればその個数を優先
+      // - なければ extracted.keys の数を使う
+      // - 最低12、最大80
+      maxLinesHint: (() => {
+        const exAny =
+          ((meta as any)?.extra && typeof (meta as any).extra === 'object')
+            ? (meta as any).extra
+            : {};
+
+        const rbLen = Array.isArray((exAny as any)?.rephraseBlocks)
+          ? (exAny as any).rephraseBlocks.length
+          : 0;
+
+        const slotLen = Array.isArray((extracted as any)?.keys)
+          ? (extracted as any).keys.length
+          : 0;
+
+        const basis = rbLen > 0 ? rbLen : slotLen > 0 ? slotLen : 4;
+        const budget = Math.max(12, basis * 8);
+        return Math.min(80, budget);
+      })(),
+
+      // ✅ 本丸：rephraseEngine が必ず拾える top-level 配線（ctxPackが薄くなっても死なない）
+      topicDigest: topicDigestForCtx,
+      conversationLine: conversationLineForCtx,
+      replyGoal: replyGoalForCtx,
+      repeatSignal: repeatSignalForCtx,
+    } as any);
 
   console.log('[IROS/rephraseAttach][RES_KEYS]', {
     resKeys: Object.keys(res ?? {}),
@@ -1622,8 +1658,8 @@ try {
         (res as any)?.meta?.text,
         (res as any)?.meta?.content,
         (res as any)?.meta?.note,
-        (resExtra as any)?.rephraseHead,
-        (res as any)?.meta?.rawHead,
+        // ⚠️ rephraseHead / rawHead は「先頭断片」のことがあるため、
+        // 本文 fallback 候補には使わない
       ],
     });
 
