@@ -1,0 +1,21 @@
+{
+  "conversationId": "522978c4-65a7-41e3-8dd6-0c894f46fc2e",
+  "text": "報告をしたいけど、上司に起こられるのが怖い、どうしたら良いですか？",
+  "extra": {
+    "traceId": "test-llm-reference-001",
+    "historyForWriter": [
+      { "role": "user", "head": "報告が怖い" },
+      { "role": "assistant", "head": "口が重くなる自然な反応" }
+    ],
+    "STATE_CUES": {
+      "depthStage": "S2",
+      "phase": "Inner",
+      "qCode": "Q1",
+      "tLayerHint": "T3",
+      "intentBand": "S2",
+      "returnStreak": 12
+    },
+    "seedDraft": "過去の戻り回数12を意識して安全に着地できる形を提案",
+    "flowMeaning": "未完了ポイントを確認しつつ進める局面"
+  }
+}
