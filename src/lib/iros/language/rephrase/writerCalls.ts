@@ -1716,7 +1716,8 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     const packNorm = norm(internalPackFixed);
     const h = packNorm.slice(0, 420);
 
-    const flowIdx = packNorm.indexOf('FLOW_MEANING (DO NOT OUTPUT):');
+    const flowMatch = packNorm.match(/FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:/);
+    const flowIdx = flowMatch ? flowMatch.index ?? -1 : -1;
     const flowSnippet =
       flowIdx >= 0 ? packNorm.slice(flowIdx, Math.min(packNorm.length, flowIdx + 520)) : '';
 
