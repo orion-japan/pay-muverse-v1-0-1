@@ -153,6 +153,9 @@ importers:
       tinify:
         specifier: ^1.8.1
         version: 1.8.2
+      unified:
+        specifier: ^11.0.5
+        version: 11.0.5
       web-push:
         specifier: ^3.6.7
         version: 3.6.7
