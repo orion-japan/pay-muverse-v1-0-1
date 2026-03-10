@@ -256,11 +256,13 @@ function buildClarify(
   const tMode = String(questionArg?.tState?.mode ?? '').trim();
   const outputPolicy = questionArg?.outputPolicy ?? null;
 
+  const tStateFocus = String(questionArg?.tState?.focus ?? '').trim();
   const focusCandidateRaw = Array.isArray(questionArg?.iframe?.focusCandidate)
     ? questionArg.iframe.focusCandidate
     : [];
-  const questionFocus =
+  const focusCandidateTop =
     focusCandidateRaw.length > 0 ? String(focusCandidateRaw[0] ?? '').trim() : '';
+  const questionFocus = tStateFocus || focusCandidateTop;
 
   const usePastReframe = !!outputPolicy?.usePastReframe;
   const splitFactHypothesis = !!outputPolicy?.splitFactHypothesis;
@@ -427,32 +429,42 @@ function buildClarify(
     splitFactHypothesis,
     avoidPrematureClosure,
   });
+  const directAnswerRequested =
+    /答え|結論|要するに|結局|真実が知りたい|本当のことが知りたい|そろそろ結論|今の未来|未来だよ/.test(seedText);
+
+  const shouldAnswerTruthStructure =
+    resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure;
 
   const shiftIntentBase =
     isT
       ? 'implement_next_step'
       : questionSuggestsPastReframe
         ? 'answer_past_reframe'
-        : resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure
-          ? 'answer_truth_structure'
-          : 'answer_user_meaning';
+        : directAnswerRequested
+          ? 'answer_in_one_shot'
+          : shouldAnswerTruthStructure
+            ? 'answer_truth_structure'
+            : 'answer_user_meaning';
 
   const shiftHintBase =
     isT
       ? 'clarify_t_concretize_v1'
-      : resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure
+      : shouldAnswerTruthStructure
         ? 'clarify_truth_structure_v1'
-        : 'clarify_meaning_v1';
+        : directAnswerRequested
+          ? 'decide_shift_v1'
+          : 'clarify_meaning_v1';
 
   const shiftLineBase =
     isT
       ? null
       : questionSuggestsPastReframe
         ? 'いま必要なのは解決を急いで断定することではなく、戻ってきた未完了の型を見つけて、未完了テーマ・反復パターン・再配置の順で見直すこと'
-        : resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure
-          ? '結論をぼかさず先に核を答え、そのあとで構造（論点分解・検証条件・どこまで言えるか）を短く添える'
-          : clarifyMeaning.line;
-
+        : directAnswerRequested
+          ? '結論を先に短く言い切り、そのあと必要最小限の具体だけを添えて閉じる'
+          : shouldAnswerTruthStructure
+            ? '結論をぼかさず先に核を答え、そのあとで構造（論点分解・検証条件・どこまで言えるか）を短く添える'
+            : clarifyMeaning.line;
   return [
     obs,
     {
@@ -921,7 +933,18 @@ function buildFlowReply(args: {
       String((args as any)?.ctxPack?.shiftKind ?? '').trim() ||
       String((args as any)?.meta?.extra?.ctxPack?.shiftKind ?? '').trim() ||
       '';
-
+      const directAnswerRequested2 =
+      hasAny(
+        '答え',
+        '結論',
+        '要するに',
+        '結局',
+        '真実が知りたい',
+        '本当のことが知りたい',
+        'そろそろ結論',
+        '今の未来',
+        '未来だよ',
+      );
     const resolvedAskType =
       String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
       String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
@@ -945,7 +968,12 @@ function buildFlowReply(args: {
         | 'narrow_shift';
     }
 
-    // ② resolvedAsk が truth/meaning 系なら clarify を優先
+    // ② 結論要求が明示されている時は decide を優先
+    if (directAnswerRequested2) {
+      return 'decide_shift' as const;
+    }
+
+    // ③ resolvedAsk が truth/meaning 系なら clarify を優先
     if (
       resolvedAskType === 'truth_structure' ||
       resolvedAskType === 'meaning' ||
@@ -980,14 +1008,14 @@ function buildFlowReply(args: {
     return 'narrow_shift' as const;
   })();
 
-  const shiftHint2 = (() => {
-    const resolvedAskType =
-      String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
-      String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
-      '';
+  const resolvedAskType2 =
+    String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
+    String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
+    '';
 
+  const shiftHint2 = (() => {
     if (shiftKind2 === 'clarify_shift') {
-      if (resolvedAskType === 'truth_structure') return 'clarify_truth_structure_v1';
+      if (resolvedAskType2 === 'truth_structure') return 'clarify_truth_structure_v1';
       return 'clarify_meaning_v2';
     }
 
@@ -999,29 +1027,19 @@ function buildFlowReply(args: {
   })();
 
   const shiftIntent2 = (() => {
-    const resolvedAskType =
-      String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
-      String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
-      '';
-
     if (shiftKind2 === 'clarify_shift') {
-      if (resolvedAskType === 'truth_structure') return 'answer_truth_structure';
+      if (resolvedAskType2 === 'truth_structure') return 'answer_truth_structure';
       return 'meaning_reframe';
     }
 
     if (shiftKind2 === 'stabilize_shift') return 'stabilize_direction';
     if (shiftKind2 === 'distance_shift') return 'distance_tuning';
     if (shiftKind2 === 'repair_shift') return 'repair_entry';
-    if (shiftKind2 === 'decide_shift') return 'decision_axis';
+    if (shiftKind2 === 'decide_shift') return 'answer_in_one_shot';
     return 'narrow_focus';
   })();
 
   const shiftLine2 = (() => {
-    const resolvedAskType =
-      String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
-      String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
-      '';
-
     if (shiftKind2 === 'clarify_shift') {
       const isTopicCorrection =
         t.length <= 24 &&
@@ -1032,7 +1050,7 @@ function buildFlowReply(args: {
       const isDefinitionQuestion2 =
         /(?:って何|とは|意味|違い|定義)/.test(t) || /[?？]/.test(t);
 
-      if (resolvedAskType === 'truth_structure') {
+      if (resolvedAskType2 === 'truth_structure') {
         return '結論をぼかさず先に核を答え、そのあとで構造（論点分解・検証条件・どこまで言えるか）を短く添える';
       }
 
@@ -1063,7 +1081,7 @@ function buildFlowReply(args: {
     }
 
     if (shiftKind2 === 'decide_shift') {
-      return '結論を急ぐより先に、何を基準に決めるかを一つに絞る角度が合っている';
+      return '結論を先に短く言い切り、そのあと必要最小限の具体だけを添えて閉じる';
     }
 
     return '全部を動かすより、いま引っかかっている一点だけを狭くすると動きやすい';
@@ -1073,6 +1091,7 @@ function buildFlowReply(args: {
     shiftKind2 === 'clarify_shift' ||
     shiftKind2 === 'stabilize_shift' ||
     shiftKind2 === 'distance_shift' ||
+    shiftKind2 === 'decide_shift' ||
     emotionalTemperature2 === 'high' ||
     emotionalTemperature2 === 'volatile'
       ? 0
@@ -1090,7 +1109,11 @@ function buildFlowReply(args: {
             line: shiftLine2,
             source: 'phase2_shift',
             rules: {
-              answer_user_meaning: true,
+              answer_user_meaning: shiftKind2 !== 'decide_shift',
+              answer_in_one_shot: shiftKind2 === 'decide_shift',
+              first_line_is_core_answer: shiftKind2 === 'decide_shift',
+              no_question_back: shiftKind2 === 'decide_shift',
+              no_question_end: shiftKind2 === 'decide_shift',
               keep_it_simple: true,
               no_flow_lecture: true,
               no_meta_explain: true,

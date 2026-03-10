@@ -396,112 +396,184 @@ return sanitizeForJsonb(m);
 };
 
 
-  const isStatementTimeout = (e: any) => {
-    const code = String(e?.code ?? '').trim();
-    const msg = String(e?.message ?? '').toLowerCase();
-    return code === '57014' || msg.includes('statement timeout') || msg.includes('canceling statement');
+const isStatementTimeout = (e: any) => {
+  const code = String(e?.code ?? '').trim();
+  const msg = String(e?.message ?? '').toLowerCase();
+  return code === '57014' || msg.includes('statement timeout') || msg.includes('canceling statement');
+};
+
+const traceIdFinal =
+  (typeof meta?.extra?.traceId === 'string' && meta.extra.traceId.trim()) ||
+  (typeof meta?.extra?.trace_id === 'string' && meta.extra.trace_id.trim()) ||
+  (typeof meta?.traceId === 'string' && meta.traceId.trim()) ||
+  (typeof meta?.trace_id === 'string' && meta.trace_id.trim()) ||
+  null;
+
+const baseRow = {
+  conversation_id: conversationUuid,
+  role: 'assistant',
+  trace_id: traceIdFinal,
+  content: content,
+  text: content,
+  meta: finalMeta,
+
+  q_code: qCodeFinal,
+  depth_stage: depthStageFinal,
+
+  user_code: userCode,
+} as const;
+
+// ✅ 通常保存でも「軽量化メタ」を保存する
+const metaForInsert = shrinkMetaForPersist(finalMeta);
+
+let data: any = null;
+let error: any = null;
+
+const tryInsert = async (row: any) => {
+  const res = await supabase
+    .from('iros_messages')
+    .insert([row], { returning: 'minimal' });
+
+  return {
+    data: (res as any).data ?? null,
+    error: (res as any).error ?? null,
+  };
+};
+
+const tryUpdateByTrace = async (row: any) => {
+  if (!traceIdFinal) {
+    return {
+      data: null,
+      error: {
+        code: 'TRACE_ID_MISSING',
+        message: 'trace_id missing for duplicate-update path',
+      },
+    };
+  }
+
+  const res = await supabase
+    .from('iros_messages')
+    .update({
+      content: row.content,
+      text: row.text,
+      meta: row.meta,
+      q_code: row.q_code,
+      depth_stage: row.depth_stage,
+      user_code: row.user_code,
+    })
+    .eq('conversation_id', conversationUuid)
+    .eq('role', 'assistant')
+    .eq('trace_id', traceIdFinal)
+    .select('id')
+    .limit(1);
+
+  return {
+    data: (res as any).data ?? null,
+    error: (res as any).error ?? null,
+  };
+};
+
+// 1) 通常 insert
+{
+  const res1 = await tryInsert({ ...baseRow, meta: metaForInsert });
+  data = res1.data;
+  error = res1.error;
+}
+
+// 2) duplicate key のときは既存行を UPDATE
+if (error && String(error?.code ?? '') === '23505') {
+  console.warn('[IROS/persistAssistantMessageToIrosMessages] duplicate -> update existing row', {
+    conversationUuid,
+    userCode,
+    traceIdFinal,
+    code: error?.code ?? null,
+    message: error?.message ?? null,
+  });
+
+  const resDup = await tryUpdateByTrace({ ...baseRow, meta: metaForInsert });
+  data = resDup.data;
+  error = resDup.error;
+}
+
+// 3) timeout のときだけ 1回リトライ（meta軽量化）
+if (error && isStatementTimeout(error)) {
+  console.warn('[IROS/persistAssistantMessageToIrosMessages] retry with shrunk meta (statement timeout)', {
+    conversationUuid,
+    userCode,
+    code: error?.code ?? null,
+    message: error?.message ?? null,
+  });
+
+  const retryRow = {
+    ...baseRow,
+    meta: shrinkMetaForPersist(finalMeta),
   };
 
-  const baseRow = {
-    conversation_id: conversationUuid,
-    role: 'assistant',
-    content: content,
-    text: content,
-    meta: finalMeta,
+  const res2 = await tryInsert(retryRow);
+  data = res2.data;
+  error = res2.error;
 
-    // ✅ ここが本命（列）
-    q_code: qCodeFinal,
-    depth_stage: depthStageFinal,
-
-    user_code: userCode,
-  } as const;
-
-  // ✅ 通常保存でも「軽量化メタ」を保存する（巨大キー混入の再発を防ぐ）
-  const metaForInsert = shrinkMetaForPersist(finalMeta);
-
-  // 1) 通常 insert（✅ meta は “軽量化(metaForInsert)” を保存する）
-  let data: any = null;
-  let error: any = null;
-
-  {
-    const res = await supabase
-      .from('iros_messages')
-      .insert([{ ...baseRow, meta: metaForInsert }], { returning: 'minimal' }); // ✅ 返却を最小化
-    data = (res as any).data ?? null;
-    error = (res as any).error ?? null;
+  if (error && String(error?.code ?? '') === '23505') {
+    const resDup2 = await tryUpdateByTrace(retryRow);
+    data = resDup2.data;
+    error = resDup2.error;
   }
-
-
-  // 2) timeout のときだけ 1回リトライ（meta軽量化）
-  if (error && isStatementTimeout(error)) {
-    console.warn('[IROS/persistAssistantMessageToIrosMessages] retry with shrunk meta (statement timeout)', {
-      conversationUuid,
-      userCode,
-      code: error?.code ?? null,
-      message: error?.message ?? null,
-    });
-
-    const retryRow = {
-      ...baseRow,
-      meta: shrinkMetaForPersist(finalMeta), // ✅ timeout時だけ落とす
-    };
-
-    const res2 = await supabase
-      .from('iros_messages')
-      .insert([retryRow], { returning: 'minimal' }); // ✅ 返却を最小化
-    data = (res2 as any).data ?? null;
-    error = (res2 as any).error ?? null;
-  }
-
-  // 3) それでも timeout → ultra
-  if (error && isStatementTimeout(error)) {
-    const fm: any = finalMeta && typeof finalMeta === 'object' ? finalMeta : {};
-    const ex: any = fm.extra && typeof fm.extra === 'object' ? fm.extra : {};
-
-    const ultraMeta = sanitizeForJsonb({
-      itx_step: fm.itx_step ?? fm.itxStep ?? null,
-      itx_reason: fm.itx_reason ?? fm.itxReason ?? null,
-      intent_anchor_key: fm.intent_anchor_key ?? fm.intentAnchorKey ?? null,
-      extra: {
-        traceId: ex.traceId ?? null,
-        persistedByRoute: ex.persistedByRoute ?? true,
-
-        // ✅ NEW: seed を ultra でも落とさない（新仕様）
-        // - seed は短いテキスト塊のみ想定（CARD_PACKET 10〜15行）
-        // - sanitizeForJsonb を通すので jsonb 安全
-        seed: (ex as any)?.seed ?? null,
-      },
-    });
-
-    console.warn('[IROS/persistAssistantMessageToIrosMessages] retry with ULTRA shrunk meta (statement timeout)', {
-      conversationUuid,
-      userCode,
-      code: error?.code ?? null,
-      message: error?.message ?? null,
-    });
-
-    const res3 = await supabase
-      .from('iros_messages')
-      .insert([{ ...baseRow, meta: ultraMeta }], { returning: 'minimal' }); // ✅ 返却を最小化
-    data = (res3 as any).data ?? null;
-    error = (res3 as any).error ?? null;
-  }
-
-  if (error) {
-    console.error('[IROS/persistAssistantMessageToIrosMessages] insert error', {
-      conversationUuid,
-      userCode,
-      error,
-    });
-    return { ok: false, inserted: false, blocked: false, reason: 'DB_ERROR', error };
-  }
-
-  const messageId =
-    data && typeof (data as any).id === 'number'
-      ? (data as any).id
-      : data && typeof (data as any).id === 'string'
-        ? Number((data as any).id)
-        : null;
-
-  return { ok: true, inserted: true, blocked: false, messageId };
 }
+
+// 4) それでも timeout → ultra
+if (error && isStatementTimeout(error)) {
+  const fm: any = finalMeta && typeof finalMeta === 'object' ? finalMeta : {};
+  const ex: any = fm.extra && typeof fm.extra === 'object' ? fm.extra : {};
+
+  const ultraMeta = sanitizeForJsonb({
+    itx_step: fm.itx_step ?? fm.itxStep ?? null,
+    itx_reason: fm.itx_reason ?? fm.itxReason ?? null,
+    intent_anchor_key: fm.intent_anchor_key ?? fm.intentAnchorKey ?? null,
+    extra: {
+      traceId: ex.traceId ?? null,
+      persistedByRoute: ex.persistedByRoute ?? true,
+      seed: (ex as any)?.seed ?? null,
+    },
+  });
+
+  console.warn('[IROS/persistAssistantMessageToIrosMessages] retry with ULTRA shrunk meta (statement timeout)', {
+    conversationUuid,
+    userCode,
+    code: error?.code ?? null,
+    message: error?.message ?? null,
+  });
+
+  const ultraRow = { ...baseRow, meta: ultraMeta };
+
+  const res3 = await tryInsert(ultraRow);
+  data = res3.data;
+  error = res3.error;
+
+  if (error && String(error?.code ?? '') === '23505') {
+    const resDup3 = await tryUpdateByTrace(ultraRow);
+    data = resDup3.data;
+    error = resDup3.error;
+  }
+}
+
+if (error) {
+  console.error('[IROS/persistAssistantMessageToIrosMessages] insert error', {
+    conversationUuid,
+    userCode,
+    error,
+  });
+  return { ok: false, inserted: false, blocked: false, reason: 'DB_ERROR', error };
+}
+
+const messageId =
+  Array.isArray(data) && data[0] && typeof data[0].id === 'number'
+    ? data[0].id
+    : Array.isArray(data) && data[0] && typeof data[0].id === 'string'
+      ? Number(data[0].id)
+      : data && typeof (data as any).id === 'number'
+        ? (data as any).id
+        : data && typeof (data as any).id === 'string'
+          ? Number((data as any).id)
+          : null;
+
+return { ok: true, inserted: true, blocked: false, messageId };}

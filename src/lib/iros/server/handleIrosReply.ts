@@ -3255,7 +3255,9 @@ if (digestV1Raw) {
     if (resolvedAskEarly?.askType === 'truth_structure') {
       return 'clarify_shift' as const;
     }
-
+    if (hasAnyInUser('答え', '結論', '要するに', '結局', '真実が知りたい', '本当のことが知りたい', 'そろそろ結論', '今の未来', '未来だよ')) {
+      return 'decide_shift' as const;
+    }
     const topicCorrection =
       /(.+?)の話ですよ/u.test(currentUserText) ||
       /(.+?)のことです/u.test(currentUserText) ||

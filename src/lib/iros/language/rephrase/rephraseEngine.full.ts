@@ -2369,11 +2369,16 @@ const buildHistoryTextLite = (turns: any[]): string => {
       .filter((x) => x.length > 0)
       .filter((x) => !BANNED_ASSISTANT_PATTERNS.some((re) => re.test(x)));
 
-    t = kept.join('\n').trim();
+    t = kept.join(' ').replace(/\s+/g, ' ').trim();
     if (!t) return '';
 
-    // 長文化防止
-    return t.length > 260 ? `${t.slice(0, 260)}…` : t;
+    // 1文目だけ残す
+    const firstSentence = t.split(/(?<=[。！？!?])/u)[0]?.trim() ?? t;
+    t = firstSentence.replace(/\s+/g, ' ').trim();
+    if (!t) return '';
+
+    // さらに短文化
+    return t.length > 90 ? `${t.slice(0, 90)}…` : t;
   };
 
   for (const t of Array.isArray(turns) ? turns : []) {
@@ -2381,11 +2386,6 @@ const buildHistoryTextLite = (turns: any[]): string => {
     if (!role) continue;
 
     if (role === 'user') {
-      const raw = String(t?.content ?? t?.text ?? '').replace(/\r\n/g, '\n').trim();
-      if (!raw) continue;
-
-      const one = raw.length > 260 ? `${raw.slice(0, 260)}…` : raw;
-      lines.push(`user: ${one}`);
       continue;
     }
 
@@ -2896,7 +2896,7 @@ const shiftKindForLane =
 
     // ✅ intentBand / tLayerHint を systemPrompt に届ける（GUIDE_I 判定の材料）
     band,
-
+    shiftKind: String(parseShiftJson(String((shiftSlot as any)?.text ?? ''))?.kind ?? ''),
     // ✅ micro/greeting は GUIDE_I を止める（“接続だけ”の短文で I/T 誘導が出るのを防ぐ）
     personaMode:
       inputKind === 'micro' || inputKind === 'greeting'
@@ -4806,15 +4806,22 @@ raw = await (async () => {
         baseLen: baseMsgs.length,
         finalLen: messagesForWriter.length,
         injected: !alreadyHasStateCues,
-        hasStateCues: messagesForWriter.some((m) => String(m?.content ?? '').includes('STATE_CUES (DO NOT OUTPUT)')),
+        hasStateCues: messagesForWriter.some((m) => {
+          const c = String(m?.content ?? '');
+          return c.includes('STATE_CUES (DO NOT OUTPUT)') || c.includes('STATE_CUES_V3 (DO NOT OUTPUT)');
+        }),
         stateCuesHead: safeHead(
           String(
-            (messagesForWriter.find((m) => String(m?.content ?? '').includes('STATE_CUES (DO NOT OUTPUT)')) as any)?.content ?? ''
+            (
+              messagesForWriter.find((m) => {
+                const c = String(m?.content ?? '');
+                return c.includes('STATE_CUES (DO NOT OUTPUT)') || c.includes('STATE_CUES_V3 (DO NOT OUTPUT)');
+              }) as any
+            )?.content ?? ''
           ),
           1600
         ),
 
-        // ✅ NEW: digest中身（continuity）をログで可視化（話題核の強さ判定）
         digest_has: Boolean(historyDigestV1),
         digest_kind: typeof historyDigestV1,
         digest_topic: safeHead(String((historyDigestV1 as any)?.topic?.situationTopic ?? ''), 120),

@@ -66,6 +66,26 @@ function buildHypothesisSpace(domain: DomainType, questionType: QuestionType, te
     });
   }
 
+  if (questionType === 'choice') {
+    out.push(
+      {
+        key: 'self_vs_social_pressure',
+        label: '自己意思と場の圧力モデル',
+        description: '自分の意思決定と、その場の空気・圧力の影響を切り分ける',
+      },
+      {
+        key: 'decision_speed_pressure',
+        label: '決定速度圧モデル',
+        description: '急いで決めさせる流れが判断を狭めた可能性をみる',
+      },
+      {
+        key: 'group_conformity',
+        label: '同調モデル',
+        description: '周囲への同調が選択肢の幅を縮めた可能性をみる',
+      },
+    );
+  }
+
   if (questionType === 'future_design') {
     out.push({
       key: 'design_path',
@@ -125,6 +145,15 @@ function buildFocusCandidate(domain: DomainType, questionType: QuestionType, tex
 
   if (questionType === 'cause') {
     out.push('原因', 'きっかけ', '連鎖');
+  }
+
+  if (questionType === 'choice') {
+    out.push(
+      '自分の意思と場の圧力',
+      '同調圧力',
+      '決定の急かし',
+      '空気圧',
+    );
   }
 
   if (questionType === 'meaning') {

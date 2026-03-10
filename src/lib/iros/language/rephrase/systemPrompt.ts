@@ -14,6 +14,8 @@ export function systemPromptForFullReply(args?: {
   band?: { intentBand: string | null; tLayerHint: string | null } | null;
   lockedILines?: string[] | null;
 
+  // ✅ shiftKind（decide_shift などの“結論ターン”判定用）
+  shiftKind?: string | null;
   // ✅ inputKind（micro/greeting 判定用）
   inputKind?: string | null;
 
@@ -38,6 +40,9 @@ export function systemPromptForFullReply(args?: {
   const inputKindNow = String(args?.inputKind ?? '').trim().toLowerCase();
   const isMicroOrGreetingNow = inputKindNow === 'micro' || inputKindNow === 'greeting';
 
+  const shiftKindNow = String(args?.shiftKind ?? '').trim().toLowerCase();
+  const isDecideShiftNow = shiftKindNow === 'decide_shift';
+
   // ExpressionLane（表現補助用・構造は動かさない）
   const exprLane = args?.exprLane ?? null;
   const exprFired = Boolean(exprLane?.fired);
@@ -54,6 +59,9 @@ export function systemPromptForFullReply(args?: {
   const personaMode: 'GROUND' | 'DELIVER' | 'GUIDE_I' | 'ASSESS' = (() => {
     // ✅ 最優先：micro/greeting は “会話の接続” だけ。I語り・二択誘導を出さない
     if (isMicroOrGreetingNow) return 'GROUND';
+
+    // ✅ decide_shift は「結論を返すターン」なので GUIDE_I にしない
+    if (isDecideShiftNow) return 'GROUND';
 
     if (directTask) return 'DELIVER';
     if (requestedPersona) {
@@ -73,6 +81,7 @@ export function systemPromptForFullReply(args?: {
       itOk,
       personaMode,
       tLayerHint: h,
+      shiftKindNow,
       exprFired,
       exprLaneKey,
       lockedILinesLen: Array.isArray(args?.lockedILines) ? args!.lockedILines!.length : 0,
@@ -118,6 +127,15 @@ export function systemPromptForFullReply(args?: {
     '',
 
     '【会話の基本】',
+    ...(isDecideShiftNow
+      ? [
+          '【decide_shift 固定】',
+          '- このターンでは末尾を質問にしない。確認質問・二択質問・問い返しを置かず、答え切って閉じる。',
+          '- 行動を促す言い方（「今日は〜する日」「〜してみて」「〜しよう」など）を使わない。',
+          '- 例を並べて薄めず、核心を2〜3段落で言い切る。',
+          '- 最終段落は説明文か断定文で閉じる。勧誘文・命令文・問いかけで閉じない。',
+        ]
+      : []),
     '- ユーザーの最後の文に直接返す（同じ話題・同じ粒度）。',
     '- 具体語を最低1つ残す（抽象語で上書きしない）。',
     '- 一般論・定型励ましで締めない。曖昧語で締めない。質問攻めにしない。',
@@ -164,6 +182,20 @@ export function systemPromptForFullReply(args?: {
     }
 
     // GROUND（通常）
+    if (isDecideShiftNow) {
+      return [
+        '',
+        '【スタイル注意：GROUND / DECIDE_SHIFT（露出禁止）】',
+        '- これは結論ターンとして扱う。',
+        '- 1文目で結論を言う。',
+        '- 質問文を作らない。疑問形で終えない。',
+        '- 「たぶん」「〜と思う」「言い換えると」から始めない。',
+        '- 相手の意味の再定義より、いま言える結論を短く固定する。',
+      ]
+        .filter(Boolean)
+        .join('\n');
+    }
+
     return ['', '【スタイル注意：GROUND（露出禁止）】', '- 通常は自然に。過度に装飾しない。']
       .filter(Boolean)
       .join('\n');

@@ -1152,7 +1152,15 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                       '',
                   ).trim();
 
+                  // ===== direct answer override =====
+                  const userTextNorm = String(userTextForRecall || '').toLowerCase();
+                  const directAnswerOverride =
+                    /答え|結論|要するに|結局/.test(userTextNorm) &&
+                    questionType === 'future_design';
 
+                  const effectiveQuestionType = directAnswerOverride
+                    ? 'direct_answer'
+                    : questionType;
 
                   console.log('[IROS/writerCalls][RECALL_INPUT_DEBUG]', {
                     traceId:
@@ -1160,7 +1168,7 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                       (args as any)?.extra?.traceId ??
                       extraAny?.traceId ??
                       null,
-                    questionType,
+                      questionType: effectiveQuestionType,
                     questionDomain,
                     tLayerHint_candidates: {
                       userContext_tLayerHint: (args as any)?.userContext?.tLayerHint ?? null,
@@ -1233,7 +1241,7 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                         ctxPack?.flowDigest ??
                         '',
                     ).trim() || null,
-                    questionType: questionType || null,
+                    questionType: effectiveQuestionType || null,
                     questionDomain: questionDomain || null,
 
                     tLayerHint:
@@ -1361,6 +1369,21 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   questionDomain: questionDomain || null,
                   questionFocus: questionFocus || null,
                   questionTMode: questionTMode || null,
+                  writerStyleKey: (() => {
+                    const focus = String(questionFocus || '').trim();
+                    const qType = String(questionType || '').trim();
+                    const flow = String(flowDelta2 || '').trim();
+                    const rs = Number.isFinite(Number(returnStreak2)) ? Number(returnStreak2) : 0;
+
+                    if (qType !== 'choice') return null;
+                    if (!/自分の意思と場の圧力|同調圧力|決定の急かし|空気圧/.test(focus)) return null;
+
+                    if (rs >= 2) return 'choice_pressure_map';
+                    if (flow === 'RETURN') return 'choice_pressure_insight';
+                    if (flow === 'FORWARD') return 'choice_pressure_reclaim';
+
+                    return 'choice_pressure_insight';
+                  })(),
                   recallEligible: recallDecision.recallEligible,
                   recallScope: recallDecision.recallScope,
                   recallReason: recallDecision.recallReason,
@@ -1370,15 +1393,23 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                       (args as any)?.userContext?.ctxPack?.topicDigest ??
                       '') || '',
                   ).trim() || null,
-                  historyForWriterLen: Array.isArray(
-                    (args as any)?.userContext?.historyForWriter ??
-                      (args as any)?.userContext?.ctxPack?.historyForWriter,
-                  )
-                    ? (
-                        (args as any)?.userContext?.historyForWriter ??
-                        (args as any)?.userContext?.ctxPack?.historyForWriter
-                      ).length
-                    : 0,
+                  historyForWriterLen: (() => {
+                    const uc: any = (args as any)?.userContext ?? {};
+                    const cp: any = uc?.ctxPack ?? {};
+                    const src =
+                      Array.isArray(uc?.historyForWriter) && uc.historyForWriter.length > 0
+                        ? uc.historyForWriter
+                        : Array.isArray(cp?.historyForWriter) && cp.historyForWriter.length > 0
+                          ? cp.historyForWriter
+                          : Array.isArray(uc?.turnsForWriter) && uc.turnsForWriter.length > 0
+                            ? uc.turnsForWriter
+                            : Array.isArray(cp?.turnsForWriter) && cp.turnsForWriter.length > 0
+                              ? cp.turnsForWriter
+                              : Array.isArray(uc?.turns) && uc.turns.length > 0
+                                ? uc.turns
+                                : [];
+                    return Array.isArray(src) ? src.length : 0;
+                  })(),
                 });
 
                 const questionIframeKeys = (() => {
@@ -1391,23 +1422,194 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                     .slice(0, 8);
                   return keys.length > 0 ? keys.join(', ') : '(none)';
                 })();
+                const compactMemoryLine = [
+                  `eligible=${recallDecision.recallEligible ? 'true' : 'false'}`,
+                  `scope=${recallDecision.recallScope}`,
+                  `reason=${recallDecision.recallReason || '(none)'}`,
+                ].join(' / ');
+
+                const compactQuestionLine = [
+                  `domain=${questionDomain || '(none)'}`,
+                  `type=${questionType || '(none)'}`,
+                  `mode=${questionTMode || '(none)'}`,
+                  `focus=${questionFocus || '(none)'}`,
+                ].join(' / ');
+
+                const compactMetaLine = [
+                  `depth=${depthStage || '(none)'}`,
+                  `phase=${phase || '(none)'}`,
+                  `q=${qCode || '(none)'}`,
+                  `sting=${stingLevelForSeed || '(none)'}`,
+                  `shift=${shiftKindForSeed || '(none)'}`,
+                  `temp=${emotionalTemperatureForSeed || '(none)'}`,
+                  `flow=${flowDelta2 || '(none)'}:${returnStreak2 || '0'}`,
+                  `e_turn=${eTurn2 || '(none)'}`,
+                ].join(' / ');
+
+                const writerStyleKey = (() => {
+                  const focus = String(questionFocus || '').trim();
+                  const openLoop = String(flowMeaningV1?.openLoop ?? '').trim();
+                  const qType = String(questionType || '').trim();
+                  const flow = String(flowDelta2 || '').trim();
+
+                  if (
+                    qType === 'choice' &&
+                    (
+                      /自分の意思と場の圧力|同調圧力|決定の急かし|空気圧/.test(focus) ||
+                      /自分の意思と場の圧力|YESのあとに残るズレ|NOを言えなくなる圧/.test(openLoop)
+                    )
+                  ) {
+                    return 'choice_self_vs_pressure';
+                  }
+
+                  if (qType === 'structure') {
+                    return 'structure_explain';
+                  }
+
+                  if (flow === 'RETURN') {
+                    return 'return_adjust';
+                  }
+
+                  return 'default';
+                })();
+
+                const writerStyleRuleLines = (() => {
+                  switch (writerStyleKey) {
+                    case 'choice_self_vs_pressure':
+                      return [
+                        '- Start from the loss of agency or loss of pause, not from abstract general advice.',
+                        '- Name the user’s displaced hesitation before giving any suggestion.',
+                        '- Prefer continuous empathic prose over bullet points unless the user explicitly asked for a list.',
+                        '- Do not widen to social theory or generic self-help.',
+                        '- End with only one narrow question, choosing either pressure-source or lost-pause.',
+                      ];
+
+                    case 'structure_explain':
+                      return [
+                        '- Explain the structure plainly and compactly.',
+                        '- Prioritize frame and mechanism over emotional expansion.',
+                        '- Avoid poetic drift and avoid widening beyond the asked structure.',
+                      ];
+
+                    case 'return_adjust':
+                      return [
+                        '- Treat this as a return/adjustment turn.',
+                        '- Do not force progress; help the user recover the missing point.',
+                        '- Keep the response soft, narrow, and low-pressure.',
+                      ];
+
+                    default:
+                      return [
+                        '- Keep it narrow and grounded.',
+                        '- Answer the user’s meaning before expanding.',
+                        '- Avoid generic broadening.',
+                      ];
+                  }
+                })();
+
+                const coreAssertionLine = (() => {
+                  const hook0 = String(flowMeaningV1?.thisTurnHook ?? '').trim();
+                  const tension0 = String(flowMeaningV1?.continuingTension ?? '').trim();
+                  const shift0 = String(cueLabels?.shiftMeaning ?? '').trim();
+                  const core0 = String(stateCore ?? '').trim();
+
+                  const candidates = [
+                    hook0,
+                    tension0,
+                    shift0,
+                    core0,
+                  ].filter((v) => v.length > 0);
+
+                  const picked =
+                    candidates.find((v) => v.length >= 12) ??
+                    candidates[0] ??
+                    '';
+
+                  return picked.replace(/\s+/g, ' ').trim();
+                })();
+
                 const stateCueLines0 = [
                   'STATE_CUES_V3 (DO NOT OUTPUT):',
                   '',
 
+                  'CORE_ASSERTION:',
+                  (() => {
+                    const hook = String(flowMeaningV1?.thisTurnHook ?? '').trim();
+                    const meaning = String(flowMeaningV1?.flowMeaning ?? '').trim();
+                    const tension = String(flowMeaningV1?.continuingTension ?? '').trim();
+                    const openLoop0 = String(flowMeaningV1?.openLoop ?? '').trim();
+
+                    const openLoop = openLoop0
+                      .replace(/mode=\w+/g, '')
+                      .replace(/\s*\/\s*$/g, '')
+                      .replace(/\s{2,}/g, ' ')
+                      .trim();
+
+                    const sharpAssertion = (() => {
+                      if (!openLoop) return '';
+
+                      if (/自分の意思と場の圧力/.test(openLoop)) {
+                        return '本当の引っかかりは、自分の意思より先に場の圧が決めてしまうこと';
+                      }
+                      if (/同調圧力/.test(openLoop)) {
+                        return '本当の引っかかりは、考える前に周囲に合わせる流れが始まること';
+                      }
+                      if (/決定の急かし/.test(openLoop)) {
+                        return '本当の引っかかりは、考える間が消える速さに押されること';
+                      }
+                      if (/空気圧/.test(openLoop)) {
+                        return '本当の引っかかりは、言葉にされない圧で保留が消えること';
+                      }
+                      if (/次の一手/.test(openLoop)) {
+                        return '本当に欲しいのは一般論ではなく、次にどこへ足を出すかの一点';
+                      }
+                      if (/主張の型/.test(openLoop)) {
+                        return '本当に見たいのは結論そのものより、いまの話がどんな型で立っているか';
+                      }
+
+                      return `本当に見たいのは「${openLoop}」という一点`;
+                    })();
+
+                    if (sharpAssertion) return sharpAssertion;
+
+                    const cleaned = [hook, meaning, tension]
+                      .map((s) =>
+                        s
+                          .replace(/今回は\s*[A-Za-z0-9_]+\s*の記憶を使ってよい/g, '')
+                          .replace(/reason:\s*[A-Za-z0-9_()-]+/g, '')
+                          .replace(/mode=\w+/g, '')
+                          .replace(/\s{2,}/g, ' ')
+                          .replace(/\s*\/\s*$/g, '')
+                          .trim()
+                      )
+                      .filter(Boolean);
+
+                    const first = cleaned[0] ?? '';
+                    const second = cleaned[1] ?? '';
+                    const third = cleaned[2] ?? '';
+
+                    const merged = [first, second]
+                      .filter(Boolean)
+                      .join(' / ')
+                      .replace(/\s{2,}/g, ' ')
+                      .trim();
+
+                    if (merged) return merged;
+                    if (third) return third;
+                    if (openLoop) return `本当に見たいのは「${openLoop}」という一点`;
+                    return 'このターンでは、いちばん引っかかっている一点を先に言い切る';
+                  })(),
+                  '',
                   'STATE_CORE:',
                   stateCore,
                   '',
 
-                  'QUESTION_META:',
-                  `QUESTION_DOMAIN: ${questionDomain || '(none)'}`,
-                  `QUESTION_TYPE: ${questionType || '(none)'}`,
-                  `QUESTION_T_MODE: ${questionTMode || '(none)'}`,
-                  `QUESTION_FOCUS: ${questionFocus || '(none)'}`,
-                  `QUESTION_POLICY: ${questionPolicy}`,
-                  `QUESTION_IFRAME_KEYS: ${questionIframeKeys}`,
+                  'QUESTION:',
+                  compactQuestionLine,
                   '',
-                  ...memoryDecisionLines,
+
+                  'MEMORY:',
+                  compactMemoryLine,
                   '',
 
                   'FLOW_MEANING:',
@@ -1426,66 +1628,36 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   flowMeaningV1.openLoop,
                   '',
 
-                  'CURRENT_MEANING:',
-                  cueLabels.currentMeaning,
-                  '',
-
-                  'SHIFT_MEANING:',
+                  'SHIFT:',
                   cueLabels.shiftMeaning,
                   '',
 
-                  'NEXT_MEANING:',
-                  cueLabels.nextMeaning,
-                  '',
-
-                  'SAFE_MEANING:',
+                  'SAFE:',
                   safeMeaning,
-                  '',
-
-                  'FLOW_BRIDGE:',
-                  cueLabels.flowBridge,
-                  '',
-
-                  'WHY_IT_MATCHES:',
-                  cueLabels.whyItMatches,
-                  '',
-
-                  'RELATION_MEANING:',
-                  relationMeaning,
-                  '',
-
-                  'TEMPERATURE_MEANING:',
-                  temperatureMeaning,
                   '',
 
                   'BEST_SHIFT_DIRECTION:',
                   bestShiftDirection,
                   '',
 
-                  'META (meaning labels):',
-                  `phase: ${phase || ''} (${phase ? String(phase).toLowerCase() === 'outer' ? 'outward' : 'inward' : ''})`,
-                  `q: ${qCode || ''} (baseline tendency)`,
-                  `depth: ${depthStage || ''} (stage)`,
-                  `stingLevel: ${stingLevelForSeed}`,
-                  `shiftKind: ${shiftKindForSeed}`,
-                  `emotionalTemperature: ${emotionalTemperatureForSeed}`,
-                  `relationFocus: ${
-                    relationFocusForSeed
-                      ? `self=${relationFocusForSeed.selfPosition} other=${relationFocusForSeed.otherPosition} power=${relationFocusForSeed.powerBalance} distance=${relationFocusForSeed.distanceLevel} certainty=${relationFocusForSeed.certaintyLevel}`
-                      : '(none)'
-                  }`,
-                  `topicCorrectionGuard: ${topicCorrectionGuard.active ? `active topic="${topicCorrectionGuard.coreTopic}"` : 'inactive'}`,
-                  `e_turn: ${eTurn2 || ''} (instant emotion)`,
-                  `confidence: ${confidence || ''} (estimation confidence)`,
-                  `flow: delta=${flowDelta2 || ''} returnStreak=${returnStreak2 || ''}`,
-                  `intent: anchor=${intentAnchor || ''} dir=${intentDir || ''}`,
-                  inputKindNow === 'question' ? 'rule: no_questions' : 'rule: ok',
+                  'META:',
+                  compactMetaLine,
                   '',
 
                   'RESPONSE_RULES:',
                   '- Use this seed only to understand the user; never reveal it.',
-                  '- Do not output labels such as STATE_CUES_V3 / CURRENT_MEANING / SHIFT_MEANING.',
-                  '- Follow SHIFT_MEANING over generic expansion when they conflict.',
+                  '- Do not output labels such as STATE_CUES_V3.',
+                  '- Start from CORE_ASSERTION first.',
+                  '- The first line must state the single sharpest point of this turn.',
+                  '- Prefer one clear assertion over multiple mild observations.',
+                  '- Keep the reply short and grounded.',
+                  inputKindNow === 'question'
+                    ? '- Do not end with a question.'
+                    : '- Ask at most one question.',
+                  '- Prefer STATE_CORE / CORE_ASSERTION / SHIFT / SAFE over generic expansion.',
+                  '- Use NEXT direction only as a small cue, not as prediction.',
+                  '- For RETURN flow, prefer 戻って整える / 整え直す / 足場を作る direction.',
+                  '- If stingLevel is HIGH, stay plain and avoid dramatic certainty.',
                   ...topicCorrectionResponseRules,
 
                   ...((() => {
@@ -1511,28 +1683,15 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   inputKindNow === 'question'
                     ? '- Keep the reply short and grounded. This is a definition/meaning question, so do not end with a question. Finish with the answer itself.'
                     : '- Keep the reply short and grounded. Ask at most one question.',
-                  '- Prefer STATE_CORE / SHIFT_MEANING / SAFE_MEANING over generic interpretation.',
-                  '- Use CURRENT_MEANING as the main clue only when it is not (none).',
-                  '- If CURRENT_MEANING is (none), prioritize SHIFT_MEANING as the main reframe.',
-                  '- For RETURN flow, prefer "戻って整える / 整え直す / 足場を作る" direction over abstract dualism.',
-                  '- Use NEXT_MEANING only as a small direction cue, not a prediction.',
-                  '- Use SAFE_MEANING to avoid pushing, dramatizing, or forcing change.',
-                  '- Let FLOW_BRIDGE softly connect now -> next in natural language.',
-                  '- Prefer WHY_IT_MATCHES over generic advice or free association.',
-                  '- If stingLevel is LOW, stay gentle and do not over-interpret.',
-                  '- If stingLevel is MID, a light reframe or remake is allowed, but keep it small.',
-                  '- If stingLevel is HIGH, do not make every line intense.',
-                  '- If stingLevel is HIGH, use at most one short remake sentence.',
-                  '- If stingLevel is HIGH, put the remake only when the user shows mixed state / repeated return / visible hesitation.',
-                  '- If stingLevel is HIGH, the first line may gently name what is happening now in plain words.',
-                  '- If stingLevel is HIGH, avoid dramatic certainty, verdict tone, or heavy interpretation.',
-                  inputKindNow === 'question'
-                    ? '- If stingLevel is HIGH and this is a definition/meaning question, do not add a closing question.'
-                    : '- If stingLevel is HIGH, ask at most one question and only after the short remake.',
-                  '- If stingLevel is HIGH, skip the remake for direct factual questions or simple practical requests.',
+                  '- Prefer STATE_CORE / SHIFT / SAFE over generic interpretation.',
+                  '- Use SHIFT as the main reframe cue.',
+                  '- Use SAFE to avoid pushing, dramatizing, or forcing change.',
+                  '- For RETURN flow, prefer 戻って整える / 整え直す / 足場を作る direction over abstract dualism.',
+                  '- If stingLevel is HIGH, stay plain, calm, and avoid dramatic certainty.',
+                  '- If stingLevel is HIGH, ask at most one question.',
                   '- The reply should still feel calm, ordinary, and easy to receive.',
                 ];
-  const stateCueSeed = clampLinesByLen(stateCueLines0, 30, 980).join('\n');
+                const stateCueSeed = clampLinesByLen(stateCueLines0, 18, 520).join('\n');
 
   const coordMinimal: string[] = [];
   coordMinimal.push('COORD (DO NOT OUTPUT):');
@@ -1611,6 +1770,14 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
   const meaningKindRaw = shiftMeta.meaningKind;
   const shiftIntentRaw = shiftMeta.intent;
 
+  const internalPackForWriter = String(internalPackFixed ?? '')
+    .replace(/^[ \t]*@OBS[^\n]*(?:\n|$)/gm, '')
+    .replace(/^[ \t]*@SHIFT[^\n]*(?:\n|$)/gm, '')
+    .replace(/^[ \t]*@SAFE[^\n]*(?:\n|$)/gm, '')
+    .replace(/^[ \t]*@NEXT_HINT[^\n]*(?:\n|$)/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
   const isTopicRecallTurn =
     meaningKindRaw === 'topic_recall';
 
@@ -1625,28 +1792,61 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
       (shiftKindRaw === 'clarify' && meaningKindRaw === 'define')
     );
 
-  const turnsRaw = turnsToMessages(args.turns, { maxTurnLen: 900, maxUserTurnLen: 900 });
+    const turnsRaw = turnsToMessages(args.turns, { maxTurnLen: 900, maxUserTurnLen: 900 });
 
-  // clarify_meaning_v1 / topic_recall では古い履歴汚染を避ける
-  // - 直前1往復だけ残す
-  // - ただし current turn は ensureEndsWithUser(args.userText) が後で正本を付ける
-  const turns =
-    (isClarifyMeaningTurn || isTopicRecallTurn)
-      ? (() => {
-          const tail = Array.isArray(turnsRaw) ? turnsRaw.slice(-2) : [];
-          // 末尾 user は current turn 混入のことがあるので落とす
-          if (tail.length > 0 && tail[tail.length - 1]?.role === 'user') {
-            return tail.slice(0, -1);
-          }
-          return tail;
-        })()
-      : turnsRaw;
+    const currentUserTextNorm = stripInternalMarkersFromUserText(String(args.userText ?? ''))
+      .replace(/\r\n/g, '\n')
+      .trim();
 
-      const packMsg: WriterMessage | null = internalPackFixed
-      ? { role: 'assistant', content: internalPackFixed }
+    const turnsBase = Array.isArray(turnsRaw) ? turnsRaw : [];
+
+    const turnsDeduped = (() => {
+      if (!currentUserTextNorm) return turnsBase;
+
+      return turnsBase.filter((m, idx) => {
+        if (m?.role !== 'user') return true;
+
+        const contentNorm = stripInternalMarkersFromUserText(String(m?.content ?? ''))
+          .replace(/\r\n/g, '\n')
+          .trim();
+
+        if (!contentNorm) return false;
+
+        const isSameAsCurrentUser = contentNorm === currentUserTextNorm;
+        if (!isSameAsCurrentUser) return true;
+
+        try {
+          console.log('[IROS/writerCalls][DROP_DUP_CURRENT_USER_IN_TURNS]', {
+            idx,
+            len: contentNorm.length,
+            head: contentNorm.slice(0, 80),
+          });
+        } catch {}
+
+        return false;
+      });
+    })();
+
+    // clarify_meaning_v1 / topic_recall では古い履歴汚染を避ける
+    // - 直前1往復だけ残す
+    // - ただし current turn は ensureEndsWithUser(args.userText) が後で正本を付ける
+    const turns =
+      (isClarifyMeaningTurn || isTopicRecallTurn)
+        ? (() => {
+            const tail = turnsDeduped.slice(-2);
+            // 末尾 user は current turn 混入のことがあるので落とす
+            if (tail.length > 0 && tail[tail.length - 1]?.role === 'user') {
+              return tail.slice(0, -1);
+            }
+            return tail;
+          })()
+        : turnsDeduped;
+
+      const packMsg: WriterMessage | null = internalPackForWriter
+      ? { role: 'assistant', content: internalPackForWriter }
       : null;
 
-    const topicRecallNoEvidenceMsg: WriterMessage | null =
+      const topicRecallNoEvidenceMsg: WriterMessage | null =
       isTopicRecallTurn && (!Array.isArray(turns) || turns.length === 0)
         ? {
             role: 'assistant',
