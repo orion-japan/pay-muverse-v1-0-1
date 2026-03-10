@@ -58,6 +58,7 @@
     "remark-emoji": "^5.0.2",
     "remark-gfm": "^4.0.1",
     "resend": "^6.0.2",
+    "sharp": "^0.34.5",
     "swr": "^2.3.6",
     "tesseract.js": "2.1.5",
     "tesseract.js-core": "2.2.0",
