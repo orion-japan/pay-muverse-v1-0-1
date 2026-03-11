@@ -4626,10 +4626,11 @@ if (shouldRunWriter) {
       maxLinesHint: (() => {
         const exAny = (out.metaForSave as any)?.extra ?? {};
 
-        // ✅ BlockPlan は“system注入専用”で保存・継続しない（残留は揺れの原因）
+        // ✅ BlockPlan の“重い/内部用”だけ落とす
+        // - blockPlan 本体（enabled/why/mode/blocks 等）は同一turnの最終 meta 確認に必要なので残す
+        // - system 注入文そのものや内部メタだけ削除する
         try {
           if (exAny && typeof exAny === 'object') {
-            delete (exAny as any).blockPlan;
             delete (exAny as any).blockPlanText;
             delete (exAny as any).blockPlanEnabled;
             delete (exAny as any).blockPlanMeta;
@@ -5040,7 +5041,36 @@ if (shouldRunWriter) {
             const mx = (rr as any)?.meta?.extra ?? {};
             const blocksCandidate =
               (rr as any)?.rephraseBlocks ?? mx?.rephraseBlocks ?? mx?.rephrase?.blocks ?? null;
-
+            // ✅ rephrase 後の blockPlan を正本として metaForSave.extra に戻す
+            if (mx?.blockPlan && typeof mx.blockPlan === 'object') {
+              (out.metaForSave as any).extra.blockPlan = {
+                ...mx.blockPlan,
+                bridgedBy: 'handleIrosReply.rephraseBridge',
+                bridgedAt: new Date().toISOString(),
+              };
+            }
+            try {
+              console.log('[IROS/rephraseBridge][RR_KEYS]', {
+                rr_keys: rr && typeof rr === 'object' ? Object.keys(rr as any) : [],
+                rr_meta_keys:
+                  (rr as any)?.meta && typeof (rr as any).meta === 'object'
+                    ? Object.keys((rr as any).meta)
+                    : [],
+                rr_meta_extra_keys:
+                  (rr as any)?.meta?.extra && typeof (rr as any).meta.extra === 'object'
+                    ? Object.keys((rr as any).meta.extra)
+                    : [],
+                rr_metaForSave_extra_keys:
+                  (rr as any)?.metaForSave?.extra && typeof (rr as any).metaForSave.extra === 'object'
+                    ? Object.keys((rr as any).metaForSave.extra)
+                    : [],
+                has_blockPlan_in_meta_extra: Boolean((rr as any)?.meta?.extra?.blockPlan),
+                has_blockPlan_in_metaForSave_extra: Boolean((rr as any)?.metaForSave?.extra?.blockPlan),
+              });
+            } catch {}
+            if (mx?.blockPlanMode != null && (out.metaForSave as any).extra.blockPlanMode == null) {
+              (out.metaForSave as any).extra.blockPlanMode = mx.blockPlanMode;
+            }
             // ✅ Expression preface を rephraseBlocks にも反映して、UI/保存のズレを消す
             const pickPreface = (): string => {
               const raw =

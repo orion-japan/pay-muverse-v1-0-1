@@ -896,11 +896,11 @@ if (isNonForwardButEmpty) {
           String(traceId ?? '') ||
           String(conversationId ?? '');
 
-        const n = normalizeIrosStyleFinal(finalText, {
-          seed,
-          emojiKeepRate: 0.1,
-          maxReplacements: 0,
-        });
+          const n = normalizeIrosStyleFinal(finalText, {
+            seed,
+            emojiKeepRate: 1.0,
+            maxReplacements: 0,
+          });
 
         const outText = typeof (n as any)?.text === 'string' ? (n as any).text : finalText;
 
@@ -1366,7 +1366,7 @@ extraSoT = {
           // ✅ 戻り値を受け取る（n が未定義で落ちていたのを修正）
           const n = normalizeIrosStyleFinal(finalText, {
             seed,
-            emojiKeepRate: 0.1, // 0でもいい
+            emojiKeepRate: 1.0, // 絵文字は剥がさない
             maxReplacements: 0, // ✅ 置換ゼロ（長文化の主因を止める）
           });
 
