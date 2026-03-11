@@ -217,7 +217,127 @@
    ========================================================= */
 @media (max-width: 600px) {
   .message {
-    margin-bottom: 28px;
+    margin-bottom: 14px;
+    gap: 6px;
   }
-  /* モバイル時に msgBody 側で line-height を上げない（本文側に任せる） */
+
+  .message + .message {
+    margin-top: 8px;
+  }
+
+  .bubble {
+    padding: 10px 12px !important;
+    border-radius: 14px;
+  }
+
+  .message.is-user .bubble {
+    padding: 10px 12px !important;
+  }
+
+  .sof-msgs {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+    padding-bottom: calc(var(--sof-compose-h, 100px) + 12px) !important;
+  }
+
+  .sof-msgs .message.is-assistant {
+    padding: 0 4px 0 2px !important;
+  }
 }
+
+
+/* PC中央レーン幅 */
+.sofia-container.sof-center {
+  max-width: 1280px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+@media (min-width: 1024px) {
+  .sofia-container.sof-center {
+    max-width: 1440px;
+  }
+
+  .sofia-container {
+    --bubble-max-w: 1100px;
+  }
+
+  .iro-chat-main,
+  .sof-msgs {
+    width: 100%;
+  }
+}
+/* IROS: 上流の 430px フレーム制限を解除 */
+main.mu-main,
+.mu-page,
+.sofia-container,
+.sofia-container.sof-center,
+.iro-chat-main {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+}
+
+
+
+/* =========================================================
+   IROS PC UI polish
+   - PCだけ広いチャットUIに整える
+   ========================================================= */
+   @media (min-width: 1024px) {
+    /* 全体レーン */
+    .sofia-container,
+    .sofia-container.sof-center,
+    .iro-chat-main,
+    .sof-msgs {
+      width: 100% !important;
+      max-width: none !important;
+    }
+
+    /* チャット本文の中央レーン */
+    .sof-msgs {
+      max-width: 1180px !important;
+      margin: 0 auto !important;
+      padding-left: 24px !important;
+      padding-right: 24px !important;
+      padding-top: 8px !important;
+    }
+
+    /* アシスタント本文幅 */
+    .sofia-container {
+      --bubble-max-w: 1040px;
+    }
+
+    .sof-msgs .message.is-assistant .msgBody {
+      max-width: 1040px !important;
+      font-size: 16px !important;
+      line-height: 1.78 !important;
+    }
+
+    /* ユーザー吹き出しもPCで少し広げる */
+    .message.is-user .bubble {
+      max-width: min(820px, 72vw) !important;
+      font-size: 15px !important;
+      line-height: 1.7 !important;
+    }
+
+    /* メッセージ間の余白を少し整える */
+    .message {
+      gap: 10px !important;
+      margin-bottom: 14px !important;
+    }
+
+    .message + .message {
+      margin-top: 14px !important;
+    }
+
+    /* 入力欄の横幅も本文に合わせる */
+    .sof-compose-dock,
+    .sof-footer-spacer {
+      max-width: 1180px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+  }
+
+

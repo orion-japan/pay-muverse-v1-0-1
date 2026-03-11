@@ -1484,26 +1484,30 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                         '- End with only one narrow question, choosing either pressure-source or lost-pause.',
                       ];
 
-                    case 'structure_explain':
-                      return [
-                        '- Explain the structure plainly and compactly.',
-                        '- Prioritize frame and mechanism over emotional expansion.',
-                        '- Avoid poetic drift and avoid widening beyond the asked structure.',
-                      ];
+                      case 'structure_explain':
+                        return [
+                          '- Explain the structure plainly and compactly.',
+                          '- Prioritize frame and mechanism over emotional expansion.',
+                          '- Avoid poetic drift and avoid widening beyond the asked structure.',
+                          '- Do not end with a question.',
+                          '- Do not ask the user to introspect or continue unless explicitly requested.',
+                          '- Finish with the explanation itself.',
+                        ];
 
-                    case 'return_adjust':
-                      return [
-                        '- Treat this as a return/adjustment turn.',
-                        '- Do not force progress; help the user recover the missing point.',
-                        '- Keep the response soft, narrow, and low-pressure.',
-                      ];
+                      case 'return_adjust':
+                        return [
+                          '- Treat this as a return/adjustment turn.',
+                          '- Do not force progress; help the user recover the missing point.',
+                          '- Keep the response soft, narrow, and low-pressure.',
+                        ];
 
-                    default:
-                      return [
-                        '- Keep it narrow and grounded.',
-                        '- Answer the user’s meaning before expanding.',
-                        '- Avoid generic broadening.',
-                      ];
+                      default:
+                        return [
+                          '- Keep it narrow and grounded.',
+                          '- Answer the user’s meaning before expanding.',
+                          '- Avoid generic broadening.',
+                          '- Do not add a closing question when questions_max is 0.',
+                        ];
                   }
                 })();
 

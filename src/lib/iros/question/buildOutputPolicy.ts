@@ -21,9 +21,14 @@ export function buildOutputPolicy(input: BuildOutputPolicyInput): OutputPolicy {
   }
 
   if (questionType === 'structure') {
+    // ✅ 仕様確認・定義確認・理由説明は、まず答えを返す。
+    //    ここで askBackAllowed=true だと、
+    //    「名前は？」「何ができるの？」「なぜe3？」のような
+    //    説明要求に対して、答えより先に深読み質問へ流れやすい。
     answerFirst = true;
-    askBackAllowed = true;
+    askBackAllowed = false;
     splitFactHypothesis = false;
+    avoidPrematureClosure = false;
   }
 
   if (questionType === 'cause') {

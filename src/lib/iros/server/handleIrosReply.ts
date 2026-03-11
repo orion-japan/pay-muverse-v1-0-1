@@ -1148,12 +1148,16 @@ const gatedGreeting = await runGreetingGate({
 
 if (gatedGreeting?.ok) {
   // ✅ gate の metaForSave は root メタ。ここでは extraLocal には metaForSave.extra のみ注入する
+  const gateMetaRoot =
+    gatedGreeting?.metaForSave && typeof gatedGreeting.metaForSave === 'object'
+      ? (gatedGreeting.metaForSave as any)
+      : null;
+
   const gateExtra =
-    gatedGreeting?.metaForSave &&
-    typeof gatedGreeting.metaForSave === 'object' &&
-    (gatedGreeting.metaForSave as any).extra &&
-    typeof (gatedGreeting.metaForSave as any).extra === 'object'
-      ? (gatedGreeting.metaForSave as any).extra
+    gateMetaRoot &&
+    gateMetaRoot.extra &&
+    typeof gateMetaRoot.extra === 'object'
+      ? gateMetaRoot.extra
       : null;
 
   if (gateExtra) {
@@ -1173,7 +1177,40 @@ if (gatedGreeting?.ok) {
     };
   }
 
-  // ✅ ここで return しない（下へ続行）
+  // ✅ identity gate はここで確定返却する
+  // - 後段の rephrase / LLM に流すと「私は iros です。」へ縮退するため
+  if (gateMetaRoot?.gate === 'identity') {
+    let metaForSaveImmediate: any = {
+      ...(gateMetaRoot ?? {}),
+    };
+
+    if (extraLocal && typeof extraLocal === 'object') {
+      const prevExtra =
+        metaForSaveImmediate?.extra && typeof metaForSaveImmediate.extra === 'object'
+          ? metaForSaveImmediate.extra
+          : {};
+      metaForSaveImmediate.extra = {
+        ...prevExtra,
+        ...extraLocal,
+      };
+    }
+
+    metaForSaveImmediate = stampSingleWriter(metaForSaveImmediate);
+
+    return {
+      ok: true,
+      result: gatedGreeting.result ?? '',
+      assistantText: String(gatedGreeting.result ?? '').trim(),
+      metaForSave: metaForSaveImmediate,
+      finalMode: 'auto',
+      slots: Array.isArray(metaForSaveImmediate?.slotPlan?.slots)
+        ? metaForSaveImmediate.slotPlan.slots
+        : [],
+      meta: metaForSaveImmediate,
+    };
+  }
+
+  // greeting は従来どおり下へ続行
 }
 // ok=false / gate不成立はそのまま下へ
 
@@ -2024,9 +2061,9 @@ function normForRecall(v: any): string {
       gateApplied,
     });
     // ---------------------------------------------------------
-    // ✅ ViewShift: 前回スナップを baseMetaMergedForTurn に注入
-    // - orchestrator.ts は baseMeta/history から prevSnap を拾う
-    // - historyForTurn に meta が載っている環境でも確実に拾えるように、入口で集約する
+    // ✅ ViewShift / earlyResolvedAsk: Orchestrator 前に baseMetaMergedForTurn へ注入
+    // - normalChat / orchestrator が参照できるのはこの時点の baseMetaForTurn
+    // - capability_reask は後段 stamp では遅いので、ここで早期注入する
     // ---------------------------------------------------------
     try {
       const pickSnapFromMsg = (m: any) =>
@@ -2035,6 +2072,51 @@ function normForRecall(v: any): string {
         m?.meta?.extra?.viewShiftSnapshot ??
         m?.meta?.viewShiftSnapshot ??
         null;
+
+      const currentUserText = String(text ?? '').trim();
+      const currentUserTextLc = currentUserText.toLowerCase();
+
+      const hasAnyInUser = (...needles: string[]) =>
+        needles.some((n) => currentUserText.includes(n) || currentUserTextLc.includes(n.toLowerCase()));
+
+      const hasCapabilityAsk =
+        /何ができる|なにができる|できること|何をしてくれる|なにをしてくれる|どう役立つ|何がわかる|なにがわかる/u.test(
+          currentUserText,
+        );
+
+      const hasRepairCue =
+        hasAnyInUser(
+          'ちがう',
+          '違う',
+          'それじゃない',
+          'それじゃなくて',
+          'それではなく',
+          'そこじゃない',
+          'そこではない',
+          'そこじゃなくて',
+          'さっき',
+          '前に',
+          '聞いた',
+          '聞いたんだよ',
+          'って聞いた',
+          '答えて',
+          'ちゃんと答えて',
+          '一文で',
+          'はぐらかさず',
+          '元の質問',
+          '元の問い',
+        ) ||
+        /さっき聞いた|前に聞いた|って聞いたんだよ|何ができるの[？?]って聞いた/u.test(currentUserText);
+
+        const resolvedAskEarly =
+        hasCapabilityAsk
+          ? {
+              topic: 'Irosで何ができるのか',
+              askType: 'capability_reask',
+              replyMode: 'reanswer_prior_question',
+              sourceUserText: currentUserText,
+            }
+          : null;
 
       let snap: any =
         (baseMetaMergedForTurn as any)?.extra?.ctxPack?.viewShiftSnapshot ??
@@ -2053,25 +2135,30 @@ function normForRecall(v: any): string {
         }
       }
 
+      (baseMetaMergedForTurn as any).extra =
+        (baseMetaMergedForTurn as any).extra &&
+        typeof (baseMetaMergedForTurn as any).extra === 'object'
+          ? (baseMetaMergedForTurn as any).extra
+          : {};
+
+      (baseMetaMergedForTurn as any).extra.ctxPack =
+        (baseMetaMergedForTurn as any).extra.ctxPack &&
+        typeof (baseMetaMergedForTurn as any).extra.ctxPack === 'object'
+          ? (baseMetaMergedForTurn as any).extra.ctxPack
+          : {};
+
       if (snap && typeof snap === 'object') {
-        (baseMetaMergedForTurn as any).extra =
-          (baseMetaMergedForTurn as any).extra &&
-          typeof (baseMetaMergedForTurn as any).extra === 'object'
-            ? (baseMetaMergedForTurn as any).extra
-            : {};
-
-        (baseMetaMergedForTurn as any).extra.ctxPack =
-          (baseMetaMergedForTurn as any).extra.ctxPack &&
-          typeof (baseMetaMergedForTurn as any).extra.ctxPack === 'object'
-            ? (baseMetaMergedForTurn as any).extra.ctxPack
-            : {};
-
         (baseMetaMergedForTurn as any).extra.ctxPack.viewShiftSnapshot = snap;
+      }
+
+      if (resolvedAskEarly) {
+        (baseMetaMergedForTurn as any).extra.ctxPack.resolvedAsk = resolvedAskEarly;
       }
 
       console.log('[IROS/VIEWSHIFT][pre-orch][inject]', {
         hasSnap: Boolean(snap),
         snapKeys: snap && typeof snap === 'object' ? Object.keys(snap).slice(0, 20) : null,
+        earlyResolvedAskType: resolvedAskEarly?.askType ?? '',
       });
     } catch (e) {
       console.log('[IROS/VIEWSHIFT][pre-orch][inject][ERR]', { err: String(e ?? '') });
@@ -3237,6 +3324,44 @@ if (digestV1Raw) {
         hasAnyInUser('地球外生命体', '宇宙人') ||
         /地球外生命体|宇宙人/u.test(currentUserText);
 
+      const hasCapabilityAsk =
+        /何ができる|なにができる|できること|何をしてくれる|なにをしてくれる|どう役立つ|何がわかる|なにがわかる/u.test(
+          currentUserText,
+        );
+
+      const hasRepairCue =
+        hasAnyInUser(
+          'ちがう',
+          '違う',
+          'それじゃない',
+          'それじゃなくて',
+          'それではなく',
+          'そこじゃない',
+          'そこではない',
+          'そこじゃなくて',
+          'さっき',
+          '前に',
+          '聞いた',
+          '聞いたんだよ',
+          'って聞いた',
+          '答えて',
+          'ちゃんと答えて',
+          '一文で',
+          'はぐらかさず',
+          '元の質問',
+          '元の問い',
+        ) ||
+        /さっき聞いた|前に聞いた|って聞いたんだよ|何ができるの[？?]って聞いた/u.test(currentUserText);
+
+      if (hasCapabilityAsk && hasRepairCue) {
+        return {
+          topic: 'Irosで何ができるのか',
+          askType: 'capability_reask',
+          replyMode: 'reanswer_prior_question',
+          sourceUserText: currentUserText,
+        } as const;
+      }
+
       if (
         (hasHumanCreationLike && (hasTruthLike || hasStructureLike)) ||
         (hasAlienTopicLike && hasStructureLike)
@@ -3312,7 +3437,7 @@ if (digestV1Raw) {
   if (cp.emotionalTemperature == null) cp.emotionalTemperature = emotionalTemperature;
   if (cp.shiftKind == null) cp.shiftKind = shiftKind;
 
-  const resolvedAskNow = (() => {
+  const resolvedAskDecision = (() => {
     const currentUserText = String(text ?? '').trim();
     const currentUserTextLc = currentUserText.toLowerCase();
 
@@ -3341,15 +3466,79 @@ if (digestV1Raw) {
       hasAnyInUser('地球外生命体', '宇宙人') &&
       hasAnyInUser('並び', '構造', '当てる', '当てはめる', '置き換える', '解釈');
 
-    if (explicitTruthStructure) {
+    const hasCapabilityAsk =
+      /何ができる|なにができる|何が出来る|なにが出来る|できること|何をしてくれる|なにをしてくれる|どう役立つ|何がわかる|なにがわかる/u.test(
+        currentUserText,
+      );
+
+    const hasRepairCue =
+      hasAnyInUser(
+        'ちがう',
+        '違う',
+        'それじゃない',
+        'それじゃなくて',
+        'それではなく',
+        'そこじゃない',
+        'そこではない',
+        'そこじゃなくて',
+        'さっき',
+        '前に',
+        '聞いた',
+        '聞いたんだよ',
+        'って聞いた',
+        '答えて',
+        'ちゃんと答えて',
+        '一文で',
+        'はぐらかさず',
+        '元の質問',
+        '元の問い',
+      ) ||
+      /さっき聞いた|前に聞いた|って聞いたんだよ|何ができるの[？?]って聞いた/u.test(currentUserText);
+
+    // ✅ capability の言い直しは最優先
+    if (hasCapabilityAsk && hasRepairCue) {
       return {
-        topic: '地球外生命体が人間を作ったのか',
-        askType: 'truth_structure',
-        replyMode: 'direct_answer_first',
-        sourceUserText: currentUserText,
-      };
+        next: {
+          topic: 'Irosで何ができるのか',
+          askType: 'capability_reask',
+          replyMode: 'reanswer_prior_question',
+          sourceUserText: currentUserText,
+        },
+        clear: false,
+      } as const;
     }
 
+    // ✅ capability_reask 継続
+    if (
+      prev &&
+      typeof prev === 'object' &&
+      String((prev as any).askType ?? '').trim() === 'capability_reask' &&
+      (hasCapabilityAsk || hasRepairCue)
+    ) {
+      return {
+        next: {
+          ...prev,
+          replyMode: 'reanswer_prior_question',
+          sourceUserText: currentUserText,
+        },
+        clear: false,
+      } as const;
+    }
+
+    // ✅ truth_structure 明示
+    if (explicitTruthStructure) {
+      return {
+        next: {
+          topic: '地球外生命体が人間を作ったのか',
+          askType: 'truth_structure',
+          replyMode: 'direct_answer_first',
+          sourceUserText: currentUserText,
+        },
+        clear: false,
+      } as const;
+    }
+
+    // ✅ truth_structure のフォローオン
     if (
       structureFollowOnAlienTopic &&
       prev &&
@@ -3357,46 +3546,65 @@ if (digestV1Raw) {
       String((prev as any).askType ?? '').trim() === 'truth_structure'
     ) {
       return {
-        ...prev,
-        replyMode: 'direct_answer_first',
-        sourceUserText: currentUserText,
-      };
+        next: {
+          ...prev,
+          replyMode: 'direct_answer_first',
+          sourceUserText: currentUserText,
+        },
+        clear: false,
+      } as const;
     }
 
+    // ✅ 話題訂正だけなら前回文脈を維持
     if (topicCorrectionOnly && prev && typeof prev === 'object') {
       return {
-        ...prev,
-        sourceUserText: currentUserText,
-      };
+        next: {
+          ...prev,
+          sourceUserText: currentUserText,
+        },
+        clear: false,
+      } as const;
     }
 
     if (structureFollowOnAlienTopic) {
       return {
-        topic: '地球外生命体が人間を作ったのか',
-        askType: 'truth_structure',
-        replyMode: 'direct_answer_first',
-        sourceUserText: currentUserText,
-      };
+        next: {
+          topic: '地球外生命体が人間を作ったのか',
+          askType: 'truth_structure',
+          replyMode: 'direct_answer_first',
+          sourceUserText: currentUserText,
+        },
+        clear: false,
+      } as const;
     }
 
-    if (hasAnyInUser('地球外生命体', '宇宙人') && !prev) {
-      return {
-        topic: '地球外生命体',
-        askType: 'topic_clarify',
-        replyMode: 'stay_on_topic',
-        sourceUserText: currentUserText,
-      };
+    // ✅ ここが重要：
+    // 今回の入力が「一般的な capability / structure 質問」で、
+    // 特定トピック resolvedAsk を作れない場合は、前ターンの resolvedAsk を残さない
+    if (hasCapabilityAsk) {
+      return { next: null, clear: true } as const;
     }
 
-    return prev;
+    if (
+      !hasAnyInUser('地球外生命体', '宇宙人', '人間') &&
+      /何が|なにが|どういう|どう|とは|意味|構造|出来ますか|できますか/u.test(currentUserText)
+    ) {
+      return { next: null, clear: true } as const;
+    }
+
+    return { next: null, clear: false } as const;
   })();
+
+  const resolvedAskNow = resolvedAskDecision.next;
+  const shouldClearResolvedAskNow = resolvedAskDecision.clear === true;
 
   if (resolvedAskNow) {
     (cp as any).resolvedAsk = resolvedAskNow;
+  } else if (shouldClearResolvedAskNow) {
+    delete (cp as any).resolvedAsk;
   }
+
 }
-
-
 
 // 既存の flow 同期はそのまま（ただし returnStreak/flowDelta は meta.extra.flow を正本にする）
 const flowFromMeta: any =

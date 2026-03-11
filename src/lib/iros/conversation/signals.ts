@@ -23,6 +23,93 @@ function includesAny(t: string, arr: string[]): boolean {
 }
 
 function detectRepair(t: string): boolean {
+  if (!t) return false;
+
+  const hasQuestionMark = t.includes('？') || t.includes('?');
+
+  const hasCorrection =
+    t.includes('違う') ||
+    t.includes('ちがう') ||
+    t.includes('それじゃない') ||
+    t.includes('それじゃなくて') ||
+    t.includes('それではなく') ||
+    t.includes('そこじゃない') ||
+    t.includes('そこではない') ||
+    t.includes('そこじゃなくて');
+
+  const hasRecallClaim =
+    t.includes('さっき') ||
+    t.includes('前に') ||
+    t.includes('もう言') ||
+    t.includes('言った') ||
+    t.includes('話した') ||
+    t.includes('聞いた') ||
+    t.includes('聞いたんだよ') ||
+    t.includes('聞いたよ') ||
+    t.includes('って聞いた') ||
+    t.includes('〜って聞いた') ||
+    t.includes('さっき聞いた') ||
+    t.includes('前に聞いた');
+
+  const hasAnswerDemand =
+    t.includes('答えて') ||
+    t.includes('ちゃんと答えて') ||
+    t.includes('答え') ||
+    t.includes('教えて') ||
+    t.includes('一文で') ||
+    t.includes('はぐらかさず') ||
+    t.includes('そのまま答えて');
+
+  const hasRepairPhrase =
+    t.includes('さっき言った') ||
+    t.includes('さっき聞いた') ||
+    t.includes('前に言った') ||
+    t.includes('前に聞いた') ||
+    t.includes('同じこと') ||
+    t.includes('もう一回') ||
+    t.includes('もう一度') ||
+    t.includes('ちゃんと') ||
+    t.includes('元の質問') ||
+    t.includes('元の問い') ||
+    t.includes('その質問') ||
+    t.includes('そこじゃない');
+
+  // 最優先: 修復要求の明示
+  if ((hasCorrection && hasAnswerDemand) || (hasRecallClaim && hasAnswerDemand)) {
+    return true;
+  }
+
+  // 「ちがう、聞いたんだよ」「それじゃない、答えて」型
+  if (hasCorrection && hasRecallClaim) {
+    return true;
+  }
+
+  // 元質問への差し戻し
+  if (hasRepairPhrase && (hasAnswerDemand || hasQuestionMark)) {
+    return true;
+  }
+
+  // 「〜って聞いたんだよ」単体でも十分強い
+  if (
+    t.includes('って聞いたんだよ') ||
+    t.includes('って聞いたよ') ||
+    t.includes('何ができるのって聞いた') ||
+    t.includes('何ができるの？って聞いた') ||
+    t.includes('何ができるのって聞いたんだよ')
+  ) {
+    return true;
+  }
+
+  // 短文でも強い否定修正
+  if (
+    t === 'ちがう' ||
+    t === '違う' ||
+    t === 'それじゃない' ||
+    t === 'そこじゃない'
+  ) {
+    return true;
+  }
+
   const keys = [
     'さっき',
     'もう言',
@@ -34,19 +121,29 @@ function detectRepair(t: string): boolean {
     '繰り返',
     'また',
     '違う',
+    'ちがう',
     'それじゃない',
+    'それじゃなくて',
+    'それではなく',
+    'そこじゃない',
     'わかって',
     '覚えて',
+    '答えて',
+    'ちゃんと答えて',
+    'って聞いた',
+    '聞いたんだよ',
+    '聞いたよ',
+    '元の質問',
+    '元の問い',
   ];
-  if (!t) return false;
 
-  const strong =
-    (t.includes('さっき') && (t.includes('言') || t.includes('話'))) ||
-    (t.includes('覚えて') && (t.includes('ない') || t.includes('？'))) ||
-    (t.includes('わかって') && (t.includes('ない') || t.includes('？')));
-  if (strong) return true;
-
-  return includesAny(t, keys) && (t.includes('？') || t.includes('ない') || t.includes('違'));
+  return includesAny(t, keys) && (
+    hasQuestionMark ||
+    t.includes('ない') ||
+    t.includes('答えて') ||
+    t.includes('答え') ||
+    t.includes('ちゃんと')
+  );
 }
 
 function detectDetail(t: string): boolean {

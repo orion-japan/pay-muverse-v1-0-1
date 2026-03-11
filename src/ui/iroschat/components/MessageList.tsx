@@ -627,7 +627,10 @@ const safeText = transformIrTemplateToMarkdown(displayText);
               style={{
                 ...(isUser ? userBubbleStyle : assistantBubbleShellStyle),
                 alignSelf: isUser ? 'flex-end' : 'flex-start',
-                maxWidth: 'min(760px, 88%)',
+                maxWidth:
+                  typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches
+                    ? 'min(1100px, 92%)'
+                    : 'min(760px, 88%)',
               }}
             >
               {/* 本文 */}

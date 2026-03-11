@@ -1507,29 +1507,58 @@ const fromBlocks = stripInternalLines(blocksJoinedCleaned);
 const fromResultObj = stripInternalLines(resultObjFinalRaw);
 
 const contentForPersist = (() => {
-  // ✅ SoT固定:
-  // まず「UIに実際返した本文(result.content)」を最優先で保存する
-  // UI本文 = DB本文 を完全一致させる
-  if (!isEffectivelyEmptyText(uiReturnText) && uiReturnText.length > 0) {
+  const isSeedLikePersistText = (s: string) => {
+    const t = String(s ?? '').replace(/\r\n/g, '\n').trim();
+    if (!t) return true;
+
+    if (t === '……') return true;
+    if (t === '続けてください') return true;
+
+    if (/^@(?:OBS|SHIFT|SAFE|NEXT_HINT)\b/m.test(t)) return true;
+    if (/^CARD_PACKET\b/m.test(t)) return true;
+    if (/^INTERNAL PACK\b/m.test(t)) return true;
+    if (/^COORD\b/m.test(t)) return true;
+    if (/^STATE_CUES_V3\b/m.test(t)) return true;
+
+    return false;
+  };
+
+  const uiReturnText = stripInternalLines(
+    String(
+      (result as any)?.content ??
+      (result as any)?.assistantText ??
+      (result as any)?.text ??
+      ''
+    )
+  ).trim();
+
+  const uiResolvedText = stripInternalLines(
+    String(
+      (metaForSave as any)?.extra?.resolvedText ??
+      (metaForSave as any)?.extra?.finalAssistantText ??
+      ''
+    )
+  ).trim();
+
+  const fromBlocks = blocksJoinedCleaned.trim();
+  const fromResultObj = stripInternalLines(resultObjFinalRaw).trim();
+
+  if (!isEffectivelyEmptyText(uiReturnText) && uiReturnText.length > 0 && !isSeedLikePersistText(uiReturnText)) {
     return uiReturnText;
   }
 
-  // 次に、同期済み meta の最終本文
-  if (!isEffectivelyEmptyText(uiResolvedText) && uiResolvedText.length > 0) {
+  if (!isEffectivelyEmptyText(uiResolvedText) && uiResolvedText.length > 0 && !isSeedLikePersistText(uiResolvedText)) {
     return uiResolvedText;
   }
 
-  // blocks は UI正本が空のときだけ救済に使う
-  if (!isEffectivelyEmptyText(fromBlocks) && fromBlocks.length > 0) {
+  if (!isEffectivelyEmptyText(fromBlocks) && fromBlocks.length > 0 && !isSeedLikePersistText(fromBlocks)) {
     return fromBlocks;
   }
 
-  // 以下は “正本が空” の救済
-  if (!isEffectivelyEmptyText(fromResultObj) && fromResultObj.length > 0) {
+  if (!isEffectivelyEmptyText(fromResultObj) && fromResultObj.length > 0 && !isSeedLikePersistText(fromResultObj)) {
     return fromResultObj;
   }
 
-  // ❌ userEcho には落とさない（オウム再発防止）
   return '……';
 })();
 

@@ -34,7 +34,11 @@
 import crypto from 'node:crypto';
 import { chatComplete } from '../../../llm/chatComplete';
 
-import { recallGuardOk, shouldEnforceRecallGuard } from './guards';
+import {
+  recallGuardOk,
+  shouldEnforceRecallGuard,
+  checkWriterGuardsMinimal,
+} from './guards';
 import { containsForbiddenLeakText, extractDirectTask } from './leak';
 import { finalizeLamp } from './lamp';
 import { extractHistoryTextFromContext, extractLastTurnsFromContext } from './history';
@@ -2897,6 +2901,31 @@ const shiftKindForLane =
     // ✅ intentBand / tLayerHint を systemPrompt に届ける（GUIDE_I 判定の材料）
     band,
     shiftKind: String(parseShiftJson(String((shiftSlot as any)?.text ?? ''))?.kind ?? ''),
+
+    // ✅ question 系を systemPrompt に渡す
+    // - 説明要求 / 構造確認 / 理由説明では GUIDE_I を抑えるため
+    questionType: String(
+      (
+        (opts as any)?.userContext?.question?.questionType ??
+        (opts as any)?.userContext?.meta?.extra?.question?.questionType ??
+        ''
+      )
+    ).trim(),
+    questionFocus: String(
+      (
+        (opts as any)?.userContext?.question?.tState?.focus ??
+        (opts as any)?.userContext?.meta?.extra?.question?.tState?.focus ??
+        ''
+      )
+    ).trim(),
+    askBackAllowed: (() => {
+      const p =
+        (opts as any)?.userContext?.question?.outputPolicy ??
+        (opts as any)?.userContext?.meta?.extra?.question?.outputPolicy ??
+        null;
+      return p?.askBackAllowed === true;
+    })(),
+
     // ✅ micro/greeting は GUIDE_I を止める（“接続だけ”の短文で I/T 誘導が出るのを防ぐ）
     personaMode:
       inputKind === 'micro' || inputKind === 'greeting'
@@ -4978,9 +5007,19 @@ raw = await (async () => {
         internalPack.includes('質問はしない。') ||
         internalPack.includes('文末を「?」で終えない。'));
 
-    const noQuestions = forceNoQuestionsByGoal || forceNoQuestionsByPack;
-    if (!noQuestions) return t;
+        const askBackAllowedRaw =
+        (opts?.userContext as any)?.question?.outputPolicy?.askBackAllowed ??
+        (opts?.userContext as any)?.meta?.extra?.question?.outputPolicy?.askBackAllowed ??
+        null;
 
+      const forceNoQuestionsByPolicy = askBackAllowedRaw === false;
+
+      const noQuestions =
+        forceNoQuestionsByGoal ||
+        forceNoQuestionsByPack ||
+        forceNoQuestionsByPolicy;
+
+    if (!noQuestions) return t;
     const lines = t
       .split('\n')
       .map((ln) => String(ln ?? '').replace(/\s+$/g, ''))
@@ -5066,8 +5105,154 @@ raw = await (async () => {
     maxLines,
   });
 
+  const naturalizeOpeningIfOverread = (text: string): string => {
+    const raw = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+    if (!raw) return raw;
+
+    const blocks = raw
+      .split(/\n{2,}/)
+      .map((b) => b.trim())
+      .filter(Boolean);
+
+    // 2段落未満なら、落としすぎ事故を避けてそのまま
+    if (blocks.length < 2) return raw;
+
+    const first = blocks[0] ?? '';
+    const second = blocks[1] ?? '';
+
+    const userTextNow = String((opts as any)?.userText ?? '').trim();
+    const quotedUser = userTextNow ? `「${userTextNow}」` : '';
+
+    const startsWithQuotedEcho =
+      !!quotedUser &&
+      (first.startsWith(`${quotedUser}って`) ||
+        first.startsWith(`${quotedUser}は`) ||
+        first.startsWith(`${quotedUser}の奥には`) ||
+        first.startsWith(`${quotedUser}には`));
+
+    const hasInterpretiveReading =
+      /(感じがする|気がする|ように見える|ようにも見える|聞こえる|聞こえてくる|ニュアンス|奥には|たぶん)/.test(
+        first,
+      );
+
+    const secondLooksAnswerish =
+      /^(ここでできるのは|Irosとして|Irosです|要するに|結論から言うと|今ここでできるのは|未来の発明なら|それなら)/.test(
+        second,
+      );
+
+    // 1段落目が「復唱＋読み」で、2段落目がすでに答えなら、1段落目を落とす
+    if ((startsWithQuotedEcho || hasInterpretiveReading) && secondLooksAnswerish) {
+      return blocks.slice(1).join('\n\n').trim();
+    }
+
+    return raw;
+  };
+
   const candidateBeforeSanitize = String(candidate ?? '');
+
+  const shiftObjForOpening = parseShiftJson(String((shiftSlot as any)?.text ?? ''));
+
+  const naturalizeOpeningByShift = (text: string, shiftObj: any): string => {
+    const raw = String(text ?? '').trim();
+    if (!raw) return raw;
+
+    const kind = String(shiftObj?.kind ?? '').trim();
+    const meaningKind = String(shiftObj?.meaning_kind ?? '').trim();
+    const seedText = String(shiftObj?.seed_text ?? '').trim();
+
+    const blocks = raw
+      .split(/\n{2,}/)
+      .map((b) => String(b ?? '').trim())
+      .filter(Boolean);
+
+    if (blocks.length === 0) return raw;
+
+    const first = blocks[0] ?? '';
+    const second = blocks[1] ?? '';
+
+    const startsWithQuotedEcho =
+      /^「[^」]{2,40}」(?:って|の|は)/.test(first) ||
+      /^『[^』]{2,40}』(?:って|の|は)/.test(first);
+
+    const hasInterpretiveReading =
+      /(奥にあるのは|っていうもどかしさ|感じがある|知りたい感じ|確かめたい感じ|ニュアンスが混ざってる|ほしい感じ)/.test(first);
+
+    const secondLooksAnswerish =
+      /^(Iros|ここで|ここでは|いま|今|できるのは|できることは|一緒にできるのは|大事なのは|要するに|結論として)/.test(second);
+
+    const firstLooksCapabilityEcho =
+      startsWithQuotedEcho &&
+      (
+        /何ができる|なにができる|何が出来る|なにが出来る/.test(first) ||
+        /何ができる|なにができる|何が出来る|なにが出来る/.test(seedText)
+      );
+
+    const buildCapabilityDirect = () => {
+      if (/何ができる|なにができる|何が出来る|なにが出来る/.test(seedText)) {
+        return 'ここでできるのは、あなたの言葉や状況を整理して、引っかかっている点を見つけて、次に動ける形まで落とすこと。';
+      }
+      return 'ここでできるのは、あなたの言葉や状況を整理して、次に動ける形まで落とすこと。';
+    };
+
+    const normalizeCapabilityLead = (s: string): string => {
+      let out = String(s ?? '').trim();
+      if (!out) return out;
+
+      out = out.replace(/^ここで一緒にできるのは、/u, 'ここでできるのは、');
+      out = out.replace(/^ここでは、/u, 'ここでできるのは、');
+      out = out.replace(/^Irosとして(?:今ここで)?できるのは、/u, 'ここでできるのは、');
+      out = out.replace(/^Irosとしてここで出来るのは、/u, 'ここでできるのは、');
+      out = out.replace(/^Irosとしてできるのは、/u, 'ここでできるのは、');
+      out = out.replace(/^できることは、/u, 'ここでできるのは、');
+
+      return out.trim();
+    };
+
+    // 1) capability_reask は最優先で「即答」へ寄せる
+    if (
+      firstLooksCapabilityEcho ||
+      (kind === 'clarify' && meaningKind === 'capability_reask')
+    ) {
+      const direct = buildCapabilityDirect();
+
+      if (blocks.length >= 2) {
+        const secondNormalized = normalizeCapabilityLead(second);
+
+        if (/^ここでできるのは、/u.test(secondNormalized)) {
+          return [secondNormalized, ...blocks.slice(2)].join('\n\n').trim();
+        }
+
+        return [direct, secondNormalized, ...blocks.slice(2)].join('\n\n').trim();
+      }
+
+      return direct;
+    }
+
+    // 2) 汎用 echo:
+    //    先頭が「引用+解釈」で、2段落目が答え本体なら先頭段落を落とす
+    if (startsWithQuotedEcho && hasInterpretiveReading && secondLooksAnswerish) {
+      const secondNormalized = normalizeCapabilityLead(second);
+      return [secondNormalized, ...blocks.slice(2)].join('\n\n').trim();
+    }
+
+    // 3) 先頭が強い解釈文で、2段落目が capability 本体なら
+    //    capability の定型先頭に差し替える
+    if (
+      blocks.length >= 2 &&
+      /(感じがする|と思う|もどかしさ|足場が欲しい|知りたいというより)/.test(first) &&
+      /^(ここで|ここでは|Iros|できるのは|できることは|一緒にできるのは)/.test(second)
+    ) {
+      const secondNormalized = normalizeCapabilityLead(second);
+      if (/何ができる|なにができる|何が出来る|なにが出来る/.test(seedText)) {
+        return [buildCapabilityDirect(), secondNormalized, ...blocks.slice(2)].join('\n\n').trim();
+      }
+      return [secondNormalized, ...blocks.slice(2)].join('\n\n').trim();
+    }
+
+    return raw;
+  };
   candidate = sanitizeNoQuestions(candidate);
+  candidate = naturalizeOpeningByShift(String(candidate ?? ''), shiftObjForOpening);
 
   console.log('[IROS/rephraseEngine][CANDIDATE_AFTER_SANITIZE]', {
     traceId: debug.traceId,
@@ -5079,22 +5264,314 @@ raw = await (async () => {
     beforeHead: safeHead(candidateBeforeSanitize, 160),
     afterHead: safeHead(String(candidate ?? ''), 160),
   });
-  // ✅ 最終確定直前：問いを物理的に落とす（いったん元に戻す）
+
+  // ✅ 最終確定直前：問いを物理的に落とす
   candidate = sanitizeNoQuestions(candidate);
+  candidate = naturalizeOpeningIfOverread(candidate);
 
-  if (scaffoldActive && scaffoldMissingAfterRestore.length > 0 && seedFromSlots) {
-    console.warn('[IROS/REPHRASE][SCAFFOLD_MUST_HAVE_TO_SEED]', {
-      traceId: debug.traceId,
-      conversationId: debug.conversationId,
-      userCode: debug.userCode,
-      missing: scaffoldMissingAfterRestore,
+  // ---------------------------------------------
+  // Minimal Writer Guard（LLM逸脱の最終防波堤）
+  // - systemPrompt の整形契約を “採用前” に最低限検査する
+  // - NG のときは writer 文を採用せず、seed 側へ戻す
+  // ---------------------------------------------
+  const minimalWriterRules = (() => {
+    const questionPolicy =
+      (opts as any)?.extra?.question?.outputPolicy ??
+      (opts as any)?.userContext?.question?.outputPolicy ??
+      (opts as any)?.userContext?.meta?.extra?.question?.outputPolicy ??
+      null;
+
+    const shiftRules = (() => {
+      try {
+        const parsed = parseShiftJson(String((shiftSlot as any)?.text ?? ''));
+        return parsed?.draft?.rules ?? parsed?.rules ?? null;
+      } catch {
+        return null;
+      }
+    })();
+
+    const systemPromptArgs = (opts as any)?.systemPromptArgs ?? null;
+
+    const askBackAllowedNow =
+      ((opts as any)?.extra?.question?.outputPolicy?.askBackAllowed ??
+        (opts as any)?.userContext?.question?.outputPolicy?.askBackAllowed ??
+        (opts as any)?.userContext?.meta?.extra?.question?.outputPolicy?.askBackAllowed ??
+        null) as boolean | null;
+
+    const parseContractFromText = (src: unknown): Record<string, any> | null => {
+      const text = String(src ?? '').trim();
+      if (!text) return null;
+
+      const m = text.match(/@CONTRACT\s+(\{[\s\S]*?\})(?:\n|$)/);
+      if (!m?.[1]) return null;
+
+      try {
+        const parsed = JSON.parse(m[1]);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+      } catch {
+        return null;
+      }
+    };
+
+    const contractFromSeed =
+      parseContractFromText((opts as any)?.extra?.llmRewriteSeedRaw) ??
+      parseContractFromText((opts as any)?.userContext?.meta?.extra?.llmRewriteSeedRaw) ??
+      parseContractFromText((opts as any)?.userContext?.ctxPack?.llmRewriteSeedRaw) ??
+      parseContractFromText((opts as any)?.extra?.llmRewriteSeed) ??
+      parseContractFromText((opts as any)?.userContext?.meta?.extra?.llmRewriteSeed) ??
+      null;
+
+    const contractFromLlmGate =
+      ((opts as any)?.extra?.llmGate?.contractObj &&
+      typeof (opts as any)?.extra?.llmGate?.contractObj === 'object'
+        ? (opts as any).extra.llmGate.contractObj
+        : null) ??
+      ((opts as any)?.userContext?.meta?.extra?.llmGate?.contractObj &&
+      typeof (opts as any)?.userContext?.meta?.extra?.llmGate?.contractObj === 'object'
+        ? (opts as any).userContext.meta.extra.llmGate.contractObj
+        : null) ??
+      ((opts as any)?.userContext?.ctxPack?.llmGate?.contractObj &&
+      typeof (opts as any)?.userContext?.ctxPack?.llmGate?.contractObj === 'object'
+        ? (opts as any).userContext.ctxPack.llmGate.contractObj
+        : null) ??
+      null;
+
+    const contractResolved = contractFromLlmGate ?? contractFromSeed ?? null;
+
+    const output_only =
+      (typeof contractResolved?.output_only === 'boolean' ? contractResolved.output_only : undefined) ??
+      (questionPolicy?.output_only === true ||
+        shiftRules?.output_only === true ||
+        systemPromptArgs?.output_only === true);
+
+    const questions_max = (() => {
+      if (typeof contractResolved?.questions_max === 'number') {
+        return contractResolved.questions_max;
+      }
+
+      for (const v of [
+        questionPolicy?.questions_max,
+        shiftRules?.questions_max,
+        systemPromptArgs?.questions_max,
+      ]) {
+        if (typeof v === 'number') return v;
+      }
+
+      if (askBackAllowedNow === false) return 0;
+      return null;
+    })();
+
+    const no_bullets = (() => {
+      if (typeof contractFromSeed?.no_bullets === 'boolean') return contractFromSeed.no_bullets;
+
+      if (questionPolicy?.no_bullets === false) return false;
+      if (shiftRules?.no_bullets === false) return false;
+      if (systemPromptArgs?.no_bullets === false) return false;
+
+      if (
+        questionPolicy?.no_bullets === true ||
+        shiftRules?.no_bullets === true ||
+        systemPromptArgs?.no_bullets === true
+      ) {
+        return true;
+      }
+
+      return undefined;
+    })();
+
+    if (!output_only && questions_max == null && no_bullets == null) return null;
+
+    return {
+      output_only,
+      questions_max,
+      no_bullets,
+    };
+  })();
+
+  if (minimalWriterRules) {
+    const sanitizeQuestionOverflow = (text: string, qMax: number): string => {
+      const raw = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+      if (!raw || qMax < 0) return raw;
+
+      const lines = raw
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+      if (lines.length === 0) return raw;
+
+      const isQuestionLike = (line: string): boolean => {
+        const t = String(line ?? '').trim();
+        if (!t) return false;
+        if (/[?？]/.test(t)) return true;
+        if (/(ですか|ますか|でしょうか|でしたか|ましたか|ませんか|だろうか|かな|かもね|かね)([。．…]*\s*)$/.test(t)) {
+          return true;
+        }
+        if (/(何|なに|どれ|どちら|いつ|どこ|だれ|誰|なぜ|何故|どう|どの|いくつ|幾つ|どんな|どこで|どこに|どこから|どこまで)/.test(t)) {
+          return true;
+        }
+        return false;
+      };
+
+      let keptQuestions = 0;
+      const sanitized = lines.filter((line) => {
+        if (!isQuestionLike(line)) return true;
+        if (keptQuestions < qMax) {
+          keptQuestions += 1;
+          return true;
+        }
+        return false;
+      });
+
+      return sanitized.join('\n\n').trim();
+    };
+
+    const candidateText0 = String(candidate ?? '');
+    let wg = checkWriterGuardsMinimal({
+      text: candidateText0,
+      rules: minimalWriterRules,
     });
-    return adoptAsSlots(seedFromSlots, 'SCAFFOLD_TO_SEED', {
-      scaffoldActive: true,
-      scaffoldMissing: scaffoldMissingAfterRestore,
-    });
+
+    if (!wg.ok && wg.reason === 'WG:Q_OVER') {
+      const qMax =
+        typeof minimalWriterRules?.questions_max === 'number'
+          ? minimalWriterRules.questions_max
+          : 0;
+
+      const sanitizedCandidate = sanitizeQuestionOverflow(candidateText0, qMax);
+
+      if (sanitizedCandidate && sanitizedCandidate !== candidateText0) {
+        const wg2 = checkWriterGuardsMinimal({
+          text: sanitizedCandidate,
+          rules: minimalWriterRules,
+        });
+
+        if (wg2.ok) {
+          console.warn('[IROS/WRITER_GUARD][SANITIZED_Q_OVER]', {
+            traceId: debug.traceId,
+            conversationId: debug.conversationId,
+            userCode: debug.userCode,
+            beforeHead: safeHead(candidateText0, 160),
+            afterHead: safeHead(sanitizedCandidate, 160),
+            qMax,
+          });
+
+          candidate = sanitizedCandidate;
+          wg = { ok: true };
+        }
+      }
+
+      // capability_reask は seed fallback に落とさず、本文側を救済する
+      if (!wg.ok) {
+        const shiftObjNow = parseShiftJson(String((shiftSlot as any)?.text ?? ''));
+        const kindNow = String(shiftObjNow?.kind ?? '').trim();
+        const meaningKindNow = String(shiftObjNow?.meaning_kind ?? '').trim();
+        const seedTextNow = String(shiftObjNow?.seed_text ?? '').trim();
+
+        const isCapabilityReaskNow =
+          (kindNow === 'clarify' && meaningKindNow === 'capability_reask') ||
+          /何ができる|なにができる|何が出来る|なにが出来る/.test(seedTextNow) ||
+          /何ができる|なにができる|何が出来る|なにが出来る/.test(String(opts?.userText ?? ''));
+
+        if (isCapabilityReaskNow) {
+          const rawNow = String(candidateText0 ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+
+          const parts = rawNow
+            .split(/\n{2,}/)
+            .map((x) => String(x ?? '').trim())
+            .filter(Boolean);
+
+          const isQuestionLike = (line: string) => {
+            const s = String(line ?? '').trim();
+            if (!s) return false;
+            if (/[？?]\s*$/.test(s)) return true;
+            if (/^(何|なに|どこ|どれ|どちら|どう|なぜ|なんで|いつ|誰)/.test(s)) return true;
+            if (/(教えて|聞かせて|ある？|ありますか|いい？|いいかな|でしょうか)\s*$/.test(s)) return true;
+            return false;
+          };
+
+          const normalizeCapabilityLead = (s: string): string => {
+            let out = String(s ?? '').trim();
+            if (!out) return out;
+
+            out = out.replace(/^ここで一緒にできるのは、/u, 'ここでできるのは、');
+            out = out.replace(/^ここでは、/u, 'ここでできるのは、');
+            out = out.replace(/^Irosとして(?:今ここで)?できるのは、/u, 'ここでできるのは、');
+            out = out.replace(/^Irosとしてここで出来るのは、/u, 'ここでできるのは、');
+            out = out.replace(/^Irosとしてできるのは、/u, 'ここでできるのは、');
+            out = out.replace(/^できることは、/u, 'ここでできるのは、');
+
+            return out.trim();
+          };
+
+          const buildCapabilityDirect = () => {
+            if (/何ができる|なにができる|何が出来る|なにが出来る/.test(seedTextNow)) {
+              return 'ここでできるのは、あなたの言葉や状況を整理して、引っかかっている点を見つけて、次に動ける形まで落とすこと。';
+            }
+            return 'ここでできるのは、あなたの言葉や状況を整理して、次に動ける形まで落とすこと。';
+          };
+
+          const nonQuestionParts = parts.filter((p) => !isQuestionLike(p));
+          const keptBody = nonQuestionParts
+            .filter((p) => !/^「[^」]{2,40}」(?:って|の|は)/.test(p))
+            .filter((p) => !/^『[^』]{2,40}』(?:って|の|は)/.test(p))
+            .slice(0, 2)
+            .map((p, i) => (i === 0 ? normalizeCapabilityLead(p) : p))
+            .filter(Boolean);
+
+          const salvaged = [buildCapabilityDirect(), ...keptBody]
+            .filter(Boolean)
+            .join('\n\n')
+            .trim();
+
+          const wg3 = checkWriterGuardsMinimal({
+            text: salvaged,
+            rules: minimalWriterRules,
+          });
+
+          if (salvaged && wg3.ok) {
+            console.warn('[IROS/WRITER_GUARD][SALVAGE_CAPABILITY_Q_OVER]', {
+              traceId: debug.traceId,
+              conversationId: debug.conversationId,
+              userCode: debug.userCode,
+              beforeHead: safeHead(candidateText0, 160),
+              afterHead: safeHead(salvaged, 160),
+              qMax,
+            });
+
+            candidate = salvaged;
+            wg = { ok: true };
+          }
+        }
+      }
+    }
+
+    if (!wg.ok) {
+      const fallbackSeed =
+        String(seedFromSlots ?? '').trim() ||
+        String(seedDraft ?? '').trim() ||
+        '';
+
+      console.warn('[IROS/WRITER_GUARD][REJECT_TO_SEED]', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        reason: wg.reason,
+        detail: (wg as any)?.detail ?? null,
+        rules: minimalWriterRules,
+        candidateHead: safeHead(String(candidate ?? ''), 160),
+        fallbackSeedHead: safeHead(fallbackSeed, 160),
+      });
+
+      if (fallbackSeed) {
+        return adoptAsSlots(fallbackSeed, 'WRITER_GUARD_REJECT_TO_SEED', {
+          scaffoldActive,
+          writerGuardReason: wg.reason,
+          writerGuardDetail: (wg as any)?.detail ?? null,
+        });
+      }
+    }
   }
-
   // ---------------------------------------------
   // Flagship Guard（採用ゲート）
   // ---------------------------------------------
@@ -5376,6 +5853,65 @@ raw = await (async () => {
 
   const shiftObj = parseShiftJson(shiftSlot?.text);
 
+  const naturalizeOpeningLine = (text: string, shiftObj: any): string => {
+    const src = String(text ?? '').replace(/\r\n/g, '\n').trim();
+    if (!src) return src;
+
+    const lines = src.split('\n');
+    const first = String(lines[0] ?? '').trim();
+    if (!first) return src;
+
+    const rest = lines.slice(1).join('\n').trim();
+
+    const kind = String(shiftObj?.kind ?? '').trim();
+    const meaningKind = String(shiftObj?.meaning_kind ?? '').trim();
+    const seedText = String(shiftObj?.seed_text ?? '').trim();
+
+    const looksQuotedEcho =
+      /^「[^」]{2,80}」(?:って|の|は)/.test(first) ||
+      /^『[^』]{2,80}』(?:って|の|は)/.test(first);
+
+    const looksInterpretiveOpening =
+      /たぶん|気がする|ニュアンス|奥にあるのは|混ざってる|知りたい感じ|確かめたい感じ|もどかしさだと思う/.test(first);
+
+    const shouldNaturalize =
+      (looksQuotedEcho || looksInterpretiveOpening) &&
+      kind === 'clarify';
+
+    if (!shouldNaturalize) return src;
+
+    let replacement: string | null = null;
+
+    if (meaningKind === 'capability_reask') {
+      replacement =
+        'ここでできるのは、あなたの状況や言葉を整理して、いちばん大事な点を見つけ、次にどう動くかを一緒に形にすること。';
+    } else if (meaningKind === 'topic_recall') {
+      replacement =
+        seedText.length > 0
+          ? `さっきまで話していたのは、「${seedText}」について。`
+          : 'さっきまで話していた流れをそのまま言い直すね。';
+    } else if (meaningKind === 'truth_structure') {
+      replacement = '結論から言うと、先に核を短く置いてから、必要な構造だけを足す形で返せる。';
+    } else if (seedText.length > 0) {
+      replacement = `いま話しているのは、「${seedText}」について。`;
+    }
+
+    if (!replacement || replacement === first) return src;
+
+    const rebuilt = [replacement, rest].filter(Boolean).join('\n\n').trim();
+
+    console.log('[IROS/rephraseEngine][OPENING_NATURALIZED]', {
+      traceId: debug?.traceId ?? null,
+      conversationId: debug?.conversationId ?? null,
+      userCode: debug?.userCode ?? null,
+      meaningKind,
+      seedTextHead: safeHead(seedText, 80),
+      beforeHead: safeHead(first, 120),
+      afterHead: safeHead(replacement, 120),
+    });
+
+    return rebuilt;
+  };
   const pol = computeMinOkPolicy({
     inputKind,
     inputKindFromMeta,

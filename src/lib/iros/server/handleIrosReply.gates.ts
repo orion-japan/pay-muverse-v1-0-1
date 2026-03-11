@@ -495,13 +495,70 @@ export async function runGreetingGate(args: any): Promise<{
 
   const userText = norm2(args?.userText ?? args?.text ?? args?.input_text ?? args?.lastUserText ?? '');
 
-  // 記号・空白・絵文字を落として「挨拶だけ」かを見る
+  // 記号・空白・絵文字を落とした core
   const core = userText
     .replace(/[。．.!！?？\s]+/g, '')
     .replace(/[\u{1F300}-\u{1FAFF}]/gu, '');
 
   if (!core) return { ok: false, result: null, metaForSave: null };
 
+  // =========================================================
+  // 1) identity question gate
+  // - 最優先で拾う
+  // - 「あなたの名前は？」「お名前は？」「君の名前は？」系
+  // =========================================================
+  const isIdentityQuestion =
+    /^(?:あなた|君|きみ|おまえ|あんた)?(?:の)?(?:お?名前|名前)(?:は|って)?$/u.test(core) ||
+    /^(?:あなた|君|きみ|おまえ|あんた)(?:のお?名前|の名前|は誰|って誰)$/u.test(core) ||
+    /^(?:name|yourname|whatsyourname|whatisyourname)$/iu.test(core);
+
+  if (isIdentityQuestion) {
+    const seed =
+      `私は Iros。\n\n` +
+      `あなたの言葉を整理して、いま起きていることを見える形にする対話エンジンだよ。`;
+
+    const slots = [
+      { key: 'OBS', role: 'assistant', style: 'soft', content: '私は Iros。' },
+      { key: 'SEED_TEXT', role: 'assistant', style: 'soft', content: seed },
+    ];
+
+    const framePlan = {
+      slotPlanPolicy: 'FINAL',
+      slots,
+    };
+
+    return {
+      ok: true,
+      result: seed,
+      metaForSave: {
+        gate: 'identity',
+        prefer_llm_writer: true,
+        framePlan,
+        slotPlan: {
+          slotPlanPolicy: 'FINAL',
+          slots,
+        },
+        slotPlanPolicy: 'FINAL',
+        slotPlanLen: slots.length,
+        extra: {
+          slotPlanPolicy: 'FINAL',
+          slotPlanLen: slots.length,
+          ctxPack: {
+            shortSummary: 'identity_question',
+          },
+          framePlan,
+          slotPlan: {
+            slotPlanPolicy: 'FINAL',
+            slots,
+          },
+        },
+      },
+    };
+  }
+
+  // =========================================================
+  // 2) greeting-only gate
+  // =========================================================
   const hit =
     (/^(こんばんは|今晩は)$/u.test(core) && 'こんばんは。') ||
     (/^(こんにちは)$/u.test(core) && 'こんにちは。') ||
@@ -513,19 +570,13 @@ export async function runGreetingGate(args: any): Promise<{
     (/^(hi|hello)$/iu.test(core) && 'こんにちは。') ||
     null;
 
-
   if (!hit) return { ok: false, result: null, metaForSave: null };
-  // ✅ 固定テンプレを避ける：ここは「素材」だけ返す（判断しない）
-  // - 挨拶は “短文になりがち” なので、最小の厚みを gate 側で担保する
-  // - ここで一般論は足さない（=会話を前に進めるための「入り口」だけ）
-  // - split が効くように段落ブレイク（\n\n）を必ず入れる
+
   const seed =
     `${hit}\n\n` +
     `いまは「ひとこと」だけでも、テーマからでも始められます。🪔\n\n` +
     `そのまま続けて、いま出せる言葉を置いてください。`;
 
-  // ✅ 重要：slots を 2つ以上にする（keys が SEED_TEXT のみになるのを防ぐ）
-  // - OBS は “入口の受領” として短く（意味は足さない）
   const slots = [
     { key: 'OBS', role: 'assistant', style: 'soft', content: hit },
     { key: 'SEED_TEXT', role: 'assistant', style: 'soft', content: seed },
@@ -536,40 +587,25 @@ export async function runGreetingGate(args: any): Promise<{
     slots,
   };
 
-
   return {
     ok: true,
     result: seed,
     metaForSave: {
       gate: 'greeting',
       prefer_llm_writer: true,
-
-      // ✅ understand判定（no_ctx_summary）を潰す：初手greetingでも shortSummary を必ず持たせる
-      // - UIには出さない（ログ用）
-      // ✅ ctxPack 正本は extra.ctxPack に統一（metaForSave.ctxPack は持たない）
-
-      // ✅ rephraseAttach / conv evidence / postprocess が拾う “濃いmeta”
       framePlan,
-
-      // ✅ framePlan だけだと拾い漏れる経路があるので slotPlan も併記（確実化）
       slotPlan: {
         slotPlanPolicy: 'FINAL',
         slots,
       },
-
       slotPlanPolicy: 'FINAL',
       slotPlanLen: slots.length,
-
-      // ✅ extra 側も “濃いmeta” として埋める（merge/pick 互換）
       extra: {
         slotPlanPolicy: 'FINAL',
         slotPlanLen: slots.length,
-
-        // ✅ renderGateway は extra.ctxPack / meta.ctxPack / orch.ctxPack を見る経路がある
         ctxPack: {
           shortSummary: 'greeting',
         },
-
         framePlan,
         slotPlan: {
           slotPlanPolicy: 'FINAL',
@@ -577,6 +613,5 @@ export async function runGreetingGate(args: any): Promise<{
         },
       },
     },
-
   };
 }

@@ -210,31 +210,17 @@ export function checkWriterGuardsMinimal(args: {
     let count = (t.match(/[?？]/g) ?? []).length;
 
     // (B) 行末の疑問終止（疑問符なしでも “質問” とみなす）
-    // 例: 「〜ですか」「〜ますか」「〜でしょうか」「〜かな」「〜だろうか」
-    // NOTE: “〜です” などは含めない（誤検知を減らす）
     const lines = t.split('\n').map((l) => l.trim()).filter(Boolean);
     const endQuestionRe =
       /(ですか|ますか|でしょうか|でしたか|ましたか|ませんか|だろうか|かな|かもね|かね)([。．…]*\s*)$/;
 
     for (const line of lines) {
+      if (/[?？]/.test(line)) continue;
       if (endQuestionRe.test(line)) count += 1;
-    }
-
-    // (C) 疑問詞（何/どれ/どちら/いつ/どこ/だれ/なぜ/どう/いくつ）
-    // - これも「質問っぽさ」の主因なので加点する
-    // - ただし過剰検知を避けるため、1行につき最大1加点
-    const whRe =
-      /(何|なに|どれ|どちら|いつ|どこ|だれ|誰|なぜ|何故|どう|どの|いくつ|幾つ|どんな|どこで|どこに|どこから|どこまで)\b/;
-
-    for (const line of lines) {
-      // 疑問符や疑問終止で既に質問扱いなら二重加点しない
-      if (/[?？]/.test(line) || endQuestionRe.test(line)) continue;
-      if (whRe.test(line)) count += 1;
     }
 
     return count;
   };
-
   if (qMax != null) {
     const qCount = countQuestionsLike(text);
     if (qCount > qMax) return { ok: false, reason: 'WG:Q_OVER', detail: { qCount, qMax } };

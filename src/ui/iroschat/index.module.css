@@ -483,3 +483,16 @@
 .timeline {
   gap: 16px;
 }
+/* ================================
+   IROS PC 幅拡張
+================================ */
+
+@media (min-width: 900px) {
+
+  .timeline {
+    max-width: 1200px !important;
+    width: 100% !important;
+    margin: 0 auto !important;
+  }
+
+}

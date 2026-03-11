@@ -2645,6 +2645,32 @@ try {
 
   finalAssistantText = n.text;
 
+  // ✅ identity / provider leakage guard（最終本文の保険）
+  {
+    const t0 = String(finalAssistantText ?? '').trim();
+
+    const looksLikeChatGptIdentity =
+      /^(?:私は|ぼくは|僕は|俺は|わたしは)?\s*(?:chatgpt|ChatGPT)\s*(?:です|だよ|だ|です。|だよ。)?$/i.test(t0) ||
+      /^(?:i am|i'm)\s+chatgpt\.?$/i.test(t0) ||
+      /chatgptです。?$/i.test(t0);
+
+    const mentionsProviderAsSelf =
+      /^(?:私は|ぼくは|僕は|俺は|わたしは).*(?:OpenAI|openai|AIアシスタント|言語モデル)/.test(t0);
+
+    if (looksLikeChatGptIdentity || mentionsProviderAsSelf) {
+      finalAssistantText =
+        '私は Iros。\n\nあなたの言葉を整理して、いま起きていることを見える形にする対話エンジンだよ。';
+
+      (metaForSave.extra as any) = {
+        ...(metaForSave.extra ?? {}),
+        identityLeakGuardApplied: true,
+        identityLeakGuardReason: looksLikeChatGptIdentity
+          ? 'CHATGPT_SELF_IDENT'
+          : 'PROVIDER_SELF_IDENT',
+      };
+    }
+  }
+
   // 任意：デバッグ用（必要なら残す。重いなら消してOK）
   (metaForSave.extra as any) = {
     ...(metaForSave.extra ?? {}),

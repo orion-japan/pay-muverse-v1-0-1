@@ -170,6 +170,17 @@ export function sanitizeHistoryForTurn(history: unknown[], maxTotal: number): un
     const text = v.trim();
     if (!text) continue;
 
+    // ✅ internal / reject marker は履歴に入れない
+    // - writer guard の reject note
+    // - HISTORY_LITE / INTERNAL PACK / DO NOT OUTPUT 系の内部文
+    if (
+      text === 'WRITER_GUARD_REJECT_TO_SEED' ||
+      /^(?:HISTORY_LITE|INTERNAL PACK|COORD\s*\(|STATE_CUES_V3)\b/i.test(text) ||
+      /DO NOT OUTPUT/i.test(text)
+    ) {
+      continue;
+    }
+
     // text を正に統一（content が object の可能性を潰す）
     const mm: any = { ...(m as any), role, text };
 

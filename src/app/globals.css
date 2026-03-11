@@ -562,11 +562,15 @@ body {
 
 /* main は保険で中央 430px に */
 main {
-  max-width: 430px !important;
-  margin: 0 auto !important;
   display: block !important;
 }
 
+body:has(.sofia-container) main,
+body:has(.sofia-container) main.mu-main {
+  max-width: none !important;
+  width: 100% !important;
+  margin: 0 !important;
+}
 /* 旧コンテナのクセを殺す（右寄り/横並びの保険） */
 .page-wrapper,
 .frame-container,

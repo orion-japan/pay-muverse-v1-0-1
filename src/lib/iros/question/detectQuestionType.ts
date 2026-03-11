@@ -95,6 +95,17 @@ export function detectQuestionType(input: DetectQuestionTypeInput): QuestionType
     const scores = INITIAL_SCORES();
     if (!text) return scores;
 
+    const asksCapability =
+      /何ができる|なにができる|できること|何をしてくれる|なにをしてくれる|どう役立つ|何がわかる|なにがわかる/.test(
+        text,
+      );
+
+    const asksDirectDefinition =
+      /とは|って何|どういう意味|何者|何のため|何をする/.test(text);
+
+    const asksRepairAnswer =
+      /答えて|ちゃんと答えて|一文で|そのまま答えて|はぐらかさず/.test(text);
+
     addIfMatched(
       scores,
       text,
@@ -189,6 +200,24 @@ export function detectQuestionType(input: DetectQuestionTypeInput): QuestionType
 
     if (/なぜ.*のか|どうして.*のか/.test(text)) {
       scores.cause += 3 * contextWeight;
+    }
+
+    // ✅ capability / definition / 再回答要求 は structure ではなく meaning 側へ寄せる
+    // 目的:
+    // - 「何ができるの？」を「主張の型」に倒さない
+    // - 「Irosって何？」系を先に説明要求として扱う
+    if (asksCapability) {
+      scores.meaning += 5 * contextWeight;
+      scores.structure = Math.max(0, scores.structure - 2 * contextWeight);
+    }
+
+    if (asksDirectDefinition) {
+      scores.meaning += 3 * contextWeight;
+    }
+
+    if (asksCapability && asksRepairAnswer) {
+      scores.meaning += 3 * contextWeight;
+      scores.structure = Math.max(0, scores.structure - 3 * contextWeight);
     }
 
     applyDomainBias(scores, input.domain, text);

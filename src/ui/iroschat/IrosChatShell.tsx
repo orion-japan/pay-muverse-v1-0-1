@@ -67,18 +67,40 @@ function IrosChatInner({ open }: Props) {
         document.documentElement.style.setProperty(k, v);
       } catch {}
     };
-    set('--sofia-container-maxw', `${get(ui.containerMaxWidth, 840)}px`);
-    set('--sofia-bubble-maxw', `${get(ui.bubbleMaxWidthPct, 88)}%`);
-    set('--sofia-a-border', get(ui.assistantBorder, '1px solid rgba(255,255,255,0.08)'));
-    set('--sofia-a-radius', `${get(ui.assistantRadius, 14)}px`);
-    set('--sofia-a-shadow', get(ui.assistantShadow, '0 4px 24px rgba(0,0,0,0.25)'));
-    set('--sofia-a-bg', get(ui.assistantBg, 'rgba(255,255,255,0.04)'));
-    set('--sofia-bq-border', get(ui.blockquoteTintBorder, '1px solid rgba(160,200,255,0.25)'));
-    set('--sofia-bq-bg', get(ui.blockquoteTintBg, 'rgba(160,200,255,0.06)'));
-    set('--sofia-user-bg', get(ui.userBg, 'rgba(0,0,0,0.25)'));
-    set('--sofia-user-fg', get(ui.userFg, '#fff'));
-    set('--sofia-user-border', get(ui.userBorder, '1px solid rgba(255,255,255,0.08)'));
-    set('--sofia-user-radius', `${get(ui.userRadius, 14)}px`);
+
+    const applyUiVars = () => {
+      const isPc = typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches;
+
+      set(
+        '--sofia-container-maxw',
+        isPc ? `${get(ui.containerMaxWidthPc, 1600)}px` : `${get(ui.containerMaxWidth, 840)}px`
+      );
+
+      set('--sofia-bubble-maxw', `${get(ui.bubbleMaxWidthPct, 88)}%`);
+      set('--sofia-a-border', get(ui.assistantBorder, '1px solid rgba(255,255,255,0.08)'));
+      set('--sofia-a-radius', `${get(ui.assistantRadius, 14)}px`);
+      set('--sofia-a-shadow', get(ui.assistantShadow, '0 4px 24px rgba(0,0,0,0.25)'));
+      set('--sofia-a-bg', get(ui.assistantBg, 'rgba(255,255,255,0.04)'));
+      set('--sofia-bq-border', get(ui.blockquoteTintBorder, '1px solid rgba(160,200,255,0.25)'));
+      set('--sofia-bq-bg', get(ui.blockquoteTintBg, 'rgba(160,200,255,0.06)'));
+      set('--sofia-user-bg', get(ui.userBg, 'rgba(0,0,0,0.25)'));
+      set('--sofia-user-fg', get(ui.userFg, '#fff'));
+      set('--sofia-user-border', get(ui.userBorder, '1px solid rgba(255,255,255,0.08)'));
+      set('--sofia-user-radius', `${get(ui.userRadius, 14)}px`);
+    };
+
+    applyUiVars();
+
+    const mql = window.matchMedia('(min-width: 1024px)');
+    const onChange = () => applyUiVars();
+
+    if (typeof mql.addEventListener === 'function') {
+      mql.addEventListener('change', onChange);
+      return () => mql.removeEventListener('change', onChange);
+    } else {
+      mql.addListener(onChange);
+      return () => mql.removeListener(onChange);
+    }
   }, []);
 
   // Compose 高さをCSS変数に反映

@@ -403,17 +403,19 @@ function buildClarify(
     String(flow?.delta ?? flowDelta ?? '').toUpperCase() === 'RETURN' &&
     Number((flow as any)?.returnStreak ?? 0) >= 2;
 
-  const normalizedUserText = norm(userText);
-  const resolvedAskType =
-    String(resolvedAskTypeArg ?? '').trim() ||
-    (
-      /(地球外生命体|宇宙人)/.test(normalizedUserText) &&
-      /(人間|人類)/.test(normalizedUserText) &&
-      /(作った|作られた|介入)/.test(normalizedUserText) &&
-      /(構造)/.test(normalizedUserText)
-    )
-      ? 'truth_structure'
-      : '';
+    const normalizedUserText = norm(userText);
+    const resolvedAskType: string = (() => {
+      const stamped = String(resolvedAskTypeArg ?? '').trim();
+      if (stamped) return stamped;
+
+      const looksTruthStructure =
+        /(地球外生命体|宇宙人)/.test(normalizedUserText) &&
+        /(人間|人類)/.test(normalizedUserText) &&
+        /(作った|作られた|介入)/.test(normalizedUserText) &&
+        /(構造)/.test(normalizedUserText);
+
+      return looksTruthStructure ? 'truth_structure' : '';
+    })();
 
   console.log('[IROS/NORMAL_CHAT][BUILD_CLARIFY_TRACE]', {
     userHead: String(userText ?? '').slice(0, 80),
@@ -429,146 +431,204 @@ function buildClarify(
     splitFactHypothesis,
     avoidPrematureClosure,
   });
+
   const directAnswerRequested =
     /答え|結論|要するに|結局|真実が知りたい|本当のことが知りたい|そろそろ結論|今の未来|未来だよ/.test(seedText);
 
+  const hasTruthStructureLexeme =
+    /(真実|事実|本当|構造|論点|検証|仮説|どこまで言える|切り分け|整理)/.test(normalizedUserText) ||
+    (
+      /(地球外生命体|宇宙人)/.test(normalizedUserText) &&
+      /(人間|人類)/.test(normalizedUserText) &&
+      /(作った|作られた|介入)/.test(normalizedUserText)
+    );
+
   const shouldAnswerTruthStructure =
-    resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure;
+    resolvedAskType === 'truth_structure' ||
+    (questionSuggestsTruthStructure && hasTruthStructureLexeme);
+
+  const shouldReanswerCapability =
+    resolvedAskType === 'capability_reask';
 
   const shiftIntentBase =
     isT
       ? 'implement_next_step'
       : questionSuggestsPastReframe
         ? 'answer_past_reframe'
-        : directAnswerRequested
-          ? 'answer_in_one_shot'
-          : shouldAnswerTruthStructure
-            ? 'answer_truth_structure'
-            : 'answer_user_meaning';
+        : shouldReanswerCapability
+          ? 'reanswer_capability'
+          : directAnswerRequested
+            ? 'answer_in_one_shot'
+            : shouldAnswerTruthStructure
+              ? 'answer_truth_structure'
+              : 'answer_user_meaning';
 
   const shiftHintBase =
     isT
       ? 'clarify_t_concretize_v1'
-      : shouldAnswerTruthStructure
-        ? 'clarify_truth_structure_v1'
-        : directAnswerRequested
-          ? 'decide_shift_v1'
-          : 'clarify_meaning_v1';
+      : shouldReanswerCapability
+        ? 'repair_capability_reask_v1'
+        : shouldAnswerTruthStructure
+          ? 'clarify_truth_structure_v1'
+          : directAnswerRequested
+            ? 'decide_shift_v1'
+            : 'clarify_meaning_v1';
 
   const shiftLineBase =
     isT
       ? null
       : questionSuggestsPastReframe
         ? 'いま必要なのは解決を急いで断定することではなく、戻ってきた未完了の型を見つけて、未完了テーマ・反復パターン・再配置の順で見直すこと'
-        : directAnswerRequested
-          ? '結論を先に短く言い切り、そのあと必要最小限の具体だけを添えて閉じる'
-          : shouldAnswerTruthStructure
-            ? '結論をぼかさず先に核を答え、そのあとで構造（論点分解・検証条件・どこまで言えるか）を短く添える'
-            : clarifyMeaning.line;
-  return [
-    obs,
-    {
-      key: 'SHIFT',
-      role: 'assistant',
-      style: 'neutral',
-      content: m('SHIFT', {
-        kind: isT ? 't_concretize' : 'clarify',
-        intent: shiftIntentBase,
-        hint: shiftHintBase,
-        line: shiftLineBase,
-        source: isT
-          ? 't_concretize'
-          : questionSuggestsPastReframe
-            ? 'question_engine'
-            : resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure
-              ? 'resolved_ask'
-              : clarifyMeaning.source,
-        meaning_kind: isT
-          ? null
-          : questionSuggestsPastReframe
-            ? 'past_reframe'
-            : resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure
-              ? 'truth_structure'
-              : clarifyMeaning.kind,
-        question_type: questionType || null,
-        t_mode: tMode || null,
-        question_focus: questionFocus || null,
-        question_policy: {
-          usePastReframe,
-          splitFactHypothesis,
-          avoidPrematureClosure,
-        },
-        contract: isT
-          ? pickRandom(contractsT)
-          : questionSuggestsPastReframe
-            ? [
-                'answer_in_one_shot',
-                'first_line_names_unfinished_theme_or_pattern',
-                'prefer_past_reframe_over_advice',
-                'no_premature_closure',
-                'plain_words',
-                'no_boilerplate',
-              ]
-            : resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure
-              ? [
-                  'answer_in_one_shot',
-                  'first_line_is_core_answer',
-                  'then_structure_brief',
-                  'no_meta_explain',
-                  'plain_words',
-                  'no_boilerplate',
-                ]
-              : clarifyMeaning.kind === 'topic_recall'
-                ? [
-                    'answer_in_one_shot',
-                    'first_line_names_last_topic_directly',
-                    'prefer_topic_restatement_over_interpretation',
-                    'no_meta_explain',
-                    'plain_words',
-                    'no_boilerplate',
-                  ]
-                : isDefinitionQuestion
-                  ? ['answer_in_one_shot', 'first_line_is_definition_or_pointing', 'no_meta_explain', 'plain_words', 'no_boilerplate']
-                  : pickRandom(contractsClarify.slice(1)),
-        rules: {
-          ...(shiftPreset?.rules ?? {}),
-          answer_user_meaning:
-            !questionSuggestsPastReframe &&
-            resolvedAskType !== 'truth_structure' &&
-            !questionSuggestsTruthStructure,
-          answer_truth_structure:
-            resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure,
-          use_past_reframe: questionSuggestsPastReframe,
-          split_fact_hypothesis: splitFactHypothesis,
-          avoid_premature_closure: avoidPrematureClosure,
-          keep_it_simple: true,
-          no_flow_lecture: true,
-          no_meta_explain: true,
-          questions_max: isT
-            ? 0
-            : questionSuggestsPastReframe
-              ? 0
-              : resolvedAskType === 'truth_structure' || questionSuggestsTruthStructure
-                ? 0
-                : clarifyMeaning.kind === 'topic_recall'
-                  ? 0
-                  : isDefinitionQuestion
-                    ? 0
-                    : 1,
-          ...(deepReadBoost ? { no_definition: false } : {}),
-        },
-        allow: {
-          ...(shiftPreset?.allow ?? {}),
-          concrete_reply: true,
-          short_reply_ok: isT ? false : true,
-        },
-        seed_text: seedText,
-      }),
-    },
-    safe,
-    buildNextHintSlot({ userText, laneKey: lane, flowDelta: delta }),
-  ];
-}
+        : shouldReanswerCapability
+          ? '前に聞かれた問いを短く言い直してから、「何ができるのか」をできることの形で先に直答する。型の説明や感情の意味づけには広げず、1行目で機能を言い切り、そのあと必要最小限の具体例だけを添える'
+          : directAnswerRequested
+            ? '結論を先に短く言い切り、そのあと必要最小限の具体だけを添えて閉じる'
+            : shouldAnswerTruthStructure
+              ? '結論をぼかさず先に核を答え、そのあとで構造（論点分解・検証条件・どこまで言えるか）を短く添える'
+              : clarifyMeaning.line;
+              return [
+                obs,
+                {
+                  key: 'SHIFT',
+                  role: 'assistant',
+                  style: 'neutral',
+                  content: m('SHIFT', {
+                    kind: isT ? 't_concretize' : 'clarify',
+                    intent: shiftIntentBase,
+                    hint: shiftHintBase,
+                    line: shiftLineBase,
+                    source: isT
+                      ? 't_concretize'
+                      : questionSuggestsPastReframe
+                        ? 'question_engine'
+                        : shouldAnswerTruthStructure
+                          ? 'resolved_ask'
+                          : shouldReanswerCapability
+                            ? 'resolved_ask'
+                            : clarifyMeaning.source,
+                    meaning_kind: isT
+                      ? null
+                      : questionSuggestsPastReframe
+                        ? 'past_reframe'
+                        : shouldAnswerTruthStructure
+                          ? 'truth_structure'
+                          : shouldReanswerCapability
+                            ? 'capability_reask'
+                            : clarifyMeaning.kind,
+                    question_type: questionType || null,
+                    t_mode: tMode || null,
+                    question_focus: questionFocus || null,
+                    question_policy: {
+                      usePastReframe,
+                      splitFactHypothesis,
+                      avoidPrematureClosure,
+                    },
+                    contract: isT
+                      ? pickRandom(contractsT)
+                      : questionSuggestsPastReframe
+                        ? [
+                            'answer_in_one_shot',
+                            'first_line_names_unfinished_theme_or_pattern',
+                            'prefer_past_reframe_over_advice',
+                            'no_premature_closure',
+                            'plain_words',
+                            'no_boilerplate',
+                          ]
+                        : shouldReanswerCapability
+                          ? [
+                              'answer_in_one_shot',
+                              'first_line_is_definition_or_pointing',
+                              'no_meta_explain',
+                              'plain_words',
+                              'no_boilerplate',
+                            ]
+                          : shouldAnswerTruthStructure
+                            ? [
+                                'answer_in_one_shot',
+                                'first_line_is_core_answer',
+                                'then_structure_brief',
+                                'no_meta_explain',
+                                'plain_words',
+                                'no_boilerplate',
+                              ]
+                            : clarifyMeaning.kind === 'topic_recall'
+                              ? [
+                                  'answer_in_one_shot',
+                                  'first_line_names_last_topic_directly',
+                                  'prefer_topic_restatement_over_interpretation',
+                                  'no_meta_explain',
+                                  'plain_words',
+                                  'no_boilerplate',
+                                ]
+                              : isDefinitionQuestion
+                                ? [
+                                    'answer_in_one_shot',
+                                    'first_line_is_definition_or_pointing',
+                                    'no_meta_explain',
+                                    'plain_words',
+                                    'no_boilerplate',
+                                  ]
+                                : pickRandom(contractsClarify.slice(1)),
+                    rules: {
+                      ...(shiftPreset?.rules ?? {}),
+                      answer_user_meaning:
+                        !questionSuggestsPastReframe &&
+                        !shouldAnswerTruthStructure &&
+                        !shouldReanswerCapability,
+                      answer_truth_structure: shouldAnswerTruthStructure,
+                      use_past_reframe: questionSuggestsPastReframe,
+                      split_fact_hypothesis: splitFactHypothesis,
+                      avoid_premature_closure: avoidPrematureClosure,
+                      keep_it_simple: true,
+                      no_flow_lecture: true,
+                      no_meta_explain: true,
+                      output_only:
+                        shouldAnswerTruthStructure ||
+                        shouldReanswerCapability ||
+                        clarifyMeaning.kind === 'topic_recall' ||
+                        isDefinitionQuestion,
+                      no_bullets:
+                        shouldAnswerTruthStructure ||
+                        shouldReanswerCapability ||
+                        clarifyMeaning.kind === 'topic_recall' ||
+                        isDefinitionQuestion,
+                      lines_max:
+                        shouldAnswerTruthStructure
+                          ? 4
+                          : shouldReanswerCapability
+                            ? 3
+                            : clarifyMeaning.kind === 'topic_recall'
+                              ? 3
+                              : isDefinitionQuestion
+                                ? 3
+                                : undefined,
+                                questions_max: isT
+                                ? 0
+                                : questionSuggestsPastReframe
+                                  ? 0
+                                  : shouldAnswerTruthStructure
+                                    ? 0
+                                    : shouldReanswerCapability
+                                      ? 1
+                                      : clarifyMeaning.kind === 'topic_recall'
+                                        ? 0
+                                        : isDefinitionQuestion
+                                          ? 0
+                                          : 2,
+                      ...(deepReadBoost ? { no_definition: false } : {}),
+                    },
+                    allow: {
+                      ...(shiftPreset?.allow ?? {}),
+                      concrete_reply: true,
+                      short_reply_ok: isT ? false : true,
+                    },
+                    seed_text: seedText,
+                  }),
+                },
+                safe,
+                buildNextHintSlot({ userText, laneKey: lane, flowDelta: delta }),
+              ];
+            }
 // ✅ HowTo/方法質問（QuestionSlots）を normalChat に合わせて「@行だけ」に正規化
 function buildQuestion(
   userText: string,
@@ -1248,7 +1308,7 @@ export function buildNormalChatSlotPlan(args: {
     reason = 'questionSlots';
     usedQuestionSlots = true;
     slots = buildQuestion(userText, lastUserText ?? undefined, laneKeyArg, flowDelta);
-  } else if (isClarify(userText) && /[?？]/.test(userText)) {
+  } else if ((isClarify(userText) && /[?？]/.test(userText)) || resolvedAskType === 'capability_reask') {
     reason = 'clarify';
     usedClarify = true;
     slots = buildClarify(

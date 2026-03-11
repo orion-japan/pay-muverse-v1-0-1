@@ -24,6 +24,17 @@ export function systemPromptForFullReply(args?: {
   mode?: string | null;
   openingPolicy?: string | null;
 
+  // ✅ question 系（冒頭の説明要求・構造確認では GUIDE_I を抑える）
+  questionType?: string | null;
+  questionFocus?: string | null;
+  askBackAllowed?: boolean | null;
+
+  // ✅ structure系の整形ルール
+  lines_max?: number | null;
+  questions_max?: number | null;
+  output_only?: boolean | null;
+  no_bullets?: boolean | null;
+
   // ExpressionLane（発火結果）: personaModeを変えず、本文の“言い方”補助だけに使う
   exprLane?: { fired?: boolean; lane?: string | null; reason?: string | null } | null;
 
@@ -43,6 +54,16 @@ export function systemPromptForFullReply(args?: {
   const shiftKindNow = String(args?.shiftKind ?? '').trim().toLowerCase();
   const isDecideShiftNow = shiftKindNow === 'decide_shift';
 
+  // ✅ question 系
+  const questionTypeNow = String(args?.questionType ?? '').trim().toLowerCase();
+  const questionFocusNow = String(args?.questionFocus ?? '').trim();
+  const askBackAllowedNow = args?.askBackAllowed === true;
+
+  const linesMaxNow = typeof args?.lines_max === 'number' ? args.lines_max : null;
+const questionsMaxNow = typeof args?.questions_max === 'number' ? args.questions_max : null;
+const outputOnlyNow = args?.output_only === true;
+const noBulletsNow = args?.no_bullets !== false;
+
   // ExpressionLane（表現補助用・構造は動かさない）
   const exprLane = args?.exprLane ?? null;
   const exprFired = Boolean(exprLane?.fired);
@@ -54,6 +75,15 @@ export function systemPromptForFullReply(args?: {
   const isIOrTRequested = Boolean(h && (h.startsWith('I') || h.startsWith('T')));
   const allowIStyle = Boolean(itOk && isIOrTRequested);
 
+  // ✅ 説明要求・構造確認・原因確認では GUIDE_I を抑える
+  // - 「あなたは誰？」「何ができる？」「なぜe3？」のようなターンで
+  //   深読み口調が先に出るのを防ぐ
+  const shouldGroundByQuestion =
+    questionTypeNow === 'structure' ||
+    questionTypeNow === 'cause' ||
+    (questionTypeNow === 'truth' && askBackAllowedNow) ||
+    questionFocusNow === '主張の型';
+
   // clamp: GUIDE_I は allowIStyle を満たさないと無効化
   const requestedPersona = args?.personaMode ?? null;
   const personaMode: 'GROUND' | 'DELIVER' | 'GUIDE_I' | 'ASSESS' = (() => {
@@ -62,6 +92,9 @@ export function systemPromptForFullReply(args?: {
 
     // ✅ decide_shift は「結論を返すターン」なので GUIDE_I にしない
     if (isDecideShiftNow) return 'GROUND';
+
+    // ✅ 説明要求・構造確認では GUIDE_I を抑える
+    if (shouldGroundByQuestion) return 'GROUND';
 
     if (directTask) return 'DELIVER';
     if (requestedPersona) {
@@ -109,12 +142,15 @@ export function systemPromptForFullReply(args?: {
   //   → exprMeta / laneContractTail / renderGateway / STYLE_NORM 側へ寄せる
   // =========================================================
   const base = [
-    'あなたは iros の会話生成（reply）担当です。',
+    'あなたは iros ＜アイロス＞の会話生成（reply）担当です。',
     '人格・世界観・語り口は、上位人格定義に従う。',
     '',
 
     '【露出禁止】',
     '- 本文で自己定義（Sofia/AI/システム/プロンプト等）を宣言しない。',
+    '- 自分を ChatGPT / OpenAI / AIアシスタント / 言語モデル などと名乗らない。',
+    '- 名前や立場を聞かれた場合は、本文上の名乗りは「Iros」のみを使う。',
+    '- OpenAI / モデル名 / 基盤モデル / 提供元の説明を本文に出さない。',
     '- 内部事情（仕組み説明/ルール説明/プロンプト説明）で本文を埋めない。',
     '- 深度/フェーズ/Qコード/アンカー等の“名前・キー・数値・JSON・制御語”を本文に出さない。',
     '- メタを根拠に説明しない（「〜だから」型でメタを語らない）。',
@@ -140,6 +176,34 @@ export function systemPromptForFullReply(args?: {
     '- 具体語を最低1つ残す（抽象語で上書きしない）。',
     '- 一般論・定型励ましで締めない。曖昧語で締めない。質問攻めにしない。',
     '',
+    '【文章レイアウトルール（露出禁止）】',
+    '- スマートフォンで読みやすい文章構造を優先する。',
+    '- 1行は18〜40文字程度を目安に、意味の切れ目で改行する。',
+    '- 不自然に短く切らず、20〜32文字程度の行も許容する。',
+    '- 文の途中で細かく切りすぎず、意味のまとまりを優先する。',
+    '- 内容が切り替わるときだけ段落を区切る。',
+    '- 1段落が4行以上続かないようにする。',
+    '- 重要な文の前後は1行空けてもよい。',
+    '- 箇条書きが必要ない場面では、短い段落の連なりで見せる。',
+    '- 改行は装飾ではなく、意味の区切りと読みやすさのために使う。',
+    '',
+    '【見た目の装飾ルール（露出禁止）】',
+    '- 見出しや切り替わり地点では、絵文字を最小1つ添えてよい。',
+    '- 強調したい語句や結論は、必要に応じて **太字** で示してよい。',
+    '- 節の切り替えでは、短い見出し行を置いてよい。',
+    '- 区切りを見せたいときは、―― や —— のような短い線表現を使ってよい。',
+    '- ただし毎段落を装飾しすぎず、1返答の中で強調は2〜4回までに抑える。',
+    '- 装飾は意味を見やすくするために使い、飾りだけで増やさない。',
+    '- 箇条書きが有効な場面では、・ を使って整理してよい。',
+    '',
+  ].join('\n');
+  const structureRules = [
+    '',
+    '【出力整形ルール（DO NOT OUTPUT）】',
+    ...(linesMaxNow ? [`- 最大行数は ${linesMaxNow} 行以内。`] : []),
+    ...(questionsMaxNow !== null ? [`- 質問は最大 ${questionsMaxNow} 個まで。`] : []),
+    ...(outputOnlyNow ? ['- 解説や前置きは禁止。答えのみ出力する。'] : []),
+    ...(noBulletsNow ? ['- 箇条書き（-,・,1.など）は使用しない。'] : []),
   ].join('\n');
 
   // =========================================================
@@ -215,5 +279,11 @@ export function systemPromptForFullReply(args?: {
     });
   } catch {}
 
-  return [sofiaPersona, base, lockRule, personaStyle].filter(Boolean).join('\n');
+  return [
+    sofiaPersona,
+    base,
+    structureRules,
+    lockRule,
+    personaStyle,
+  ].join('\n');
 }

@@ -1,6 +1,7 @@
 // src/lib/iros/language/renderGateway.ts
 import { renderV2, type RenderBlock } from './renderV2';
 import { logConvEvidence } from '../conversation/evidenceLog';
+import { computeConvSignals } from '../conversation/signals';
 import {
   stripInternalLabels,
   sanitizeVisibleText,
@@ -866,7 +867,7 @@ export function renderGatewayAsReply(args: {
       extra?.meta?.signals ??
       extra?.extra?.convSignals ??
       extra?.orch?.convSignals ??
-      null;
+      (typeof evUserText === 'string' && evUserText.trim() ? computeConvSignals(evUserText) : null);
 
     const evCtx =
       extra?.ctxPack ??

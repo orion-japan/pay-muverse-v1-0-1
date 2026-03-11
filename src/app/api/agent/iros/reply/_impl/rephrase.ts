@@ -1277,7 +1277,7 @@ try {
   const isTopicRecallNow =
     shiftTextForGuard.includes('"meaning_kind":"topic_recall"');
 
-  const isStructureMapNow =
+    const isStructureMapNow =
     shiftTextForGuard.includes('"meaning_kind":"structure"') ||
     /(構造から|構造で|構造に|構造へ)/.test(userText) ||
     /(置き換える|置換|写像|翻訳|言い換える)/.test(userText) ||
@@ -1294,6 +1294,17 @@ try {
       )
     );
 
+  const isCapabilityReaskNow =
+    !isTopicRecallNow &&
+    !isStructureMapNow &&
+    (
+      shiftTextForGuard.includes('"hint":"repair_capability_reask_v1"') ||
+      shiftTextForGuard.includes('"meaning_kind":"capability_reask"') ||
+      shiftTextForGuard.includes('"intent":"reanswer_capability"') ||
+      shiftTextForGuard.includes('"replyMode":"reanswer_prior_question"') ||
+      shiftTextForGuard.includes('"askType":"capability_reask"')
+    );
+
   const isStabilizeShiftNow =
     !isTopicRecallNow &&
     !isStructureMapNow &&
@@ -1307,6 +1318,7 @@ try {
     userCode,
     traceId: traceId ?? null,
     isClarifyMeaningNow,
+    isCapabilityReaskNow,
     isTopicRecallNow,
     isStabilizeShiftNow,
     curHfw_isArray: Array.isArray(curHfw),
@@ -1582,9 +1594,12 @@ try {
   };
 
   // 3) historyForWriter の扱い
-  // - clarify / stabilize_shift は今の入力優先
+  // - capability_reask / clarify / stabilize_shift は前トピックHFWを使わない
   // - topic_recall / structure_map は normalize + trim を通す
-  if (isClarifyMeaningNow || isStabilizeShiftNow) {
+  if (isCapabilityReaskNow) {
+    delete (userContext.ctxPack as any).historyForWriter;
+    delete (userContext as any).turnsForWriter;
+  } else if (isClarifyMeaningNow || isStabilizeShiftNow) {
     delete (userContext.ctxPack as any).historyForWriter;
 
     const src: any[] =
@@ -1903,7 +1918,9 @@ try {
     if (safeFromRes) {
       const isSentinel =
         /^MICRO_LIKE_SKIP_REPHRASE\b/.test(String(safeFromRes)) ||
-        /^REPHRASE_/i.test(String(safeFromRes));
+        /^REPHRASE_/i.test(String(safeFromRes)) ||
+        /^WRITER_GUARD_REJECT_TO_SEED\b/.test(String(safeFromRes)) ||
+        /^FLAGSHIP_WARN_REJECT_TO_SEED\b/.test(String(safeFromRes));
 
       if (!isSentinel) {
         attachBlocksFromTextOrSkip(safeFromRes, 'REPHRASE_TEXT_FALLBACK_SAFE');
