@@ -952,11 +952,13 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
     const hasViewShift = !!(metaForSave as any)?.extra?.ctxPack?.viewShift;
     const hasViewShiftSnap = !!(metaForSave as any)?.extra?.ctxPack?.viewShiftSnapshot;
 
-      const polarityBand =
-        (metaForSave as any)?.polarityBand ??
-        (metaForSave as any)?.extra?.polarityBand ??
-        (metaForSave as any)?.extra?.ctxPack?.polarityBand ??
-        null;
+    const polarityBand =
+    (metaForSave as any)?.polarityBand ??
+    (metaForSave as any)?.unified?.polarityBand ??
+    (metaForSave as any)?.extra?.polarityBand ??
+    (metaForSave as any)?.extra?.ctxPack?.polarityBand ??
+    (metaForSave as any)?.extra?.unified?.polarityBand ??
+    null;
 
       const polarityFromMirrorRaw =
         (metaForSave as any)?.mirror?.polarity ??
@@ -1097,10 +1099,10 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
 // 5.x) cards-lite 生成（ctxPack.cards） + card180 seed 生成（ログ可視化）
 // =========================================================
 try {
-  // cards（既にあれば上書きしない）
+  // cards-lite の既存有無に関係なく、card180 seed 生成までは進める
   const hasCards = !!(metaForSave as any)?.extra?.ctxPack?.cards;
 
-  if (!hasCards) {
+  {
     const qCountsAny: any =
       (metaForSave as any)?.qCounts ??
       (metaForSave as any)?.extra?.qCounts ??
@@ -1166,9 +1168,43 @@ try {
       null;
 
     // polarity は card180 seed に必要（yin/yang）
-    const polRaw: any = mirrorObjAny?.polarity ?? null;
-    const polKey: 'yin' | 'yang' | null =
-      polRaw === 'yin' || polRaw === 'yang' ? polRaw : null;
+    const polRaw: any =
+      mirrorObjAny?.polarity ??
+      (metaForSave as any)?.polarityBand ??
+      (metaForSave as any)?.unified?.polarityBand ??
+      (metaForSave as any)?.extra?.polarityBand ??
+      (metaForSave as any)?.extra?.unified?.polarityBand ??
+      (metaForSave as any)?.extra?.ctxPack?.polarityBand ??
+      null;
+
+    const normalizeCardPolarity = (raw: any): 'yin' | 'yang' | null => {
+      if (raw == null) return null;
+
+      if (typeof raw === 'string') {
+        const s = raw.trim().toLowerCase();
+        if (s === 'yin' || s === 'negative') return 'yin';
+        if (s === 'yang' || s === 'positive') return 'yang';
+        return null;
+      }
+
+      if (typeof raw === 'object') {
+        const vIn = normalizeCardPolarity((raw as any).in);
+        if (vIn) return vIn;
+
+        const vOut = normalizeCardPolarity((raw as any).out);
+        if (vOut) return vOut;
+
+        const vBand = normalizeCardPolarity((raw as any).metaBand);
+        if (vBand) return vBand;
+
+        const vBand2 = normalizeCardPolarity((raw as any).polarityBand);
+        if (vBand2) return vBand2;
+      }
+
+      return null;
+    };
+
+    const polKey: 'yin' | 'yang' | null = normalizeCardPolarity(polRaw);
 
     // 既存lite互換（UI互換のため温存）
     const makeLabels = (k: string) => {
@@ -1232,8 +1268,19 @@ try {
       };
 
       // --- 追加: card180 由来 seedText を生成して保存（ログで見える化）
-      // ※ depthNow / polKey が揃っている時だけ（憶測で補完しない）
-      if (depthNow && polKey) {
+      // ※ current card の stage は observedStage を優先する
+      const observedStageNow =
+        typeof (metaForSave as any)?.observedStage === 'string' &&
+        (metaForSave as any).observedStage.trim().length > 0
+          ? (metaForSave as any).observedStage.trim()
+          : typeof (metaForSave as any)?.extra?.ctxPack?.observedStage === 'string' &&
+              (metaForSave as any).extra.ctxPack.observedStage.trim().length > 0
+            ? (metaForSave as any).extra.ctxPack.observedStage.trim()
+            : null;
+
+      const cardStageNow = observedStageNow ?? depthNow ?? null;
+
+      if (cardStageNow && polKey) {
         try {
           const { buildDualCardPacket, formatDualCardPacketForLLM } =
             await import('@/lib/iros/cards/card180');
@@ -1241,7 +1288,7 @@ try {
           const packet = buildDualCardPacket(
             {
               current: {
-                stage: depthNow ?? null,
+                stage: cardStageNow as any,
                 e_turn: eKey as any,
                 polarity: polKey as any,
                 sa: (metaForSave as any)?.sa ?? null,
@@ -1260,33 +1307,87 @@ try {
           const seedText = raw ? raw.split('\n').slice(0, 15).join('\n').trim() : '';
 
           if (seedText) {
-            (metaForSave as any).extra.ctxPack.cards.seedText = seedText;
-            (metaForSave as any).extra.ctxPack.cards.seedTextLen = seedText.length;
-            (metaForSave as any).extra.ctxPack.cards.seedTextHead = seedText.slice(0, 160);
+            const prevCards =
+              (metaForSave as any)?.extra?.ctxPack?.cards &&
+              typeof (metaForSave as any).extra.ctxPack.cards === 'object'
+                ? (metaForSave as any).extra.ctxPack.cards
+                : {};
+
+            (metaForSave as any).extra.ctxPack.cards = {
+              ...prevCards,
+              currentCard: {
+                cardId: packet.currentCard?.cardId ?? null,
+                meaningKey: packet.currentCard?.meaningKey ?? null,
+                e_turn: eKey,
+                stage: cardStageNow,
+                polarity: polKey,
+                stageSource: observedStageNow ? 'observedStage' : 'depthStage',
+                observedStage: observedStageNow,
+                depthStage: depthNow ?? null,
+                basedOn: String(userText ?? '').trim().slice(0, 80) || null,
+                confidence:
+                  packet.currentCard?.confidence ??
+                  (mirrorObjAny?.confidence ?? (metaForSave as any)?.confidence ?? null),
+                shortText: packet.currentCard?.baseMeaning ?? null,
+                source: packet.currentCard?.source ?? 'detected',
+              },
+              futureCard: packet.futureCard
+                ? {
+                    cardId: packet.futureCard.cardId ?? null,
+                    meaningKey: packet.futureCard.meaningKey ?? null,
+                    e_turn: packet.futureCard.e_turn ?? null,
+                    stage: packet.futureCard.stage ?? null,
+                    polarity: packet.futureCard.polarity ?? null,
+                    shortText: packet.futureCard.baseMeaning ?? null,
+                    source: packet.futureCard.source ?? 'random',
+                  }
+                : null,
+              seedText,
+              seedTextLen: seedText.length,
+              seedTextHead: seedText.slice(0, 160),
+            };
 
             console.log('[IROS/CARDS][SEED_FROM_CARD180][OK]', {
               traceId: (metaForSave as any)?.extra?.traceId ?? (metaForSave as any)?.traceId ?? null,
               conversationId: (metaForSave as any)?.conversationId ?? null,
               userCode: (metaForSave as any)?.userCode ?? null,
               e_turn: eKey,
+              stage: cardStageNow,
+              stageSource: observedStageNow ? 'observedStage' : 'depthStage',
+              observedStage: observedStageNow,
               depthStage: depthNow,
               polarity: polKey,
               seedLen: seedText.length,
               seedHead: seedText.slice(0, 160),
             });
+
           } else {
             console.warn('[IROS/CARDS][SEED_FROM_CARD180][EMPTY]', {
               e_turn: eKey,
+              stage: cardStageNow,
+              stageSource: observedStageNow ? 'observedStage' : 'depthStage',
+              observedStage: observedStageNow,
               depthStage: depthNow,
               polarity: polKey,
             });
           }
         } catch (e) {
-          console.warn('[IROS/CARDS][SEED_FROM_CARD180][ERR]', { err: String(e) });
+          console.warn('[IROS/CARDS][SEED_FROM_CARD180][ERR]', {
+            err: String(e),
+            e_turn: eKey,
+            stage: cardStageNow,
+            stageSource: observedStageNow ? 'observedStage' : 'depthStage',
+            observedStage: observedStageNow,
+            depthStage: depthNow,
+            polarity: polKey,
+          });
         }
       } else {
         console.log('[IROS/CARDS][SEED_FROM_CARD180][SKIP_MISSING]', {
           e_turn: eKey,
+          stage: cardStageNow ?? null,
+          stageSource: observedStageNow ? 'observedStage' : 'depthStage',
+          observedStage: observedStageNow,
           depthStage: depthNow ?? null,
           polarity: polKey ?? null,
         });
@@ -1392,8 +1493,10 @@ try {
   // ✅ polarity の入力元を増やす（meta直下の polarityBand を mirrorFlow に橋渡し）
   const polarityBand =
     (metaForSave as any)?.polarityBand ??
+    (metaForSave as any)?.unified?.polarityBand ??
     (metaForSave as any)?.extra?.polarityBand ??
     (metaForSave as any)?.extra?.ctxPack?.polarityBand ??
+    (metaForSave as any)?.extra?.unified?.polarityBand ??
     null;
 
   const polarityFromMirrorRaw =
@@ -1577,13 +1680,14 @@ const polarityMetaBand: string | null =
     // [Phase 1] resonance cards（current/future）生成 → ctxPack.cards に保存
     // - e_turn + 現在の座標（depth/phase/stage/band）から “刺さり候補語” を作る
     // - 正本は extra.ctxPack（writer/rephrase 側が拾える）
+    // - card180 seed は MirrorFlow / polarity 正規化の後でここで生成する
     // =========================================
     try {
       const exAny: any = (metaForSave as any).extra ?? {};
       exAny.ctxPack = exAny.ctxPack && typeof exAny.ctxPack === 'object' ? exAny.ctxPack : {};
       (metaForSave as any).extra = exAny;
 
-      // e_turn は MIRROR_FLOW の mirror から拾う（上で mirrorObj を作っている）
+      // e_turn は MIRROR_FLOW の mirror から拾う
       const mirrorObjAny: any =
         (metaForSave as any)?.mirror ??
         (metaForSave as any)?.extra?.mirror ??
@@ -1594,12 +1698,13 @@ const polarityMetaBand: string | null =
 
       const normalizeETurnKey = (v: any): string | null => {
         if (v == null) return null;
+
         if (typeof v === 'string') {
           const s = v.trim();
           return s ? s : null;
         }
+
         if (typeof v === 'object') {
-          // { key:'e2' } / { code:'e2' } / { e_turn:'e2' } などに耐える
           const c =
             (typeof (v as any).key === 'string' && (v as any).key.trim()) ||
             (typeof (v as any).code === 'string' && (v as any).code.trim()) ||
@@ -1607,10 +1712,12 @@ const polarityMetaBand: string | null =
             null;
           return c ? String(c).trim() : null;
         }
+
         return null;
       };
 
-      const eKey = normalizeETurnKey(rawETurn); // 例: 'e1'〜'e5'
+      const eKey = normalizeETurnKey(rawETurn); // 'e1'〜'e5'
+
       const depthNow: string | null = (() => {
         const d =
           (metaForSave as any)?.depth ??
@@ -1641,10 +1748,7 @@ const polarityMetaBand: string | null =
         (metaForSave as any)?.extra?.coord?.band ??
         null;
 
-      // --- label 生成（短く・固定・憶測しない）
-      // e_turn が無い場合は “生成しない” （ここは無理に捏造しない）
       const makeLabels = (k: string) => {
-        // 8〜12文字“目安”の短文（日本語は字数計測が曖昧なので「短く固定」を優先）
         const currentMap: Record<string, string> = {
           e1: 'いま整え直す',
           e2: 'いま伸ばし切る',
@@ -1652,6 +1756,7 @@ const polarityMetaBand: string | null =
           e4: 'いま解き放つ',
           e5: 'いま灯し直す',
         };
+
         const futureMap: Record<string, string> = {
           e1: '次は安定が来る',
           e2: '次は成長が来る',
@@ -1659,6 +1764,7 @@ const polarityMetaBand: string | null =
           e4: '次は浄化が来る',
           e5: '次は熱が戻る',
         };
+
         return {
           current: currentMap[k] ?? 'いま整え直す',
           future: futureMap[k] ?? '次は安定が来る',
@@ -1666,7 +1772,6 @@ const polarityMetaBand: string | null =
       };
 
       const makeScore = (k: string): number => {
-        // 決め打ち（憶測を広げない）：eの強さとして単調増加
         if (k === 'e5') return 90;
         if (k === 'e4') return 78;
         if (k === 'e3') return 66;
@@ -1675,26 +1780,71 @@ const polarityMetaBand: string | null =
         return 50;
       };
 
+      const normalizeCardPolarity = (raw: any): 'yin' | 'yang' | null => {
+        if (raw == null) return null;
+
+        if (typeof raw === 'string') {
+          const s = raw.trim().toLowerCase();
+          if (s === 'yin' || s === 'negative') return 'yin';
+          if (s === 'yang' || s === 'positive') return 'yang';
+          return null;
+        }
+
+        if (typeof raw === 'object') {
+          const vIn = normalizeCardPolarity((raw as any).in);
+          if (vIn) return vIn;
+
+          const vOut = normalizeCardPolarity((raw as any).out);
+          if (vOut) return vOut;
+
+          const vBand = normalizeCardPolarity((raw as any).metaBand);
+          if (vBand) return vBand;
+
+          const vBand2 = normalizeCardPolarity((raw as any).polarityBand);
+          if (vBand2) return vBand2;
+        }
+
+        return null;
+      };
+
+      const polRaw: any =
+        mirrorObjAny?.polarity ??
+        (metaForSave as any)?.polarityBand ??
+        (metaForSave as any)?.unified?.polarityBand ??
+        (metaForSave as any)?.extra?.polarityBand ??
+        (metaForSave as any)?.extra?.unified?.polarityBand ??
+        (metaForSave as any)?.extra?.ctxPack?.polarityBand ??
+        null;
+
+      const polKey: 'yin' | 'yang' | null = normalizeCardPolarity(polRaw);
+
       if (eKey) {
         const labels = makeLabels(eKey);
         const stingScore = makeScore(eKey);
 
+        const prevCards =
+          (metaForSave as any)?.extra?.ctxPack?.cards &&
+          typeof (metaForSave as any).extra.ctxPack.cards === 'object'
+            ? (metaForSave as any).extra.ctxPack.cards
+            : {};
+
         (metaForSave as any).extra.ctxPack.cards = {
+          ...prevCards,
           current: {
+            ...((prevCards as any).current ?? {}),
             label: labels.current,
-            // “材料”として残す（writer が回収するため）
             e_turn: eKey,
             depth: depthNow,
             phase: phaseNow,
           },
           future: {
+            ...((prevCards as any).future ?? {}),
             label: labels.future,
             e_turn: eKey,
             depth: depthNow,
             phase: phaseNow,
           },
           stingScore,
-          // 追加メモ（writer が必要なら拾える）
           hint: {
             stage: stageNow,
             band: bandNow,
@@ -1712,6 +1862,122 @@ const polarityMetaBand: string | null =
           depth: depthNow,
           phase: phaseNow,
         });
+
+        // --- card180 seed はここで生成する（MirrorFlow 後）
+        const observedStageNow =
+          typeof (metaForSave as any)?.observedStage === 'string' &&
+          (metaForSave as any).observedStage.trim().length > 0
+            ? (metaForSave as any).observedStage.trim()
+            : typeof (metaForSave as any)?.extra?.ctxPack?.observedStage === 'string' &&
+                (metaForSave as any).extra.ctxPack.observedStage.trim().length > 0
+              ? (metaForSave as any).extra.ctxPack.observedStage.trim()
+              : null;
+
+        const cardStageNow = observedStageNow ?? depthNow ?? null;
+
+        if (cardStageNow && polKey) {
+          try {
+            const { buildDualCardPacket, formatDualCardPacketForLLM } =
+              await import('@/lib/iros/cards/card180');
+
+            const packet = buildDualCardPacket(
+              {
+                current: {
+                  stage: cardStageNow as any,
+                  e_turn: eKey as any,
+                  polarity: polKey as any,
+                  sa: (metaForSave as any)?.sa ?? null,
+                  basedOn: String(userText ?? '').trim().slice(0, 80) || null,
+                  confidence: (mirrorObjAny?.confidence ?? (metaForSave as any)?.confidence ?? null) as any,
+                },
+                previous: null,
+                randomSeed: null,
+              },
+              { currentUndetectablePolicy: 'null' }
+            );
+
+            const raw = String(formatDualCardPacketForLLM(packet) ?? '').trim();
+            const seedText = raw ? raw.split('\n').slice(0, 15).join('\n').trim() : '';
+
+            if (seedText) {
+              const prevCards2 =
+                (metaForSave as any)?.extra?.ctxPack?.cards &&
+                typeof (metaForSave as any).extra.ctxPack.cards === 'object'
+                  ? (metaForSave as any).extra.ctxPack.cards
+                  : {};
+
+              (metaForSave as any).extra.ctxPack.cards = {
+                ...prevCards2,
+                seedText,
+                seedTextLen: seedText.length,
+                seedTextHead: seedText.slice(0, 160),
+              };
+              (metaForSave as any).extra.ctxPack.e_turn = eKey ?? null;
+              (metaForSave as any).extra.ctxPack.polarity = polKey ?? null;
+              (metaForSave as any).extra.ctxPack.observedStage = observedStageNow ?? cardStageNow ?? null;
+              (metaForSave as any).extra.ctxPack.observedBasedOn =
+                String(userText ?? '').trim().slice(0, 80) || null;
+
+              const prevDepthHistoryLite = Array.isArray((metaForSave as any).extra.ctxPack.depthHistoryLite)
+                ? (metaForSave as any).extra.ctxPack.depthHistoryLite
+                    .map((v: any) => (typeof v === 'string' ? v.trim() : ''))
+                    .filter((v: string) => /^[SFRCIT][123]$/.test(v))
+                    .slice(-5)
+                : [];
+
+              const stageForHistory =
+                typeof (observedStageNow ?? cardStageNow ?? null) === 'string' &&
+                /^[SFRCIT][123]$/.test(String(observedStageNow ?? cardStageNow).trim())
+                  ? String(observedStageNow ?? cardStageNow).trim()
+                  : null;
+
+              (metaForSave as any).extra.ctxPack.depthHistoryLite = stageForHistory
+                ? [...prevDepthHistoryLite, stageForHistory].slice(-5)
+                : prevDepthHistoryLite;
+              console.log('[IROS/CARDS][SEED_FROM_CARD180][OK]', {
+                traceId: (metaForSave as any)?.extra?.traceId ?? (metaForSave as any)?.traceId ?? null,
+                conversationId: (metaForSave as any)?.conversationId ?? null,
+                userCode: (metaForSave as any)?.userCode ?? null,
+                e_turn: eKey,
+                stage: cardStageNow,
+                stageSource: observedStageNow ? 'observedStage' : 'depthStage',
+                observedStage: observedStageNow,
+                depthStage: depthNow,
+                polarity: polKey,
+                seedLen: seedText.length,
+                seedHead: seedText.slice(0, 160),
+              });
+            } else {
+              console.warn('[IROS/CARDS][SEED_FROM_CARD180][EMPTY]', {
+                e_turn: eKey,
+                stage: cardStageNow,
+                stageSource: observedStageNow ? 'observedStage' : 'depthStage',
+                observedStage: observedStageNow,
+                depthStage: depthNow,
+                polarity: polKey,
+              });
+            }
+          } catch (e) {
+            console.warn('[IROS/CARDS][SEED_FROM_CARD180][ERR]', {
+              err: String(e),
+              e_turn: eKey,
+              stage: cardStageNow,
+              stageSource: observedStageNow ? 'observedStage' : 'depthStage',
+              observedStage: observedStageNow,
+              depthStage: depthNow,
+              polarity: polKey,
+            });
+          }
+        } else {
+          console.log('[IROS/CARDS][SEED_FROM_CARD180][SKIP_MISSING]', {
+            e_turn: eKey,
+            stage: cardStageNow ?? null,
+            stageSource: observedStageNow ? 'observedStage' : 'depthStage',
+            observedStage: observedStageNow,
+            depthStage: depthNow ?? null,
+            polarity: polKey ?? null,
+          });
+        }
       } else {
         console.log('[IROS/CARDS][GEN]', {
           ok: false,
@@ -2703,8 +2969,58 @@ try {
 // 7) UnifiedAnalysis 保存（失敗しても落とさない）
 // =========================================================
 try {
-    const tenantId = typeof args.tenantId === 'string' ? args.tenantId : 'default';
+  const unifiedAny =
+  (metaForSave as any)?.unified && typeof (metaForSave as any).unified === 'object'
+    ? (metaForSave as any).unified
+    : {};
 
+const unifiedDepth =
+  unifiedAny.depth && typeof unifiedAny.depth === 'object'
+    ? unifiedAny.depth
+    : {};
+
+const unifiedQ =
+  unifiedAny.q && typeof unifiedAny.q === 'object'
+    ? unifiedAny.q
+    : {};
+
+const finalDepthForUnified =
+  (metaForSave as any)?.depth ??
+  (metaForSave as any)?.depth_stage ??
+  (metaForSave as any)?.depthStage ??
+  null;
+
+const finalQForUnified =
+  (metaForSave as any)?.qCode ??
+  (metaForSave as any)?.q_code ??
+  null;
+
+const finalPhaseForUnified =
+  (metaForSave as any)?.phase ??
+  null;
+
+(metaForSave as any).unified = {
+  ...unifiedAny,
+  depth: {
+    ...unifiedDepth,
+    stage: finalDepthForUnified,
+  },
+  q: {
+    ...unifiedQ,
+    current: finalQForUnified,
+  },
+  phase: finalPhaseForUnified,
+};
+    const tenantId = typeof args.tenantId === 'string' ? args.tenantId : 'default';
+    console.log('[UnifiedAnalysis][INPUT_META]', {
+      depth: (metaForSave as any)?.depth ?? null,
+      depthStage: (metaForSave as any)?.depthStage ?? null,
+      depth_stage: (metaForSave as any)?.depth_stage ?? null,
+      unified_depth_stage:
+        (metaForSave as any)?.unified?.depth?.stage ?? null,
+      qCode: (metaForSave as any)?.qCode ?? null,
+      q_code: (metaForSave as any)?.q_code ?? null,
+    });
     const analysis = await buildUnifiedAnalysis({
       userText,
       assistantText: finalAssistantText,

@@ -21,6 +21,7 @@ import type { HistoryDigestV1 } from '../../history/historyDigestV1';
 import { injectHistoryDigestV1 } from '../../history/historyDigestV1';
 import { decideRecallV1 } from '../../memory/recallGate';
 import { buildFlowMeaningV1 } from '../../memory/buildFlowMeaning';
+import { buildMirrorFlowSeed, formatMirrorFlowSeed } from '../../seed/seedEngine';
 
 export type WriterMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 type TurnMsg = { role: 'user' | 'assistant'; content: string };
@@ -330,9 +331,55 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
   );
 
   const phase = pick(args?.phase, ctxPack?.phase, extra?.phase);
+
+  const cardsAny: any = firstNonNull(
+    (ctxPack as any)?.cards,
+    (extra as any)?.ctxPack?.cards,
+    (extra as any)?.cards,
+    null,
+  );
+  const currentCardAny: any = firstNonNull(
+    cardsAny?.currentCard,
+    cardsAny?.current,
+    null,
+  );
+
+  const mirrorFlowV1ForSeed: any =
+    pick(
+      (args as any)?.mirrorFlowV1,
+      (ctxPack as any)?.mirrorFlowV1,
+      (extra as any)?.mirrorFlowV1,
+    ) ?? null;
+
+  const qCountsForSeed: any =
+    pick(
+      (ctxPack as any)?.resonanceState?.qCounts,
+      (ctxPack as any)?.qCounts,
+      (args as any)?.resonanceState?.qCounts,
+      (args as any)?.qCounts,
+      (extra as any)?.resonanceState?.qCounts,
+      (extra as any)?.qCounts,
+    ) ?? null;
+
+  const mirror = firstNonNull<any>(
+    ctxPack?.mirror,
+    extra?.mirror,
+    (extra as any)?.ctxPack?.mirror,
+    null,
+  );
+
   const eTurn = pick(
     args?.e_turn,
     args?.eTurn,
+    mirror?.e_turn,
+    mirror?.eTurn,
+    mirrorFlowV1ForSeed?.mirror?.e_turn,
+    mirrorFlowV1ForSeed?.mirror?.eTurn,
+    currentCardAny?.e_turn,
+    qCountsForSeed?.e_turn_now,
+    qCountsForSeed?.eTurnNow,
+    qCountsForSeed?.e_turn,
+    qCountsForSeed?.eTurn,
     ctxPack?.e_turn,
     ctxPack?.eTurn,
     extra?.e_turn,
@@ -344,15 +391,15 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
   const saTone = pick(exprMeta?.tone, args?.sa?.tone, ctxPack?.sa?.tone);
   const saBrevity = pick(exprMeta?.brevity, args?.sa?.brevity, ctxPack?.sa?.brevity);
 
-  const mirror = firstNonNull<any>(
-    ctxPack?.mirror,
-    extra?.mirror,
-    (extra as any)?.ctxPack?.mirror,
-    null,
-  );
   const polRaw = firstNonNull<any>(
     args?.polarity,
     mirror?.polarity,
+    (mirror as any)?.polarity_out,
+    (mirror as any)?.polarityBand,
+    mirrorFlowV1ForSeed?.mirror?.polarity,
+    mirrorFlowV1ForSeed?.mirror?.polarity_out,
+    mirrorFlowV1ForSeed?.mirror?.polarityBand,
+    currentCardAny?.polarity,
     ctxPack?.polarity,
     extra?.polarity,
     null,
@@ -1697,25 +1744,117 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                 ];
                 const stateCueSeed = clampLinesByLen(stateCueLines0, 18, 520).join('\n');
 
-  const coordMinimal: string[] = [];
-  coordMinimal.push('COORD (DO NOT OUTPUT):');
-  if (eTurn) coordMinimal.push(`e_turn=${eTurn}`);
-  if (depthStage) coordMinimal.push(`depthStage=${depthStage}`);
-  if (qCode) coordMinimal.push(`qCode=${qCode}`);
-  if (phase) coordMinimal.push(`phase=${phase}`);
-  if (polarity) coordMinimal.push(`polarity=${polarity}`);
+                const mirrorFlowSeedBuilt = buildMirrorFlowSeed({
+                  observedStage: pick(
+                    (ctxPack as any)?.observedStage,
+                    (extra as any)?.observedStage,
+                    currentCardAny?.observedStage,
+                    null,
+                  ),
+                  primaryStage: pick(
+                    (ctxPack as any)?.primaryStage,
+                    (extra as any)?.primaryStage,
+                    currentCardAny?.primaryStage,
+                    currentCardAny?.observedStage,
+                    null,
+                  ),
+                  secondaryStage: pick(
+                    (ctxPack as any)?.secondaryStage,
+                    (extra as any)?.secondaryStage,
+                    currentCardAny?.secondaryStage,
+                    null,
+                  ),
 
-  const coordMinimalBlock = coordMinimal.length > 1 ? coordMinimal.join('\n') : '';
+                  depthStage: depthStage ?? null,
+                  depthHistoryLite: Array.isArray((ctxPack as any)?.depthHistoryLite)
+                    ? (ctxPack as any).depthHistoryLite
+                    : Array.isArray((extra as any)?.depthHistoryLite)
+                      ? (extra as any).depthHistoryLite
+                      : null,
 
-  const injectedHead = [coordMinimalBlock, stateCueSeed]
-    .filter((x) => norm(x))
-    .join('\n\n');
+                  e_turn: eTurn || eTurn2 || null,
+                  polarity: polarity ?? null,
+                  basedOn:
+                    latestUserText ||
+                    String((ctxPack as any)?.conversationLine ?? '').trim() ||
+                    String((ctxPack as any)?.topicDigest ?? '').trim() ||
+                    null,
 
-  const internalPackFixed = [injectedHead, internalPackRaw]
-    .filter((x) => norm(x))
-    .join('\n\n')
-    .trim();
+                  willRotation:
+                    (ctxPack as any)?.willRotation ??
+                    (extra as any)?.willRotation ??
+                    null,
 
+                  tLayerHint: pick(
+                    (ctxPack as any)?.tLayerHint,
+                    (extra as any)?.tLayerHint,
+                    null,
+                  ),
+                  itOk:
+                    typeof (ctxPack as any)?.itOk === 'boolean'
+                      ? (ctxPack as any).itOk
+                      : typeof (ctxPack as any)?.itTriggered === 'boolean'
+                        ? (ctxPack as any).itTriggered
+                        : typeof (extra as any)?.itOk === 'boolean'
+                          ? (extra as any).itOk
+                          : null,
+
+                  qCode: qCode ?? null,
+                  flowDelta: flowDelta2 || null,
+
+                  writerDirectives: {
+                    tone: 'reflective',
+                    maxLines: 6,
+                    slotPolicy: 'OBS_FIRST',
+                    rotationMention: '1sentence',
+                  },
+                });
+
+                const mirrorFlowSeedFormatted = formatMirrorFlowSeed(mirrorFlowSeedBuilt);
+                const mirrorFlowSeedText = String(mirrorFlowSeedFormatted.mirrorFlowSeedText ?? '').trim();
+
+                const cardsSeedText = String(
+                  pick(
+                    (ctxPack as any)?.cards?.seedText,
+                    (extra as any)?.ctxPack?.cards?.seedText,
+                    (extra as any)?.cards?.seedText,
+                    '',
+                  ) ?? '',
+                ).trim();
+
+                const coordMinimal: string[] = [];
+                coordMinimal.push('COORD (DO NOT OUTPUT):');
+                if (eTurn) coordMinimal.push(`e_turn=${eTurn}`);
+                if (depthStage) coordMinimal.push(`depthStage=${depthStage}`);
+                if (qCode) coordMinimal.push(`qCode=${qCode}`);
+                if (phase) coordMinimal.push(`phase=${phase}`);
+                if (polarity) coordMinimal.push(`polarity=${polarity}`);
+
+                const coordMinimalBlock = coordMinimal.length > 1 ? coordMinimal.join('\n') : '';
+
+                const internalPackRawLight = String(internalPackRaw ?? '')
+                  .replace(
+                    /\n*CARD_PACKET\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\nSTATE_CUES_V3\s*\(DO NOT OUTPUT\):|\nINTERNAL PACK\s*\(DO NOT OUTPUT\):|$)/g,
+                    '\n',
+                  )
+                  .replace(
+                    /\n*STATE_CUES_V3\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\nINTERNAL PACK\s*\(DO NOT OUTPUT\):|$)/g,
+                    '\n',
+                  )
+                  .replace(/\n{3,}/g, '\n\n')
+                  .trim();
+
+                const seedBlocksForWriter = [mirrorFlowSeedText].filter((x) => norm(x));
+                const seedBlockForWriter = seedBlocksForWriter.join('\n\n');
+
+                const injectedHead = [coordMinimalBlock, seedBlockForWriter]
+                  .filter((x) => norm(x))
+                  .join('\n\n');
+
+                const internalPackFixed = [injectedHead, internalPackRawLight]
+                  .filter((x) => norm(x))
+                  .join('\n\n')
+                  .trim();
   try {
     const packNorm = norm(internalPackFixed);
     const h = packNorm.slice(0, 420);

@@ -859,12 +859,9 @@ if (isNonForwardButEmpty) {
   }
 
   if (shouldEarlyReturn) {
-    // ✅ 返却候補（content優先 / assistantTextフォールバック）
     let finalText = pickText((result as any)?.content, assistantText);
     finalText = String(finalText ?? '').trim();
 
-    // ✅ “空なら早期returnしない”
-    // 空のまま return すると 200 + 空本文 になり得るため、通常ルートへ落として救済（本文同期/NORMAL BASE等）に任せる
     if (!finalText) {
       console.warn('[IROS/SPEECH_EARLY_RETURN][SKIP_EMPTY]', {
         traceId_used: String(traceId ?? ''),
@@ -875,82 +872,23 @@ if (isNonForwardButEmpty) {
         contentLen: String((result as any)?.content ?? '').trim().length,
         assistantTextLen: String(assistantText ?? '').trim().length,
       });
-      // ✅ return しない（＝通常ルートへ）
     } else {
-      console.info('[IROS/SPEECH_EARLY_RETURN][HIT]', {
+      console.info('[IROS/SPEECH_EARLY_RETURN][BYPASS_TO_NORMAL_ROUTE]', {
         traceId_used: String(traceId ?? ''),
         traceId_req: String((body as any)?.traceId ?? ''),
         conversationId: String(conversationId ?? ''),
         userCode: String(userCode ?? ''),
         speechAct0,
         finalLen: finalText.length,
+        reason: 'use_normal_return_path_for_meta_consistency',
       });
 
-      metaAny.extra = { ...(metaAny.extra ?? {}), speechEarlyReturned: true };
-
-      // ✅ FORWARD early-return でも STYLE_NORM_FINAL を適用（UI返却の穴埋め）
-      try {
-        const seed =
-          String((metaAny as any)?.traceId ?? '') ||
-          String((metaAny as any)?.extra?.traceId ?? '') ||
-          String(traceId ?? '') ||
-          String(conversationId ?? '');
-
-          const n = normalizeIrosStyleFinal(finalText, {
-            seed,
-            emojiKeepRate: 1.0,
-            maxReplacements: 0,
-          });
-
-        const outText = typeof (n as any)?.text === 'string' ? (n as any).text : finalText;
-
-        console.info('[IROS/STYLE_NORM_FINAL]', {
-          applied: true,
-          meta: (n as any)?.meta,
-          len_in: String(finalText ?? '').length,
-          len_out: String(outText ?? '').length,
-          route: 'speechEarlyReturn',
-        });
-
-        finalText = outText;
-
-        metaAny.extra = {
-          ...(metaAny.extra ?? {}),
-          styleNormFinal: (n as any)?.meta,
-        };
-      } catch {}
-
-      const capRes = await captureChat(req, userCode, CREDIT_AMOUNT, creditRef);
-
-      const headers: Record<string, string> = withTrace(
-        {
-          ...CORS_HEADERS,
-          'x-handler': 'app/api/agent/iros/reply',
-          'x-credit-ref': creditRef,
-          'x-credit-amount': String(CREDIT_AMOUNT),
-          ...(lowWarn ? { 'x-warning': 'low_balance' } : {}),
-        },
-        traceId,
-      );
-
-      return NextResponse.json(
-        {
-          ok: true,
-          mode: finalMode ?? 'auto',
-          content: finalText,
-          assistantText: finalText,
-          credit: {
-            ref: creditRef,
-            amount: CREDIT_AMOUNT,
-            authorize: authRes,
-            capture: capRes,
-            ...(lowWarn ? { warning: lowWarn } : {}),
-          },
-          ...(lowWarn ? { warning: lowWarn } : {}),
-          meta: metaAny,
-        },
-        { status: 200, headers },
-      );
+      metaAny.extra = {
+        ...(metaAny.extra ?? {}),
+        speechEarlyReturnRequested: true,
+        speechEarlyReturnBypassed: true,
+        speechEarlyReturnBypassedReason: 'use_normal_return_path_for_meta_consistency',
+      };
     }
   }
 }
@@ -1793,6 +1731,39 @@ meta.extra = {
           : 'resultObjOrMetaPreferred',
   },
 };
+
+try {
+  console.log('[IROS/ROUTE][FINAL_CTXPACK_WILLROTATION]', {
+    traceId,
+    conversationId,
+    userCode,
+
+    meta_extra_ctxPack_willRotation:
+      (meta as any)?.extra?.ctxPack?.willRotation ?? null,
+
+    metaForSave_extra_ctxPack_willRotation:
+      (metaForSave as any)?.extra?.ctxPack?.willRotation ?? null,
+
+    result_meta_extra_ctxPack_willRotation:
+      (result as any)?.meta?.extra?.ctxPack?.willRotation ?? null,
+
+    result_ctxPack_willRotation:
+      (result as any)?.ctxPack?.willRotation ?? null,
+
+    meta_extra_ctxPack_keys:
+      (meta as any)?.extra?.ctxPack &&
+      typeof (meta as any).extra.ctxPack === 'object'
+        ? Object.keys((meta as any).extra.ctxPack)
+        : null,
+
+    metaForSave_extra_ctxPack_keys:
+      (metaForSave as any)?.extra?.ctxPack &&
+      typeof (metaForSave as any).extra.ctxPack === 'object'
+        ? Object.keys((metaForSave as any).extra.ctxPack)
+        : null,
+  });
+} catch {}
+
 // training sample（skip flags）
 const skipTraining =
   meta?.skipTraining === true ||

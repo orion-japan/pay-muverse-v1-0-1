@@ -35,6 +35,16 @@ export type UnifiedLikeAnalysis = {
   depth: {
     stage: Depth | null;
   };
+  observed?: {
+    primaryStage: Depth | null;
+    secondaryStage: Depth | null;
+    observedStage: Depth | null;
+    primaryBand: 'S' | 'F' | 'R' | 'C' | 'I' | 'T' | null;
+    secondaryBand: 'S' | 'F' | 'R' | 'C' | 'I' | 'T' | null;
+    primaryDepth: 1 | 2 | 3 | null;
+    secondaryDepth: 1 | 2 | 3 | null;
+    basedOn: string | null;
+  };
   phase: 'Inner' | 'Outer' | null;
   intentSummary: string | null;
 
@@ -592,6 +602,8 @@ function detectPhaseFromText(text: string): 'Inner' | 'Outer' | null {
 
 /* ========= Unified-like 解析 ========= */
 
+/* ========= Unified-like 解析 ========= */
+
 export async function analyzeUnifiedTurn(params: {
   text: string;
   requestedDepth?: Depth;
@@ -602,16 +614,38 @@ export async function analyzeUnifiedTurn(params: {
   const autoDepthLight = detectDepthFromText(text);
 
   let autoDepthDeep: Depth | null = null;
-  if (!autoDepthLight) {
-    try {
-      const mod = await import('@/lib/iros/deepScan');
-      if (typeof mod.deepScan === 'function') {
-        const ds = mod.deepScan(text);
-        autoDepthDeep = (ds?.depth ?? null) as Depth | null;
-      }
-    } catch {
-      autoDepthDeep = null;
+  let observedFromDeep: {
+    primaryStage: Depth | null;
+    secondaryStage: Depth | null;
+    observedStage: Depth | null;
+    primaryBand: 'S' | 'F' | 'R' | 'C' | 'I' | 'T' | null;
+    secondaryBand: 'S' | 'F' | 'R' | 'C' | 'I' | 'T' | null;
+    primaryDepth: 1 | 2 | 3 | null;
+    secondaryDepth: 1 | 2 | 3 | null;
+    basedOn: string | null;
+  } | null = null;
+
+  try {
+    const mod = await import('@/lib/iros/deepScan');
+    if (typeof mod.deepScan === 'function') {
+      const ds = mod.deepScan(text);
+      autoDepthDeep = (ds?.depth ?? null) as Depth | null;
+      observedFromDeep = {
+        primaryStage: (ds?.primaryStage ?? null) as Depth | null,
+        secondaryStage: (ds?.secondaryStage ?? null) as Depth | null,
+        observedStage: (ds?.observedStage ?? null) as Depth | null,
+        primaryBand:
+          (ds?.primaryBand ?? null) as 'S' | 'F' | 'R' | 'C' | 'I' | 'T' | null,
+        secondaryBand:
+          (ds?.secondaryBand ?? null) as 'S' | 'F' | 'R' | 'C' | 'I' | 'T' | null,
+        primaryDepth: (ds?.primaryDepth ?? null) as 1 | 2 | 3 | null,
+        secondaryDepth: (ds?.secondaryDepth ?? null) as 1 | 2 | 3 | null,
+        basedOn: (ds?.observedBasedOn ?? null) as string | null,
+      };
     }
+  } catch {
+    autoDepthDeep = null;
+    observedFromDeep = null;
   }
 
   const autoDepth = autoDepthLight ?? autoDepthDeep ?? null;
@@ -639,6 +673,16 @@ export async function analyzeUnifiedTurn(params: {
   return {
     q: { current: qCode, decidedBy },
     depth: { stage: depth },
+    observed: observedFromDeep ?? {
+      primaryStage: depth,
+      secondaryStage: null,
+      observedStage: depth,
+      primaryBand: null,
+      secondaryBand: null,
+      primaryDepth: null,
+      secondaryDepth: null,
+      basedOn: autoDepthLight ? 'light-depth-detect' : null,
+    },
     phase,
     intentSummary: null,
     situation: {

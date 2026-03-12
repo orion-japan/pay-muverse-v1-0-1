@@ -2531,9 +2531,10 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
     // 1) META:coord
     const coord = {
       depthStage:
-        (out.metaForSave as any)?.depthStage ??
         (out.metaForSave as any)?.depth_stage ??
+        (out.metaForSave as any)?.depth ??
         (out.metaForSave as any)?.unified?.depth?.stage ??
+        (out.metaForSave as any)?.depthStage ??
         null,
       phase:
         (out.metaForSave as any)?.phase ??
@@ -2753,12 +2754,21 @@ const restoreCtxPackFromHistory = (historyForTurn: any[]): any | null => {
 
     if (!ctx || typeof ctx !== 'object') continue;
 
+    const restoredDepthHistoryLite =
+      Array.isArray((ctx as any).depthHistoryLite)
+        ? (ctx as any).depthHistoryLite
+            .map((v: any) => (typeof v === 'string' ? v.trim() : ''))
+            .filter((v: string) => /^[SFRCIT][123]$/.test(v))
+            .slice(-5)
+        : [];
+
     const restored: any = {
       qCode: typeof ctx.qCode === 'string' ? ctx.qCode : null,
       depthStage: typeof ctx.depthStage === 'string' ? ctx.depthStage : null,
       phase: typeof ctx.phase === 'string' ? ctx.phase : null,
       conversationLine: typeof ctx.conversationLine === 'string' ? ctx.conversationLine : null,
       stingLevel: typeof ctx.stingLevel === 'string' ? ctx.stingLevel : null,
+      depthHistoryLite: restoredDepthHistoryLite,
     };
 
     if (
@@ -2766,7 +2776,8 @@ const restoreCtxPackFromHistory = (historyForTurn: any[]): any | null => {
       restored.depthStage ||
       restored.phase ||
       restored.conversationLine ||
-      restored.stingLevel
+      restored.stingLevel ||
+      restoredDepthHistoryLite.length > 0
     ) {
       return restored;
     }
@@ -3663,7 +3674,64 @@ const flowConfidence_forCtx =
   // - seed_text は「保存/互換」用途で meta.extra 側に残り得るが、
   //   ctxPack に入れると rephraseEngine / llmGate の拾い口が生き続けるため。
 }
+if (extra2.ctxPack && typeof extra2.ctxPack === 'object') {
+  const unifiedObservedForStamp =
+    ((out.metaForSave as any)?.unified?.observed ??
+      (out.metaForSave as any)?.extra?.unified?.observed ??
+      null) as any;
 
+  const currentCardForStamp: any =
+    ((extra2.ctxPack as any)?.cards?.currentCard ??
+      (out.metaForSave as any)?.extra?.ctxPack?.cards?.currentCard ??
+      null) as any;
+
+  const observedStageForStamp =
+    (typeof (extra2.ctxPack as any)?.observedStage === 'string' && (extra2.ctxPack as any).observedStage.trim()
+      ? (extra2.ctxPack as any).observedStage.trim()
+      : typeof unifiedObservedForStamp?.observedStage === 'string' && unifiedObservedForStamp.observedStage.trim()
+        ? unifiedObservedForStamp.observedStage.trim()
+        : typeof currentCardForStamp?.observedStage === 'string' && currentCardForStamp.observedStage.trim()
+          ? currentCardForStamp.observedStage.trim()
+          : typeof currentCardForStamp?.stage === 'string' && currentCardForStamp.stage.trim()
+            ? currentCardForStamp.stage.trim()
+            : null);
+
+  const primaryStageForStamp =
+    (typeof (extra2.ctxPack as any)?.primaryStage === 'string' && (extra2.ctxPack as any).primaryStage.trim()
+      ? (extra2.ctxPack as any).primaryStage.trim()
+      : typeof unifiedObservedForStamp?.primaryStage === 'string' && unifiedObservedForStamp.primaryStage.trim()
+        ? unifiedObservedForStamp.primaryStage.trim()
+        : observedStageForStamp);
+
+  const secondaryStageForStamp =
+    (typeof (extra2.ctxPack as any)?.secondaryStage === 'string' && (extra2.ctxPack as any).secondaryStage.trim()
+      ? (extra2.ctxPack as any).secondaryStage.trim()
+      : typeof unifiedObservedForStamp?.secondaryStage === 'string' && unifiedObservedForStamp.secondaryStage.trim()
+        ? unifiedObservedForStamp.secondaryStage.trim()
+        : null);
+
+  const depthStageForStamp =
+    typeof (extra2.ctxPack as any)?.depthStage === 'string' && (extra2.ctxPack as any).depthStage.trim()
+      ? (extra2.ctxPack as any).depthStage.trim()
+      : null;
+
+  const prevDepthHistoryLiteForStamp = Array.isArray((extra2.ctxPack as any)?.depthHistoryLite)
+    ? (extra2.ctxPack as any).depthHistoryLite
+        .map((v: any) => (typeof v === 'string' ? v.trim() : ''))
+        .filter((v: string) => /^[SFRCIT][123]$/.test(v))
+        .slice(-5)
+    : [];
+
+  const nextDepthHistoryLiteForStamp =
+    depthStageForStamp
+      ? [...prevDepthHistoryLiteForStamp, depthStageForStamp].slice(-5)
+      : prevDepthHistoryLiteForStamp;
+
+  (extra2.ctxPack as any).observedStage = observedStageForStamp;
+  (extra2.ctxPack as any).primaryStage = primaryStageForStamp;
+  (extra2.ctxPack as any).secondaryStage = secondaryStageForStamp;
+  (extra2.ctxPack as any).depthHistoryLite = nextDepthHistoryLiteForStamp;
+}
 // digestChars は “注入対象の文字数” を見るため（JSON stringify）
 let digestChars: number | null = null;
 try {
@@ -3687,20 +3755,98 @@ console.log('[IROS][CTXPACK] stamped', {
   flowDelta: (extra2.ctxPack as any)?.flow?.flowDelta ?? null,
   returnStreak: (extra2.ctxPack as any)?.flow?.returnStreak ?? null,
 
+  // ✅ MirrorFlow SEED Step1/2 観測
+  observedStage: (extra2.ctxPack as any)?.observedStage ?? null,
+  primaryStage: (extra2.ctxPack as any)?.primaryStage ?? null,
+  secondaryStage: (extra2.ctxPack as any)?.secondaryStage ?? null,
+  observedBasedOn: (extra2.ctxPack as any)?.observedBasedOn ?? null,
+  depthHistoryLite: Array.isArray((extra2.ctxPack as any)?.depthHistoryLite)
+    ? (extra2.ctxPack as any).depthHistoryLite
+    : null,
+
   ctxPackKeys: extra2.ctxPack ? Object.keys(extra2.ctxPack as any) : null,
 
   hfw_len: Array.isArray((extra2.ctxPack as any)?.historyForWriter)
     ? (extra2.ctxPack as any).historyForWriter.length
-    : null,
-
+    : 0,
   hasDigestV1: Boolean((extra2.ctxPack as any)?.historyDigestV1),
   digestChars,
-
   hfw_src_len: Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
     ? (out.metaForSave as any).extra.historyForWriter.length
-    : null,
+    : 0,
 });
+// ✅ PDF用の最小構造パック（毎ターン正本）
+{
+  const ctxPackPdf: any =
+    extra2.ctxPack && typeof extra2.ctxPack === 'object'
+      ? extra2.ctxPack
+      : {};
 
+  const flowMeaningCanon =
+    typeof (extra2 as any)?.flowMeaning === 'string' && (extra2 as any).flowMeaning.trim()
+      ? (extra2 as any).flowMeaning.trim()
+      : typeof (extra2 as any)?.flowDigest === 'string' && (extra2 as any).flowDigest.trim()
+        ? (extra2 as any).flowDigest.trim()
+        : typeof (out.metaForSave as any)?.extra?.flowDigest === 'string' &&
+            (out.metaForSave as any).extra.flowDigest.trim()
+          ? (out.metaForSave as any).extra.flowDigest.trim()
+          : null;
+
+  const conversationLineCanon =
+    typeof ctxPackPdf.conversationLine === 'string' && ctxPackPdf.conversationLine.trim()
+      ? ctxPackPdf.conversationLine.trim()
+      : null;
+
+  const topicDigestCanon =
+    typeof ctxPackPdf.topicDigest === 'string' && ctxPackPdf.topicDigest.trim()
+      ? ctxPackPdf.topicDigest.trim()
+      : typeof (extra2 as any)?.topicDigest === 'string' && (extra2 as any).topicDigest.trim()
+        ? (extra2 as any).topicDigest.trim()
+        : null;
+
+  (extra2 as any).pdfPack = {
+    depthStage:
+      typeof ctxPackPdf.depthStage === 'string' && ctxPackPdf.depthStage.trim()
+        ? ctxPackPdf.depthStage.trim()
+        : null,
+    phase:
+      typeof ctxPackPdf.phase === 'string' && ctxPackPdf.phase.trim()
+        ? ctxPackPdf.phase.trim()
+        : null,
+    qCode:
+      typeof ctxPackPdf.qCode === 'string' && ctxPackPdf.qCode.trim()
+        ? ctxPackPdf.qCode.trim()
+        : null,
+
+    primaryStage:
+      typeof ctxPackPdf.primaryStage === 'string' && ctxPackPdf.primaryStage.trim()
+        ? ctxPackPdf.primaryStage.trim()
+        : null,
+    secondaryStage:
+      typeof ctxPackPdf.secondaryStage === 'string' && ctxPackPdf.secondaryStage.trim()
+        ? ctxPackPdf.secondaryStage.trim()
+        : null,
+    observedStage:
+      typeof ctxPackPdf.observedStage === 'string' && ctxPackPdf.observedStage.trim()
+        ? ctxPackPdf.observedStage.trim()
+        : null,
+    observedBasedOn:
+      typeof ctxPackPdf.observedBasedOn === 'string' && ctxPackPdf.observedBasedOn.trim()
+        ? ctxPackPdf.observedBasedOn.trim()
+        : null,
+
+    depthHistoryLite: Array.isArray(ctxPackPdf.depthHistoryLite)
+      ? ctxPackPdf.depthHistoryLite
+          .map((v: any) => (typeof v === 'string' ? v.trim() : ''))
+          .filter((v: string) => /^[SFRCIT][123]$/.test(v))
+          .slice(-5)
+      : [],
+
+    flowMeaning: flowMeaningCanon,
+    conversationLine: conversationLineCanon,
+    topicDigest: topicDigestCanon,
+  };
+}
 
   } catch (e) {
     // Flow は非必須：失敗しても会話を止めない
@@ -4199,6 +4345,75 @@ try {
   console.warn('[IROS/CANON][STAMP] failed', e);
 }
 
+// ✅ FINAL: rotation bridge / canonical stamp 後に ctxPack.willRotation を再stamp
+try {
+  const exAnyFinal = ((out.metaForSave as any)?.extra ?? {}) as any;
+  if (!exAnyFinal.ctxPack || typeof exAnyFinal.ctxPack !== 'object') exAnyFinal.ctxPack = {};
+  const ctxPackFinal = exAnyFinal.ctxPack as any;
+
+  const rotationStateFinal =
+    ((out.metaForSave as any)?.rotationState ??
+      (out.metaForSave as any)?.rotation ??
+      null) as any;
+
+  const willRotationReasonFinal =
+    typeof rotationStateFinal?.reason === 'string' && rotationStateFinal.reason.trim().length > 0
+      ? rotationStateFinal.reason.trim()
+      : null;
+
+  const willRotationSuggestedStageFinal =
+    typeof rotationStateFinal?.depth === 'string' && rotationStateFinal.depth.trim().length > 0
+      ? rotationStateFinal.depth.trim()
+      : null;
+
+  const willRotationSpinLoopFinal =
+    typeof rotationStateFinal?.spinLoop === 'string' && rotationStateFinal.spinLoop.trim().length > 0
+      ? rotationStateFinal.spinLoop.trim()
+      : ((out.metaForSave as any)?.spinLoop ?? null);
+
+  const willRotationDescentGateFinal =
+    typeof rotationStateFinal?.descentGate === 'string' && rotationStateFinal.descentGate.trim().length > 0
+      ? rotationStateFinal.descentGate.trim()
+      : ((out.metaForSave as any)?.descentGate ?? null);
+
+  ctxPackFinal.willRotation = {
+    ...(ctxPackFinal.willRotation && typeof ctxPackFinal.willRotation === 'object'
+      ? ctxPackFinal.willRotation
+      : {}),
+    axis: null,
+    kind: null,
+    reason: willRotationReasonFinal,
+    suggestedStage: willRotationSuggestedStageFinal,
+    spinLoop: willRotationSpinLoopFinal,
+    descentGate: willRotationDescentGateFinal,
+  };
+
+  console.log('[IROS/Reply][FINAL_META_CTXPACK_WILLROTATION_RESTAMP]', {
+    conversationId: (ctx as any)?.conversationId ?? null,
+    userCode:
+      (ctx as any)?.userCode ??
+      (ctx as any)?.user_code ??
+      (ctx as any)?.user?.code ??
+      null,
+    traceId:
+      (ctx as any)?.traceId ??
+      (out.metaForSave as any)?.extra?.traceId ??
+      (out.metaForSave as any)?.extra?.ctxPack?.traceId ??
+      null,
+    rotationState: rotationStateFinal
+      ? {
+          spinLoop: rotationStateFinal.spinLoop ?? null,
+          descentGate: rotationStateFinal.descentGate ?? null,
+          depth: rotationStateFinal.depth ?? null,
+          reason: rotationStateFinal.reason ?? null,
+        }
+      : null,
+    ctxPack_willRotation: ctxPackFinal.willRotation ?? null,
+  });
+} catch (e) {
+  console.warn('[IROS/Reply][FINAL_META_CTXPACK_WILLROTATION_RESTAMP] failed', e);
+}
+
 // ========= handleIrosReply.ts 変更点 =========
 //
 // 1) import 追加（ファイル先頭の import 群に追加）
@@ -4483,15 +4698,220 @@ if (shouldRunWriter) {
     // ✅ 重要：rephraseEngine.full.ts が最優先で拾う経路（opts.userContext.ctxPack.*）に
     // q/depth/phase を毎回 stamp して「Inner 混入」を止める
     try {
-      const qCanon = (out.metaForSave as any)?.q ?? null;
-      const depthCanon = (out.metaForSave as any)?.depth ?? null;
-      const phaseCanon = (out.metaForSave as any)?.phase ?? null;
+      const qCanon =
+        (out.metaForSave as any)?.qCode ??
+        (out.metaForSave as any)?.q ??
+        ctxPack.qCode ??
+        null;
 
-      ctxPack.qCode = qCanon ?? ctxPack.qCode ?? null;
-      ctxPack.depthStage = depthCanon ?? ctxPack.depthStage ?? null;
-      ctxPack.phase = phaseCanon ?? ctxPack.phase ?? null;
+        const depthCanon =
+        (out.metaForSave as any)?.depth_stage ??
+        (out.metaForSave as any)?.depth ??
+        (out.metaForSave as any)?.unified?.depth?.stage ??
+        ctxPack.depthStage ??
+        null;
+
+      const phaseCanon =
+        (out.metaForSave as any)?.phase ??
+        ctxPack.phase ??
+        null;
+
+      const unifiedObserved =
+        ((out.metaForSave as any)?.unified?.observed ??
+          (out.metaForSave as any)?.extra?.unified?.observed ??
+          null) as any;
+
+          const primaryStageCanon =
+          (out.metaForSave as any)?.primaryStage ??
+          unifiedObserved?.primaryStage ??
+          ctxPack.primaryStage ??
+          null;
+
+        const secondaryStageCanon =
+          (out.metaForSave as any)?.secondaryStage ??
+          unifiedObserved?.secondaryStage ??
+          ctxPack.secondaryStage ??
+          null;
+
+        const observedStageCanon =
+          (out.metaForSave as any)?.observedStage ??
+          unifiedObserved?.observedStage ??
+          ctxPack.observedStage ??
+          null;
+
+        const primaryBandCanon =
+          (out.metaForSave as any)?.primaryBand ??
+          unifiedObserved?.primaryBand ??
+          ctxPack.primaryBand ??
+          null;
+
+        const secondaryBandCanon =
+          (out.metaForSave as any)?.secondaryBand ??
+          unifiedObserved?.secondaryBand ??
+          ctxPack.secondaryBand ??
+          null;
+
+        const primaryDepthCanon =
+          (out.metaForSave as any)?.primaryDepth ??
+          unifiedObserved?.primaryDepth ??
+          ctxPack.primaryDepth ??
+          null;
+
+        const secondaryDepthCanon =
+          (out.metaForSave as any)?.secondaryDepth ??
+          unifiedObserved?.secondaryDepth ??
+          ctxPack.secondaryDepth ??
+          null;
+
+        const observedBasedOnCanon =
+          (out.metaForSave as any)?.observedBasedOn ??
+          unifiedObserved?.basedOn ??
+          ctxPack.observedBasedOn ??
+          null;
+
+        const cardsCanon: any =
+          ((out.metaForSave as any)?.extra?.ctxPack as any)?.cards ??
+          ctxPack.cards ??
+          null;
+
+        const currentCardCanon: any =
+          cardsCanon?.currentCard ??
+          null;
+
+        const observedStageCanonFixed =
+          observedStageCanon ??
+          (typeof currentCardCanon?.observedStage === 'string' && currentCardCanon.observedStage.trim()
+            ? currentCardCanon.observedStage.trim()
+            : typeof currentCardCanon?.stage === 'string' && currentCardCanon.stage.trim()
+              ? currentCardCanon.stage.trim()
+              : null);
+
+        const primaryStageCanonFixed =
+          primaryStageCanon ??
+          observedStageCanonFixed ??
+          null;
+
+        const mirrorCanon: any =
+          ((out.metaForSave as any)?.extra?.mirror ??
+            (out.metaForSave as any)?.mirror ??
+            null) as any;
+
+        const polarityCanonFixed =
+          (typeof mirrorCanon?.polarity_out === 'string' && mirrorCanon.polarity_out.trim()
+            ? mirrorCanon.polarity_out.trim()
+            : typeof mirrorCanon?.polarity === 'string' && mirrorCanon.polarity.trim()
+              ? mirrorCanon.polarity.trim()
+              : typeof currentCardCanon?.polarity === 'string' && currentCardCanon.polarity.trim()
+                ? currentCardCanon.polarity.trim()
+                : typeof (ctxPack as any)?.polarity === 'string' && (ctxPack as any).polarity.trim()
+                  ? (ctxPack as any).polarity.trim()
+                  : null);
+
+        const normalizeStageList = (src: any): string[] => {
+          if (!Array.isArray(src)) return [];
+          return src
+            .map((v: any) => (typeof v === 'string' ? v.trim() : ''))
+            .filter((v: string) => /^[SFRCIT][123]$/.test(v))
+            .slice(-5);
+        };
+
+        const prevDepthHistoryLite = normalizeStageList(ctxPack.depthHistoryLite);
+
+        const depthStageForHistory =
+          typeof depthCanon === 'string' && /^[SFRCIT][123]$/.test(depthCanon.trim())
+            ? depthCanon.trim()
+            : null;
+
+        const nextDepthHistoryLite =
+          depthStageForHistory
+            ? [...prevDepthHistoryLite, depthStageForHistory].slice(-5)
+            : prevDepthHistoryLite;
+
+        const depthStageBefore =
+          prevDepthHistoryLite.length > 0 ? prevDepthHistoryLite[prevDepthHistoryLite.length - 1] : null;
+
+        ctxPack.qCode = qCanon;
+        ctxPack.depthStage = depthCanon;
+        ctxPack.phase = phaseCanon;
+
+        ctxPack.primaryStage = primaryStageCanonFixed;
+        ctxPack.secondaryStage = secondaryStageCanon;
+        ctxPack.observedStage = observedStageCanonFixed;
+
+        ctxPack.primaryBand = primaryBandCanon;
+        ctxPack.secondaryBand = secondaryBandCanon;
+
+        ctxPack.primaryDepth = primaryDepthCanon;
+        ctxPack.secondaryDepth = secondaryDepthCanon;
+
+        ctxPack.observedBasedOn = observedBasedOnCanon;
+        ctxPack.depthHistoryLite = nextDepthHistoryLite;
+        (ctxPack as any).polarity = polarityCanonFixed;
+
+        console.log('[IROS][CTXPACK][AFTER_CANON]', {
+          traceId: traceId ?? null,
+          conversationId,
+          userCode,
+          qCode: ctxPack.qCode ?? null,
+          depthStage_before: depthStageBefore,
+          observedStage: ctxPack.observedStage ?? null,
+          depthStage_after: ctxPack.depthStage ?? null,
+          phase: ctxPack.phase ?? null,
+          primaryStage: ctxPack.primaryStage ?? null,
+          secondaryStage: ctxPack.secondaryStage ?? null,
+          primaryBand: ctxPack.primaryBand ?? null,
+          secondaryBand: ctxPack.secondaryBand ?? null,
+          primaryDepth: ctxPack.primaryDepth ?? null,
+          secondaryDepth: ctxPack.secondaryDepth ?? null,
+          observedBasedOn: ctxPack.observedBasedOn ?? null,
+          depthHistoryLite: Array.isArray(ctxPack.depthHistoryLite)
+            ? ctxPack.depthHistoryLite
+            : null,
+          polarity: (ctxPack as any).polarity ?? null,
+        });
+        const rotationStateCanon =
+        ((out.metaForSave as any)?.rotationState ??
+          (out.metaForSave as any)?.rotation ??
+          null) as any;
+
+      const willRotationReason =
+        (typeof rotationStateCanon?.reason === 'string' && rotationStateCanon.reason.trim()
+          ? rotationStateCanon.reason.trim()
+          : typeof ctxPack.willRotation?.reason === 'string' && ctxPack.willRotation.reason.trim()
+            ? ctxPack.willRotation.reason.trim()
+            : null);
+
+      const willRotationSuggestedStage =
+        (typeof rotationStateCanon?.depth === 'string' && rotationStateCanon.depth.trim()
+          ? rotationStateCanon.depth.trim()
+          : typeof ctxPack.willRotation?.suggestedStage === 'string' &&
+              ctxPack.willRotation.suggestedStage.trim()
+            ? ctxPack.willRotation.suggestedStage.trim()
+            : null);
+
+      const willRotationSpinLoop =
+        (typeof rotationStateCanon?.spinLoop === 'string' && rotationStateCanon.spinLoop.trim()
+          ? rotationStateCanon.spinLoop.trim()
+          : typeof ctxPack.willRotation?.spinLoop === 'string' && ctxPack.willRotation.spinLoop.trim()
+            ? ctxPack.willRotation.spinLoop.trim()
+            : null);
+
+      const willRotationDescentGate =
+        (typeof rotationStateCanon?.descentGate === 'string' && rotationStateCanon.descentGate.trim()
+          ? rotationStateCanon.descentGate.trim()
+          : typeof ctxPack.willRotation?.descentGate === 'string' &&
+              ctxPack.willRotation.descentGate.trim()
+            ? ctxPack.willRotation.descentGate.trim()
+            : null);
+
+      ctxPack.willRotation = {
+        ...(ctxPack.willRotation && typeof ctxPack.willRotation === 'object' ? ctxPack.willRotation : {}),
+        reason: willRotationReason,
+        suggestedStage: willRotationSuggestedStage,
+        spinLoop: willRotationSpinLoop,
+        descentGate: willRotationDescentGate,
+      };
     } catch {}
-
     // ✅ topicDigest を最低限確保（重い処理なし）
     // - conversationLine があるなら topicDigest にも入れる
     if (!ctxPack.topicDigest && ctxPack.conversationLine) {
@@ -4502,6 +4922,71 @@ if (shouldRunWriter) {
     if (!exAny.topicDigest && (ctxPack.topicDigest || ctxPack.conversationLine)) {
       exAny.topicDigest = String(ctxPack.topicDigest ?? ctxPack.conversationLine);
     }
+    // ✅ PDF用の最小構造パック
+    // - まだPDF生成はしない
+    // - このターンで確定した構造だけを extra.pdfPack にまとめる
+    const flowMeaningCanon =
+      typeof exAny.flowMeaning === 'string' && exAny.flowMeaning.trim()
+        ? exAny.flowMeaning.trim()
+        : typeof exAny.flowDigest === 'string' && exAny.flowDigest.trim()
+          ? exAny.flowDigest.trim()
+          : null;
+
+    const conversationLineCanon =
+      typeof ctxPack.conversationLine === 'string' && ctxPack.conversationLine.trim()
+        ? ctxPack.conversationLine.trim()
+        : null;
+
+    const topicDigestCanon =
+      typeof ctxPack.topicDigest === 'string' && ctxPack.topicDigest.trim()
+        ? ctxPack.topicDigest.trim()
+        : typeof exAny.topicDigest === 'string' && exAny.topicDigest.trim()
+          ? exAny.topicDigest.trim()
+          : null;
+
+    exAny.pdfPack = {
+      depthStage:
+        typeof ctxPack.depthStage === 'string' && ctxPack.depthStage.trim()
+          ? ctxPack.depthStage.trim()
+          : null,
+      phase:
+        typeof ctxPack.phase === 'string' && ctxPack.phase.trim()
+          ? ctxPack.phase.trim()
+          : null,
+      qCode:
+        typeof ctxPack.qCode === 'string' && ctxPack.qCode.trim()
+          ? ctxPack.qCode.trim()
+          : null,
+
+      primaryStage:
+        typeof ctxPack.primaryStage === 'string' && ctxPack.primaryStage.trim()
+          ? ctxPack.primaryStage.trim()
+          : null,
+      secondaryStage:
+        typeof ctxPack.secondaryStage === 'string' && ctxPack.secondaryStage.trim()
+          ? ctxPack.secondaryStage.trim()
+          : null,
+      observedStage:
+        typeof ctxPack.observedStage === 'string' && ctxPack.observedStage.trim()
+          ? ctxPack.observedStage.trim()
+          : null,
+      observedBasedOn:
+        typeof ctxPack.observedBasedOn === 'string' && ctxPack.observedBasedOn.trim()
+          ? ctxPack.observedBasedOn.trim()
+          : null,
+
+      depthHistoryLite: Array.isArray(ctxPack.depthHistoryLite)
+        ? ctxPack.depthHistoryLite
+            .map((v: any) => (typeof v === 'string' ? v.trim() : ''))
+            .filter((v: string) => /^[SFRCIT][123]$/.test(v))
+            .slice(-5)
+        : [],
+
+      flowMeaning: flowMeaningCanon,
+      conversationLine: conversationLineCanon,
+      topicDigest: topicDigestCanon,
+    };
+
   }
   // --- TOPIC DIGEST TRACE (temporary) ---
   try {
@@ -4686,6 +5171,24 @@ if (shouldRunWriter) {
 
         // ✅ ctxPack の継続値を受けるが、BlockPlan 系は“絶対に継続しない”
         const ctxPackPrevRaw: any = ((out.metaForSave as any)?.extra?.ctxPack ?? null) as any;
+        try {
+          console.log('[IROS/Reply][CTXPACK_REBUILD_INPUTS]', {
+            traceId: traceIdCanon,
+            conversationId: _conversationId ?? null,
+            userCode: _userCode ?? null,
+
+            out_meta_extra_ctxPack_willRotation:
+              (out.metaForSave as any)?.extra?.ctxPack &&
+              typeof (out.metaForSave as any).extra.ctxPack === 'object'
+                ? ((out.metaForSave as any).extra.ctxPack as any).willRotation ?? null
+                : null,
+
+            ctxPackPrevRaw_willRotation:
+              ctxPackPrevRaw && typeof ctxPackPrevRaw === 'object'
+                ? (ctxPackPrevRaw as any).willRotation ?? null
+                : null,
+          });
+        } catch {}
         const ctxPackPrev: any =
           ctxPackPrevRaw && typeof ctxPackPrevRaw === 'object' ? { ...ctxPackPrevRaw } : {};
 
@@ -4922,121 +5425,334 @@ if (shouldRunWriter) {
                   ? turns
                   : [];
 
-          const historyForWriterForResponse = shouldHideHistoryForResponse
-            ? []
-            : historyForWriterInternal;
+                  const historyForWriterForResponse = shouldHideHistoryForResponse
+                  ? []
+                  : historyForWriterInternal;
 
-          const historyForWriterAtInternal =
-            (out.metaForSave as any)?.extra?.historyForWriterAt ??
-            ((out.metaForSave as any)?.extra?.ctxPack as any)?.historyForWriterAt ??
-            (ctxPackPrev as any)?.historyForWriterAt ??
-            null;
-            console.log('[IROS/USER_CONTEXT][EXIT_READY]', {
-              traceId: traceIdCanon,
-              conversationId: _conversationId ?? null,
-              userCode: _userCode ?? null,
-              hasMemoryStateNoteText: Boolean(memoryStateNoteText),
-              hasLongTermMemoryNoteText: Boolean(longTermMemoryNoteText),
-              selectedLongTermCount: selectedLongTermRows?.length ?? 0,
-            });
-          const historyDigestV1Internal =
-            (out.metaForSave as any)?.extra?.historyDigestV1 ??
-            ((out.metaForSave as any)?.extra?.ctxPack as any)?.historyDigestV1 ??
-            (ctxPackPrev as any)?.historyDigestV1 ??
-            null;
+                const historyForWriterAtInternal =
+                  (out.metaForSave as any)?.extra?.historyForWriterAt ??
+                  ((out.metaForSave as any)?.extra?.ctxPack as any)?.historyForWriterAt ??
+                  (ctxPackPrev as any)?.historyForWriterAt ??
+                  null;
+                console.log('[IROS/USER_CONTEXT][EXIT_READY]', {
+                  traceId: traceIdCanon,
+                  conversationId: _conversationId ?? null,
+                  userCode: _userCode ?? null,
+                  hasMemoryStateNoteText: Boolean(memoryStateNoteText),
+                  hasLongTermMemoryNoteText: Boolean(longTermMemoryNoteText),
+                  selectedLongTermCount: selectedLongTermRows?.length ?? 0,
+                });
+                const historyDigestV1Internal =
+                  (out.metaForSave as any)?.extra?.historyDigestV1 ??
+                  ((out.metaForSave as any)?.extra?.ctxPack as any)?.historyDigestV1 ??
+                  (ctxPackPrev as any)?.historyDigestV1 ??
+                  null;
 
-          return {
-            conversationId: _conversationId ?? null,
-            userCode: _userCode ?? null,
-            traceId: traceIdCanon,
-            inputKind: inputKindCanon,
+                return {
+                  conversationId: _conversationId ?? null,
+                  userCode: _userCode ?? null,
+                  traceId: traceIdCanon,
+                  inputKind: inputKindCanon,
 
-            exprMeta: exprMetaCanon,
+                  exprMeta: exprMetaCanon,
 
-            pastStateNoteText:
-              typeof (out.metaForSave as any)?.extra?.pastStateNoteText === 'string'
-                ? (out.metaForSave as any).extra.pastStateNoteText
-                : null,
+                  pastStateNoteText:
+                    typeof (out.metaForSave as any)?.extra?.pastStateNoteText === 'string'
+                      ? (out.metaForSave as any).extra.pastStateNoteText
+                      : null,
 
-            pastStateTriggerKind:
-              typeof (out.metaForSave as any)?.extra?.pastStateTriggerKind === 'string'
-                ? (out.metaForSave as any).extra.pastStateTriggerKind
-                : null,
+                  pastStateTriggerKind:
+                    typeof (out.metaForSave as any)?.extra?.pastStateTriggerKind === 'string'
+                      ? (out.metaForSave as any).extra.pastStateTriggerKind
+                      : null,
 
-            pastStateKeyword:
-              typeof (out.metaForSave as any)?.extra?.pastStateKeyword === 'string'
-                ? (out.metaForSave as any).extra.pastStateKeyword
-                : null,
+                  pastStateKeyword:
+                    typeof (out.metaForSave as any)?.extra?.pastStateKeyword === 'string'
+                      ? (out.metaForSave as any).extra.pastStateKeyword
+                      : null,
 
-            longTermMemoryNoteText,
-            memoryStateSnapshot,
-            memoryStateNoteText,
+                  longTermMemoryNoteText,
+                  memoryStateSnapshot,
+                  memoryStateNoteText,
 
-            // ここは UI 向けだけ隠す
-            historyForWriter: historyForWriterForResponse,
+                  // ここは UI 向けだけ隠す
+                  historyForWriter: historyForWriterForResponse,
 
-            ctxPack: {
-              ...(ctxPackPrev as any),
-              ...(((out.metaForSave as any)?.extra?.ctxPack ?? {}) as any),
+                  ctxPack: {
+                    ...(ctxPackPrev as any),
+                    ...(((out.metaForSave as any)?.extra?.ctxPack ?? {}) as any),
 
-              qCode:
-                (out.metaForSave as any)?.q ??
-                (out.metaForSave as any)?.qCode ??
-                memoryStateSnapshot?.qPrimary ??
-                ((out.metaForSave as any)?.extra?.ctxPack as any)?.qCode ??
-                (ctxPackPrev as any)?.qCode ??
-                null,
+                    qCode:
+                      (out.metaForSave as any)?.q ??
+                      (out.metaForSave as any)?.qCode ??
+                      memoryStateSnapshot?.qPrimary ??
+                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.qCode ??
+                      (ctxPackPrev as any)?.qCode ??
+                      null,
 
-              depthStage:
-                (out.metaForSave as any)?.depth ??
-                (out.metaForSave as any)?.depthStage ??
-                memoryStateSnapshot?.depthStage ??
-                ((out.metaForSave as any)?.extra?.ctxPack as any)?.depthStage ??
-                (ctxPackPrev as any)?.depthStage ??
-                null,
+                      depthStage:
+                      (out.metaForSave as any)?.depth_stage ??
+                      (out.metaForSave as any)?.depth ??
+                      (out.metaForSave as any)?.unified?.depth?.stage ??
+                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.depthStage ??
+                      (ctxPackPrev as any)?.depthStage ??
+                      memoryStateSnapshot?.depthStage ??
+                      null,
+                    phase:
+                      (out.metaForSave as any)?.phase ??
+                      memoryStateSnapshot?.phase ??
+                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.phase ??
+                      (ctxPackPrev as any)?.phase ??
+                      null,
 
-              phase:
-                (out.metaForSave as any)?.phase ??
-                memoryStateSnapshot?.phase ??
-                ((out.metaForSave as any)?.extra?.ctxPack as any)?.phase ??
-                (ctxPackPrev as any)?.phase ??
-                null,
+                    primaryStage:
+                      (out.metaForSave as any)?.primaryStage ??
+                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.primaryStage ??
+                      (ctxPackPrev as any)?.primaryStage ??
+                      null,
 
-              traceId: traceIdCanon,
-              inputKind: inputKindCanon,
+                    secondaryStage:
+                      (out.metaForSave as any)?.secondaryStage ??
+                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.secondaryStage ??
+                      (ctxPackPrev as any)?.secondaryStage ??
+                      null,
 
-              // UIでは隠しても、次ターン内部用は保持する
-              historyForWriter: historyForWriterInternal,
-              historyForWriterAt: historyForWriterAtInternal,
-              historyDigestV1: historyDigestV1Internal,
+                      observedStage:
+                      (out.metaForSave as any)?.observedStage ??
+                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.observedStage ??
+                      (((out.metaForSave as any)?.extra?.ctxPack as any)?.cards?.currentCard as any)?.observedStage ??
+                      (((out.metaForSave as any)?.extra?.ctxPack as any)?.cards?.currentCard as any)?.stage ??
+                      ((ctxPackPrev as any)?.cards?.currentCard as any)?.observedStage ??
+                      ((ctxPackPrev as any)?.cards?.currentCard as any)?.stage ??
+                      (ctxPackPrev as any)?.observedStage ??
+                      null,
 
-              slotPlanPolicy,
-              exprMeta: exprMetaCanon,
-              longTermMemoryNoteText,
-              memoryStateNoteText,
+                    primaryBand:
+                      (out.metaForSave as any)?.primaryBand ??
+                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.primaryBand ??
+                      (ctxPackPrev as any)?.primaryBand ??
+                      null,
 
-              memoryStateSnapshot,
-              memoryStateSummary: memoryStateSnapshot?.summary ?? null,
-              memoryStateSituationSummary: memoryStateSnapshot?.situationSummary ?? null,
-              memoryStateSituationTopic: memoryStateSnapshot?.situationTopic ?? null,
-            },
-          slotPlanPolicy,
+                    secondaryBand:
+                      (out.metaForSave as any)?.secondaryBand ??
+                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.secondaryBand ??
+                      (ctxPackPrev as any)?.secondaryBand ??
+                      null,
 
-          flowDigest: (out.metaForSave as any)?.extra?.flowDigest ?? null,
-          flowTape: (out.metaForSave as any)?.extra?.flowTape ?? null,
+                    primaryDepth:
+                      (out.metaForSave as any)?.primaryDepth ??
+                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.primaryDepth ??
+                      (ctxPackPrev as any)?.primaryDepth ??
+                      null,
 
-          meta: {
-            q: (out.metaForSave as any)?.q ?? metaRoot?.q ?? null,
-            depth: (out.metaForSave as any)?.depth ?? metaRoot?.depth ?? null,
-            phase: (out.metaForSave as any)?.phase ?? metaRoot?.phase ?? null,
-            layer: (out.metaForSave as any)?.intentLayer ?? metaRoot?.intentLayer ?? null,
-            renderMode: (out.metaForSave as any)?.renderMode ?? metaRoot?.renderMode ?? null,
-            slotPlanPolicy,
-          },
-        };
-      })(),
-    } as any,
-  );
+                    secondaryDepth:
+                      (out.metaForSave as any)?.secondaryDepth ??
+                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.secondaryDepth ??
+                      (ctxPackPrev as any)?.secondaryDepth ??
+                      null,
+
+                    observedBasedOn:
+                      (out.metaForSave as any)?.observedBasedOn ??
+                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.observedBasedOn ??
+                      (ctxPackPrev as any)?.observedBasedOn ??
+                      null,
+
+                      depthHistoryLite:
+                      Array.isArray(((out.metaForSave as any)?.extra?.ctxPack as any)?.depthHistoryLite)
+                        ? ((out.metaForSave as any).extra.ctxPack as any).depthHistoryLite
+                        : Array.isArray((ctxPackPrev as any)?.depthHistoryLite)
+                          ? (ctxPackPrev as any).depthHistoryLite
+                          : ((
+                              (out.metaForSave as any)?.depth_stage ??
+                              (out.metaForSave as any)?.depth ??
+                              (out.metaForSave as any)?.unified?.depth?.stage ??
+                              ((out.metaForSave as any)?.extra?.ctxPack as any)?.depthStage ??
+                              (ctxPackPrev as any)?.depthStage ??
+                              memoryStateSnapshot?.depthStage ??
+                              null
+                            ) &&
+                            /^[SFRCIT][123]$/.test(
+                              String(
+                                (out.metaForSave as any)?.depth_stage ??
+                                (out.metaForSave as any)?.depth ??
+                                (out.metaForSave as any)?.unified?.depth?.stage ??
+                                ((out.metaForSave as any)?.extra?.ctxPack as any)?.depthStage ??
+                                (ctxPackPrev as any)?.depthStage ??
+                                memoryStateSnapshot?.depthStage ??
+                                ''
+                              ).trim()
+                            ))
+                          ? [
+                              String(
+                                (out.metaForSave as any)?.depth_stage ??
+                                (out.metaForSave as any)?.depth ??
+                                (out.metaForSave as any)?.unified?.depth?.stage ??
+                                ((out.metaForSave as any)?.extra?.ctxPack as any)?.depthStage ??
+                                (ctxPackPrev as any)?.depthStage ??
+                                memoryStateSnapshot?.depthStage
+                              ).trim(),
+                            ]
+                          : [],
+                    polarity:
+                      ((out.metaForSave as any)?.extra?.mirror as any)?.polarity_out ??
+                      ((out.metaForSave as any)?.extra?.mirror as any)?.polarity ??
+                      ((out.metaForSave as any)?.mirror as any)?.polarity_out ??
+                      ((out.metaForSave as any)?.mirror as any)?.polarity ??
+                      (((out.metaForSave as any)?.extra?.ctxPack as any)?.cards?.currentCard as any)?.polarity ??
+                      ((ctxPackPrev as any)?.cards?.currentCard as any)?.polarity ??
+                      (ctxPackPrev as any)?.polarity ??
+                      null,
+
+                    willRotation:
+                      (((out.metaForSave as any)?.extra?.ctxPack as any)?.willRotation &&
+                      typeof ((out.metaForSave as any)?.extra?.ctxPack as any).willRotation === 'object')
+                        ? ((out.metaForSave as any).extra.ctxPack as any).willRotation
+                        : ((ctxPackPrev as any)?.willRotation &&
+                            typeof (ctxPackPrev as any).willRotation === 'object')
+                          ? (ctxPackPrev as any).willRotation
+                          : null,
+
+                    traceId: traceIdCanon,
+                    inputKind: inputKindCanon,
+
+                    // UIでは隠しても、次ターン内部用は保持する
+                    historyForWriter: historyForWriterInternal,
+                    historyForWriterAt: historyForWriterAtInternal,
+                    historyDigestV1: historyDigestV1Internal,
+
+                    slotPlanPolicy,
+                    exprMeta: exprMetaCanon,
+                    longTermMemoryNoteText,
+                    memoryStateNoteText,
+
+                    memoryStateSnapshot,
+                    memoryStateSummary: memoryStateSnapshot?.summary ?? null,
+                    memoryStateSituationSummary: memoryStateSnapshot?.situationSummary ?? null,
+                    memoryStateSituationTopic: memoryStateSnapshot?.situationTopic ?? null,
+                  },
+                  slotPlanPolicy,
+
+                  flowDigest: (out.metaForSave as any)?.extra?.flowDigest ?? null,
+                  flowTape: (out.metaForSave as any)?.extra?.flowTape ?? null,
+
+                  meta: {
+                    q: (out.metaForSave as any)?.q ?? metaRoot?.q ?? null,
+                    depth: (out.metaForSave as any)?.depth ?? metaRoot?.depth ?? null,
+                    phase: (out.metaForSave as any)?.phase ?? metaRoot?.phase ?? null,
+                    layer: (out.metaForSave as any)?.intentLayer ?? metaRoot?.intentLayer ?? null,
+                    renderMode: (out.metaForSave as any)?.renderMode ?? metaRoot?.renderMode ?? null,
+                    slotPlanPolicy,
+                    ctxPack: {
+                      ...(ctxPackPrev as any),
+                      ...(((out.metaForSave as any)?.extra?.ctxPack ?? {}) as any),
+
+                      qCode:
+                        (out.metaForSave as any)?.q ??
+                        (out.metaForSave as any)?.qCode ??
+                        memoryStateSnapshot?.qPrimary ??
+                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.qCode ??
+                        (ctxPackPrev as any)?.qCode ??
+                        null,
+
+                        depthStage:
+                        (out.metaForSave as any)?.depth_stage ??
+                        (out.metaForSave as any)?.depth ??
+                        (out.metaForSave as any)?.unified?.depth?.stage ??
+                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.depthStage ??
+                        (ctxPackPrev as any)?.depthStage ??
+                        memoryStateSnapshot?.depthStage ??
+                        null,
+
+                      phase:
+                        (out.metaForSave as any)?.phase ??
+                        memoryStateSnapshot?.phase ??
+                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.phase ??
+                        (ctxPackPrev as any)?.phase ??
+                        null,
+
+                      primaryStage:
+                        (out.metaForSave as any)?.primaryStage ??
+                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.primaryStage ??
+                        (ctxPackPrev as any)?.primaryStage ??
+                        null,
+
+                      secondaryStage:
+                        (out.metaForSave as any)?.secondaryStage ??
+                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.secondaryStage ??
+                        (ctxPackPrev as any)?.secondaryStage ??
+                        null,
+
+                      observedStage:
+                        (out.metaForSave as any)?.observedStage ??
+                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.observedStage ??
+                        (ctxPackPrev as any)?.observedStage ??
+                        null,
+
+                      primaryBand:
+                        (out.metaForSave as any)?.primaryBand ??
+                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.primaryBand ??
+                        (ctxPackPrev as any)?.primaryBand ??
+                        null,
+
+                      secondaryBand:
+                        (out.metaForSave as any)?.secondaryBand ??
+                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.secondaryBand ??
+                        (ctxPackPrev as any)?.secondaryBand ??
+                        null,
+
+                      primaryDepth:
+                        (out.metaForSave as any)?.primaryDepth ??
+                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.primaryDepth ??
+                        (ctxPackPrev as any)?.primaryDepth ??
+                        null,
+
+                      secondaryDepth:
+                        (out.metaForSave as any)?.secondaryDepth ??
+                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.secondaryDepth ??
+                        (ctxPackPrev as any)?.secondaryDepth ??
+                        null,
+
+                      observedBasedOn:
+                        (out.metaForSave as any)?.observedBasedOn ??
+                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.observedBasedOn ??
+                        (ctxPackPrev as any)?.observedBasedOn ??
+                        null,
+
+                      depthHistoryLite:
+                        Array.isArray(((out.metaForSave as any)?.extra?.ctxPack as any)?.depthHistoryLite)
+                          ? ((out.metaForSave as any).extra.ctxPack as any).depthHistoryLite
+                          : Array.isArray((ctxPackPrev as any)?.depthHistoryLite)
+                            ? (ctxPackPrev as any).depthHistoryLite
+                            : [],
+
+                      willRotation:
+                        (((out.metaForSave as any)?.extra?.ctxPack as any)?.willRotation &&
+                        typeof ((out.metaForSave as any)?.extra?.ctxPack as any).willRotation === 'object')
+                          ? ((out.metaForSave as any).extra.ctxPack as any).willRotation
+                          : ((ctxPackPrev as any)?.willRotation &&
+                              typeof (ctxPackPrev as any).willRotation === 'object')
+                            ? (ctxPackPrev as any).willRotation
+                            : null,
+
+                      traceId: traceIdCanon,
+                      inputKind: inputKindCanon,
+                      historyForWriter: historyForWriterInternal,
+                      historyForWriterAt: historyForWriterAtInternal,
+                      historyDigestV1: historyDigestV1Internal,
+                      slotPlanPolicy,
+                      exprMeta: exprMetaCanon,
+                      longTermMemoryNoteText,
+                      memoryStateNoteText,
+                      memoryStateSnapshot,
+                      memoryStateSummary: memoryStateSnapshot?.summary ?? null,
+                      memoryStateSituationSummary: memoryStateSnapshot?.situationSummary ?? null,
+                      memoryStateSituationTopic: memoryStateSnapshot?.situationTopic ?? null,
+                    },
+                  },
+                };
+              })(),
+          } as any,
+        );
           if (rr && rr.ok) {
             const mx = (rr as any)?.meta?.extra ?? {};
             const blocksCandidate =
@@ -5282,7 +5998,124 @@ if (shouldRunWriter) {
 /* ---------------------------
    6) Persist (assistant保存はしない)
 ---------------------------- */
+// ✅ PDF用の最終構造パック（persist直前の正本）
+{
+  out.metaForSave = out.metaForSave ?? {};
+  (out.metaForSave as any).extra = (out.metaForSave as any).extra ?? {};
 
+  const mf: any = out.metaForSave as any;
+  const ex: any = mf.extra as any;
+  const cp: any = ex.ctxPack && typeof ex.ctxPack === 'object' ? ex.ctxPack : {};
+  const unifiedObserved: any =
+    mf?.unified?.observed ??
+    ex?.unified?.observed ??
+    null;
+
+  const pickText = (...vals: any[]): string | null => {
+    for (const v of vals) {
+      if (typeof v === 'string') {
+        const s = v.trim();
+        if (s) return s;
+      }
+    }
+    return null;
+  };
+
+  const pickStage = (...vals: any[]): string | null => {
+    for (const v of vals) {
+      if (typeof v === 'string') {
+        const s = v.trim().toUpperCase();
+        if (/^[SFRCIT][123]$/.test(s)) return s;
+      }
+    }
+    return null;
+  };
+
+  const pickDepthHistoryLite = (...vals: any[]): string[] => {
+    for (const v of vals) {
+      if (Array.isArray(v)) {
+        return v
+          .map((x: any) => (typeof x === 'string' ? x.trim().toUpperCase() : ''))
+          .filter((x: string) => /^[SFRCIT][123]$/.test(x))
+          .slice(-5);
+      }
+    }
+    return [];
+  };
+
+  const flowMeaningCanon =
+    pickText(
+      ex?.flowMeaning,
+      ex?.flowDigest,
+    );
+
+  const conversationLineCanon =
+    pickText(
+      cp?.conversationLine,
+      ex?.conversationLine,
+    );
+
+  const topicDigestCanon =
+    pickText(
+      cp?.topicDigest,
+      ex?.topicDigest,
+      conversationLineCanon,
+    );
+
+    ex.pdfPack = {
+      depthStage: pickStage(
+        mf?.depth_stage,
+        mf?.depth,
+        mf?.unified?.depth?.stage,
+        ex?.unified?.depth?.stage,
+        cp?.depthStage,
+        cp?.depth,
+        mf?.depthStage,
+      ),
+      phase: pickText(
+        mf?.phase,
+        cp?.phase,
+      ),
+      qCode: pickText(
+        mf?.qCode,
+        mf?.q_code,
+        mf?.q,
+        cp?.qCode,
+        cp?.q_code,
+        cp?.q,
+      ),
+
+      primaryStage: pickStage(
+        mf?.primaryStage,
+        cp?.primaryStage,
+        unifiedObserved?.primaryStage,
+      ),
+      secondaryStage: pickStage(
+        mf?.secondaryStage,
+        cp?.secondaryStage,
+        unifiedObserved?.secondaryStage,
+      ),
+      observedStage: pickStage(
+        mf?.observedStage,
+        cp?.observedStage,
+        unifiedObserved?.observedStage,
+      ),
+      observedBasedOn: pickText(
+        mf?.observedBasedOn,
+        cp?.observedBasedOn,
+        unifiedObserved?.basedOn,
+      ),
+
+      depthHistoryLite: pickDepthHistoryLite(
+        cp?.depthHistoryLite,
+        ex?.depthHistoryLite,
+      ),
+
+      flowMeaning: flowMeaningCanon,
+      conversationLine: conversationLineCanon,
+      topicDigest: topicDigestCanon,
+    };
+}
 const ts = nowNs();
 
 const metaForSave = out.metaForSave ?? (orch as any)?.meta ?? null;
@@ -5386,7 +6219,32 @@ const finalMode =
 t.finished_at = nowIso();
 t.total_ms = msSince(t0);
 
-    // ✅ 最後に single-writer stamp を確定（念押し）
+try {
+  console.log('[IROS/Reply][FINAL_META_CTXPACK_WILLROTATION]', {
+    conversationId,
+    userCode,
+
+    metaForSave_extra_ctxPack_willRotation:
+      (out as any)?.metaForSave?.extra?.ctxPack?.willRotation ?? null,
+
+    metaForSave_extra_ctxPack_keys:
+      (out as any)?.metaForSave?.extra?.ctxPack &&
+      typeof (out as any).metaForSave.extra.ctxPack === 'object'
+        ? Object.keys((out as any).metaForSave.extra.ctxPack)
+        : null,
+
+    metaForSave_rotationState:
+      (out as any)?.metaForSave?.rotationState ?? null,
+
+    metaForSave_spinLoop:
+      (out as any)?.metaForSave?.spinLoop ?? null,
+
+    metaForSave_descentGate:
+      (out as any)?.metaForSave?.descentGate ?? null,
+  });
+} catch {}
+
+// ✅ 最後に single-writer stamp を確定（念押し）
     out.metaForSave = stampSingleWriter(out.metaForSave);
 
     return {

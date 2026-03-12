@@ -3,15 +3,27 @@
 // - Depth(S/F/R/C/I/T の18階層)
 // - Phase(Inner/Outer)
 // - QCode(Q1〜Q5)
-// をざっくり推定する軽量アルゴリズム（V3 fallback）
+// - ObservedStage(primary / secondary / observed)
+// を推定する軽量アルゴリズム（MirrorFlow Seed 前段）
 
 import type { Depth, QCode } from '@/lib/iros/system';
+
+export type StageBand = 'S' | 'F' | 'R' | 'C' | 'I' | 'T';
 
 export type DeepScanResult = {
   depth: Depth | null;
   phase: 'Inner' | 'Outer' | null;
   q: QCode | null;
   intentSummary: string;
+
+  primaryStage: Depth | null;
+  secondaryStage: Depth | null;
+  observedStage: Depth | null;
+  primaryBand: StageBand | null;
+  secondaryBand: StageBand | null;
+  primaryDepth: 1 | 2 | 3 | null;
+  secondaryDepth: 1 | 2 | 3 | null;
+  observedBasedOn: string | null;
 };
 
 function norm(text: string): string {
@@ -26,7 +38,37 @@ function hasAny(t: string, words: string[]): boolean {
   return words.some((w) => t.includes(w));
 }
 
-/* ========= Depth 判定（V3 / 18階層） ========= */
+function isGreetingLike(text: string): boolean {
+  const t = compact(text);
+  if (!t) return true;
+  return /^(おはよう|こんにちは|こんばんは|やあ|どうも|よろしく|はじめまして|もしもし|テスト|test|確認|相談)[!！。]?$/.test(
+    t,
+  );
+}
+
+function depthToBand(depth: Depth | null): StageBand | null {
+  if (!depth || typeof depth !== 'string' || depth.length < 2) return null;
+  const head = depth[0];
+  if (head === 'S' || head === 'F' || head === 'R' || head === 'C' || head === 'I' || head === 'T') {
+    return head;
+  }
+  return null;
+}
+
+function depthToLevel(depth: Depth | null): 1 | 2 | 3 | null {
+  if (!depth || typeof depth !== 'string' || depth.length < 2) return null;
+  const tail = depth.slice(1);
+  if (tail === '1') return 1;
+  if (tail === '2') return 2;
+  if (tail === '3') return 3;
+  return null;
+}
+
+function makeStage(band: StageBand, level: 1 | 2 | 3): Depth {
+  return `${band}${level}` as Depth;
+}
+
+/* ========= Depth 判定（既存） ========= */
 
 function inferTDepth(text: string): Depth | null {
   const t = compact(text);
@@ -203,6 +245,9 @@ function inferRDepth(text: string): Depth | null {
     'どう思っている',
     '関係の本質',
     '二人の関係',
+    '未完了',
+    'また同じ',
+    '繰り返し',
   ];
   if (hasAny(t, r3Words)) return 'R3';
 
@@ -353,8 +398,328 @@ function inferDepth(text: string): Depth | null {
   const sDepth = inferSDepth(t);
   if (sDepth) return sDepth;
 
-  // fallback は軽い自己整理
   return 'S1';
+}
+
+/* ========= observedStage 判定 ========= */
+
+function scoreBands(text: string): Record<StageBand, number> {
+  const t = compact(text);
+
+  const scores: Record<StageBand, number> = {
+    S: 0,
+    F: 0,
+    R: 0,
+    C: 0,
+    I: 0,
+    T: 0,
+  };
+
+  if (!t) {
+    scores.S = 1;
+    return scores;
+  }
+
+  // S: 自己・感情・内面
+  if (
+    hasAny(t, [
+      '私',
+      'わたし',
+      '自分',
+      '僕',
+      '俺',
+      '気持ち',
+      '心',
+      '本音',
+      '不安',
+      '怖い',
+      'つらい',
+      'しんどい',
+      '疲れた',
+      '自己否定',
+      '自己受容',
+    ])
+  ) {
+    scores.S += 5;
+  }
+
+  // R: 関係・反復・距離・相互作用
+  if (
+    hasAny(t, [
+      '相手',
+      '人間関係',
+      '関係',
+      '関係性',
+      '共鳴',
+      '対話',
+      '会話',
+      '距離感',
+      '家族',
+      'パートナー',
+      '友達',
+      '上司',
+      '部下',
+      '同僚',
+      '彼',
+      '彼女',
+      '配置',
+      'ズレ',
+      '噛み合わ',
+      '繰り返し',
+      'また同じ',
+      '毎回',
+      '同じこと',
+      'パターン',
+      '未完了',
+    ])
+  ) {
+    scores.R += 6;
+  }
+
+  // Rの構造補正
+  if (/人間関係.*繰り返|繰り返.*人間関係|同じこと.*繰り返|繰り返.*同じこと/.test(t)) {
+    scores.R += 4;
+  }
+  if (/距離感|役割|責任|期待|温度/.test(t)) {
+    scores.R += 2;
+  }
+
+  // F: 社会・周囲・制度・空気
+  if (
+    hasAny(t, [
+      '社会',
+      '世の中',
+      '周囲',
+      'みんな',
+      '他人',
+      '会社',
+      '職場',
+      '学校',
+      '組織',
+      'チーム',
+      'コミュニティ',
+      '評価',
+      '比較',
+      '常識',
+      'ルール',
+      '空気',
+      '期待',
+      '役割',
+    ])
+  ) {
+    scores.F += 5;
+  }
+
+  // C: 実装・制作・構築
+  if (
+    hasAny(t, [
+      '作る',
+      'つくる',
+      '創る',
+      '実装',
+      '設計',
+      '開発',
+      'コード',
+      '修正',
+      '改善',
+      'UI',
+      'UX',
+      '構成',
+      '構造',
+      '仕様',
+      '実験',
+      '検証',
+      '機能',
+      'API',
+      'DB',
+      '手順',
+      '進めてください',
+    ])
+  ) {
+    scores.C += 5;
+  }
+
+  // I: 意味・目的・意図
+  if (
+    hasAny(t, [
+      '意図',
+      '意味',
+      'なぜ',
+      '目的',
+      '願い',
+      '使命',
+      '存在',
+      '何のため',
+      '本質',
+      '答え',
+      '位置',
+      '確信',
+      '納得',
+      'どう在りたい',
+      'どうありたい',
+    ])
+  ) {
+    scores.I += 4;
+  }
+
+  // ただし R文脈の中の「意味整理」は Iを上げすぎない
+  if (/意味を整理|意味を見たい|なぜこうなる/.test(t)) {
+    scores.I += 1;
+  }
+
+  // T: 未来・展望
+  if (
+    hasAny(t, [
+      '未来',
+      'これから',
+      '将来',
+      '先',
+      '可能性',
+      '展望',
+      'ビジョン',
+      'この先',
+      '次の段階',
+      'どうなる',
+      '発展',
+      '進化',
+      '行き先',
+      '向かう',
+      'T3',
+    ])
+  ) {
+    scores.T += 5;
+  }
+
+  if (/どう|なぜ|何|どこ|どっち|どの|どうしたら|どうすれば|\?|？/.test(t)) {
+    scores.I += 1;
+  }
+
+  if (/したい|進めたい|作りたい|変えたい|整えたい|始めたい|直したい|導入したい|追加したい/.test(t)) {
+    scores.C += 1;
+  }
+
+  return scores;
+}
+
+function pickPrimaryBand(scores: Record<StageBand, number>): StageBand {
+  const order: StageBand[] = ['R', 'I', 'S', 'F', 'C', 'T'];
+  let best: StageBand = 'S';
+
+  for (const band of order) {
+    if (scores[band] > scores[best]) {
+      best = band;
+      continue;
+    }
+
+    if (scores[band] === scores[best]) {
+      if (order.indexOf(band) < order.indexOf(best)) {
+        best = band;
+      }
+    }
+  }
+
+  return best;
+}
+
+function chooseSecondaryBand(
+  text: string,
+  primaryBand: StageBand,
+  scores: Record<StageBand, number>,
+): StageBand {
+  const t = compact(text);
+
+  // 関係主題なら副は I or S を優先
+  if (primaryBand === 'R' && hasAny(t, ['意味', 'なぜ', '本質', '整理'])) return 'I';
+  if (primaryBand === 'R' && hasAny(t, ['私', 'わたし', '自分', '僕', '俺', '気持ち', '心'])) return 'S';
+
+  if (primaryBand === 'F' && hasAny(t, ['私', 'わたし', '自分', '僕', '俺'])) return 'S';
+  if (primaryBand === 'C' && hasAny(t, ['意図', '意味', '目的', 'なぜ', '本質'])) return 'I';
+  if (primaryBand === 'I' && hasAny(t, ['人間関係', '関係', '相手', '繰り返し', 'また同じ'])) return 'R';
+  if (primaryBand === 'I' && hasAny(t, ['未来', '将来', 'これから', 'この先'])) return 'T';
+  if (primaryBand === 'T' && hasAny(t, ['意図', '意味', '目的', '使命'])) return 'I';
+
+  const order: StageBand[] = ['R', 'I', 'S', 'F', 'C', 'T'];
+  let best: StageBand | null = null;
+
+  for (const band of order) {
+    if (band === primaryBand) continue;
+    if (best == null || scores[band] > scores[best]) best = band;
+  }
+
+  return best ?? 'S';
+}
+
+function inferObservedStages(text: string): {
+  primaryStage: Depth | null;
+  secondaryStage: Depth | null;
+  observedStage: Depth | null;
+  primaryBand: StageBand | null;
+  secondaryBand: StageBand | null;
+  primaryDepth: 1 | 2 | 3 | null;
+  secondaryDepth: 1 | 2 | 3 | null;
+  observedBasedOn: string | null;
+} {
+  const t = norm(text);
+
+  if (!t || isGreetingLike(t)) {
+    return {
+      primaryStage: 'S1',
+      secondaryStage: 'F1',
+      observedStage: 'S1',
+      primaryBand: 'S',
+      secondaryBand: 'F',
+      primaryDepth: 1,
+      secondaryDepth: 1,
+      observedBasedOn: 'greeting/default => S1',
+    };
+  }
+
+  const primaryStage = inferDepth(t);
+  const primaryBand = depthToBand(primaryStage);
+  const primaryDepth = depthToLevel(primaryStage);
+
+  if (!primaryStage || !primaryBand || !primaryDepth) {
+    return {
+      primaryStage: 'S1',
+      secondaryStage: 'F1',
+      observedStage: 'S1',
+      primaryBand: 'S',
+      secondaryBand: 'F',
+      primaryDepth: 1,
+      secondaryDepth: 1,
+      observedBasedOn: 'fallback/default => S1',
+    };
+  }
+
+  const scores = scoreBands(t);
+  const scoredPrimaryBand = pickPrimaryBand(scores);
+  const effectivePrimaryBand = scoredPrimaryBand || primaryBand;
+
+  const effectivePrimaryStage =
+    effectivePrimaryBand === primaryBand ? primaryStage : makeStage(effectivePrimaryBand, primaryDepth);
+
+  const secondaryBand = chooseSecondaryBand(t, effectivePrimaryBand, scores);
+  let secondaryDepth = primaryDepth;
+
+  if (secondaryBand === effectivePrimaryBand) {
+    secondaryDepth = primaryDepth === 3 ? 2 : ((primaryDepth + 1) as 1 | 2 | 3);
+  } else {
+    const bandDepthCandidate = depthToLevel(inferDepth(t));
+    secondaryDepth = bandDepthCandidate ?? primaryDepth;
+  }
+
+  const secondaryStage = makeStage(secondaryBand, secondaryDepth);
+
+  return {
+    primaryStage: effectivePrimaryStage,
+    secondaryStage,
+    observedStage: effectivePrimaryStage,
+    primaryBand: effectivePrimaryBand,
+    secondaryBand,
+    primaryDepth,
+    secondaryDepth,
+    observedBasedOn: `meaning/structure primary=${effectivePrimaryBand} secondary=${secondaryBand}`,
+  };
 }
 
 /* ========= Phase 判定 ========= */
@@ -423,7 +788,8 @@ function buildIntentSummary(depth: Depth | null): string {
 /* ========= Public API ========= */
 
 export function deepScan(text: string): DeepScanResult {
-  const depth = inferDepth(text);
+  const observed = inferObservedStages(text);
+  const depth = observed.observedStage ?? inferDepth(text);
   const phase = inferPhase(text);
   const q = inferQ(text);
   const intentSummary = buildIntentSummary(depth);
@@ -433,5 +799,14 @@ export function deepScan(text: string): DeepScanResult {
     phase,
     q,
     intentSummary,
+
+    primaryStage: observed.primaryStage,
+    secondaryStage: observed.secondaryStage,
+    observedStage: observed.observedStage,
+    primaryBand: observed.primaryBand,
+    secondaryBand: observed.secondaryBand,
+    primaryDepth: observed.primaryDepth,
+    secondaryDepth: observed.secondaryDepth,
+    observedBasedOn: observed.observedBasedOn,
   };
 }

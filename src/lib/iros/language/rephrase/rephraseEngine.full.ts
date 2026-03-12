@@ -3236,43 +3236,73 @@ const injectCardUndetectableRule = (reason: string) => {
     // card 以外は full seed を作らない（lite だけで十分）
     // ✅ wantsCardByText でも “未観測固定” は入れない：まずは seed で回す
   }
-  // ✅ 観測（確証を取る）
-  const __ip = String(internalPack ?? '');
-  const __tailN = 260;
+// ✅ upstream 観測（internalPack 時点の事実だけを見る）
+// - ここは messages 注入前なので injected 側は見ない
+// - downstream の injected 実体確認は writerCalls / STATE_CUES 側ログを正とする
+const __ip = String(internalPack ?? '');
+const __tailN = 260;
 
-  // cards の存在を boolean で確証化（tailに出ない問題を潰す）
-  const __hasCardsLite = /CARDS_LITE_SEED\s*\(DO NOT OUTPUT\)/.test(__ip);
-  const __hasCardPacket = /CARD_PACKET\s*\(DO NOT OUTPUT\)|CARD_SEED_V1\s*\(DO NOT OUTPUT\)/.test(__ip);
+const __pickBlockNear = (src: string, pattern: RegExp, span = 520) => {
+  const idx = src.search(pattern);
+  if (idx < 0) return '';
+  const start = idx;
+  const nextBlank = src.indexOf('\n\n', start);
+  const end = nextBlank >= 0 ? nextBlank : Math.min(src.length, start + span);
+  return src.slice(start, end);
+};
 
-  // cards 近傍だけ抜粋（入ってるのに見えない問題を潰す）
-const __idxLite = __ip.search(/CARDS_LITE_SEED\s*\(DO NOT OUTPUT\)/);
+const __patterns = {
+  mirror: /MIRROR_FLOW_SEED_V1\b/i,
+  card: /CARD_PACKET\s*\(DO NOT OUTPUT\)|CARD_SEED_V1\s*\(DO NOT OUTPUT\)/i,
+  lite: /CARDS_LITE_SEED\s*\(DO NOT OUTPUT\)/i,
+};
 
-  // ✅ cardsLiteNear は「カードブロックだけ」を抜く（直前の USE_RULE を混ぜない）
-  const __liteNear = (() => {
-    if (__idxLite < 0) return '';
-    const start = __idxLite;
+const __traceId = String((opts as any)?.traceId ?? '');
+const __conversationId = String((opts as any)?.conversationId ?? '');
+const __userCode = String((opts as any)?.userCode ?? '');
 
-    // CARDS_LITE_SEED ブロックは空行で終わる前提（無ければ固定長で切る）
-    const nextBlank = __ip.indexOf('\n\n', start);
-    const end = nextBlank >= 0 ? nextBlank : Math.min(__ip.length, start + 420);
+const __messages = Array.isArray((opts as any)?.messages)
+  ? ((opts as any).messages as any[])
+  : [];
 
-    return __ip.slice(start, end);
-  })();
-  console.log('[IROS/rephraseEngine][STATE_SNAPSHOT_PICKED]', {
-    traceId: debug.traceId,
-    conversationId: debug.conversationId,
-    userCode: debug.userCode,
-    pickedDepthStage,
-    pickedPhase,
-    pickedQCode,
-    hasCardsLite: __hasCardsLite,
-    hasCardPacket: __hasCardPacket,
-    cardsLiteNear: __liteNear,
-    internalPackHead: safeHead(__ip, 220),
-    internalPackTail: __ip.length <= __tailN ? __ip : __ip.slice(-__tailN),
-  });
+  const __assistantCandidates = __messages.filter(
+    (m) => m?.role === 'assistant' && typeof m?.content === 'string'
+  );
 
+  const __assistantLast =
+    __assistantCandidates.length > 0 ? __assistantCandidates[__assistantCandidates.length - 1] : null;
 
+  const __injectedPack = String(__assistantLast?.content ?? '');
+
+console.log('[IROS/rephraseEngine][STATE_SNAPSHOT_UPSTREAM]', {
+  traceId: __traceId,
+  conversationId: __conversationId,
+  userCode: __userCode,
+  pickedDepthStage,
+  pickedPhase,
+  pickedQCode,
+
+  internalHasMirrorFlowSeed: __patterns.mirror.test(String(internalPack ?? '')),
+  internalHasCardPacket: __patterns.card.test(String(internalPack ?? '')),
+  internalHasCardsLite: __patterns.lite.test(String(internalPack ?? '')),
+
+  upstreamHasMirrorFlowSeed: __patterns.mirror.test(__injectedPack),
+  upstreamHasCardPacket: __patterns.card.test(__injectedPack),
+  upstreamHasCardsLite: __patterns.lite.test(__injectedPack),
+
+  head: String(internalPack ?? '').slice(0, 800),
+});
+console.log('[IROS/rephraseEngine][STATE_SNAPSHOT_UPSTREAM_MSGSRC]', {
+  traceId: __traceId,
+  conversationId: __conversationId,
+  userCode: __userCode,
+  messagesLen: __messages.length,
+  roles: __messages.map((m) => m?.role),
+  lastAssistantHead:
+    typeof __assistantLast?.content === 'string'
+      ? __assistantLast.content.slice(0, 300)
+      : '',
+});
 // - 目的：roles=[system,user] を回避し、会話の文脈だけを維持する
 // ✅ 方針：writer へ userText を一切渡さない（turns/history/finalUserText から除外）
 // - ただし「会話の役割列（assistant/user）」は保つ（user本文は伏せる）
@@ -4522,7 +4552,7 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
  * [置換] src/lib/iros/language/rephrase/rephraseEngine.full.ts
  * 目的:
  * - internalPack だけでなく、messages に注入されている injectedPack（assistant0 content）も検査する
- * - TEXT_SEED と CARDS_LITE_SEED の「どっちがどこにいるか」を確証ログで固定する
+ * - TEXT_SEED と 新形式 seed（MIRROR_FLOW_SEED_V1 / CARD_PACKET）の「どっちがどこにいるか」を確証ログで固定する
  * ========================================= */
 {
   const pack = String(internalPack ?? '');
@@ -4543,18 +4573,27 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
       ? pack.slice(Math.max(0, textSeedIdx - 140), Math.min(pack.length, textSeedIdx + 260))
       : null;
 
-  // ✅ CARDS_LITE_SEED（internalPack 側）
-  const cardsIdxInternal = pack.search(/CARDS_LITE_SEED\s*\(DO NOT OUTPUT\)\s*:/i);
+  // ✅ 新形式 seed / cards（internalPack 側）
+  const seedPatterns = [
+    /MIRROR_FLOW_SEED_V1\b/i,
+    /CARD_PACKET\s*\(DO NOT OUTPUT\)\s*:/i,
+    /CARD_SEED_V1\s*\(DO NOT OUTPUT\)\s*:/i,
+  ];
+
+  const cardsIdxInternal = seedPatterns
+    .map((re) => pack.search(re))
+    .find((n) => typeof n === 'number' && n >= 0);
+
   const cardsNearInternal =
-    cardsIdxInternal >= 0
+    typeof cardsIdxInternal === 'number' && cardsIdxInternal >= 0
       ? pack.slice(
           Math.max(0, cardsIdxInternal - 140),
-          Math.min(pack.length, cardsIdxInternal + 260),
+          Math.min(pack.length, cardsIdxInternal + 420),
         )
       : null;
 
   // ✅ messages 側（注入された assistant pack）も検査する
-  // - 先頭の assistant（通常: COORD/TEXT_SEED が入っている）を拾う
+  // - 先頭の assistant（通常: COORD + MIRROR_FLOW_SEED_V1 + CARD_PACKET が入る）を拾う
   const assistant0 = (messages as any[])?.find((m) => m?.role === 'assistant') ?? null;
   const injectedPack = String((assistant0 as any)?.content ?? '');
 
@@ -4567,15 +4606,18 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
         )
       : null;
 
-  const injectedCardsLiteIdx = injectedPack.search(/CARDS_LITE_SEED\s*\(DO NOT OUTPUT\)\s*:/i);
+  const injectedCardsLiteIdx = seedPatterns
+    .map((re) => injectedPack.search(re))
+    .find((n) => typeof n === 'number' && n >= 0);
+
   const injectedCardsLiteNear =
-    injectedCardsLiteIdx >= 0
+    typeof injectedCardsLiteIdx === 'number' && injectedCardsLiteIdx >= 0
       ? injectedPack.slice(
           Math.max(0, injectedCardsLiteIdx - 140),
-          Math.min(injectedPack.length, injectedCardsLiteIdx + 300),
+          Math.min(injectedPack.length, injectedCardsLiteIdx + 420),
         )
       : null;
-
+}
 // ✅ writer input pack debug (LEN)
 // - 現在の正本は messages（callWriterLLM に渡す実体）
 // - writerArgs(pack) 系は legacy として補助表示（0でも異常ではない）
@@ -4630,7 +4672,7 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
     legacy_pack_total_tokens_approx: Math.ceil(legacy_pack_total_chars / 4),
   });
 }
-}
+
 
 raw = await (async () => {
   // ✅ V3 fix: messages が正本なので、ここで STATE_CUES を “internal assistant message” として注入する
@@ -4727,22 +4769,30 @@ raw = await (async () => {
       `qCode=${typeof pickedQCode !== 'undefined' ? String(pickedQCode) : 'null'}`,
     ].join(' / ');
 
-    // CARDS（messages正本から CARDS_LITE_SEED を拾う：無ければ null）
+    // CARDS / MIRROR（messages正本の assistant pack から拾う：無ければ null）
     const cardsBits = (() => {
       const assistantTexts = baseMsgs
         .filter((m) => String(m?.role ?? '') === 'assistant')
         .map((m) => String(m?.content ?? ''));
 
-      const hit = assistantTexts.find((c) => /CARDS_LITE_SEED\s*\(DO NOT OUTPUT\)\s*:/i.test(c));
+      const patterns = [
+        /MIRROR_FLOW_SEED_V1\b/i,
+        /CARD_PACKET\s*\(DO NOT OUTPUT\)\s*:/i,
+        /CARD_SEED_V1\s*\(DO NOT OUTPUT\)\s*:/i,
+      ];
+
+      const hit = assistantTexts.find((c) => patterns.some((re) => re.test(c)));
       if (!hit) return null;
 
-      const idx = hit.search(/CARDS_LITE_SEED\s*\(DO NOT OUTPUT\)\s*:/i);
-      if (idx < 0) return safeHead(hit, 420);
+      const idx = patterns
+        .map((re) => hit.search(re))
+        .find((n) => typeof n === 'number' && n >= 0);
 
-      const near = hit.slice(Math.max(0, idx - 140), Math.min(hit.length, idx + 300));
+      if (typeof idx !== 'number' || idx < 0) return safeHead(hit, 420);
+
+      const near = hit.slice(Math.max(0, idx - 140), Math.min(hit.length, idx + 420));
       return safeHead(near, 420);
     })();
-
     // TOPIC_LINE / KEYWORDS
     const topicLine = (() => {
       try {
@@ -4859,7 +4909,40 @@ raw = await (async () => {
         digest_last_assistant_core: safeHead(String((historyDigestV1 as any)?.continuity?.last_assistant_core ?? ''), 200),
         digest_repeat_signal: (historyDigestV1 as any)?.continuity?.repeat_signal ?? null,
       });
+      const __writerAssistantCandidates = messagesForWriter.filter(
+        (m) => m?.role === 'assistant' && typeof m?.content === 'string'
+      );
+      const __writerStateAssistant =
+        __writerAssistantCandidates.find((m) => {
+          const c = String(m?.content ?? '');
+          return (
+            __patterns.mirror.test(c) ||
+            __patterns.card.test(c) ||
+            __patterns.lite.test(c) ||
+            c.includes('STATE_CUES (DO NOT OUTPUT)') ||
+            c.includes('STATE_CUES_V3 (DO NOT OUTPUT)')
+          );
+        }) ?? null;
 
+      const __writerInjectedPack = String(__writerStateAssistant?.content ?? '');
+
+      const __writerAssistantLast =
+        __writerAssistantCandidates.length > 0
+          ? __writerAssistantCandidates[__writerAssistantCandidates.length - 1]
+          : null;
+
+      console.log('[IROS/rephraseEngine][STATE_SNAPSHOT_FOR_WRITER]', {
+        traceId: debug.traceId ?? null,
+        conversationId: debug.conversationId ?? null,
+        userCode: debug.userCode ?? null,
+        messagesLen: messagesForWriter.length,
+        roles: messagesForWriter.map((m) => m?.role),
+        hasMirrorFlowSeed: __patterns.mirror.test(__writerInjectedPack),
+        hasCardPacket: __patterns.card.test(__writerInjectedPack),
+        hasCardsLite: __patterns.lite.test(__writerInjectedPack),
+        stateAssistantHead: __writerInjectedPack.slice(0, 800),
+        lastAssistantHead: String(__writerAssistantLast?.content ?? '').slice(0, 300),
+      });
       return await callWriterLLM({
         model: opts.model ?? 'gpt-5',
         temperature: opts.temperature ?? 0.7,

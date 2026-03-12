@@ -46,6 +46,7 @@ export async function buildUnifiedAnalysis(params: {
   // orchestrator で整えた unified を最優先で使う
   const unified = safeMeta.unified ?? {};
 
+
   const unifiedQ =
     unified && unified.q && typeof unified.q.current === 'string'
       ? unified.q.current
@@ -61,8 +62,19 @@ export async function buildUnifiedAnalysis(params: {
 
   // ---- Q / Depth / Phase ----
   const qCode = unifiedQ ?? safeMeta.qCode ?? safeMeta.q_code ?? null;
+
+  // 保存用 depth_stage は observed ではなく continuity を優先する
   const depthStage =
-    unifiedDepth ?? safeMeta.depth ?? safeMeta.depth_stage ?? null;
+    (typeof safeMeta.depth === 'string' && safeMeta.depth.trim().length > 0
+      ? safeMeta.depth.trim()
+      : typeof safeMeta.depth_stage === 'string' && safeMeta.depth_stage.trim().length > 0
+        ? safeMeta.depth_stage.trim()
+        : typeof safeMeta.depthStage === 'string' && safeMeta.depthStage.trim().length > 0
+          ? safeMeta.depthStage.trim()
+          : typeof unifiedDepth === 'string' && unifiedDepth.trim().length > 0
+            ? unifiedDepth.trim()
+            : null);
+
   const phase = unifiedPhase ?? safeMeta.phase ?? null;
 
   // ---- Self Acceptance（0.0〜1.0 スケール）----

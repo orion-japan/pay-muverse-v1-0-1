@@ -297,6 +297,23 @@ export async function runIrosTurn(
     tLayerModeActive,
   } = analysis;
 
+  const observedPrimaryStage =
+    ((unified as any)?.observed?.primaryStage as Depth | null | undefined) ?? null;
+  const observedSecondaryStage =
+    ((unified as any)?.observed?.secondaryStage as Depth | null | undefined) ?? null;
+  const observedStage =
+    ((unified as any)?.observed?.observedStage as Depth | null | undefined) ?? null;
+  const observedPrimaryBand =
+    ((unified as any)?.observed?.primaryBand as string | null | undefined) ?? null;
+  const observedSecondaryBand =
+    ((unified as any)?.observed?.secondaryBand as string | null | undefined) ?? null;
+  const observedPrimaryDepth =
+    ((unified as any)?.observed?.primaryDepth as 1 | 2 | 3 | null | undefined) ?? null;
+  const observedSecondaryDepth =
+    ((unified as any)?.observed?.secondaryDepth as 1 | 2 | 3 | null | undefined) ?? null;
+  const observedBasedOn =
+    ((unified as any)?.observed?.basedOn as string | null | undefined) ?? null;
+
   // -------------------------------
   // Iモード時の上書き（※深度は変えない）
   // -------------------------------
@@ -339,14 +356,23 @@ export async function runIrosTurn(
         ? clampSelfAcceptance(selfAcceptanceLine)
         : mergedBaseMeta.selfAcceptance ?? null,
 
-    yLevel: typeof yLevel === 'number' ? yLevel : mergedBaseMeta.yLevel ?? null,
-    hLevel: typeof hLevel === 'number' ? hLevel : mergedBaseMeta.hLevel ?? null,
+        yLevel: typeof yLevel === 'number' ? yLevel : mergedBaseMeta.yLevel ?? null,
+        hLevel: typeof hLevel === 'number' ? hLevel : mergedBaseMeta.hLevel ?? null,
 
     intentLine: intentLine ?? mergedBaseMeta.intentLine ?? null,
     tLayerHint: normalizedTLayer ?? mergedBaseMeta.tLayerHint ?? null,
 
     hasFutureMemory,
   };
+
+  (meta as any).primaryStage = observedPrimaryStage;
+  (meta as any).secondaryStage = observedSecondaryStage;
+  (meta as any).observedStage = observedStage;
+  (meta as any).primaryBand = observedPrimaryBand;
+  (meta as any).secondaryBand = observedSecondaryBand;
+  (meta as any).primaryDepth = observedPrimaryDepth;
+  (meta as any).secondaryDepth = observedSecondaryDepth;
+  (meta as any).observedBasedOn = observedBasedOn;
 
   // Phase（Unified または baseMeta から採用）
   {
@@ -2238,7 +2264,23 @@ if (shouldFallbackNormalChat) {
     // - after-container で frame がズレると「C帯扱い」の誤誘導が起きるため、ここで必ず同期
     (meta as any).frame = frameFinal;
 
+    (meta as any).frame = frameFinal;
 
+    // ✅ debug / 互換キーも最終 frame に再同期
+    // - container 側の仮判定(frameSelected)が残ると debug 上だけ C/R がズレて見える
+    // - 正本は framePlan.frame / meta.frame なので、ここで最終値へ揃える
+    (meta as any).frameSelected = frameFinal;
+
+    if (
+      (meta as any).frameDebug_containerDecision &&
+      typeof (meta as any).frameDebug_containerDecision === 'object'
+    ) {
+      (meta as any).frameDebug_containerDecision = {
+        ...(meta as any).frameDebug_containerDecision,
+        frameSelected: frameFinal,
+        meta_frame_after: frameFinal,
+      };
+    }
 
     // 12) ✅ ORCHログ用 “互換キー” を同期（必ず framePlan と同値）
     (meta as any).slotPlanPolicy = slotPlanPolicyFinal;

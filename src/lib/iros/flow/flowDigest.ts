@@ -28,11 +28,41 @@ function pickLast(events: FlowTapeEvent[], t: string): FlowTapeEvent | null {
 
 function compactCoord(v: any): string {
   if (!v || typeof v !== 'object') return '';
+
   const depthStage = v.depthStage ?? null;
   const phase = v.phase ?? null;
   const intentLayer = v.intentLayer ?? null;
   const itxStep = v.itxStep ?? null;
-  const anchor = v.anchor ?? null;
+  const anchorRaw = v.anchor ?? null;
+
+  const pickAnchorText = (a: any): string | null => {
+    if (a == null) return null;
+
+    if (typeof a === 'string') {
+      const s = a.trim();
+      return s || null;
+    }
+
+    if (typeof a === 'object') {
+      const key =
+        typeof a.key === 'string' && a.key.trim()
+          ? a.key.trim()
+          : null;
+
+      const text =
+        typeof a.text === 'string' && a.text.trim()
+          ? a.text.trim()
+          : typeof a.anchor_text === 'string' && a.anchor_text.trim()
+            ? a.anchor_text.trim()
+            : null;
+
+      return key ?? text ?? null;
+    }
+
+    return null;
+  };
+
+  const anchor = pickAnchorText(anchorRaw);
 
   const parts: string[] = [];
   if (depthStage) parts.push(`Depth:${depthStage}`);
@@ -40,6 +70,7 @@ function compactCoord(v: any): string {
   if (intentLayer) parts.push(`Layer:${intentLayer}`);
   if (itxStep) parts.push(`T:${itxStep}`);
   if (anchor) parts.push(`Anchor:${anchor}`);
+
   return parts.join(' / ');
 }
 

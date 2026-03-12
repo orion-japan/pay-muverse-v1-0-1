@@ -867,11 +867,87 @@ const intentBandForCtx =
     (meta as any)?.extra?.ctx_pack ??
     (meta as any)?.ctx_pack ??
     null;
+    try {
+      console.log('[IROS/ROUTE_REPHRASE][CTXPACK_FROM_UPSTREAM]', {
+        traceId,
+        conversationId,
+        userCode,
 
-  const ctxPack: any =
+        extraMerged_ctxPack_willRotation:
+          (extraMerged as any)?.ctxPack && typeof (extraMerged as any).ctxPack === 'object'
+            ? ((extraMerged as any).ctxPack as any).willRotation ?? null
+            : null,
+
+        extraMerged_extra_ctxPack_willRotation:
+          (extraMerged as any)?.extra?.ctxPack && typeof (extraMerged as any).extra.ctxPack === 'object'
+            ? ((extraMerged as any).extra.ctxPack as any).willRotation ?? null
+            : null,
+
+        meta_extra_ctxPack_willRotation:
+          (meta as any)?.extra?.ctxPack && typeof (meta as any).extra.ctxPack === 'object'
+            ? ((meta as any).extra.ctxPack as any).willRotation ?? null
+            : null,
+
+        meta_ctxPack_willRotation:
+          (meta as any)?.ctxPack && typeof (meta as any).ctxPack === 'object'
+            ? ((meta as any).ctxPack as any).willRotation ?? null
+            : null,
+
+        framePlan_ctxPack_willRotation:
+          (meta as any)?.framePlan?.ctxPack && typeof (meta as any).framePlan.ctxPack === 'object'
+            ? ((meta as any).framePlan.ctxPack as any).willRotation ?? null
+            : null,
+
+        ctxPackFromUpstream_willRotation:
+          ctxPackFromUpstream && typeof ctxPackFromUpstream === 'object'
+            ? (ctxPackFromUpstream as any).willRotation ?? null
+            : null,
+      });
+    } catch {}
+    const ctxPack: any =
     ctxPackFromUpstream && typeof ctxPackFromUpstream === 'object'
       ? { ...(ctxPackFromUpstream as any) }
       : {};
+
+  const cardsFromCtx: any =
+    ctxPack?.cards && typeof ctxPack.cards === 'object'
+      ? ctxPack.cards
+      : null;
+
+  const currentCardFromCtx: any =
+    cardsFromCtx?.currentCard && typeof cardsFromCtx.currentCard === 'object'
+      ? cardsFromCtx.currentCard
+      : null;
+
+  if (
+    !pickStr(ctxPack.observedStage, ctxPack.primaryStage) &&
+    currentCardFromCtx &&
+    typeof currentCardFromCtx === 'object'
+  ) {
+    const observedStageFromCard = pickStr(
+      currentCardFromCtx.observedStage,
+      currentCardFromCtx.stage,
+    );
+
+    if (observedStageFromCard) {
+      ctxPack.observedStage = ctxPack.observedStage ?? observedStageFromCard;
+      ctxPack.primaryStage = ctxPack.primaryStage ?? observedStageFromCard;
+    }
+  }
+
+  if (!pickStr((ctxPack as any).polarity) && currentCardFromCtx && typeof currentCardFromCtx === 'object') {
+    const polarityFromCard = pickStr(currentCardFromCtx.polarity);
+    if (polarityFromCard) {
+      (ctxPack as any).polarity = polarityFromCard;
+    }
+  }
+
+  if (!Array.isArray(ctxPack.depthHistoryLite)) {
+    const histSeed = pickStr(ctxPack.observedStage, ctxPack.depthStage);
+    if (histSeed && /^[SFRCIT][123]$/.test(histSeed)) {
+      ctxPack.depthHistoryLite = [histSeed];
+    }
+  }
 
   // ✅ blank 判定（null/undefined/空文字/空白文字/ kind:'' を “空” とみなす）
   const isBlankLike = (v: any) => {
@@ -1698,6 +1774,26 @@ try {
     (meta as any)?.slotPlanPolicy ??
     null;
 
+    const rephraseMessages =
+      Array.isArray((userContext as any)?.turnsForWriter) && (userContext as any).turnsForWriter.length > 0
+        ? ((userContext as any).turnsForWriter as Array<{ role: 'assistant' | 'user'; content: string }>)
+        : Array.isArray((userContext as any)?.ctxPack?.historyForWriter) &&
+            (userContext as any).ctxPack.historyForWriter.length > 0
+          ? ((userContext as any).ctxPack.historyForWriter as Array<{ role: 'assistant' | 'user'; content: string }>)
+          : [];
+
+    console.log('[IROS/_impl/rephrase.ts][REPHRASE_MESSAGES_PASS]', {
+      traceId,
+      conversationId,
+      userCode,
+      messagesLen: rephraseMessages.length,
+      roles: rephraseMessages.map((m) => m?.role),
+      firstHead:
+        typeof rephraseMessages[0]?.content === 'string'
+          ? rephraseMessages[0].content.slice(0, 120)
+          : '',
+    });
+
     const res = await rephraseSlotsFinal(extracted, {
       model,
       conversationId,
@@ -1707,6 +1803,10 @@ try {
       qCode: qCodeForLLM,
       depthStage: depthForLLM,
       inputKind: inputKindForLLM,
+
+      // ✅ upstream snapshot 用の会話列を明示配線
+      messages: rephraseMessages,
+
       userContext: {
         ...(userContext && typeof userContext === 'object' ? userContext : {}),
         question:
@@ -1769,7 +1869,6 @@ try {
         },
       },
 
-      // ✅ NEW: rephraseEngine 側が top-level / extra どちらでも拾えるようにする
       extra: {
         ...(((extraMerged as any) && typeof extraMerged === 'object') ? extraMerged : {}),
         question:
@@ -1798,16 +1897,9 @@ try {
           null,
       },
 
-      // ✅ audit/分岐のために明示的に渡す
       slotPlanPolicy: slotPlanPolicyForRephrase,
-
-      // ✅ NEW: route.ts から来る forceRetry を rephraseEngine へ配線
       forceRetry: !!((extraMerged as any)?.forceRetry ?? (meta as any)?.extra?.forceRetry),
 
-      // ✅ NEW: maxLinesHint を _impl 経路でも必ず渡す
-      // - rephraseBlocks が既にあればその個数を優先
-      // - なければ extracted.keys の数を使う
-      // - 最低12、最大80
       maxLinesHint: (() => {
         const exAny =
           ((meta as any)?.extra && typeof (meta as any).extra === 'object')
@@ -1827,7 +1919,6 @@ try {
         return Math.min(80, budget);
       })(),
 
-      // ✅ 本丸：rephraseEngine が必ず拾える top-level 配線（ctxPackが薄くなっても死なない）
       topicDigest: topicDigestForCtx,
       conversationLine: conversationLineForCtx,
       replyGoal: replyGoalForCtx,
