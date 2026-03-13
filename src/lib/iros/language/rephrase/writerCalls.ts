@@ -1731,9 +1731,19 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                       : [];
                   })()),
 
-                  inputKindNow === 'question'
-                    ? '- Keep the reply short and grounded. This is a definition/meaning question, so do not end with a question. Finish with the answer itself.'
-                    : '- Keep the reply short and grounded. Ask at most one question.',
+                  (() => {
+                    const askBackAllowed =
+                      (args as any)?.userContext?.question?.outputPolicy?.askBackAllowed ??
+                      (args as any)?.userContext?.ctxPack?.question?.outputPolicy?.askBackAllowed ??
+                      (args as any)?.extra?.question?.outputPolicy?.askBackAllowed ??
+                      true;
+
+                    if (inputKindNow === 'question' || askBackAllowed === false) {
+                      return '- Keep the reply short and grounded. Do not end with a question. Finish with a complete declarative sentence.';
+                    }
+
+                    return '- Keep the reply short and grounded. Ask at most one question.';
+                  })(),
                   '- Prefer STATE_CORE / SHIFT / SAFE over generic interpretation.',
                   '- Use SHIFT as the main reframe cue.',
                   '- Use SAFE to avoid pushing, dramatizing, or forcing change.',
@@ -1855,35 +1865,53 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   .filter((x) => norm(x))
                   .join('\n\n')
                   .trim();
-  try {
-    const packNorm = norm(internalPackFixed);
-    const h = packNorm.slice(0, 420);
+                  try {
+                    const packNorm = norm(internalPackFixed);
+                    const h = packNorm.slice(0, 900);
 
-    const flowMatch = packNorm.match(/FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:/);
-    const flowIdx = flowMatch ? flowMatch.index ?? -1 : -1;
-    const flowSnippet =
-      flowIdx >= 0 ? packNorm.slice(flowIdx, Math.min(packNorm.length, flowIdx + 520)) : '';
+                    const flowMatch = packNorm.match(/FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:/);
+                    const flowIdx = flowMatch ? flowMatch.index ?? -1 : -1;
+                    const flowSnippet =
+                      flowIdx >= 0 ? packNorm.slice(flowIdx, Math.min(packNorm.length, flowIdx + 520)) : '';
 
-    console.log('[IROS/writerCalls][INJECTED_PACK_HEAD]', {
-      traceId: (args as any)?.traceId ?? null,
-      conversationId: (args as any)?.conversationId ?? null,
-      packLen: packNorm.length,
-      head: h,
-      hasCOORD: /COORD\s*\(DO NOT OUTPUT\)/.test(packNorm),
-      hasPolarity: /polarity=/.test(packNorm),
-      hasSA: /sa=/.test(packNorm),
-      hasITX: /itx_step=|itx_reason=/.test(packNorm),
-      hasFuture: /future=/.test(packNorm),
-      hasStateCues: /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/.test(packNorm),
-      hasFlowMeaning: flowIdx >= 0,
-      flowSnippet,
-      saRhythm: saRhythm || null,
-      saTone: saTone || null,
-      saBrevity: saBrevity || null,
-      itxStep: itxStep || null,
-      itxReason: itxReason || null,
-    });
-  } catch {}
+                    const hasOpenness =
+                      /(?:^|\n)OPENNESS(?:\n|$)/.test(packNorm) ||
+                      /tLayerHint=|itOk=/.test(packNorm);
+
+                    const hasWriterDirectives =
+                      /(?:^|\n)WRITER_DIRECTIVES(?:\n|$)/.test(packNorm) ||
+                      /tone=|maxLines=|slotPolicy=|rotationMention=/.test(packNorm);
+
+                    console.log('[IROS/writerCalls][INJECTED_PACK_HEAD]', {
+                      traceId: (args as any)?.traceId ?? null,
+                      conversationId: (args as any)?.conversationId ?? null,
+                      packLen: packNorm.length,
+                      head: h,
+                      hasCOORD: /COORD\s*\(DO NOT OUTPUT\)/.test(packNorm),
+                      hasPolarity: /polarity=/.test(packNorm),
+                      hasSA: /sa=/.test(packNorm),
+
+                      // 旧 itx_step / itx_reason だけでなく、MirrorFlow Seed v1 の OPENNESS も検知する
+                      hasITX:
+                        /itx_step=|itx_reason=/.test(packNorm) ||
+                        /tLayerHint=|itOk=/.test(packNorm),
+
+                      hasFuture: /future=/.test(packNorm),
+                      hasStateCues: /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/.test(packNorm),
+                      hasFlowMeaning: flowIdx >= 0,
+
+                      hasMirrorFlowSeed: /MIRROR_FLOW_SEED_V1\b/.test(packNorm),
+                      hasOpenness,
+                      hasWriterDirectives,
+
+                      flowSnippet,
+                      saRhythm: saRhythm || null,
+                      saTone: saTone || null,
+                      saBrevity: saBrevity || null,
+                      itxStep: itxStep || null,
+                      itxReason: itxReason || null,
+                    });
+                  } catch {}
 
   const shiftMeta = (() => {
     const s = String(internalPackFixed ?? '');

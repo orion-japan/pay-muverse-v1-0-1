@@ -2367,7 +2367,6 @@ if (extra && typeof extra === 'object') {
 // - metaForSave.extra に正本一本化（route.ts が拾える）
 // =========================================================
 // ✅ writer入力用の “このターン確定データ” を meta.extra に刻む（route.ts が拾う）
-// ✅ writer入力用の “このターン確定データ” を meta.extra に刻む（route.ts が拾う）
 try {
   out.metaForSave = out.metaForSave ?? {};
   (out.metaForSave as any).extra = (out.metaForSave as any).extra ?? {};
@@ -2417,45 +2416,57 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
 
     if (normalized.length === 0) return [];
 
-    // ✅ 末尾が user の場合は current turn 混入とみなし、保存用履歴から落とす
+    // current turn の latest user は writer 実行時の userText に一本化済みなので落とす
     const historyOnly =
       normalized.length > 0 && normalized[normalized.length - 1].role === 'user'
         ? normalized.slice(0, -1)
         : normalized;
 
-        if (historyOnly.length === 0) return [];
+    if (historyOnly.length === 0) return [];
 
-        const last = historyOnly[historyOnly.length - 1];
+    // ✅ 末尾から見て、同一 role 連続は「最新1件だけ」残す
+    // 例:
+    // assistant, assistant, assistant -> 最新assistantのみ採用
+    // user, user -> 最新userのみ採用
+    const collapsedFromTail: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+    let lastRole: 'user' | 'assistant' | null = null;
 
-        // ✅ assistantだけ2件にならないよう、
-        //   直近assistantに対応するuserを優先して拾う
-        if (need <= 1) {
-          return last ? [last] : [];
-        }
+    for (let i = historyOnly.length - 1; i >= 0; i--) {
+      const row = historyOnly[i];
+      if (!row?.role || !row?.content) continue;
+      if (row.role === lastRole) continue;
+      collapsedFromTail.push(row);
+      lastRole = row.role;
+      if (collapsedFromTail.length >= Math.max(need, 2)) break;
+    }
 
-        if (last?.role === 'assistant') {
-          for (let i = historyOnly.length - 2; i >= 0; i--) {
-            if (historyOnly[i]?.role === 'user') {
-              return [historyOnly[i], last];
-            }
-          }
-          return [last];
-        }
+    const collapsed = collapsedFromTail.reverse();
 
-        if (last?.role === 'user') {
-          for (let i = historyOnly.length - 2; i >= 0; i--) {
-            if (historyOnly[i]?.role === 'assistant') {
-              return [historyOnly[i], last];
-            }
-          }
-          return [last];
-        }
+    if (collapsed.length === 0) return [];
 
-        return historyOnly.slice(-need);
+    // need=1 のときは最新1件だけ
+    if (need <= 1) {
+      return [collapsed[collapsed.length - 1]];
+    }
+
+    // need>=2 のときは、できるだけ「直近の user/assistant ペア」を返す
+    if (collapsed.length >= 2) {
+      return collapsed.slice(-2);
+    }
+
+    return collapsed.slice(-1);
   };
 
   const hs = Array.isArray(historyForTurn) ? (historyForTurn as any[]) : [];
-
+  console.log('[IROS/HFW_SOURCE_BEFORE_PICK]', {
+    len: Array.isArray(historyForTurn) ? historyForTurn.length : null,
+    tail: Array.isArray(historyForTurn)
+      ? historyForTurn.slice(-6).map((m: any) => ({
+          role: m?.role ?? null,
+          head: String(m?.content ?? m?.text ?? '').slice(0, 80),
+        }))
+      : null,
+  });
   let tail: Array<{ role: 'user' | 'assistant'; content: string }> = pickHistoryOnlyTail(hs, maxMsgs)
     .map((m) => {
       const role = m?.role === 'assistant' ? 'assistant' : m?.role === 'user' ? 'user' : null;
@@ -5098,6 +5109,27 @@ if (shouldRunWriter) {
     return ctxKind || null;
   })();
 
+  console.log('[IROS/GOALKIND_BRIDGE][BEFORE_REPHRASE_CALL]', {
+    traceId: traceIdCanon,
+    conversationId: _conversationId ?? null,
+    userCode: _userCode ?? null,
+
+    top_goalKind:
+      (out.metaForSave as any)?.targetKind ??
+      (out.metaForSave as any)?.target_kind ??
+      null,
+
+    userContext_goalKind: null,
+
+    userContext_ctxPack_goalKind:
+      ((out.metaForSave as any)?.extra?.ctxPack as any)?.goalKind ??
+      (out.metaForSave as any)?.targetKind ??
+      (out.metaForSave as any)?.target_kind ??
+      null,
+
+    userContext_ctxPack_replyGoal:
+      ((out.metaForSave as any)?.extra?.ctxPack as any)?.replyGoal ?? null,
+  });
 
   const rr = await rephraseSlotsFinal(
     extracted,
@@ -5134,7 +5166,11 @@ if (shouldRunWriter) {
       })(),
 
       userText: typeof text === 'string' ? text : null,
-
+      goalKind:
+        ((out.metaForSave as any)?.extra?.ctxPack as any)?.goalKind ??
+        (out.metaForSave as any)?.targetKind ??
+        (out.metaForSave as any)?.target_kind ??
+        null,
       debug: {
         traceId: traceIdCanon,
         conversationId: _conversationId ?? null,
@@ -5539,6 +5575,13 @@ if (shouldRunWriter) {
                       (ctxPackPrev as any)?.secondaryBand ??
                       null,
 
+                      goalKind:
+                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.goalKind ??
+                      (out.metaForSave as any)?.targetKind ??
+                      (out.metaForSave as any)?.target_kind ??
+                      (ctxPackPrev as any)?.goalKind ??
+                      null,
+
                     primaryDepth:
                       (out.metaForSave as any)?.primaryDepth ??
                       ((out.metaForSave as any)?.extra?.ctxPack as any)?.primaryDepth ??
@@ -5698,6 +5741,13 @@ if (shouldRunWriter) {
                         (out.metaForSave as any)?.secondaryBand ??
                         ((out.metaForSave as any)?.extra?.ctxPack as any)?.secondaryBand ??
                         (ctxPackPrev as any)?.secondaryBand ??
+                        null,
+
+                        goalKind:
+                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.goalKind ??
+                        (out.metaForSave as any)?.targetKind ??
+                        (out.metaForSave as any)?.target_kind ??
+                        (ctxPackPrev as any)?.goalKind ??
                         null,
 
                       primaryDepth:

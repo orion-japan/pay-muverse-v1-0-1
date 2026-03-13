@@ -1793,7 +1793,24 @@ try {
           ? rephraseMessages[0].content.slice(0, 120)
           : '',
     });
+    console.log('[IROS/GOALKIND_BRIDGE][IMPL_BEFORE_REPHRASE]', {
+      traceId,
+      conversationId,
+      userCode,
 
+      goalKind_top:
+        meta?.targetKind ??
+        meta?.target_kind ??
+        null,
+
+      goalKind_ctxPack:
+        meta?.extra?.ctxPack?.goalKind ?? null,
+
+      ctxPack_keys:
+        meta?.extra?.ctxPack
+          ? Object.keys(meta.extra.ctxPack)
+          : [],
+    });
     const res = await rephraseSlotsFinal(extracted, {
       model,
       conversationId,

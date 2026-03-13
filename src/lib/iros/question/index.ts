@@ -31,6 +31,9 @@ function fallbackDomain(input: QuestionEngineInput): DomainType {
 function fallbackQuestionType(input: QuestionEngineInput, domain: DomainType): QuestionType {
   return detectQuestionType({
     userText: input.userText,
+    qCode: input.qCode ?? null,
+    eTurn: input.eTurn ?? null,
+    signals: input.signals ?? null,
     context: input.context ?? null,
     domain,
   });

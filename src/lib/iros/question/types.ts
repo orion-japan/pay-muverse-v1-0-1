@@ -93,7 +93,10 @@ export type QuestionEngineResult = {
 
 export type DetectDomainInput = Pick<QuestionEngineInput, 'userText' | 'context'>;
 
-export type DetectQuestionTypeInput = Pick<QuestionEngineInput, 'userText' | 'context'> & {
+export type DetectQuestionTypeInput = Pick<
+  QuestionEngineInput,
+  'userText' | 'context' | 'qCode' | 'eTurn' | 'signals'
+> & {
   domain?: DomainType | null;
 };
 

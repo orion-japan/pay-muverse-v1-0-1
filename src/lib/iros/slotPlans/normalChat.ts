@@ -1147,7 +1147,15 @@ function buildFlowReply(args: {
     return '全部を動かすより、いま引っかかっている一点だけを狭くすると動きやすい';
   })();
 
+  const questionForFlow =
+    (args.meta as any)?.extra?.question ??
+    (args.ctxPack as any)?.question ??
+    null;
+
+  const outputPolicyForFlow = questionForFlow?.outputPolicy ?? null;
+
   const questionsMax2 =
+    outputPolicyForFlow?.askBackAllowed === false ||
     shiftKind2 === 'clarify_shift' ||
     shiftKind2 === 'stabilize_shift' ||
     shiftKind2 === 'distance_shift' ||

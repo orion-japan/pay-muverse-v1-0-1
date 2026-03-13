@@ -3460,8 +3460,53 @@ const ctxPackForWriter =
     // ✅ NEW: 末尾 user の正本
     userText: String((opts as any)?.userText ?? ''),
 
-    // ✅ NEW: buildFirstPassMessages / writerCalls.ts が直接拾える経路
+// ✅ NEW: buildFirstPassMessages / writerCalls.ts が直接拾える経路
+extra: {
+  question:
+    ((opts as any)?.extra?.question) ??
+    ((opts as any)?.userContext?.question) ??
+    ((opts as any)?.userContext?.meta?.extra?.question) ??
+    null,
+  pastStateNoteText:
+    ((opts as any)?.extra?.pastStateNoteText) ??
+    ((opts as any)?.userContext?.pastStateNoteText) ??
+    ((opts as any)?.userContext?.meta?.extra?.pastStateNoteText) ??
+    null,
+  pastStateTriggerKind:
+    ((opts as any)?.extra?.pastStateTriggerKind) ??
+    ((opts as any)?.userContext?.pastStateTriggerKind) ??
+    ((opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind) ??
+    null,
+  pastStateKeyword:
+    ((opts as any)?.extra?.pastStateKeyword) ??
+    ((opts as any)?.userContext?.pastStateKeyword) ??
+    ((opts as any)?.userContext?.meta?.extra?.pastStateKeyword) ??
+    null,
+  goalKind: // ✅ top-level goalKind も extra に保持
+    (opts as any)?.goalKind ??
+    (opts as any)?.userContext?.goalKind ??
+    (opts as any)?.userContext?.ctxPack?.goalKind ??
+    (opts as any)?.userContext?.ctxPack?.replyGoal?.kind ??
+    null,
+},
+
+userContext: {
+  ...(((opts as any)?.userContext && typeof (opts as any).userContext === 'object')
+    ? (opts as any).userContext
+    : {}),
+  question:
+    ((opts as any)?.extra?.question) ??
+    ((opts as any)?.userContext?.question) ??
+    ((opts as any)?.userContext?.meta?.extra?.question) ??
+    null,
+  meta: {
+    ...((((opts as any)?.userContext?.meta && typeof (opts as any).userContext.meta === 'object')
+      ? (opts as any).userContext.meta
+      : {})),
     extra: {
+      ...(((((opts as any)?.userContext?.meta?.extra) && typeof (opts as any).userContext.meta.extra === 'object')
+        ? (opts as any).userContext.meta.extra
+        : {})),
       question:
         ((opts as any)?.extra?.question) ??
         ((opts as any)?.userContext?.question) ??
@@ -3482,49 +3527,16 @@ const ctxPackForWriter =
         ((opts as any)?.userContext?.pastStateKeyword) ??
         ((opts as any)?.userContext?.meta?.extra?.pastStateKeyword) ??
         null,
-    },
-
-    userContext: {
-      ...(((opts as any)?.userContext && typeof (opts as any).userContext === 'object')
-        ? (opts as any).userContext
-        : {}),
-      question:
-        ((opts as any)?.extra?.question) ??
-        ((opts as any)?.userContext?.question) ??
-        ((opts as any)?.userContext?.meta?.extra?.question) ??
-        null,
-      meta: {
-        ...((((opts as any)?.userContext?.meta && typeof (opts as any).userContext.meta === 'object')
-          ? (opts as any).userContext.meta
-          : {})),
-        extra: {
-          ...(((((opts as any)?.userContext?.meta?.extra) && typeof (opts as any).userContext.meta.extra === 'object')
-            ? (opts as any).userContext.meta.extra
-            : {})),
-          question:
-            ((opts as any)?.extra?.question) ??
-            ((opts as any)?.userContext?.question) ??
-            ((opts as any)?.userContext?.meta?.extra?.question) ??
-            null,
-          pastStateNoteText:
-            ((opts as any)?.extra?.pastStateNoteText) ??
-            ((opts as any)?.userContext?.pastStateNoteText) ??
-            ((opts as any)?.userContext?.meta?.extra?.pastStateNoteText) ??
-            null,
-          pastStateTriggerKind:
-            ((opts as any)?.extra?.pastStateTriggerKind) ??
-            ((opts as any)?.userContext?.pastStateTriggerKind) ??
-            ((opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind) ??
-            null,
-          pastStateKeyword:
-            ((opts as any)?.extra?.pastStateKeyword) ??
-            ((opts as any)?.userContext?.pastStateKeyword) ??
-            ((opts as any)?.userContext?.meta?.extra?.pastStateKeyword) ??
-            null,
-          ctxPack: ctxPackForWriter,
-        },
+      ctxPack: {
+        ...ctxPackForWriter,
+        goalKind: // ✅ ctxPack 内にも goalKind を確実に反映
+          (opts as any)?.goalKind ??
+          (opts as any)?.userContext?.goalKind ??
+          (ctxPackForWriter?.goalKind ?? null),
       },
     },
+  },
+},
 
     // ✅ 既存の経路も残す
     ctxPack: ctxPackForWriter,
@@ -3854,6 +3866,24 @@ const ctxPackForWriter =
 // --- BLOCK_PLAN（system4）生成（設計図のみ / 例外演出のみ） ---
 const ctxPack = (opts as any)?.userContext?.ctxPack ?? null;
 
+try {
+  console.log('[IROS/GOALKIND_BRIDGE][FULL_BLOCKPLAN_INPUT]', {
+    traceId: (debug as any)?.traceId ?? null,
+    conversationId: (debug as any)?.conversationId ?? null,
+    userCode: (debug as any)?.userCode ?? null,
+
+    goalKind_top: (opts as any)?.goalKind ?? null,
+    goalKind_userContext: (opts as any)?.userContext?.goalKind ?? null,
+    goalKind_ctxPack: ctxPack?.goalKind ?? null,
+    replyGoalKind_ctxPack: ctxPack?.replyGoal?.kind ?? null,
+
+    ctxPack_keys:
+      ctxPack && typeof ctxPack === 'object'
+        ? Object.keys(ctxPack)
+        : [],
+  });
+} catch {}
+
 const goalKind =
   ctxPack?.replyGoal?.kind ?? // ✅ ctxPack 正本
   ctxPack?.goalKind ??
@@ -3934,7 +3964,10 @@ const itTriggered = Boolean(
   });
 
   const blockPlanText = blockPlan ? renderBlockPlanSystem4(blockPlan) : '';
-
+// テスト用: BLOCK_PLAN を強制的に有効化
+if (typeof blockPlan !== 'undefined' && blockPlan) {
+  (blockPlan as any).enabled = true; // 型チェック回避
+}
   // ---- ✅ DIAG を必ずログ化（why/flags を 1ターン確証として固定）----
   try {
     const d: any = blockPlanDiag && typeof blockPlanDiag === 'object' ? blockPlanDiag : null;
@@ -4958,49 +4991,74 @@ raw = await (async () => {
         // ✅ 重要：拾ってるだけだった digest を “実際に渡す”
         historyDigestV1,
 
-        // ✅ NEW: writerCalls.ts で question / pastState を参照できるように渡す
-        extra: {
-          ...(((opts as any)?.extra && typeof (opts as any).extra === 'object') ? (opts as any).extra : {}),
-          question:
-            ((opts as any)?.extra?.question) ??
-            ((opts as any)?.userContext?.question) ??
-            ((opts as any)?.userContext?.meta?.extra?.question) ??
-            null,
-          pastStateNoteText:
-            ((opts as any)?.extra?.pastStateNoteText) ??
-            ((opts as any)?.userContext?.pastStateNoteText) ??
-            ((opts as any)?.userContext?.meta?.extra?.pastStateNoteText) ??
-            null,
-          pastStateTriggerKind:
-            ((opts as any)?.extra?.pastStateTriggerKind) ??
-            ((opts as any)?.userContext?.pastStateTriggerKind) ??
-            ((opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind) ??
-            null,
-          pastStateKeyword:
-            ((opts as any)?.extra?.pastStateKeyword) ??
-            ((opts as any)?.userContext?.pastStateKeyword) ??
-            ((opts as any)?.userContext?.meta?.extra?.pastStateKeyword) ??
-            null,
-        },
+// ✅ NEW: writerCalls.ts で question / pastState / goalKind を参照できるように渡す
+extra: {
+  ...(((opts as any)?.extra && typeof (opts as any).extra === 'object') ? (opts as any).extra : {}),
+  question:
+    ((opts as any)?.extra?.question) ??
+    ((opts as any)?.userContext?.question) ??
+    ((opts as any)?.userContext?.meta?.extra?.question) ??
+    null,
+  pastStateNoteText:
+    ((opts as any)?.extra?.pastStateNoteText) ??
+    ((opts as any)?.userContext?.pastStateNoteText) ??
+    ((opts as any)?.userContext?.meta?.extra?.pastStateNoteText) ??
+    null,
+  pastStateTriggerKind:
+    ((opts as any)?.extra?.pastStateTriggerKind) ??
+    ((opts as any)?.userContext?.pastStateTriggerKind) ??
+    ((opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind) ??
+    null,
+  pastStateKeyword:
+    ((opts as any)?.extra?.pastStateKeyword) ??
+    ((opts as any)?.userContext?.pastStateKeyword) ??
+    ((opts as any)?.userContext?.meta?.extra?.pastStateKeyword) ??
+    null,
+  goalKind:
+    (opts as any)?.goalKind ??
+    (opts as any)?.userContext?.goalKind ??
+    (opts as any)?.userContext?.ctxPack?.goalKind ??
+    (opts as any)?.userContext?.ctxPack?.replyGoal?.kind ??
+    null,
+},
 
-        userContext: {
-          ...(((opts as any)?.userContext && typeof (opts as any).userContext === 'object') ? (opts as any).userContext : {}),
-          meta: {
-            ...((((opts as any)?.userContext?.meta && typeof (opts as any).userContext.meta === 'object')
-              ? (opts as any).userContext.meta
-              : {})),
-            extra: {
-              ...(((((opts as any)?.userContext?.meta?.extra) && typeof (opts as any).userContext.meta.extra === 'object')
-                ? (opts as any).userContext.meta.extra
-                : {})),
-              question:
-                ((opts as any)?.extra?.question) ??
-                ((opts as any)?.userContext?.question) ??
-                ((opts as any)?.userContext?.meta?.extra?.question) ??
-                null,
-            },
-          },
-        },
+userContext: {
+  ...(((opts as any)?.userContext && typeof (opts as any).userContext === 'object') ? (opts as any).userContext : {}),
+  meta: {
+    ...((((opts as any)?.userContext?.meta && typeof (opts as any).userContext.meta === 'object')
+      ? (opts as any).userContext.meta
+      : {})),
+    extra: {
+      ...(((((opts as any)?.userContext?.meta?.extra) && typeof (opts as any).userContext.meta.extra === 'object')
+        ? (opts as any).userContext.meta.extra
+        : {})),
+      question:
+        ((opts as any)?.extra?.question) ??
+        ((opts as any)?.userContext?.question) ??
+        ((opts as any)?.userContext?.meta?.extra?.question) ??
+        null,
+      pastStateNoteText:
+        ((opts as any)?.extra?.pastStateNoteText) ??
+        ((opts as any)?.userContext?.pastStateNoteText) ??
+        ((opts as any)?.userContext?.meta?.extra?.pastStateNoteText) ??
+        null,
+      pastStateTriggerKind:
+        ((opts as any)?.extra?.pastStateTriggerKind) ??
+        ((opts as any)?.userContext?.pastStateTriggerKind) ??
+        ((opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind) ??
+        null,
+      pastStateKeyword:
+        ((opts as any)?.extra?.pastStateKeyword) ??
+        ((opts as any)?.userContext?.pastStateKeyword) ??
+        ((opts as any)?.userContext?.meta?.extra?.pastStateKeyword) ??
+        null,
+      ctxPack: {
+        ...ctxPackForWriter,
+        goalKind: (opts as any)?.goalKind ?? (opts as any)?.userContext?.goalKind ?? (ctxPackForWriter?.goalKind ?? null),
+      },
+    },
+  },
+},
 
         // ✅ task のときだけ raw user を許可（writerCalls.ts 側で判定に使う）
         // - directTask が true なら許可
@@ -5427,22 +5485,25 @@ raw = await (async () => {
         shiftRules?.output_only === true ||
         systemPromptArgs?.output_only === true);
 
-    const questions_max = (() => {
-      if (typeof contractResolved?.questions_max === 'number') {
-        return contractResolved.questions_max;
-      }
+        const questions_max = (() => {
+          // ✅ askBackAllowed=false は最優先
+          // 上流で questions_max=1 が来ていても、ここでは必ず 0 に落とす
+          if (askBackAllowedNow === false) return 0;
 
-      for (const v of [
-        questionPolicy?.questions_max,
-        shiftRules?.questions_max,
-        systemPromptArgs?.questions_max,
-      ]) {
-        if (typeof v === 'number') return v;
-      }
+          if (typeof contractResolved?.questions_max === 'number') {
+            return contractResolved.questions_max;
+          }
 
-      if (askBackAllowedNow === false) return 0;
-      return null;
-    })();
+          for (const v of [
+            questionPolicy?.questions_max,
+            shiftRules?.questions_max,
+            systemPromptArgs?.questions_max,
+          ]) {
+            if (typeof v === 'number') return v;
+          }
+
+          return null;
+        })();
 
     const no_bullets = (() => {
       if (typeof contractFromSeed?.no_bullets === 'boolean') return contractFromSeed.no_bullets;
@@ -5487,7 +5548,7 @@ raw = await (async () => {
         const t = String(line ?? '').trim();
         if (!t) return false;
         if (/[?？]/.test(t)) return true;
-        if (/(ですか|ますか|でしょうか|でしたか|ましたか|ませんか|だろうか|かな|かもね|かね)([。．…]*\s*)$/.test(t)) {
+        if (/(ですか|ますか|でしょうか|でしたか|ましたか|ませんか|だろうか|かな|かね)([。．…]*\s*)$/.test(t)) {
           return true;
         }
         if (/(何|なに|どれ|どちら|いつ|どこ|だれ|誰|なぜ|何故|どう|どの|いくつ|幾つ|どんな|どこで|どこに|どこから|どこまで)/.test(t)) {
@@ -5496,15 +5557,61 @@ raw = await (async () => {
         return false;
       };
 
+      const isDanglingTail = (line: string): boolean => {
+        const t = String(line ?? '').trim();
+        if (!t) return true;
+
+        return (
+          /(?:それとも|それともまだ|それともまた)\s*$/u.test(t) ||
+          /(?:寄り|感じ|ほう|方)\s*それとも\s*$/u.test(t) ||
+          /(?:それとも|寄り|どっち|どちら|感じ|ほう|方)\s*$/u.test(t) ||
+          /(?:のは|のは、|のは。|って|って、|とは|とは、)\s*$/u.test(t) ||
+          /(?:今日の|今回の|いまの|今の).*(?:のは|のは、)\s*$/u.test(t) ||
+          /(?:や|とか|など|で|を|に|が|は|も|の|と)\s*$/u.test(t)
+        );
+      };
+
+      const trimDanglingTail = (line: string): string => {
+        let t = String(line ?? '').trim();
+        if (!t) return '';
+
+        t = t.replace(/(?:それとも|それともまだ|それともまた)\s*$/u, '').trim();
+        t = t.replace(/(?:寄り|感じ|ほう|方)\s*それとも\s*$/u, '$1').trim();
+        t = t.replace(/(?:のは、|のは。|のは|って、|って|とは、|とは)\s*$/u, '').trim();
+        t = t.replace(/(?:や|とか|など|で|を|に|が|は|も|の|と)\s*$/u, '').trim();
+
+        return t;
+      };
+
       let keptQuestions = 0;
-      const sanitized = lines.filter((line) => {
-        if (!isQuestionLike(line)) return true;
-        if (keptQuestions < qMax) {
-          keptQuestions += 1;
-          return true;
+      const sanitized: string[] = [];
+
+      for (const line of lines) {
+        if (isQuestionLike(line)) {
+          if (keptQuestions < qMax) {
+            keptQuestions += 1;
+            sanitized.push(line);
+          }
+          continue;
         }
-        return false;
-      });
+
+        const trimmed = trimDanglingTail(line);
+
+        if (qMax === 0 && isDanglingTail(trimmed)) {
+          continue;
+        }
+
+        sanitized.push(trimmed || line);
+      }
+
+      while (sanitized.length > 0) {
+        const tail = String(sanitized[sanitized.length - 1] ?? '').trim();
+        if (!tail || (qMax === 0 && isDanglingTail(tail))) {
+          sanitized.pop();
+          continue;
+        }
+        break;
+      }
 
       return sanitized.join('\n\n').trim();
     };
@@ -5514,7 +5621,6 @@ raw = await (async () => {
       text: candidateText0,
       rules: minimalWriterRules,
     });
-
     if (!wg.ok && wg.reason === 'WG:Q_OVER') {
       const qMax =
         typeof minimalWriterRules?.questions_max === 'number'

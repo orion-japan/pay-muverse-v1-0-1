@@ -219,7 +219,31 @@ export function detectQuestionType(input: DetectQuestionTypeInput): QuestionType
       scores.meaning += 3 * contextWeight;
       scores.structure = Math.max(0, scores.structure - 3 * contextWeight);
     }
+    const eTurn = normalizeText(String(input.eTurn ?? ''));
+    const qCode = normalizeText(String(input.qCode ?? ''));
+    const signalsObj =
+      input.signals && typeof input.signals === 'object' ? input.signals : null;
 
+    const topicHintText = normalizeText(String(input.context?.topicHint ?? ''));
+    const situationSummaryText = normalizeText(String(input.context?.situationSummary ?? ''));
+
+    const looksPersonalStateStatement =
+      !!text &&
+      input.domain === 'personal' &&
+      !/[?？]/.test(text) &&
+      /不安|こわい|怖い|つらい|苦しい|しんどい|寂しい|孤独|揺れる|迷う|モヤモヤ|落ち込む|苦手/.test(text);
+
+    const hasRuntimeStateHints =
+      !!eTurn ||
+      !!qCode ||
+      !!signalsObj ||
+      !!topicHintText ||
+      !!situationSummaryText;
+
+    if (looksPersonalStateStatement && hasRuntimeStateHints) {
+      scores.meaning += 2 * contextWeight;
+      scores.structure = Math.max(0, scores.structure - 1 * contextWeight);
+    }
     applyDomainBias(scores, input.domain, text);
     return scores;
   };
