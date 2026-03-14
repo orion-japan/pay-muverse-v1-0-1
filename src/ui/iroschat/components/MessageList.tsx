@@ -609,7 +609,6 @@ const safeText = transformIrTemplateToMarkdown(displayText);
 {/* Metaバッジ：Iros（assistant）のときだけ */}
 {!isUser && (
   <IrosMetaBadge
-    qCode={qToShowSafe ?? undefined}
     eTurn={eTurnToShowSafe ?? undefined}
     depth={depthToShowSafe}
     responseType={responseTypeToShow}

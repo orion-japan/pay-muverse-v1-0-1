@@ -35,14 +35,26 @@ export default function IrosHeader({
     chatCtx?.meta ??
     null;
 
-  const qCode =
+    const qCodeRaw =
     currentMeta?.qCode ??
     currentMeta?.q_code ??
-    undefined;
+    currentMeta?.q ??
+    currentMeta?.extra?.ctxPack?.qCode ??
+    currentMeta?.extra?.ctxPack?.qPrimary ??
+    currentMeta?.unified?.q?.current ??
+    null;
+
+    const qCode: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5' | undefined =
+    typeof qCodeRaw === 'string' && /^Q[1-5]$/i.test(qCodeRaw)
+      ? (qCodeRaw.toUpperCase() as 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5')
+      : undefined;
 
   const depth =
     currentMeta?.depth ??
+    currentMeta?.depthStage ??
     currentMeta?.depth_stage ??
+    currentMeta?.extra?.ctxPack?.depthStage ??
+    currentMeta?.unified?.depth?.current ??
     null;
 
   const mode = currentMeta?.mode ?? null;
@@ -115,16 +127,16 @@ export default function IrosHeader({
 
       <div className="sof-right">
         {/* ★ 追加：右上の Q / 深度 / モード インジケーター（compact 表示） */}
-        {currentMeta && (
-          <div className="sof-meta-wrap" aria-label="Iros meta indicator">
-            <IrosMetaBadge
-              qCode={qCode}
-              depth={depth}
-              mode={mode}
-              compact
-            />
-          </div>
-        )}
+        {false && currentMeta && (
+  <div className="sof-meta-wrap" aria-label="Iros meta indicator">
+    <IrosMetaBadge
+      qCode={qCode}
+      depth={depth}
+      mode={mode}
+      compact
+    />
+  </div>
+)}
 
         <button
           type="button"

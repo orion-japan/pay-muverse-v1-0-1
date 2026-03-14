@@ -328,7 +328,27 @@ function IrosChatInner({ open }: Props) {
                 zIndex: 3,
               }}
             >
-              <IrosMetaBadge qCode={meta?.qCode} depth={meta?.depth} mode={meta?.mode} compact />
+<IrosMetaBadge
+  qCode={
+    ((meta?.qCode ??
+      meta?.q_code ??
+      meta?.q ??
+      meta?.extra?.ctxPack?.qCode ??
+      meta?.extra?.ctxPack?.qPrimary ??
+      meta?.unified?.q?.current ??
+      undefined) as 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5' | undefined)
+  }
+  depth={
+    meta?.depth ??
+    meta?.depthStage ??
+    meta?.depth_stage ??
+    meta?.extra?.ctxPack?.depthStage ??
+    meta?.unified?.depth?.stage ??
+    null
+  }
+  mode={meta?.mode}
+  compact
+/>
             </div>
 
             <IrosSidebarMobile

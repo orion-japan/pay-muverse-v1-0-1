@@ -37,6 +37,11 @@ type SendResult =
     /** 現在の Iros 口調スタイル（settings で選択されたもの） */
     style: IrosStyle;
 
+        /** Header 用の最新メタ */
+        currentMeta: any;
+        lastMeta: any;
+        meta: any;
+
     fetchMessages: (cid: string) => Promise<void>;
 
     // 通常のチャット送信
@@ -666,6 +671,33 @@ const payload: any = {
     })();
   }, [reloadUserInfo, reloadConversations]);
 
+  const lastAssistantMsg =
+    [...messages]
+      .reverse()
+      .find((m) => (m as any)?.role === 'assistant') ?? null;
+
+  const lastMeta =
+    (lastAssistantMsg as any)?.meta ??
+    (lastAssistantMsg
+      ? {
+          qCode:
+            (lastAssistantMsg as any)?.qCode ??
+            (lastAssistantMsg as any)?.q_code ??
+            (lastAssistantMsg as any)?.q ??
+            null,
+          depth:
+            (lastAssistantMsg as any)?.depth ??
+            (lastAssistantMsg as any)?.depthStage ??
+            (lastAssistantMsg as any)?.depth_stage ??
+            null,
+          depthStage:
+            (lastAssistantMsg as any)?.depthStage ??
+            (lastAssistantMsg as any)?.depth_stage ??
+            (lastAssistantMsg as any)?.depth ??
+            null,
+        }
+      : null);
+
   return (
     <IrosChatContext.Provider
       value={{
@@ -676,6 +708,10 @@ const payload: any = {
         activeConversationId,
         getActiveConversationId: () => activeConversationIdRef.current,
         style,
+
+        currentMeta: lastMeta,
+        lastMeta,
+        meta: lastMeta,
 
         fetchMessages,
         sendMessage,

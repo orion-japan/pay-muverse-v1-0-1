@@ -331,7 +331,11 @@ export async function deleteConversation(conversationId: string): Promise<{ ok: 
 
 /* ========= Messages ========= */
 export async function fetchMessages(conversationId: string): Promise<IrosMessage[]> {
-  const params = new URLSearchParams({ conversation_id: conversationId });
+  const params = new URLSearchParams({
+    conversation_id: conversationId,
+    include_meta: '1',
+  });
+
   const res = await authFetch(`/api/agent/iros/messages?${params.toString()}`, {
     method: 'GET',
   });
@@ -347,15 +351,71 @@ export async function fetchMessages(conversationId: string): Promise<IrosMessage
 
     const text = String(m.content ?? m.text ?? '');
 
-    return {
-      id: String(m.id),
-      role: m.role === 'assistant' ? 'assistant' : 'user',
-      text,
-      ts: created,
-      meta: m.meta ?? null,
-      q: (m.q ?? m.q_code ?? undefined) as any,
-      color: (m.color ?? undefined) as any,
-    } satisfies IrosMessage;
+    const metaSafe =
+      m.meta && typeof m.meta === 'object' && !Array.isArray(m.meta)
+        ? { ...m.meta }
+        : null;
+
+    const qSafe = m.q_code ?? m.q ?? null;
+    const depthSafe = m.depth_stage ?? null;
+    const intentLayerSafe = m.intent_layer ?? null;
+
+    const mergedMeta =
+      metaSafe != null
+        ? {
+            ...metaSafe,
+            qCode: metaSafe.qCode ?? metaSafe.q_code ?? metaSafe.q ?? qSafe ?? null,
+            q_code: metaSafe.q_code ?? metaSafe.qCode ?? metaSafe.q ?? qSafe ?? null,
+            q: metaSafe.q ?? metaSafe.qCode ?? metaSafe.q_code ?? qSafe ?? null,
+            depth:
+              metaSafe.depth ??
+              metaSafe.depthStage ??
+              metaSafe.depth_stage ??
+              depthSafe ??
+              null,
+            depthStage:
+              metaSafe.depthStage ??
+              metaSafe.depth_stage ??
+              metaSafe.depth ??
+              depthSafe ??
+              null,
+            depth_stage:
+              metaSafe.depth_stage ??
+              metaSafe.depthStage ??
+              metaSafe.depth ??
+              depthSafe ??
+              null,
+            intentLayer:
+              metaSafe.intentLayer ??
+              metaSafe.intent_layer ??
+              intentLayerSafe ??
+              null,
+            intent_layer:
+              metaSafe.intent_layer ??
+              metaSafe.intentLayer ??
+              intentLayerSafe ??
+              null,
+          }
+        : {
+            qCode: qSafe,
+            q_code: qSafe,
+            q: qSafe,
+            depth: depthSafe,
+            depthStage: depthSafe,
+            depth_stage: depthSafe,
+            intentLayer: intentLayerSafe,
+            intent_layer: intentLayerSafe,
+          };
+
+          return {
+            id: String(m.id),
+            role: m.role === 'assistant' ? 'assistant' : 'user',
+            text,
+            ts: created,
+            meta: mergedMeta,
+            q: (qSafe ?? undefined) as any,
+            color: (m.color ?? undefined) as any,
+          } satisfies IrosMessage;
   });
 }
 

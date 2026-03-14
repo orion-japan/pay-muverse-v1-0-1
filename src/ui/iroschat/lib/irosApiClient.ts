@@ -362,24 +362,96 @@ export const irosClient: IrosAPI = {
   async fetchMessages(conversationId: string) {
     if (typeof _raw.fetchMessages === 'function') return _raw.fetchMessages(conversationId);
     dbg('fetchMessages() fallback', conversationId);
+
     const r = await authFetch(
-      `/api/agent/iros/messages?conversation_id=${encodeURIComponent(conversationId)}`,
+      `/api/agent/iros/messages?conversation_id=${encodeURIComponent(conversationId)}&include_meta=1`,
     );
+
     const j = await r.json();
     const rows = Array.isArray(j?.messages) ? j.messages : [];
-    return rows.map((m: any) => ({
-      id: String(m.id),
-      role: (m.role === 'assistant'
-        ? 'assistant'
-        : m.role === 'system'
-          ? 'system'
-          : 'user') as IrosMessage['role'],
-      text: String(m.content ?? m.text ?? ''),
-      content: String(m.content ?? m.text ?? ''),
-      created_at: m.created_at ?? null,
-      ts: m.ts ? Number(m.ts) : new Date(m.created_at || Date.now()).getTime(),
-      meta: m.meta ?? null,
-    })) as IrosMessage[];
+
+    return rows.map((m: any) => {
+      const metaSafe =
+        m.meta && typeof m.meta === 'object' && !Array.isArray(m.meta)
+          ? { ...m.meta }
+          : null;
+
+      const qSafe = m.q_code ?? m.q ?? null;
+      const depthSafe = m.depth_stage ?? null;
+      const intentLayerSafe = m.intent_layer ?? null;
+
+      const mergedMeta =
+        metaSafe != null
+          ? {
+              ...metaSafe,
+              qCode: metaSafe.qCode ?? metaSafe.q_code ?? qSafe ?? null,
+              q_code: metaSafe.q_code ?? metaSafe.qCode ?? qSafe ?? null,
+              q: metaSafe.q ?? qSafe ?? null,
+              depth:
+                metaSafe.depth ??
+                metaSafe.depthStage ??
+                metaSafe.depth_stage ??
+                depthSafe ??
+                null,
+              depthStage:
+                metaSafe.depthStage ??
+                metaSafe.depth_stage ??
+                metaSafe.depth ??
+                depthSafe ??
+                null,
+              depth_stage:
+                metaSafe.depth_stage ??
+                metaSafe.depthStage ??
+                metaSafe.depth ??
+                depthSafe ??
+                null,
+              intentLayer:
+                metaSafe.intentLayer ??
+                metaSafe.intent_layer ??
+                intentLayerSafe ??
+                null,
+              intent_layer:
+                metaSafe.intent_layer ??
+                metaSafe.intentLayer ??
+                intentLayerSafe ??
+                null,
+            }
+          : {
+              qCode: qSafe,
+              q_code: qSafe,
+              q: qSafe,
+              depth: depthSafe,
+              depthStage: depthSafe,
+              depth_stage: depthSafe,
+              intentLayer: intentLayerSafe,
+              intent_layer: intentLayerSafe,
+            };
+
+      return {
+        id: String(m.id),
+        role: (m.role === 'assistant'
+          ? 'assistant'
+          : m.role === 'system'
+            ? 'system'
+            : 'user') as IrosMessage['role'],
+        text: String(m.content ?? m.text ?? ''),
+        content: String(m.content ?? m.text ?? ''),
+        created_at: m.created_at ?? null,
+        ts: m.ts ? Number(m.ts) : new Date(m.created_at || Date.now()).getTime(),
+        meta: mergedMeta,
+
+        // reload後も UI バッジで使う列値を保持
+        q_code: qSafe,
+        qCode: qSafe,
+        q: qSafe,
+        color: m.color ?? null,
+        depth_stage: depthSafe,
+        depthStage: depthSafe,
+        depth: depthSafe,
+        intent_layer: intentLayerSafe,
+        intentLayer: intentLayerSafe,
+      };
+    }) as IrosMessage[];
   },
 
   async renameConversation(conversationId: string, title: string) {

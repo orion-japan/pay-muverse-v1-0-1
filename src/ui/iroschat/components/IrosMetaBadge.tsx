@@ -75,16 +75,17 @@ function normalizeETurn(v: unknown): 'e1' | 'e2' | 'e3' | 'e4' | 'e5' | null {
   return null;
 }
 
-/** 左側メッセージ用：深度は先頭文字だけ */
-function depthToBand(depth?: string | null): 'S' | 'F' | 'R' | 'C' | 'I' | 'T' | null {
+/** 左側メッセージ用：depthStage は全文字表示（例: R3 / I2 / T1） */
+function normalizeDepthStage(depth?: string | null): string | null {
   const s = normStr(depth)?.toUpperCase() ?? '';
-  const head = s.charAt(0);
-  if (head === 'S' || head === 'F' || head === 'R' || head === 'C' || head === 'I' || head === 'T') {
-    return head;
-  }
+  if (/^[SFRCIT][1-3]$/.test(s)) return s;
   return null;
 }
-
+function depthHead(depth?: string | null): string | null {
+  const s = typeof depth === 'string' ? depth.trim().toUpperCase() : '';
+  if (/^[SFRCIT][1-3]$/.test(s)) return s.charAt(0);
+  return null;
+}
 /** 右上用：従来ラベル */
 function depthToLabel(depth?: string | null): string {
   if (!depth) return '';
@@ -152,16 +153,17 @@ export default function IrosMetaBadge(props: IrosMetaBadgeProps) {
 
   const eTurnSafe = normalizeETurn(eTurn);
   const eInfo = eTurnSafe ? E_TURN_META[eTurnSafe] : null;
-  const depthBand = depthToBand(depth);
+  const depthStage = normalizeDepthStage(depth);
+  const depthHeadTurnSafe = depthHead(depthStage);
   const responseTypeSafe = normStr(responseType);
 
   // ✅ 左側メッセージ用の新表示
-  const shouldUseTurnStyle = Boolean(eInfo || depthBand || responseTypeSafe);
+  const hasAnyTurnStyle = Boolean(eInfo) || Boolean(depthStage) || Boolean(responseTypeSafe);
 
-  if (shouldUseTurnStyle) {
-    const hasAnyTurnStyle = Boolean(eInfo) || Boolean(depthBand) || Boolean(responseTypeSafe);
+  if (hasAnyTurnStyle) {
+    const hasAnyTurnStyleInner = Boolean(eInfo) || Boolean(depthStage) || Boolean(responseTypeSafe);
 
-    if (!hasAnyTurnStyle) return null;
+    if (!hasAnyTurnStyleInner) return null;
 
     return (
       <div
@@ -203,23 +205,22 @@ export default function IrosMetaBadge(props: IrosMetaBadgeProps) {
           </div>
         )}
 
-        {eInfo && (depthBand || responseTypeSafe) && <Sep compact={compact} />}
+{eInfo && (depthStage || responseTypeSafe) && <Sep compact={compact} />}
 
-        {depthBand && (
-          <div
-            title={`depth band: ${depthBand}`}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-            }}
-          >
-            <span style={{ opacity: 0.72 }}>深度</span>
-            <span style={{ fontWeight: 700 }}>{depthBand}</span>
-          </div>
-        )}
+{depthHeadTurnSafe && (
+  <div
+  title={`depth band: ${depthHeadTurnSafe}`}
+    style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4,
+    }}
+  >
+<span style={{ fontWeight: 700 }}>{depthHeadTurnSafe}</span>
+  </div>
+)}
 
-        {depthBand && responseTypeSafe && <Sep compact={compact} />}
+{depthStage && responseTypeSafe && <Sep compact={compact} />}
 
         {responseTypeSafe && (
           <div
@@ -242,6 +243,7 @@ export default function IrosMetaBadge(props: IrosMetaBadgeProps) {
   const qInfo = qCode ? Q_META[qCode] : null;
   const depthLabel = depthToLabel(depth);
   const modeLabel = modeToLabel(mode);
+  const depthHeadSafe = depthHead(depth);
 
   const laneKeySafe = normStr(laneKey);
   const deltaShort = shortDelta(flowDelta);
@@ -253,44 +255,105 @@ export default function IrosMetaBadge(props: IrosMetaBadgeProps) {
   const itSafe = typeof itTriggered === 'boolean' ? itTriggered : null;
 
   const hasAny =
-    Boolean(qInfo) ||
-    Boolean(depthLabel) ||
-    Boolean(modeLabel) ||
-    Boolean(laneKeySafe) ||
-    Boolean(deltaShort) ||
-    rsSafe !== null ||
-    Boolean(policySafe) ||
-    Boolean(exprSafe) ||
-    itSafe !== null;
+  Boolean(qInfo) ||
+  Boolean(depthLabel) ||
+  Boolean(modeLabel) ||
+  Boolean(laneKeySafe) ||
+  Boolean(deltaShort) ||
+  rsSafe !== null ||
+  Boolean(policySafe) ||
+  Boolean(exprSafe) ||
+  itSafe !== null;
+  if (compact) {
+    if (!qInfo && !depthHeadSafe) {
+      return (
+        <div
+          className="iros-meta-badge"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '2px 6px',
+            borderRadius: 999,
+            border: '1px solid rgba(148, 163, 184, 0.35)',
+            background: 'linear-gradient(90deg, #f8fafc, #eef2ff)',
+            fontSize: 10,
+            color: '#64748b',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: '999px',
+              background: '#cbd5f5',
+            }}
+          />
+          <span style={{ opacity: 0.7 }}>Iros meta: -</span>
+        </div>
+      );
+    }
 
-  if (!hasAny) {
     return (
       <div
         className="iros-meta-badge"
         style={{
           display: 'inline-flex',
           alignItems: 'center',
-          gap: 8,
-          padding: compact ? '2px 6px' : '4px 10px',
+          gap: 6,
+          padding: '3px 8px',
           borderRadius: 999,
-          border: '1px solid rgba(148, 163, 184, 0.35)',
-          background: 'linear-gradient(90deg, #f8fafc, #eef2ff)',
-          fontSize: compact ? 10 : 11,
-          color: '#64748b',
+          border: '1px solid rgba(148, 163, 184, 0.45)',
+          background: 'linear-gradient(90deg, #f9fafb, #e5edff)',
+          fontSize: 10,
+          color: '#475569',
+          lineHeight: 1.4,
           whiteSpace: 'nowrap',
+          boxShadow: '0 1px 3px rgba(15, 23, 42, 0.08)',
         }}
       >
-        <span
-          style={{
-            width: compact ? 6 : 8,
-            height: compact ? 6 : 8,
-            borderRadius: '999px',
-            background: '#cbd5f5',
-          }}
-        />
-        <span style={{ opacity: 0.7 }}>Iros meta: -</span>
+        {qInfo && (
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+            title={qInfo.label}
+          >
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 999,
+                background: qInfo.color,
+                boxShadow: '0 0 0 2px rgba(148, 163, 184, 0.25)',
+              }}
+            />
+            <span style={{ fontWeight: 600, letterSpacing: 0.3 }}>{qCode}</span>
+          </div>
+        )}
+
+        {qInfo && depthHeadSafe && <Sep compact />}
+
+        {depthHeadSafe && (
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+            title={`depth band: ${depthHeadSafe}`}
+          >
+            <span style={{ fontWeight: 600 }}>{depthHeadSafe}</span>
+          </div>
+        )}
       </div>
     );
+  }
+  if (!hasAny) {
+    return null;
   }
 
   const hasMain = Boolean(qInfo) || Boolean(depthLabel) || Boolean(modeLabel);
