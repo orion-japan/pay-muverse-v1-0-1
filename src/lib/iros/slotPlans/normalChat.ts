@@ -443,49 +443,52 @@ function buildClarify(
       /(作った|作られた|介入)/.test(normalizedUserText)
     );
 
-  const shouldAnswerTruthStructure =
-    resolvedAskType === 'truth_structure' ||
-    (questionSuggestsTruthStructure && hasTruthStructureLexeme);
+    const isStructureQuestion = questionType === 'structure';
 
-  const shouldReanswerCapability =
-    resolvedAskType === 'capability_reask';
+    const shouldAnswerTruthStructure =
+      resolvedAskType === 'truth_structure' ||
+      isStructureQuestion ||
+      (questionSuggestsTruthStructure && hasTruthStructureLexeme);
 
-  const shiftIntentBase =
-    isT
-      ? 'implement_next_step'
-      : questionSuggestsPastReframe
-        ? 'answer_past_reframe'
+    const shouldReanswerCapability =
+      resolvedAskType === 'capability_reask';
+
+    const shiftIntentBase =
+      isT
+        ? 'implement_next_step'
+        : questionSuggestsPastReframe
+          ? 'answer_past_reframe'
+          : shouldReanswerCapability
+            ? 'reanswer_capability'
+            : directAnswerRequested
+              ? 'answer_in_one_shot'
+              : shouldAnswerTruthStructure
+                ? 'answer_truth_structure'
+                : 'answer_user_meaning';
+
+    const shiftHintBase =
+      isT
+        ? 'clarify_t_concretize_v1'
         : shouldReanswerCapability
-          ? 'reanswer_capability'
-          : directAnswerRequested
-            ? 'answer_in_one_shot'
-            : shouldAnswerTruthStructure
-              ? 'answer_truth_structure'
-              : 'answer_user_meaning';
+          ? 'repair_capability_reask_v1'
+          : shouldAnswerTruthStructure
+            ? 'clarify_truth_structure_v1'
+            : directAnswerRequested
+              ? 'decide_shift_v1'
+              : 'clarify_meaning_v1';
 
-  const shiftHintBase =
-    isT
-      ? 'clarify_t_concretize_v1'
-      : shouldReanswerCapability
-        ? 'repair_capability_reask_v1'
-        : shouldAnswerTruthStructure
-          ? 'clarify_truth_structure_v1'
-          : directAnswerRequested
-            ? 'decide_shift_v1'
-            : 'clarify_meaning_v1';
-
-  const shiftLineBase =
-    isT
-      ? null
-      : questionSuggestsPastReframe
-        ? 'いま必要なのは解決を急いで断定することではなく、戻ってきた未完了の型を見つけて、未完了テーマ・反復パターン・再配置の順で見直すこと'
-        : shouldReanswerCapability
-          ? '前に聞かれた問いを短く言い直してから、「何ができるのか」をできることの形で先に直答する。型の説明や感情の意味づけには広げず、1行目で機能を言い切り、そのあと必要最小限の具体例だけを添える'
-          : directAnswerRequested
-            ? '結論を先に短く言い切り、そのあと必要最小限の具体だけを添えて閉じる'
-            : shouldAnswerTruthStructure
-              ? '結論をぼかさず先に核を答え、そのあとで構造（論点分解・検証条件・どこまで言えるか）を短く添える'
-              : clarifyMeaning.line;
+    const shiftLineBase =
+      isT
+        ? null
+        : questionSuggestsPastReframe
+          ? 'いま必要なのは解決を急いで断定することではなく、戻ってきた未完了の型を見つけて、未完了テーマ・反復パターン・再配置の順で見直すこと'
+          : shouldReanswerCapability
+            ? '前に聞かれた問いを短く言い直してから、「何ができるのか」をできることの形で先に直答する。型の説明や感情の意味づけには広げず、1行目で機能を言い切り、そのあと必要最小限の具体例だけを添える'
+            : directAnswerRequested
+              ? '結論を先に短く言い切り、そのあと必要最小限の具体だけを添えて閉じる'
+              : shouldAnswerTruthStructure
+              ? '結論を先に1〜2文で言い切り、そのあとで「どこを変えると動くか」を2〜3点の短い箇条書き相当で示す。説明で広げすぎず、観測→芯→具体案の順で返す'
+                : clarifyMeaning.line;
               return [
                 obs,
                 {

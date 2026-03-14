@@ -148,7 +148,18 @@ export function deriveIrosGoal(args: {
       reason: '行動・仕事・実務の前進がテーマと判断',
     };
   }
-
+  // 4.5) 実用判断の問い → enableAction
+  // - 「どうしよう / どうする / どうしたら / どうすれば」などは、
+  //   stabilize ではなく「選び方・動き方」を返したい
+  if (/(どうしよう|どうする|どうしたら|どうすれば|どっちがいい|どちらがいい)/.test(text)) {
+    const targetDepth = chooseActionDepth(lastDepth);
+    return {
+      kind: 'enableAction',
+      targetDepth,
+      targetQ: lastQ,
+      reason: '実用的な判断・選択の問いと判断したため、安定化より行動選択を優先',
+    };
+  }
   // 5) 意図/意味 → reframeIntention
   if (containsIntentionWords(text)) {
     const targetDepth = chooseIntentionDepth(lastDepth);

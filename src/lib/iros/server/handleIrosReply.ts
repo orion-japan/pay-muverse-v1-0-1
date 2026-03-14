@@ -834,7 +834,9 @@ try {
       return;
     }
 
-    const goalKind = String(cp?.goalKind ?? metaAny.goalKind ?? 'stabilize').trim() || 'stabilize';
+    const replyGoalRaw = cp?.replyGoal ?? ex?.replyGoal ?? metaAny.replyGoal ?? null;
+    const replyGoalKind = typeof replyGoalRaw === 'string' ? replyGoalRaw.trim() : String(replyGoalRaw?.kind ?? '').trim();
+    const goalKind = String(cp?.goalKind ?? metaAny.goalKind ?? (replyGoalKind === 'permit_density' ? 'forward' : '')).trim() || null;
 
     const depthStage =
       typeof (cp?.depthStage ?? metaAny.depthStage) === 'string'
@@ -2339,27 +2341,6 @@ if (extra && typeof extra === 'object') {
       console.warn('[IROS/Reply] SpeechAct stamp failed', e);
     }
 
-    // ✅ writer入力用の “このターン確定データ” を meta.extra に刻む（route.ts が拾う）
-    try {
-      out.metaForSave = out.metaForSave ?? {};
-      (out.metaForSave as any).extra = (out.metaForSave as any).extra ?? {};
-      const exAny: any = (out.metaForSave as any).extra;
-
-  // history は巨大化し得るので “必要最小限” の形にして渡す
-  // ✅ 必ず末尾だけに trim（デフォルト6）
-  const maxMsgsRaw = Number(process.env.IROS_REPHRASE_LAST_TURNS_MAX);
-  const maxMsgs = maxMsgsRaw > 0 ? Math.floor(maxMsgsRaw) : 6;
-
-  const hs = Array.isArray(historyForTurn) ? (historyForTurn as any[]) : [];
-  const tail = hs.slice(-Math.max(2, maxMsgs));
-
-  exAny.historyForWriter = tail.map((m) => ({
-    role: m?.role,
-    content: m?.content ?? m?.text ?? '',
-  }));
-
-  exAny.rememberTextForIros = typeof rememberTextForIros === 'string' ? rememberTextForIros : null;
-  exAny.historyForWriterAt = new Date().toISOString();
 
 // =========================================================
 // ✅ FlowTape / FlowDigest（LLM-facing tiny continuity）
@@ -2394,6 +2375,47 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
     return /(?:^|[\s「『（(])入力なし(?:[\s」』）):,，。.!！?？]|$)|（入力なし）/.test(s);
   };
 
+  const stripAssistantTailQuestion = (text: string) => {
+    const t = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+    if (!t) return '';
+
+    const lines = t
+      .split('\n')
+      .map((ln) => String(ln ?? '').trim())
+      .filter((ln, i, arr) => !(ln === '' && (i === 0 || i === arr.length - 1)));
+
+    if (lines.length === 0) return '';
+
+    const isQuestionLikeLine = (ln: string) => {
+      const s = String(ln ?? '').trim();
+      if (!s) return false;
+      if (/[?？]\s*$/.test(s)) return true;
+      if (/(ですか|ますか|でしょうか|ませんか|ないですか|たいですか)\s*$/.test(s)) return true;
+      return false;
+    };
+
+    const last = String(lines[lines.length - 1] ?? '').trim();
+
+    if (!isQuestionLikeLine(last)) {
+      return lines.join('\n').trim();
+    }
+
+    if (lines.length >= 2) {
+      const prev = String(lines[lines.length - 2] ?? '').trim();
+
+      const prevLooksDanglingLead =
+        /(?:が|は|を|に|へ|と|で|から|まで|より|だけ|ほど|くらい|ぐらい|とか|など|なに|何|どれ|どの|どこ|誰|いつ)$/.test(prev) ||
+        /(?:いま|今|たとえば|例えば)[、,\s]*$/.test(prev) ||
+        /(?:どの身体反応が|どの感覚に|あなたは|いま、あなたは)$/.test(prev);
+
+      const dropCount = prevLooksDanglingLead ? 2 : 1;
+      const trimmed = lines.slice(0, -dropCount).join('\n').trim();
+      return trimmed;
+    }
+
+    return '';
+  };
+
   // historyForWriter は「履歴のみ」を保存する
   // - latest user の正本は writer 実行時の userText に一本化済み
   // - ここでは current user を再注入しない
@@ -2405,11 +2427,19 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
       .map((m) => {
         const role =
           m?.role === 'assistant' ? 'assistant' : m?.role === 'user' ? 'user' : null;
-        const content =
+
+        let content =
           typeof (m?.text ?? m?.content) === 'string'
             ? String(m.text ?? m.content).trim()
             : '';
+
+        if (role === 'assistant') {
+          content = stripAssistantTailQuestion(content);
+        }
+
         if (!role || !content) return null;
+        if (shouldDropAssistantHistory(role, content)) return null;
+
         return { role, content };
       })
       .filter(Boolean) as Array<{ role: 'user' | 'assistant'; content: string }>;
@@ -2425,9 +2455,6 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
     if (historyOnly.length === 0) return [];
 
     // ✅ 末尾から見て、同一 role 連続は「最新1件だけ」残す
-    // 例:
-    // assistant, assistant, assistant -> 最新assistantのみ採用
-    // user, user -> 最新userのみ採用
     const collapsedFromTail: Array<{ role: 'user' | 'assistant'; content: string }> = [];
     let lastRole: 'user' | 'assistant' | null = null;
 
@@ -2444,21 +2471,18 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
 
     if (collapsed.length === 0) return [];
 
-    // need=1 のときは最新1件だけ
     if (need <= 1) {
       return [collapsed[collapsed.length - 1]];
     }
 
-    // need>=2 のときは、できるだけ「直近の user/assistant ペア」を返す
     if (collapsed.length >= 2) {
       return collapsed.slice(-2);
     }
 
     return collapsed.slice(-1);
   };
-
   const hs = Array.isArray(historyForTurn) ? (historyForTurn as any[]) : [];
-  console.log('[IROS/HFW_SOURCE_BEFORE_PICK]', {
+  console.log('[IROS/HFW_RAW_SOURCE_BEFORE_PICK]', {
     len: Array.isArray(historyForTurn) ? historyForTurn.length : null,
     tail: Array.isArray(historyForTurn)
       ? historyForTurn.slice(-6).map((m: any) => ({
@@ -2477,8 +2501,50 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
     })
     .filter((m): m is { role: 'user' | 'assistant'; content: string } => Boolean(m));
 
+  const finalAssistantContent = (() => {
+    const ex = exAny as any;
+
+    const candidates = [
+      ex?.finalAssistantText,
+      ex?.resolvedText,
+      out?.assistantText,
+      (out as any)?.content,
+      ex?.persistedAssistantMessage?.text,
+    ];
+
+    for (const v of candidates) {
+      if (typeof v === 'string' && v.trim().length > 0) {
+        return v.trim();
+      }
+    }
+
+    return '';
+  })();
+
+  if (finalAssistantContent) {
+    const last = tail.length > 0 ? tail[tail.length - 1] : null;
+
+    if (last?.role === 'assistant') {
+      tail[tail.length - 1] = { role: 'assistant', content: finalAssistantContent };
+    } else {
+      tail.push({ role: 'assistant', content: finalAssistantContent });
+    }
+  }
+
   // 最大件数に再調整
   tail = tail.slice(-Math.max(1, maxMsgs));
+
+  console.log('[IROS/HFW_PICKED_TAIL]', {
+    len: Array.isArray(tail) ? tail.length : null,
+    items: Array.isArray(tail)
+      ? tail.map((m) => ({
+          role: m.role,
+          head: String(m.content ?? '').slice(0, 80),
+        }))
+      : null,
+    finalAssistantHead: finalAssistantContent.slice(0, 80),
+  });
+
 
   const slotPlanArr =
     Array.isArray((out.metaForSave as any)?.slotPlan)
@@ -2520,10 +2586,7 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
     // ※この下は「あなたの既存の coord 構築 & append/build」をそのまま残してOK
     // exAny.flowTape = appendFlowTape(prevTape, coord, ...);
     // exAny.flowDigest = buildFlowDigest(exAny.flowTape);
-  } catch (e) {
-    // Flow は非必須：失敗しても会話を止めない
-    console.warn('[IROS/FlowTape] stamp failed (non-fatal)', e);
-  }
+
 } catch (e) {
   console.warn('[IROS/Reply] failed to stamp history/remember for writer', e);
 }

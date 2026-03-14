@@ -41,7 +41,10 @@ function pickQuestionType(scores: QuestionTypeScoreMap): QuestionType {
   const top = sorted[0];
   const second = sorted[1];
 
-  if (!top || top[1] <= 0) return 'structure';
+  // ✅ 未ヒット時は structure に倒さない
+  // - 短い挨拶 / 入口文 / まだ問いになっていない文で
+  //   「主張の型」「構造確認」に誤爆するのを防ぐ
+  if (!top || top[1] <= 0) return 'meaning';
 
   // 完全拮抗は structure に寄せる
   if (second && second[1] > 0 && top[1] === second[1]) {

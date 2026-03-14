@@ -3170,7 +3170,7 @@ const injectCardUndetectableRule = (reason: string) => {
             sa: sa ?? null,
             confidence: confidence ?? null,
             skipped: true,
-            reason: 'FLOW_MOVED_TO_STATE_CUES_V3',
+            reason: 'FLOW_MOVED_TO_WRITER_INJECTED_PACK',
           });
         }
       }
@@ -3824,11 +3824,54 @@ userContext: {
   // ---------------------------------------------
   // exprMeta（表現の質）: 語彙/比喩/余白の「許可」
   // ---------------------------------------------
+  const ctxPack = (opts as any)?.userContext?.ctxPack ?? null;
+
   const exprMetaFromCtx =
     (opts as any)?.exprMeta ??
     (opts as any)?.userContext?.exprMeta ??
     (opts as any)?.userContext?.ctxPack?.exprMeta ??
     null;
+
+  const replyGoalRawForExpr = ctxPack?.replyGoal ?? null;
+  const replyGoalKindForExpr =
+    typeof replyGoalRawForExpr === 'string'
+      ? replyGoalRawForExpr.trim() || null
+      : typeof replyGoalRawForExpr === 'object' && replyGoalRawForExpr
+        ? String((replyGoalRawForExpr as any).kind ?? '').trim() || null
+        : null;
+
+  const goalKindForExpr =
+    (opts as any)?.goalKind ??
+    (opts as any)?.userContext?.goalKind ??
+    ctxPack?.goalKind ??
+    replyGoalKindForExpr ??
+    null;
+
+  const flowDeltaForExpr = String(
+    ctxPack?.flow?.delta ??
+      ctxPack?.flowDelta ??
+      ''
+  )
+    .trim()
+    .toUpperCase();
+
+  const returnStreakRawForExpr =
+    ctxPack?.flow?.returnStreak ??
+    ctxPack?.returnStreak ??
+    0;
+
+  const returnStreakForExpr =
+    typeof returnStreakRawForExpr === 'number'
+      ? returnStreakRawForExpr
+      : Number(returnStreakRawForExpr || 0);
+
+  const stingLevelForExpr = String(
+    ctxPack?.stingLevel ??
+      (opts as any)?.userContext?.stingLevel ??
+      ''
+  )
+    .trim()
+    .toUpperCase();
 
   // 最小の既定（まずは効かせる）
   // - lane契約（IDEA_BAND/T_CONCRETIZE）は systemPrompt 側に既にある前提。
@@ -3843,9 +3886,31 @@ userContext: {
     forbidden: ['結論：', '次の一手：', '箇条書き', 'チェックリスト'],
   };
 
-  const exprMeta = (exprMetaFromCtx && typeof exprMetaFromCtx === 'object')
-    ? { ...exprMetaDefault, ...(exprMetaFromCtx as any) }
-    : exprMetaDefault;
+  const exprMetaBase =
+    exprMetaFromCtx && typeof exprMetaFromCtx === 'object'
+      ? { ...exprMetaDefault, ...(exprMetaFromCtx as any) }
+      : exprMetaDefault;
+
+  // ✅ 今回の主修正
+  // stabilize / RETURN / 戻り連続 / sting HIGH では、
+  // 「短く安全に閉じる」より「具体を少し厚く返す」を優先する
+  // ※ 質問ルールは別レイヤなのでここでは触らない
+  const shouldOpenExprWide =
+    goalKindForExpr === 'stabilize' ||
+    flowDeltaForExpr === 'RETURN' ||
+    returnStreakForExpr >= 2 ||
+    stingLevelForExpr === 'HIGH';
+
+  const exprMeta = shouldOpenExprWide
+    ? {
+        ...exprMetaBase,
+        tone: 'high',
+        density: 'rich',
+        metaphor: 'lite',
+        brevity: 'long',
+        rhythm: 'breathe',
+      }
+    : exprMetaBase;
 
   const exprMetaText =
     [
@@ -3861,52 +3926,71 @@ userContext: {
       `- forbidden: ${(Array.isArray((exprMeta as any).forbidden) ? (exprMeta as any).forbidden : []).join(', ')}`,
     ].join('\n');
 
-// systemPrompt（先頭system） → allow（system2） → exprMeta（system3） → BLOCK_PLAN（system4）
-// ※ HistoryDigest v1 を system2 に入れてる場合は “その後ろ” になるが、ここは同一処理内では優先順位固定でOK
-// --- BLOCK_PLAN（system4）生成（設計図のみ / 例外演出のみ） ---
-const ctxPack = (opts as any)?.userContext?.ctxPack ?? null;
+  // systemPrompt（先頭system） → allow（system2） → exprMeta（system3） → BLOCK_PLAN（system4）
+  // ※ HistoryDigest v1 を system2 に入れてる場合は “その後ろ” になるが、ここは同一処理内では優先順位固定でOK
+  // --- BLOCK_PLAN（system4）生成（設計図のみ / 例外演出のみ） ---
 
-try {
-  console.log('[IROS/GOALKIND_BRIDGE][FULL_BLOCKPLAN_INPUT]', {
-    traceId: (debug as any)?.traceId ?? null,
-    conversationId: (debug as any)?.conversationId ?? null,
-    userCode: (debug as any)?.userCode ?? null,
+  try {
+    const replyGoalRaw = ctxPack?.replyGoal ?? null;
+    const replyGoalKindNormalized =
+      typeof replyGoalRaw === 'string'
+        ? replyGoalRaw.trim() || null
+        : typeof replyGoalRaw === 'object' && replyGoalRaw
+          ? String((replyGoalRaw as any).kind ?? '').trim() || null
+          : null;
 
-    goalKind_top: (opts as any)?.goalKind ?? null,
-    goalKind_userContext: (opts as any)?.userContext?.goalKind ?? null,
-    goalKind_ctxPack: ctxPack?.goalKind ?? null,
-    replyGoalKind_ctxPack: ctxPack?.replyGoal?.kind ?? null,
+    console.log('[IROS/GOALKIND_BRIDGE][FULL_BLOCKPLAN_INPUT]', {
+      traceId: (debug as any)?.traceId ?? null,
+      conversationId: (debug as any)?.conversationId ?? null,
+      userCode: (debug as any)?.userCode ?? null,
 
-    ctxPack_keys:
-      ctxPack && typeof ctxPack === 'object'
-        ? Object.keys(ctxPack)
-        : [],
-  });
-} catch {}
+      goalKind_top: (opts as any)?.goalKind ?? null,
+      goalKind_userContext: (opts as any)?.userContext?.goalKind ?? null,
+      goalKind_ctxPack: ctxPack?.goalKind ?? null,
+      replyGoal_ctxPack: replyGoalRaw,
+      replyGoalKind_ctxPack: replyGoalKindNormalized,
 
-const goalKind =
-  ctxPack?.replyGoal?.kind ?? // ✅ ctxPack 正本
-  ctxPack?.goalKind ??
-  (opts as any)?.userContext?.goalKind ??
-  (opts as any)?.goalKind ??
-  null;
+      ctxPack_keys:
+        ctxPack && typeof ctxPack === 'object'
+          ? Object.keys(ctxPack)
+          : [],
+    });
+  } catch {}
 
-// ✅ depth / IT は “構造メタ” から拾う（BlockPlan 自動条件に必要）
-const depthStage =
-  ctxPack?.depthStage ??
-  ctxPack?.unified?.depthStage ??
-  (opts as any)?.userContext?.depthStage ??
-  null;
+  const replyGoalRaw = ctxPack?.replyGoal ?? null;
+  const replyGoalKindNormalized =
+    typeof replyGoalRaw === 'string'
+      ? replyGoalRaw.trim() || null
+      : typeof replyGoalRaw === 'object' && replyGoalRaw
+        ? String((replyGoalRaw as any).kind ?? '').trim() || null
+        : null;
 
-// IT_TRIGGER（true/false）を最小で拾う（存在しない場合は false）
-const itTriggered = Boolean(
-  ctxPack?.itTriggered ??
-    ctxPack?.it_triggered ??
-    ctxPack?.qCounts?.it_triggered_true ??
-    ctxPack?.qCounts?.it_triggered ??
-    false
-);
+  const structuralGoalKind =
+    (opts as any)?.goalKind ??
+    (opts as any)?.userContext?.goalKind ??
+    ctxPack?.goalKind ??
+    null;
 
+  const goalKind =
+    structuralGoalKind ??
+    replyGoalKindNormalized ??
+    null;
+
+  // ✅ depth / IT は “構造メタ” から拾う（BlockPlan 自動条件に必要）
+  const depthStage =
+    ctxPack?.depthStage ??
+    ctxPack?.unified?.depthStage ??
+    (opts as any)?.userContext?.depthStage ??
+    null;
+
+  // IT_TRIGGER（true/false）を最小で拾う（存在しない場合は false）
+  const itTriggered = Boolean(
+    ctxPack?.itTriggered ??
+      ctxPack?.it_triggered ??
+      ctxPack?.qCounts?.it_triggered_true ??
+      ctxPack?.qCounts?.it_triggered ??
+      false
+  );
   // ✅ explicitTrigger は「今回の入力（opts.userText）」を正本にする
   // - messages は、history/bridgeの都合で “別ターンの短文” が最後の user に紛れることがある
   // - その場合「続けてください」等が trigger 判定を汚染するので、opts を優先し fallback としてのみ messages を使う
@@ -4073,25 +4157,8 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
       '- 問いかけをする場合は「最大1つ」まで。不要なら問いを置かずに進めてよい。',
     ].join('\n');
 
-    // ✅ EXPR_META（directiveV1 は system に混入しない）
-    let exprMetaForSystem = '';
-    if (exprMetaText && String(exprMetaText).trim().length > 0) {
-      const em: any = exprMeta && typeof exprMeta === 'object' ? exprMeta : {};
-      const directiveV1_on = Boolean(em.directiveV1_on);
-      const directiveV1 = String(em.directiveV1 ?? '').trim();
-      const hasDirectiveV1 = !!(directiveV1_on && directiveV1.length > 0);
-
-      exprMetaForSystem = String(exprMetaText);
-
-      // 追跡用（directive が存在している事実だけ見える化）
-      try {
-        console.log('[IROS/rephraseEngine][EXPR_META]', {
-          injected: true,
-          hasDirectiveV1,
-          directiveInSystem: false,
-        });
-      } catch {}
-    }
+    // ✅ EXPR_META は一旦 system から外す（token削減のため）
+    const exprMetaForSystem = '';
 
     // ✅ allow（任意）
     const allowForSystem = allowText && String(allowText).trim().length > 0 ? String(allowText) : '';
@@ -4541,7 +4608,8 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
 // ✅ micro-like は rephrase LLM を呼ばずに即 return（コスト/遅延を消す）
 {
   const seedDraftTrim = String(seedDraft ?? '').trim();
-  const userLenTiny = String(userText ?? '').trim().length <= 2;
+  const userTextTrim = String(userText ?? '').trim();
+  const userLenTiny = userTextTrim.length <= 2;
   const seedLenTiny = seedDraftTrim.length > 0 && seedDraftTrim.length <= 40;
 
   // inputKind が 'micro' / 'greeting' を持っている場合もここで吸収
@@ -4550,32 +4618,66 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
     inputKind === 'greeting' ||
     (userLenTiny && seedLenTiny);
 
+  const stripInternalAndHintLines = (src: string): string => {
+    return String(src ?? '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .filter((line) => !line.startsWith('@'))
+      .filter((line) => !/^(続けてください|つづけてください|続けて|つづけて)$/u.test(line))
+      .join('\n')
+      .trim();
+  };
+
+  const isEchoLike = (a: string, b: string): boolean => {
+    const aa = String(a ?? '').trim();
+    const bb = String(b ?? '').trim();
+    if (!aa || !bb) return false;
+    return aa === bb;
+  };
+
   if (microLikeEarly) {
-    // この関数の引数 `extracted` をそのまま slots として扱う（slots 変数に依存しない）
     const fixed: any = { ...(extracted as any) };
 
-    // seedDraft を OBS に採用（短文で前に進む）
+    const naturalSeed = stripInternalAndHintLines(seedDraftTrim);
+
+    // ✅ greeting は userText を返さない
+    // ✅ micro も echo を避ける
+    const visibleText = (() => {
+      if (inputKind === 'greeting') {
+        return 'こんにちは。';
+      }
+
+      if (naturalSeed && !isEchoLike(naturalSeed, userTextTrim)) {
+        return naturalSeed;
+      }
+
+      if (inputKind === 'micro') {
+        return '了解です。';
+      }
+
+      return 'こんにちは。';
+    })();
+
     fixed.OBS = {
       ...(fixed.OBS ?? {}),
       key: 'OBS',
-      content: seedDraftTrim,
-      head: seedDraftTrim,
+      content: visibleText,
+      head: visibleText,
     };
 
-    // scaffoldActive はこの時点では未確定なので、ここでは false 固定でOK（あとで必要なら再設計）
     return {
       ok: true,
       slots: fixed,
       meta: {
         inKeys: Object.keys((extracted as any) ?? {}),
         outKeys: ['OBS'],
-        rawLen: seedDraftTrim.length,
-        rawHead: seedDraftTrim.slice(0, 200),
+        rawLen: visibleText.length,
+        rawHead: visibleText.slice(0, 200),
         note: 'MICRO_LIKE_SKIP_REPHRASE',
         extra: {
           scaffoldActive: false,
-          // ✅ renderGateway が期待してるのは「文字列ブロック配列」
-          rephraseBlocks: [seedDraftTrim],
+          rephraseBlocks: [visibleText],
         },
       },
     } as any;
@@ -4864,7 +4966,6 @@ raw = await (async () => {
     if (topicLine) lines.push(`TOPIC_LINE: ${safeHead(String(topicLine), 200)}`);
     if (keywords.length > 0) lines.push(`KEYWORDS: ${keywords.map((k) => String(k)).join(', ')}`);
     if (topicRaw) lines.push(`TOPIC_RAW: ${topicRaw}`);
-    if (cardsBits) lines.push(`CARDS: ${cardsBits}`);
 
     if (questionDomainForWriter) lines.push(`QUESTION_DOMAIN: ${safeHead(questionDomainForWriter, 80)}`);
     if (questionTypeForWriter) lines.push(`QUESTION_TYPE: ${safeHead(questionTypeForWriter, 80)}`);
@@ -4886,96 +4987,90 @@ raw = await (async () => {
     return lines.join('\n');
   })();
 
-  const stateCuesMsg =
-    alreadyHasStateCues
-      ? null
-      : ({
-          role: 'assistant',
-          content: stateCuesText,
-        } as any);
+  const stateCuesMsg = null;
 
-  // 注入位置：system の直後（system が複数あるなら最後の system の直後）
-  const sysLastIdx = (() => {
-    let last = -1;
-    for (let i = 0; i < baseMsgs.length; i++) {
-      if (String(baseMsgs[i]?.role ?? '') === 'system') last = i;
-    }
-    return last;
-  })();
+  const messagesForWriter = baseMsgs;
 
-  const messagesForWriter =
-    stateCuesMsg
-      ? (() => {
-          if (sysLastIdx >= 0) {
-            return [...baseMsgs.slice(0, sysLastIdx + 1), stateCuesMsg, ...baseMsgs.slice(sysLastIdx + 1)];
-          }
-          // system が無いパスでも落とさない（先頭に入れる）
-          return [stateCuesMsg, ...baseMsgs];
-        })()
-      : baseMsgs;
-      console.log('[IROS/STATE_CUES][inject]', {
-        traceId: debug.traceId ?? null,
-        baseLen: baseMsgs.length,
-        finalLen: messagesForWriter.length,
-        injected: !alreadyHasStateCues,
-        hasStateCues: messagesForWriter.some((m) => {
-          const c = String(m?.content ?? '');
-          return c.includes('STATE_CUES (DO NOT OUTPUT)') || c.includes('STATE_CUES_V3 (DO NOT OUTPUT)');
-        }),
-        stateCuesHead: safeHead(
-          String(
-            (
-              messagesForWriter.find((m) => {
-                const c = String(m?.content ?? '');
-                return c.includes('STATE_CUES (DO NOT OUTPUT)') || c.includes('STATE_CUES_V3 (DO NOT OUTPUT)');
-              }) as any
-            )?.content ?? ''
-          ),
-          1600
-        ),
+  console.log('[IROS/STATE_CUES][inject]', {
+    traceId: debug.traceId ?? null,
+    baseLen: baseMsgs.length,
+    finalLen: messagesForWriter.length,
+    injected: false,
+    hasStateCues: messagesForWriter.some((m) => {
+      const c = String(m?.content ?? '');
+      return c.includes('STATE_CUES (DO NOT OUTPUT)') || c.includes('STATE_CUES_V3 (DO NOT OUTPUT)');
+    }),
+    stateCuesHead: safeHead(
+      String(
+        (
+          messagesForWriter.find((m) => {
+            const c = String(m?.content ?? '');
+            return c.includes('STATE_CUES (DO NOT OUTPUT)') || c.includes('STATE_CUES_V3 (DO NOT OUTPUT)');
+          }) as any
+        )?.content ?? ''
+      ),
+      1600
+    ),
+    digest_has: !!historyDigestV1,
+    digest_kind: historyDigestV1 == null ? null : Array.isArray(historyDigestV1) ? 'array' : typeof historyDigestV1,
+    digest_topic: safeHead(String((historyDigestV1 as any)?.topic?.situationTopic ?? ''), 120),
+    digest_summary: safeHead(String((historyDigestV1 as any)?.topic?.situationSummary ?? ''), 160),
+    digest_last_user_core: safeHead(String((historyDigestV1 as any)?.continuity?.last_user_core ?? ''), 200),
+    digest_last_assistant_core: safeHead(String((historyDigestV1 as any)?.continuity?.last_assistant_core ?? ''), 200),
+    digest_repeat_signal: (historyDigestV1 as any)?.continuity?.repeat_signal ?? null,
+  });
 
-        digest_has: Boolean(historyDigestV1),
-        digest_kind: typeof historyDigestV1,
-        digest_topic: safeHead(String((historyDigestV1 as any)?.topic?.situationTopic ?? ''), 120),
-        digest_summary: safeHead(String((historyDigestV1 as any)?.topic?.situationSummary ?? ''), 160),
-        digest_last_user_core: safeHead(String((historyDigestV1 as any)?.continuity?.last_user_core ?? ''), 200),
-        digest_last_assistant_core: safeHead(String((historyDigestV1 as any)?.continuity?.last_assistant_core ?? ''), 200),
-        digest_repeat_signal: (historyDigestV1 as any)?.continuity?.repeat_signal ?? null,
-      });
-      const __writerAssistantCandidates = messagesForWriter.filter(
-        (m) => m?.role === 'assistant' && typeof m?.content === 'string'
+  const __writerAssistantCandidates = messagesForWriter.filter(
+    (m) => m?.role === 'assistant' && typeof m?.content === 'string'
+  );
+
+  const __writerInjectedPackAssistant =
+    __writerAssistantCandidates.find((m) => {
+      const c = String(m?.content ?? '');
+      return (
+        /COORD\s*\(DO NOT OUTPUT\):/i.test(c) ||
+        /MIRROR_FLOW_SEED_V1\b/i.test(c) ||
+        /CARD_PACKET\s*\(DO NOT OUTPUT\):/i.test(c) ||
+        /CARDS_LITE_SEED\s*\(DO NOT OUTPUT\):/i.test(c) ||
+        /FLOW_CONTEXT\s*\(DO NOT OUTPUT\):/i.test(c)
       );
-      const __writerStateAssistant =
-        __writerAssistantCandidates.find((m) => {
-          const c = String(m?.content ?? '');
-          return (
-            __patterns.mirror.test(c) ||
-            __patterns.card.test(c) ||
-            __patterns.lite.test(c) ||
-            c.includes('STATE_CUES (DO NOT OUTPUT)') ||
-            c.includes('STATE_CUES_V3 (DO NOT OUTPUT)')
-          );
-        }) ?? null;
+    }) ?? null;
 
-      const __writerInjectedPack = String(__writerStateAssistant?.content ?? '');
+  const __writerStateAssistant =
+    __writerAssistantCandidates.find((m) => {
+      const c = String(m?.content ?? '');
+      return (
+        c.includes('STATE_CUES (DO NOT OUTPUT)') ||
+        c.includes('STATE_CUES_V3 (DO NOT OUTPUT)')
+      );
+    }) ?? null;
 
-      const __writerAssistantLast =
-        __writerAssistantCandidates.length > 0
-          ? __writerAssistantCandidates[__writerAssistantCandidates.length - 1]
-          : null;
+  const __writerAssistantLast =
+    __writerAssistantCandidates.length > 0
+      ? __writerAssistantCandidates[__writerAssistantCandidates.length - 1]
+      : null;
 
-      console.log('[IROS/rephraseEngine][STATE_SNAPSHOT_FOR_WRITER]', {
-        traceId: debug.traceId ?? null,
-        conversationId: debug.conversationId ?? null,
-        userCode: debug.userCode ?? null,
-        messagesLen: messagesForWriter.length,
-        roles: messagesForWriter.map((m) => m?.role),
-        hasMirrorFlowSeed: __patterns.mirror.test(__writerInjectedPack),
-        hasCardPacket: __patterns.card.test(__writerInjectedPack),
-        hasCardsLite: __patterns.lite.test(__writerInjectedPack),
-        stateAssistantHead: __writerInjectedPack.slice(0, 800),
-        lastAssistantHead: String(__writerAssistantLast?.content ?? '').slice(0, 300),
-      });
+  const __writerInjectedPack = __writerInjectedPackAssistant
+    ? String(__writerInjectedPackAssistant.content ?? '')
+    : '';
+
+  const __writerStateHead = __writerStateAssistant
+    ? String(__writerStateAssistant.content ?? '').slice(0, 800)
+    : '';
+
+  console.log('[IROS/rephraseEngine][STATE_SNAPSHOT_FOR_WRITER]', {
+    traceId: debug.traceId ?? null,
+    conversationId: debug.conversationId ?? null,
+    userCode: debug.userCode ?? null,
+    messagesLen: messagesForWriter.length,
+    roles: messagesForWriter.map((m) => m?.role),
+    hasMirrorFlowSeed: __patterns.mirror.test(__writerInjectedPack),
+    hasCardPacket: __patterns.card.test(__writerInjectedPack),
+    hasCardsLite: __patterns.lite.test(__writerInjectedPack),
+    injectedPackHead: __writerInjectedPack.slice(0, 800),
+    stateAssistantHead: __writerStateHead,
+    lastAssistantHead: String(__writerAssistantLast?.content ?? '').slice(0, 300),
+  });
       return await callWriterLLM({
         model: opts.model ?? 'gpt-5',
         temperature: opts.temperature ?? 0.7,
@@ -5148,75 +5243,48 @@ userContext: {
         internalPack.includes('質問はしない。') ||
         internalPack.includes('文末を「?」で終えない。'));
 
-        const askBackAllowedRaw =
-        (opts?.userContext as any)?.question?.outputPolicy?.askBackAllowed ??
-        (opts?.userContext as any)?.meta?.extra?.question?.outputPolicy?.askBackAllowed ??
-        null;
+    const askBackAllowedRaw =
+      (opts?.userContext as any)?.question?.outputPolicy?.askBackAllowed ??
+      (opts?.userContext as any)?.meta?.extra?.question?.outputPolicy?.askBackAllowed ??
+      null;
 
-      const forceNoQuestionsByPolicy = askBackAllowedRaw === false;
+    const forceNoQuestionsByPolicy = askBackAllowedRaw === false;
 
-      const noQuestions =
-        forceNoQuestionsByGoal ||
-        forceNoQuestionsByPack ||
-        forceNoQuestionsByPolicy;
+    const noQuestions =
+      forceNoQuestionsByGoal ||
+      forceNoQuestionsByPack ||
+      forceNoQuestionsByPolicy;
 
-    if (!noQuestions) return t;
     const lines = t
       .split('\n')
       .map((ln) => String(ln ?? '').replace(/\s+$/g, ''))
       .filter((ln, idx, arr) => !(idx === arr.length - 1 && ln.trim() === ''));
 
-    if (!lines.length) return t;
-
-    const isQuestionLikeLine = (ln: string) => {
-      const s = String(ln ?? '').trim();
-      if (!s) return false;
-
-      // 末尾が ? / ？ で終わる
-      if (/[?？]\s*$/.test(s)) return true;
-
-      // ? の後ろに補足カッコが付いて終わる
-      // 例: 〜固まりやすい？（探す/応募/面談）
-      if (/[?？]\s*[)）】〕］〉》」』】].*\s*$/.test(s)) return true;
-      if (/[?？]\s*[（(][\s\S]*[)）]\s*$/.test(s)) return true;
-
-      // 文末疑問表現
-      if (/(ですか|ますか|でしょうか|どうですか|どれですか|何ですか|なんですか)\s*$/.test(s)) return true;
-
-      return false;
-    };
-
-    const softenQuestionToStatement = (ln: string) => {
-      let s = String(ln ?? '').trim();
-      if (!s) return s;
-
-      s = s.replace(/[?？]\s*$/g, '');
-      s = s.replace(/(ですか|ますか|でしょうか)\s*$/g, 'です。');
-      s = s.replace(/(何ですか|なんですか)\s*$/g, 'です。');
-      s = s.replace(/(どうですか)\s*$/g, 'です。');
-      s = s.replace(/(どれですか)\s*$/g, 'です。');
-
-      if (!/[。.!！]$/.test(s)) s += '。';
-      return s;
-    };
-
     const last = lines[lines.length - 1] ?? '';
 
-    // 末尾が質問なら、複数行のときは末尾行ごと落とす
-    if (isQuestionLikeLine(last)) {
-      if (lines.length >= 2) {
-        const trimmed = lines.slice(0, -1).join('\n').trim();
-        if (trimmed) return trimmed;
-      }
+    console.log('[IROS/rephraseEngine][SANITIZE_NO_QUESTIONS_BYPASS]', {
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      noQuestions,
+      askBackAllowedRaw,
+      goalKindNow,
+      forceNoQuestionsByPack,
+      linesLen: lines.length,
+      last,
+      reason: 'QUESTION_TEXT_PRESERVED__NO_TAIL_REWRITE',
+      beforeLen: t.length,
+      afterLen: t.length,
+      changed: false,
+    });
 
-      // 1行しかない場合は、質問を言い切りに変換して残す
-      return softenQuestionToStatement(last);
-    }
-
-    // 末尾以外に ? が残っていても、noQuestions 時は句点化して弱める
-    const normalized = lines.map((ln) => ln.replace(/[?？]\s*$/g, '。')).join('\n').trim();
-    return normalized;
+    // 方針:
+    // - 質問を render/sanitize で消さない
+    // - 提案文末尾を壊さないことを最優先
+    // - 本関数では本文を書き換えない
+    return t;
   };
+
   let candidate = makeCandidate(rawGuarded, maxLines, renderEngine);
 
   if (!candidate) {
@@ -5235,6 +5303,7 @@ userContext: {
       candidate = makeCandidate(restoredAfterClamp, maxLines, renderEngine);
     }
   }
+
   console.log('[IROS/rephraseEngine][CANDIDATE_LEN_TRACE]', {
     traceId: debug.traceId,
     conversationId: debug.conversationId,
@@ -5245,7 +5314,6 @@ userContext: {
     candidateAfterMakeHead: safeHead(String(candidate ?? ''), 160),
     maxLines,
   });
-
   const naturalizeOpeningIfOverread = (text: string): string => {
     const raw = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
     if (!raw) return raw;
@@ -5551,9 +5619,6 @@ userContext: {
         if (/(ですか|ますか|でしょうか|でしたか|ましたか|ませんか|だろうか|かな|かね)([。．…]*\s*)$/.test(t)) {
           return true;
         }
-        if (/(何|なに|どれ|どちら|いつ|どこ|だれ|誰|なぜ|何故|どう|どの|いくつ|幾つ|どんな|どこで|どこに|どこから|どこまで)/.test(t)) {
-          return true;
-        }
         return false;
       };
 
@@ -5561,13 +5626,13 @@ userContext: {
         const t = String(line ?? '').trim();
         if (!t) return true;
 
+        // ぶら下がり扱いは「質問へ直接つながる未完了」だけに限定する
         return (
           /(?:それとも|それともまだ|それともまた)\s*$/u.test(t) ||
           /(?:寄り|感じ|ほう|方)\s*それとも\s*$/u.test(t) ||
-          /(?:それとも|寄り|どっち|どちら|感じ|ほう|方)\s*$/u.test(t) ||
           /(?:のは|のは、|のは。|って|って、|とは|とは、)\s*$/u.test(t) ||
           /(?:今日の|今回の|いまの|今の).*(?:のは|のは、)\s*$/u.test(t) ||
-          /(?:や|とか|など|で|を|に|が|は|も|の|と)\s*$/u.test(t)
+          /(?:どれ|どの|どっち|どちら|どこ|何|なに|誰|いつ)\s*$/u.test(t)
         );
       };
 
@@ -5576,14 +5641,14 @@ userContext: {
         if (!t) return '';
 
         t = t.replace(/(?:それとも|それともまだ|それともまた)\s*$/u, '').trim();
-        t = t.replace(/(?:寄り|感じ|ほう|方)\s*それとも\s*$/u, '$1').trim();
         t = t.replace(/(?:のは、|のは。|のは|って、|って|とは、|とは)\s*$/u, '').trim();
-        t = t.replace(/(?:や|とか|など|で|を|に|が|は|も|の|と)\s*$/u, '').trim();
+        t = t.replace(/(?:どれ|どの|どっち|どちら|どこ|何|なに|誰|いつ)\s*$/u, '').trim();
 
         return t;
       };
 
       let keptQuestions = 0;
+      let removedQuestions = 0;
       const sanitized: string[] = [];
 
       for (const line of lines) {
@@ -5591,26 +5656,37 @@ userContext: {
           if (keptQuestions < qMax) {
             keptQuestions += 1;
             sanitized.push(line);
+          } else {
+            removedQuestions += 1;
           }
           continue;
         }
 
-        const trimmed = trimDanglingTail(line);
-
-        if (qMax === 0 && isDanglingTail(trimmed)) {
-          continue;
-        }
-
-        sanitized.push(trimmed || line);
+        sanitized.push(line);
       }
 
-      while (sanitized.length > 0) {
-        const tail = String(sanitized[sanitized.length - 1] ?? '').trim();
-        if (!tail || (qMax === 0 && isDanglingTail(tail))) {
-          sanitized.pop();
-          continue;
+      // qMax=0 で、実際に質問行を落とした時だけ末尾のぶら下がりを軽く整える
+      if (qMax === 0 && removedQuestions > 0) {
+        while (sanitized.length > 0) {
+          const tail = String(sanitized[sanitized.length - 1] ?? '').trim();
+          if (!tail) {
+            sanitized.pop();
+            continue;
+          }
+
+          // 長い説明文や提案文までは巻き込まない
+          if (tail.length <= 18 && isDanglingTail(tail)) {
+            const trimmedTail = trimDanglingTail(tail);
+            if (trimmedTail) {
+              sanitized[sanitized.length - 1] = trimmedTail;
+            } else {
+              sanitized.pop();
+            }
+            continue;
+          }
+
+          break;
         }
-        break;
       }
 
       return sanitized.join('\n\n').trim();
@@ -5621,34 +5697,29 @@ userContext: {
       text: candidateText0,
       rules: minimalWriterRules,
     });
+
     if (!wg.ok && wg.reason === 'WG:Q_OVER') {
       const qMax =
         typeof minimalWriterRules?.questions_max === 'number'
           ? minimalWriterRules.questions_max
           : 0;
 
-      const sanitizedCandidate = sanitizeQuestionOverflow(candidateText0, qMax);
+      console.warn('[IROS/WRITER_GUARD][BYPASS_Q_OVER_KEEP_QUESTION]', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        qMax,
+        candidateHead: safeHead(candidateText0, 160),
+        reason: 'KEEP_QUESTION_AS_IS__DO_NOT_SANITIZE',
+      });
 
-      if (sanitizedCandidate && sanitizedCandidate !== candidateText0) {
-        const wg2 = checkWriterGuardsMinimal({
-          text: sanitizedCandidate,
-          rules: minimalWriterRules,
-        });
-
-        if (wg2.ok) {
-          console.warn('[IROS/WRITER_GUARD][SANITIZED_Q_OVER]', {
-            traceId: debug.traceId,
-            conversationId: debug.conversationId,
-            userCode: debug.userCode,
-            beforeHead: safeHead(candidateText0, 160),
-            afterHead: safeHead(sanitizedCandidate, 160),
-            qMax,
-          });
-
-          candidate = sanitizedCandidate;
-          wg = { ok: true };
-        }
-      }
+      // 方針:
+      // - WG:Q_OVER でも本文はそのまま保持する
+      // - 質問文は削除・言い換えしない
+      // - sanitizeNoQuestions でも末尾質問は保存する
+      // - seed fallback に落とさず、そのまま採用する
+      // - つまり「Q_OVER を直す」のではなく「Q_OVER を許容する」
+      wg = { ok: true };
 
       // capability_reask は seed fallback に落とさず、本文側を救済する
       if (!wg.ok) {
@@ -6214,22 +6285,58 @@ userContext: {
 
       const kept: string[] = [];
 
-      for (const line of lines) {
-        if (!line) continue;
+      const isQuestionLikeLine = (line: string): boolean => {
+        const t = String(line ?? '').trim();
+        if (!t) return false;
 
-        // 1) 明示的な質問文は落とす
-        if (/[?？]/u.test(line)) continue;
+        // 1) 明示的な質問文
+        if (/[?？]/u.test(t)) return true;
 
-        // 2) stabilize / distance 系では問いかけ文も落とす
+        // 2) 質問で終わりやすい語尾
+        const tail = t.replace(/[。！!]+$/u, '').trim();
         if (
           /(?:どれ|なに|何|どう|どこ|どんな|どの|ありますか|でしょうか|近い|戻る)$/u.test(
-            line.replace(/[。！!]+$/u, '').trim()
+            tail,
           )
         ) {
-          continue;
+          return true;
         }
 
+        return false;
+      };
+
+      const isDanglingQuestionLead = (line: string): boolean => {
+        const t = String(line ?? '')
+          .replace(/[。！!]+$/u, '')
+          .trim();
+
+        if (!t) return false;
+
+        // 問いの導入句だけで止まっている末尾を落とす
+        // 例:
+        // - いま得たい体験って、
+        // - その体験は、
+        // - こうするなら、
+        // - 〜について、
+        // - 〜で、
+        if (
+          /(?:って、|とは、|は、|なら、|すると、|するとしたら、|について、|で、)$/u.test(t)
+        ) {
+          return true;
+        }
+
+        return false;
+      };
+
+      for (const line of lines) {
+        if (!line) continue;
+        if (isQuestionLikeLine(line)) continue;
         kept.push(line);
+      }
+
+      // 3) 質問導入句だけで終わる末尾も落とす
+      while (kept.length > 0 && isDanglingQuestionLead(kept[kept.length - 1])) {
+        kept.pop();
       }
 
       // 全部落ちたら、元文の先頭1行だけを安全に返す
@@ -6246,6 +6353,7 @@ userContext: {
           .replace(/[?？].*$/u, '')
           .replace(/（[^）]*$/u, '')
           .replace(/\([^)]*$/u, '')
+          .replace(/(?:って、|とは、|は、|なら、|すると、|するとしたら、|について、|で、)$/u, '')
           .trim();
       }
 

@@ -73,11 +73,15 @@ export async function loadConversationHistory(
     const rows = (data ?? []).slice().reverse();
 
     const pickTextFromRow = (m: any): string => {
-      // 1) content が文字列なら最優先
-      if (typeof m?.content === 'string' && m.content.trim().length > 0) return m.content.trim();
+      // 1) text が文字列なら最優先
+      if (typeof m?.text === 'string' && m.text.trim().length > 0) {
+        return m.text.trim();
+      }
 
-      // 2) text が文字列なら採用
-      if (typeof m?.text === 'string' && m.text.trim().length > 0) return m.text.trim();
+      // 2) content が文字列なら次に採用
+      if (typeof m?.content === 'string' && m.content.trim().length > 0) {
+        return m.content.trim();
+      }
 
       // 3) content が object の場合：安全に “中の文字列候補” だけ拾う（stringify 禁止）
       const c = m?.content;

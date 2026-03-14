@@ -1817,6 +1817,11 @@ try {
       userCode,
       traceId,
       userText,
+      goalKind:
+        meta?.targetKind ??
+        meta?.target_kind ??
+        meta?.extra?.ctxPack?.goalKind ??
+        null,
       qCode: qCodeForLLM,
       depthStage: depthForLLM,
       inputKind: inputKindForLLM,

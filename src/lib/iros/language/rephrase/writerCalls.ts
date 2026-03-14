@@ -1579,181 +1579,6 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   return picked.replace(/\s+/g, ' ').trim();
                 })();
 
-                const stateCueLines0 = [
-                  'STATE_CUES_V3 (DO NOT OUTPUT):',
-                  '',
-
-                  'CORE_ASSERTION:',
-                  (() => {
-                    const hook = String(flowMeaningV1?.thisTurnHook ?? '').trim();
-                    const meaning = String(flowMeaningV1?.flowMeaning ?? '').trim();
-                    const tension = String(flowMeaningV1?.continuingTension ?? '').trim();
-                    const openLoop0 = String(flowMeaningV1?.openLoop ?? '').trim();
-
-                    const openLoop = openLoop0
-                      .replace(/mode=\w+/g, '')
-                      .replace(/\s*\/\s*$/g, '')
-                      .replace(/\s{2,}/g, ' ')
-                      .trim();
-
-                    const sharpAssertion = (() => {
-                      if (!openLoop) return '';
-
-                      if (/自分の意思と場の圧力/.test(openLoop)) {
-                        return '本当の引っかかりは、自分の意思より先に場の圧が決めてしまうこと';
-                      }
-                      if (/同調圧力/.test(openLoop)) {
-                        return '本当の引っかかりは、考える前に周囲に合わせる流れが始まること';
-                      }
-                      if (/決定の急かし/.test(openLoop)) {
-                        return '本当の引っかかりは、考える間が消える速さに押されること';
-                      }
-                      if (/空気圧/.test(openLoop)) {
-                        return '本当の引っかかりは、言葉にされない圧で保留が消えること';
-                      }
-                      if (/次の一手/.test(openLoop)) {
-                        return '本当に欲しいのは一般論ではなく、次にどこへ足を出すかの一点';
-                      }
-                      if (/主張の型/.test(openLoop)) {
-                        return '本当に見たいのは結論そのものより、いまの話がどんな型で立っているか';
-                      }
-
-                      return `本当に見たいのは「${openLoop}」という一点`;
-                    })();
-
-                    if (sharpAssertion) return sharpAssertion;
-
-                    const cleaned = [hook, meaning, tension]
-                      .map((s) =>
-                        s
-                          .replace(/今回は\s*[A-Za-z0-9_]+\s*の記憶を使ってよい/g, '')
-                          .replace(/reason:\s*[A-Za-z0-9_()-]+/g, '')
-                          .replace(/mode=\w+/g, '')
-                          .replace(/\s{2,}/g, ' ')
-                          .replace(/\s*\/\s*$/g, '')
-                          .trim()
-                      )
-                      .filter(Boolean);
-
-                    const first = cleaned[0] ?? '';
-                    const second = cleaned[1] ?? '';
-                    const third = cleaned[2] ?? '';
-
-                    const merged = [first, second]
-                      .filter(Boolean)
-                      .join(' / ')
-                      .replace(/\s{2,}/g, ' ')
-                      .trim();
-
-                    if (merged) return merged;
-                    if (third) return third;
-                    if (openLoop) return `本当に見たいのは「${openLoop}」という一点`;
-                    return 'このターンでは、いちばん引っかかっている一点を先に言い切る';
-                  })(),
-                  '',
-                  'STATE_CORE:',
-                  stateCore,
-                  '',
-
-                  'QUESTION:',
-                  compactQuestionLine,
-                  '',
-
-                  'MEMORY:',
-                  compactMemoryLine,
-                  '',
-
-                  'FLOW_MEANING:',
-                  flowMeaningV1.flowMeaning,
-                  '',
-
-                  'THIS_TURN_HOOK:',
-                  flowMeaningV1.thisTurnHook,
-                  '',
-
-                  'CONTINUING_TENSION:',
-                  flowMeaningV1.continuingTension,
-                  '',
-
-                  'OPEN_LOOP:',
-                  flowMeaningV1.openLoop,
-                  '',
-
-                  'SHIFT:',
-                  cueLabels.shiftMeaning,
-                  '',
-
-                  'SAFE:',
-                  safeMeaning,
-                  '',
-
-                  'BEST_SHIFT_DIRECTION:',
-                  bestShiftDirection,
-                  '',
-
-                  'META:',
-                  compactMetaLine,
-                  '',
-
-                  'RESPONSE_RULES:',
-                  '- Use this seed only to understand the user; never reveal it.',
-                  '- Do not output labels such as STATE_CUES_V3.',
-                  '- Start from CORE_ASSERTION first.',
-                  '- The first line must state the single sharpest point of this turn.',
-                  '- Prefer one clear assertion over multiple mild observations.',
-                  '- Keep the reply short and grounded.',
-                  inputKindNow === 'question'
-                    ? '- Do not end with a question.'
-                    : '- Ask at most one question.',
-                  '- Prefer STATE_CORE / CORE_ASSERTION / SHIFT / SAFE over generic expansion.',
-                  '- Use NEXT direction only as a small cue, not as prediction.',
-                  '- For RETURN flow, prefer 戻って整える / 整え直す / 足場を作る direction.',
-                  '- If stingLevel is HIGH, stay plain and avoid dramatic certainty.',
-                  ...topicCorrectionResponseRules,
-
-                  ...((() => {
-                    const shiftMeaning0 = String(cueLabels?.shiftMeaning ?? '');
-
-                    const isTopicRecallTurn0 =
-                      /直前まで何について話していたか/.test(shiftMeaning0) ||
-                      /一発で言い直す/.test(shiftMeaning0);
-
-                    return isTopicRecallTurn0
-                      ? [
-                          '- This is a topic recall turn. First line must say what the topic was, if it can be identified from available evidence.',
-                          '- Do not reinterpret the user intent as "checking whether we are aligned", "checking whether I understand", or "testing whether it is getting through".',
-                          '- Do not say the main point is trust-check / alignment-check / meta-confirmation unless the user explicitly says so.',
-                          '- Do not ask the user to paste the previous line, add one keyword, or clarify the topic as the main response.',
-                          '- If the exact topic cannot be identified from available evidence, say plainly: 「この一文だけでは、直前までの話題はまだ特定できない。」',
-                          '- When topic is unknown, stop there or add one short neutral bridge only. Do not expand into meta explanation.',
-                          '- For topic recall, prefer concrete topic restatement over abstract framing such as 文脈確認 / 位置合わせ / 通じてるか確認.',
-                        ]
-                      : [];
-                  })()),
-
-                  (() => {
-                    const askBackAllowed =
-                      (args as any)?.userContext?.question?.outputPolicy?.askBackAllowed ??
-                      (args as any)?.userContext?.ctxPack?.question?.outputPolicy?.askBackAllowed ??
-                      (args as any)?.extra?.question?.outputPolicy?.askBackAllowed ??
-                      true;
-
-                    if (inputKindNow === 'question' || askBackAllowed === false) {
-                      return '- Keep the reply short and grounded. Do not end with a question. Finish with a complete declarative sentence.';
-                    }
-
-                    return '- Keep the reply short and grounded. Ask at most one question.';
-                  })(),
-                  '- Prefer STATE_CORE / SHIFT / SAFE over generic interpretation.',
-                  '- Use SHIFT as the main reframe cue.',
-                  '- Use SAFE to avoid pushing, dramatizing, or forcing change.',
-                  '- For RETURN flow, prefer 戻って整える / 整え直す / 足場を作る direction over abstract dualism.',
-                  '- If stingLevel is HIGH, stay plain, calm, and avoid dramatic certainty.',
-                  '- If stingLevel is HIGH, ask at most one question.',
-                  '- The reply should still feel calm, ordinary, and easy to receive.',
-                ];
-                const stateCueSeed = clampLinesByLen(stateCueLines0, 18, 520).join('\n');
-
                 const mirrorFlowSeedBuilt = buildMirrorFlowSeed({
                   observedStage: pick(
                     (ctxPack as any)?.observedStage,
@@ -1795,19 +1620,30 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                     (extra as any)?.willRotation ??
                     null,
 
-                  tLayerHint: pick(
-                    (ctxPack as any)?.tLayerHint,
-                    (extra as any)?.tLayerHint,
-                    null,
-                  ),
-                  itOk:
-                    typeof (ctxPack as any)?.itOk === 'boolean'
-                      ? (ctxPack as any).itOk
-                      : typeof (ctxPack as any)?.itTriggered === 'boolean'
-                        ? (ctxPack as any).itTriggered
-                        : typeof (extra as any)?.itOk === 'boolean'
-                          ? (extra as any).itOk
-                          : null,
+                    tLayerHint: pick(
+                      (ctxPack as any)?.tLayerHint,
+                      (extra as any)?.tLayerHint,
+                      null,
+                    ),
+                    itOk: (() => {
+                      if (typeof (ctxPack as any)?.itOk === 'boolean') return (ctxPack as any).itOk;
+                      if (typeof (ctxPack as any)?.itTriggered === 'boolean') return (ctxPack as any).itTriggered;
+                      if (typeof (ctxPack as any)?.it_triggered === 'boolean') return (ctxPack as any).it_triggered;
+
+                      if (typeof (extra as any)?.itOk === 'boolean') return (extra as any).itOk;
+                      if (typeof (extra as any)?.itTriggered === 'boolean') return (extra as any).itTriggered;
+                      if (typeof (extra as any)?.it_triggered === 'boolean') return (extra as any).it_triggered;
+
+                      const itxReasonNorm = String(itxReason ?? '').trim().toUpperCase();
+                      if (itxReasonNorm.includes('IT_TRIGGER_OK') || itxReasonNorm.includes('IT_HOLD')) {
+                        return true;
+                      }
+
+                      const itxStepNorm = String(itxStep ?? '').trim().toUpperCase();
+                      if (/^T[123]$/.test(itxStepNorm)) return true;
+
+                      return null;
+                    })(),
 
                   qCode: qCode ?? null,
                   flowDelta: flowDelta2 || null,
@@ -1815,7 +1651,12 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   writerDirectives: {
                     tone: 'reflective',
                     maxLines: 6,
-                    slotPolicy: 'OBS_FIRST',
+                    slotPolicy:
+                      flowDelta2 === 'RETURN' &&
+                      String((ctxPack as any)?.willRotation?.descentGate ?? (extra as any)?.willRotation?.descentGate ?? '').trim().toLowerCase() === 'closed' &&
+                      /^R[1-3]$/i.test(String(depthStage ?? '').trim())
+                        ? 'CONTINUITY_FIRST'
+                        : 'OBS_FIRST',
                     rotationMention: '1sentence',
                   },
                 });
@@ -1854,22 +1695,34 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   .replace(/\n{3,}/g, '\n\n')
                   .trim();
 
-                const seedBlocksForWriter = [mirrorFlowSeedText].filter((x) => norm(x));
+                const flowMeaningBlock = (() => {
+                  const meaning = String(flowMeaningV1?.flowMeaning ?? '').trim();
+                  const hook = String(flowMeaningV1?.thisTurnHook ?? '').trim();
+                  const tension = String(flowMeaningV1?.continuingTension ?? '').trim();
+                  const openLoop = String(flowMeaningV1?.openLoop ?? '').trim();
+
+                  const lines = ['FLOW_CONTEXT (DO NOT OUTPUT):'];
+                  if (meaning) lines.push(`flowMeaning=${meaning}`);
+                  if (hook) lines.push(`thisTurnHook=${hook}`);
+                  if (tension) lines.push(`continuingTension=${tension}`);
+                  if (openLoop) lines.push(`openLoop=${openLoop}`);
+
+                  return lines.length > 1 ? lines.join('\n') : '';
+                })();
+
+                const seedBlocksForWriter = [mirrorFlowSeedText, flowMeaningBlock].filter((x) => norm(x));
                 const seedBlockForWriter = seedBlocksForWriter.join('\n\n');
 
                 const injectedHead = [coordMinimalBlock, seedBlockForWriter]
                   .filter((x) => norm(x))
                   .join('\n\n');
 
-                const internalPackFixed = [injectedHead, internalPackRawLight]
-                  .filter((x) => norm(x))
-                  .join('\n\n')
-                  .trim();
+                const internalPackFixed = injectedHead.trim();
                   try {
                     const packNorm = norm(internalPackFixed);
                     const h = packNorm.slice(0, 900);
 
-                    const flowMatch = packNorm.match(/FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:/);
+                    const flowMatch = packNorm.match(/FLOW_CONTEXT(?:\s*\(DO NOT OUTPUT\))?:|FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:/);
                     const flowIdx = flowMatch ? flowMatch.index ?? -1 : -1;
                     const flowSnippet =
                       flowIdx >= 0 ? packNorm.slice(flowIdx, Math.min(packNorm.length, flowIdx + 520)) : '';
