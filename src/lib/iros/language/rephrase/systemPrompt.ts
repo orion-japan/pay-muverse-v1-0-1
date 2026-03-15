@@ -204,7 +204,16 @@ const noBulletsNow = args?.no_bullets !== false;
     '',
     '【出力整形ルール（DO NOT OUTPUT）】',
     ...(linesMaxNow ? [`- 最大行数は ${linesMaxNow} 行以内。`] : []),
-    ...(questionsMaxNow !== null ? [`- 質問は最大 ${questionsMaxNow} 個まで。`] : []),
+    ...(questionsMaxNow !== null
+      ? questionsMaxNow === 0
+        ? [
+            '- 疑問文は禁止。',
+            '- 文末を質問形（？ / か / どれ / どこ / なに / どう など）で終えない。',
+            '- 次の行動を促す問い返し、確認質問、二択質問、部位確認の質問を追加しない。',
+            '- 必ず平叙文で言い切って終える。',
+          ]
+        : [`- 質問は最大 ${questionsMaxNow} 個まで。`]
+      : []),
     ...(outputOnlyNow ? ['- 解説や前置きは禁止。答えのみ出力する。'] : []),
     ...(noBulletsNow ? ['- 箇条書き（-,・,1.など）は使用しない。'] : []),
   ].join('\n');

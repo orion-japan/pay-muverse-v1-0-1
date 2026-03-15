@@ -673,6 +673,96 @@ function inferObservedStages(text: string): {
       observedBasedOn: 'greeting/default => S1',
     };
   }
+  // --- 明示的な観測意図は最優先で observedStage に反映する ---
+  // テスト入力や、ユーザーが自分で取りに来た意図文を
+  // 既存の文脈/関係/継続性より先に拾うための優先ルート
+  const directObserved = (() => {
+    // S: 自分の内側を観測したい
+    if (
+      /自分の中で何が起きている|自分の状態を知りたい|内側を見たい|いま何が起きているか見たい/.test(t)
+    ) {
+      return {
+        primaryStage: 'S1' as Depth,
+        secondaryStage: 'F1' as Depth,
+        observedStage: 'S1' as Depth,
+        primaryBand: 'S' as StageBand,
+        secondaryBand: 'F' as StageBand,
+        primaryDepth: 1 as 1 | 2 | 3,
+        secondaryDepth: 1 as 1 | 2 | 3,
+        observedBasedOn: 'direct-intent:S',
+      };
+    }
+
+    // F: ぼんやりしたものに輪郭を与えたい
+    if (
+      /ぼんやりしていたものを少し形にしたい|この感覚を言葉にすると何になる|輪郭を出したい|形にしたい/.test(t)
+    ) {
+      return {
+        primaryStage: 'F1' as Depth,
+        secondaryStage: 'S1' as Depth,
+        observedStage: 'F1' as Depth,
+        primaryBand: 'F' as StageBand,
+        secondaryBand: 'S' as StageBand,
+        primaryDepth: 1 as 1 | 2 | 3,
+        secondaryDepth: 1 as 1 | 2 | 3,
+        observedBasedOn: 'direct-intent:F',
+      };
+    }
+
+    // R: 関係の中で起きていると明示
+    if (
+      /誰かとの関係の中で起きてる|相手との関係で起きてる|人との関係の中で起きてる|関係の中で起きてる/.test(t)
+    ) {
+      return {
+        primaryStage: 'R1' as Depth,
+        secondaryStage: 'S1' as Depth,
+        observedStage: 'R1' as Depth,
+        primaryBand: 'R' as StageBand,
+        secondaryBand: 'S' as StageBand,
+        primaryDepth: 1 as 1 | 2 | 3,
+        secondaryDepth: 1 as 1 | 2 | 3,
+        observedBasedOn: 'direct-intent:R',
+      };
+    }
+
+    // C: ここから何を作るか、どう動くかを組み立てたい
+    if (
+      /ここから何を作ればいいか考えたい|何を作ればいいか考えたい|次にどう動くかを組み立てたい|何を作るか考えたい/.test(t)
+    ) {
+      return {
+        primaryStage: 'C1' as Depth,
+        secondaryStage: 'F1' as Depth,
+        observedStage: 'C1' as Depth,
+        primaryBand: 'C' as StageBand,
+        secondaryBand: 'F' as StageBand,
+        primaryDepth: 1 as 1 | 2 | 3,
+        secondaryDepth: 1 as 1 | 2 | 3,
+        observedBasedOn: 'direct-intent:C',
+      };
+    }
+
+    // I: 意味・目的・何のため
+    if (
+      /何のために|この流れの意味をはっきりさせたい|いちばん奥にある意図を知りたい|意味をはっきりさせたい/.test(t)
+    ) {
+      return {
+        primaryStage: 'I1' as Depth,
+        secondaryStage: 'S1' as Depth,
+        observedStage: 'I1' as Depth,
+        primaryBand: 'I' as StageBand,
+        secondaryBand: 'S' as StageBand,
+        primaryDepth: 1 as 1 | 2 | 3,
+        secondaryDepth: 1 as 1 | 2 | 3,
+        observedBasedOn: 'direct-intent:I',
+      };
+    }
+
+    return null;
+  })();
+
+  if (directObserved) {
+    return directObserved;
+  }
 
   const primaryStage = inferDepth(t);
   const primaryBand = depthToBand(primaryStage);

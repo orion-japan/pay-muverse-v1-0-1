@@ -2394,9 +2394,25 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
       return false;
     };
 
+    const isDanglingLeadLine = (ln: string) => {
+      const s = String(ln ?? '').trim();
+      if (!s) return false;
+
+      if (/(が|は|を|に|へ|と|で|から|まで|より|だけ|ほど|くらい|ぐらい|とか|など)$/.test(s)) return true;
+      if (/(なに|何|どれ|どの|どこ|誰|いつ|どう|なぜ)$/.test(s)) return true;
+      if (/(いま|今|たとえば|例えば)$/.test(s)) return true;
+      if (/(一番|もっとも|強く|近く|直後|途中|最後|先)$/.test(s)) return true;
+      if (/[、，,:：]\s*$/.test(s)) return true;
+      if (/のは\s*$/.test(s)) return true;
+      if (/とは\s*$/.test(s)) return true;
+      if (/なら\s*$/.test(s)) return true;
+      if (/いちばん\s*$/.test(s)) return true;
+      return false;
+    };
+
     const last = String(lines[lines.length - 1] ?? '').trim();
 
-    if (!isQuestionLikeLine(last)) {
+    if (!isQuestionLikeLine(last) && !isDanglingLeadLine(last)) {
       return lines.join('\n').trim();
     }
 
@@ -2404,9 +2420,8 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
       const prev = String(lines[lines.length - 2] ?? '').trim();
 
       const prevLooksDanglingLead =
-        /(?:が|は|を|に|へ|と|で|から|まで|より|だけ|ほど|くらい|ぐらい|とか|など|なに|何|どれ|どの|どこ|誰|いつ)$/.test(prev) ||
-        /(?:いま|今|たとえば|例えば)[、,\s]*$/.test(prev) ||
-        /(?:どの身体反応が|どの感覚に|あなたは|いま、あなたは)$/.test(prev);
+        isDanglingLeadLine(prev) ||
+        /(?:どの身体反応が|どの感覚に|あなたは|いま、あなたは|ざわつきが一番強くなるのは)$/.test(prev);
 
       const dropCount = prevLooksDanglingLead ? 2 : 1;
       const trimmed = lines.slice(0, -dropCount).join('\n').trim();
@@ -2667,7 +2682,7 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
 // ✅ 追加：historyDigestV1（無ければこの場で作って保存）
 // - 生成ポイントを “ここ1箇所” に固定（重複生成しない）
 // - 既に入ってるなら触らない
-if (!(mf.extra as any).historyDigestV1) {
+if (true) {
   try {
     // const { buildHistoryDigestV1 } = await import('@/lib/iros/history/historyDigestV1');
 
@@ -2676,33 +2691,52 @@ if (!(mf.extra as any).historyDigestV1) {
     const lastAssistantCore =
       String((ctx as any)?.continuity?.last_assistant_core ?? (ctx as any)?.lastAssistantCore ?? '').trim() || '';
 
-    const repeatSignal = !!(ctx as any)?.repeatSignalSame || !!(ctx as any)?.repeat_signal || false;
+      const repeatSignal = !!(ctx as any)?.repeatSignalSame || !!(ctx as any)?.repeat_signal || false;
 
-    // ✅ 最新 user を最優先
-    const latestSummary = lastUserCore.slice(0, 120);
-    const fallbackSummary = String((ctx as any)?.situationSummary ?? '').trim().slice(0, 120);
-    const situationSummaryForDigest = latestSummary || fallbackSummary;
+      // ✅ 最新 user を最優先
+      const latestSummary = lastUserCore.slice(0, 120);
+      const fallbackSummary = String((ctx as any)?.situationSummary ?? '').trim().slice(0, 120);
+      const situationSummaryForDigest = latestSummary || fallbackSummary;
 
-    // ✅ 古い topic に強く引っ張られないよう、一旦ニュートラル寄りに戻す
-    const rawTopic = String((ctx as any)?.situationTopic ?? '').trim();
-    const situationTopicForDigest =
-      latestSummary.length > 0 ? 'その他・ライフ全般' : (rawTopic || 'その他・ライフ全般');
+      // ✅ topic を雑に「その他・ライフ全般」へ潰さない
+      // - rawTopic が具体的ならそれを残す
+      // - rawTopic が空 / 汎用ラベルなら latestSummary から短く起こす
+      const rawTopic = String((ctx as any)?.situationTopic ?? '').trim();
 
-    (mf.extra as any).historyDigestV1 = buildHistoryDigestV1({
-      fixedNorth: { key: 'SUN', phrase: '成長 / 進化 / 希望 / 歓喜' },
-      metaAnchorKey: String((ctx as any)?.baseMetaForTurn?.intent_anchor_key ?? '').trim() || null,
-      memoryAnchorKey: String((ctx as any)?.memoryState?.intentAnchor ?? (ctx as any)?.intentAnchor ?? '').trim() || null,
+      const isGenericTopic =
+        !rawTopic ||
+        rawTopic === 'その他・ライフ全般' ||
+        rawTopic === 'その他ライフ全般' ||
+        rawTopic === 'ライフ全般' ||
+        rawTopic === 'その他';
 
-      qPrimary: (ctx as any)?.memoryState?.qPrimary ?? (ctx as any)?.qPrimary ?? 'Q3',
-      depthStage: (ctx as any)?.memoryState?.depthStage ?? (ctx as any)?.depthStage ?? 'F1',
-      phase: (ctx as any)?.memoryState?.phase ?? (ctx as any)?.phase ?? 'Inner',
+      const summaryTopicSeed =
+        latestSummary ||
+        fallbackSummary ||
+        String((ctx as any)?.latestUserText ?? '').trim() ||
+        '';
 
-      situationTopic: situationTopicForDigest,
-      situationSummary: situationSummaryForDigest,
+      const situationTopicForDigest = (
+        isGenericTopic
+          ? (summaryTopicSeed.slice(0, 32) || 'その他・ライフ全般')
+          : rawTopic
+      ).slice(0, 40);
 
-      lastUserCore: lastUserCore.slice(0, 120),
-      lastAssistantCore: lastAssistantCore.slice(0, 120),
-      repeatSignal,
+      (mf.extra as any).historyDigestV1 = buildHistoryDigestV1({
+        fixedNorth: { key: 'SUN', phrase: '成長 / 進化 / 希望 / 歓喜' },
+        metaAnchorKey: String((ctx as any)?.baseMetaForTurn?.intent_anchor_key ?? '').trim() || null,
+        memoryAnchorKey: String((ctx as any)?.memoryState?.intentAnchor ?? (ctx as any)?.intentAnchor ?? '').trim() || null,
+
+        qPrimary: (ctx as any)?.memoryState?.qPrimary ?? (ctx as any)?.qPrimary ?? 'Q3',
+        depthStage: (ctx as any)?.memoryState?.depthStage ?? (ctx as any)?.depthStage ?? 'F1',
+        phase: (ctx as any)?.memoryState?.phase ?? (ctx as any)?.phase ?? 'Inner',
+
+        situationTopic: situationTopicForDigest,
+        situationSummary: situationSummaryForDigest,
+
+        lastUserCore: lastUserCore.slice(0, 120),
+        lastAssistantCore: lastAssistantCore.slice(0, 120),
+        repeatSignal,
     });
   } catch {
     // keep silent
@@ -3015,9 +3049,14 @@ if (prevAtIso) {
 
     const line = topic?.conversationLine ?? null;
     const digest = topic?.topicDigest ?? line ?? null;
+    const digestV2 =
+      topic?.topicDigestV2 && typeof topic.topicDigestV2 === 'object'
+        ? topic.topicDigestV2
+        : null;
 
     (extra2.ctxPack as any).conversationLine = line;
     (extra2.ctxPack as any).topicDigest = digest;
+    (extra2.ctxPack as any).topicDigestV2 = digestV2;
 
     if (Array.isArray(topic?.keywords) && topic.keywords.length > 0) {
       (extra2.ctxPack as any).topicKeywords = topic.keywords;
@@ -4955,13 +4994,15 @@ if (shouldRunWriter) {
             ? ctxPack.willRotation.reason.trim()
             : null);
 
-      const willRotationSuggestedStage =
-        (typeof rotationStateCanon?.depth === 'string' && rotationStateCanon.depth.trim()
-          ? rotationStateCanon.depth.trim()
-          : typeof ctxPack.willRotation?.suggestedStage === 'string' &&
-              ctxPack.willRotation.suggestedStage.trim()
-            ? ctxPack.willRotation.suggestedStage.trim()
-            : null);
+            const willRotationSuggestedStage =
+            (rotationStateCanon?.shouldRotate === true &&
+            typeof rotationStateCanon?.depth === 'string' &&
+            rotationStateCanon.depth.trim()
+              ? rotationStateCanon.depth.trim()
+              : typeof ctxPack.willRotation?.suggestedStage === 'string' &&
+                  ctxPack.willRotation.suggestedStage.trim()
+                ? ctxPack.willRotation.suggestedStage.trim()
+                : null);
 
       const willRotationSpinLoop =
         (typeof rotationStateCanon?.spinLoop === 'string' && rotationStateCanon.spinLoop.trim()
@@ -5234,6 +5275,31 @@ if (shouldRunWriter) {
         (out.metaForSave as any)?.targetKind ??
         (out.metaForSave as any)?.target_kind ??
         null,
+
+      extra: {
+        ...(((out.metaForSave as any)?.extra ?? {}) as any),
+        llmGate:
+          (((out.metaForSave as any)?.extra?.llmGate &&
+            typeof (out.metaForSave as any).extra.llmGate === 'object')
+            ? (out.metaForSave as any).extra.llmGate
+            : null) ??
+          {
+            contractObj:
+              (((out.metaForSave as any)?.extra?.llmGate as any)?.contractObj &&
+                typeof ((out.metaForSave as any)?.extra?.llmGate as any).contractObj === 'object')
+                ? ((out.metaForSave as any).extra.llmGate as any).contractObj
+                : null,
+          },
+        llmRewriteSeed:
+          typeof (out.metaForSave as any)?.extra?.llmRewriteSeed === 'string'
+            ? (out.metaForSave as any).extra.llmRewriteSeed
+            : null,
+        llmRewriteSeedRaw:
+          typeof (out.metaForSave as any)?.extra?.llmRewriteSeedRaw === 'string'
+            ? (out.metaForSave as any).extra.llmRewriteSeedRaw
+            : null,
+      },
+
       debug: {
         traceId: traceIdCanon,
         conversationId: _conversationId ?? null,
@@ -5699,15 +5765,54 @@ if (shouldRunWriter) {
                               ).trim(),
                             ]
                           : [],
-                    polarity:
-                      ((out.metaForSave as any)?.extra?.mirror as any)?.polarity_out ??
-                      ((out.metaForSave as any)?.extra?.mirror as any)?.polarity ??
-                      ((out.metaForSave as any)?.mirror as any)?.polarity_out ??
-                      ((out.metaForSave as any)?.mirror as any)?.polarity ??
-                      (((out.metaForSave as any)?.extra?.ctxPack as any)?.cards?.currentCard as any)?.polarity ??
-                      ((ctxPackPrev as any)?.cards?.currentCard as any)?.polarity ??
-                      (ctxPackPrev as any)?.polarity ??
-                      null,
+                          e_turn:
+                          (out.metaForSave as any)?.extra?.e_turn ??
+                          ((out.metaForSave as any)?.extra?.mirror as any)?.e_turn ??
+                          ((out.metaForSave as any)?.extra?.ctxPack as any)?.e_turn ??
+                          ((ctxPackPrev as any)?.mirror as any)?.e_turn ??
+                          (ctxPackPrev as any)?.e_turn ??
+                          null,
+
+                        polarity:
+                          ((out.metaForSave as any)?.extra?.mirror as any)?.polarity_out ??
+                          ((out.metaForSave as any)?.extra?.mirror as any)?.polarity ??
+                          ((out.metaForSave as any)?.mirror as any)?.polarity_out ??
+                          ((out.metaForSave as any)?.mirror as any)?.polarity ??
+                          ((out.metaForSave as any)?.extra?.polarity as any) ??
+                          ((out.metaForSave as any)?.extra?.ctxPack as any)?.polarity ??
+                          (((out.metaForSave as any)?.extra?.ctxPack as any)?.cards?.currentCard as any)?.polarity ??
+                          ((ctxPackPrev as any)?.cards?.currentCard as any)?.polarity ??
+                          ((ctxPackPrev as any)?.mirror as any)?.polarity ??
+                          (ctxPackPrev as any)?.polarity ??
+                          null,
+
+                        mirror: {
+                          ...((((ctxPackPrev as any)?.mirror &&
+                            typeof (ctxPackPrev as any).mirror === 'object')
+                            ? (ctxPackPrev as any).mirror
+                            : {}) as any),
+                          ...((((out.metaForSave as any)?.extra?.mirror &&
+                            typeof (out.metaForSave as any).extra.mirror === 'object')
+                            ? (out.metaForSave as any).extra.mirror
+                            : {}) as any),
+                          e_turn:
+                            (out.metaForSave as any)?.extra?.e_turn ??
+                            ((out.metaForSave as any)?.extra?.mirror as any)?.e_turn ??
+                            ((out.metaForSave as any)?.extra?.ctxPack as any)?.e_turn ??
+                            ((ctxPackPrev as any)?.mirror as any)?.e_turn ??
+                            (ctxPackPrev as any)?.e_turn ??
+                            null,
+                          polarity:
+                            ((out.metaForSave as any)?.extra?.mirror as any)?.polarity_out ??
+                            ((out.metaForSave as any)?.extra?.mirror as any)?.polarity ??
+                            ((out.metaForSave as any)?.mirror as any)?.polarity_out ??
+                            ((out.metaForSave as any)?.mirror as any)?.polarity ??
+                            ((out.metaForSave as any)?.extra?.polarity as any) ??
+                            ((out.metaForSave as any)?.extra?.ctxPack as any)?.polarity ??
+                            ((ctxPackPrev as any)?.mirror as any)?.polarity ??
+                            (ctxPackPrev as any)?.polarity ??
+                            null,
+                        },
 
                     willRotation:
                       (((out.metaForSave as any)?.extra?.ctxPack as any)?.willRotation &&
@@ -5718,24 +5823,52 @@ if (shouldRunWriter) {
                           ? (ctxPackPrev as any).willRotation
                           : null,
 
-                    traceId: traceIdCanon,
-                    inputKind: inputKindCanon,
+                          traceId: traceIdCanon,
+                          inputKind: inputKindCanon,
 
-                    // UIでは隠しても、次ターン内部用は保持する
-                    historyForWriter: historyForWriterInternal,
-                    historyForWriterAt: historyForWriterAtInternal,
-                    historyDigestV1: historyDigestV1Internal,
+                          // UIでは隠しても、次ターン内部用は保持する
+                          historyForWriter: historyForWriterInternal,
+                          historyForWriterAt: historyForWriterAtInternal,
+                          historyDigestV1: historyDigestV1Internal,
 
-                    slotPlanPolicy,
-                    exprMeta: exprMetaCanon,
-                    longTermMemoryNoteText,
-                    memoryStateNoteText,
+                          slotPlanPolicy,
+                          exprMeta: exprMetaCanon,
+                          longTermMemoryNoteText,
+                          memoryStateNoteText,
 
-                    memoryStateSnapshot,
-                    memoryStateSummary: memoryStateSnapshot?.summary ?? null,
-                    memoryStateSituationSummary: memoryStateSnapshot?.situationSummary ?? null,
-                    memoryStateSituationTopic: memoryStateSnapshot?.situationTopic ?? null,
-                  },
+                          memoryStateSnapshot,
+                          memoryStateSummary: memoryStateSnapshot?.summary ?? null,
+                          memoryStateSituationSummary: memoryStateSnapshot?.situationSummary ?? null,
+                          memoryStateSituationTopic: memoryStateSnapshot?.situationTopic ?? null,
+
+                          // ✅ LLM_GATE / rewriteSeed を rephrase 側へ橋渡しする正本
+                          llmGate:
+                            ((out.metaForSave as any)?.extra?.llmGate &&
+                            typeof (out.metaForSave as any).extra.llmGate === 'object')
+                              ? ((out.metaForSave as any).extra.llmGate as any)
+                              : ((ctxPackPrev as any)?.llmGate &&
+                                  typeof (ctxPackPrev as any).llmGate === 'object')
+                                ? ((ctxPackPrev as any).llmGate as any)
+                                : null,
+
+                          llmRewriteSeedRaw:
+                            typeof (out.metaForSave as any)?.extra?.llmRewriteSeedRaw === 'string'
+                              ? (out.metaForSave as any).extra.llmRewriteSeedRaw
+                              : typeof ((out.metaForSave as any)?.extra?.ctxPack as any)?.llmRewriteSeedRaw === 'string'
+                                ? ((out.metaForSave as any).extra.ctxPack as any).llmRewriteSeedRaw
+                                : typeof (ctxPackPrev as any)?.llmRewriteSeedRaw === 'string'
+                                  ? (ctxPackPrev as any).llmRewriteSeedRaw
+                                  : null,
+
+                          llmRewriteSeed:
+                            typeof (out.metaForSave as any)?.extra?.llmRewriteSeed === 'string'
+                              ? (out.metaForSave as any).extra.llmRewriteSeed
+                              : typeof ((out.metaForSave as any)?.extra?.ctxPack as any)?.llmRewriteSeed === 'string'
+                                ? ((out.metaForSave as any).extra.ctxPack as any).llmRewriteSeed
+                                : typeof (ctxPackPrev as any)?.llmRewriteSeed === 'string'
+                                  ? (ctxPackPrev as any).llmRewriteSeed
+                                  : null,
+                        },
                   slotPlanPolicy,
 
                   flowDigest: (out.metaForSave as any)?.extra?.flowDigest ?? null,

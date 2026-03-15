@@ -31,9 +31,17 @@ export type TopicSummarizerArgs = {
   situationTopic?: string | null;
 };
 
+export type TopicDigestV2 = {
+  mainTopic: string | null;
+  subTopic: string | null;
+  summary: string | null;
+  keywords: string[];
+};
+
 export type TopicSummarizerResult = {
   conversationLine: string | null;
   topicDigest: string | null;
+  topicDigestV2: TopicDigestV2 | null;
   keywords: string[];
 };
 
@@ -446,6 +454,7 @@ export function summarizeTopicLineV1(
     return {
       conversationLine: null,
       topicDigest: null,
+      topicDigestV2: null,
       keywords: [],
     };
   }
@@ -463,9 +472,45 @@ export function summarizeTopicLineV1(
     40,
   ) || null;
 
+  const mainTopic =
+    truncateJa(
+      String(args.situationTopic ?? '').trim() ||
+        topicDigest ||
+        conversationLine ||
+        '',
+      40,
+    ) || null;
+
+  const subTopic =
+    truncateJa(
+      String(args.situationSummary ?? '').trim() ||
+        conversationLine ||
+        '',
+      40,
+    ) || null;
+
+  const summary =
+    truncateJa(
+      topicDigest ||
+        String(args.situationSummary ?? '').trim() ||
+        rawText,
+      60,
+    ) || null;
+
+  const topicDigestV2: TopicDigestV2 | null =
+    mainTopic || subTopic || summary || keywords.length > 0
+      ? {
+          mainTopic,
+          subTopic,
+          summary,
+          keywords,
+        }
+      : null;
+
   return {
     conversationLine,
     topicDigest,
+    topicDigestV2,
     keywords,
   };
 }

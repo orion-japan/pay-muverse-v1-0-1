@@ -278,12 +278,54 @@ function buildWriterRewriteSeed(args: {
   const resolved = pickContract(meta);
 
   // goal default（安全弁）
-  const defaultQuestionsMax = goal === 'STABILIZE' || goal === 'SAFE' ? 0 : 1;
-  const defaultLinesMax = goal === 'SAFE' ? 4 : 8;
+  const questionTypeNow = String(
+    (meta as any)?.extra?.question?.questionType ??
+    (meta as any)?.question?.questionType ??
+    ''
+  ).trim().toLowerCase();
+
+  const questionModeNow = String(
+    (meta as any)?.extra?.question?.tState?.mode ??
+    (meta as any)?.question?.tState?.mode ??
+    ''
+  ).trim().toLowerCase();
+
+  const isMeaningConfirm =
+    questionTypeNow === 'meaning' && questionModeNow === 'confirm';
+
+  const defaultQuestionsMax =
+    goal === 'STABILIZE' || goal === 'SAFE'
+      ? 0
+      : isMeaningConfirm
+        ? 0
+        : 1;
+
+  const defaultLinesMax =
+    goal === 'SAFE'
+      ? 4
+      : isMeaningConfirm
+        ? 10
+        : 8;
+
+  const askBackAllowedFromMeta =
+    (meta as any)?.extra?.question?.outputPolicy?.askBackAllowed ??
+    (meta as any)?.question?.outputPolicy?.askBackAllowed ??
+    null;
 
   // ここが “補完” の本体（上流を尊重して欠けた分だけ埋める）
-  const questions_max = pickNumber(resolved?.questions_max) ?? defaultQuestionsMax;
-  const lines_max = pickNumber(resolved?.lines_max) ?? pickNumber(meta?.lines_max) ?? defaultLinesMax;
+  const questions_max =
+    pickNumber(resolved?.questions_max) ??
+    (isMeaningConfirm
+      ? null
+      : askBackAllowedFromMeta === true
+        ? 1
+        : null) ??
+    defaultQuestionsMax;
+
+  const lines_max =
+    pickNumber(resolved?.lines_max) ??
+    pickNumber((meta as any)?.lines_max) ??
+    defaultLinesMax;
 
   // ask/propose style は “任意” で付与（writer が未対応でも壊れない）
   const contractObj: ContractV1 = {

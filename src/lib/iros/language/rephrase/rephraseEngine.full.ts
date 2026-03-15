@@ -2953,12 +2953,18 @@ const shiftKindForLane =
   } catch {}
   // ✅ q/depth/phase を “確証つきで” internalPack に入れる（STATE_SNAPSHOTの土台）
   // 優先順位：opts直指定 → ctxPack（最終スタンプ） → userContext直指定 → null
+  const pickedObservedStage =
+    (opts as any)?.observedStage ??
+    (opts as any)?.userContext?.ctxPack?.observedStage ??
+    (opts as any)?.userContext?.observedStage ??
+    null;
+
   const pickedDepthStage =
+    pickedObservedStage ??
     (opts as any)?.depthStage ??
     (opts as any)?.userContext?.ctxPack?.depthStage ??
     (opts as any)?.userContext?.depthStage ??
     null;
-
   const pickedPhase =
     (opts as any)?.phase ??
     (opts as any)?.userContext?.ctxPack?.phase ??
@@ -3023,6 +3029,9 @@ const shiftKindForLane =
       depthStage: pickedDepthStage,
       phase: pickedPhase,
       qCode: pickedQCode,
+      e_turn: pickedETurn,
+      polarity: pickedPolarity,
+      sa: pickedSa,
 
       flowDigest,
       flowTape,
@@ -3314,6 +3323,12 @@ const topicDigestForWriter =
     ''
   ).trim();
 
+const topicDigestV2ForWriter =
+  (opts as any)?.topicDigestV2 ??
+  (opts as any)?.userContext?.topicDigestV2 ??
+  (opts as any)?.userContext?.ctxPack?.topicDigestV2 ??
+  null;
+
 const conversationLineForWriter =
   String(
     (opts as any)?.conversationLine ??
@@ -3382,39 +3397,63 @@ const rawTail = Array.isArray(rawTurnsForWriter)
   ? rawTurnsForWriter.slice(-MAX_TURNS_FOR_WRITER)
   : [];
 
-const turnsForWriterBase: any[] = rawTail
-  .map((t: any) => {
-    const role =
-      t?.role === 'assistant'
-        ? 'assistant'
-        : t?.role === 'user'
-          ? 'user'
-          : null;
-    if (!role) return null;
+  const askBackAllowedForWriter = (() => {
+    const p =
+      (opts as any)?.extra?.question?.outputPolicy ??
+      (opts as any)?.userContext?.question?.outputPolicy ??
+      (opts as any)?.userContext?.meta?.extra?.question?.outputPolicy ??
+      null;
+    return p?.askBackAllowed === true;
+  })();
 
-    // ✅ user はここでは placeholder を作らない
-    // - 空なら捨てる
-    // - 最後の user 保証は writerCalls.ts 側に一本化する
-    if (role === 'user') {
+  const turnsForWriterBase: any[] = rawTail
+    .map((t: any) => {
+      const role =
+        t?.role === 'assistant'
+          ? 'assistant'
+          : t?.role === 'user'
+            ? 'user'
+            : null;
+      if (!role) return null;
+
       const content = String(t?.content ?? '').trim();
       if (!content) return null;
-      return { role: 'user', content };
-    }
 
-    const content = String(t?.content ?? '').trim();
-    if (!content) return null;
-    return { role: 'assistant', content };
-  })
-  .filter(Boolean);
+      // ✅ askBackAllowed=false のときは、
+      // writer に「過去 assistant の自然文」を渡さない
+      // - 過去 assistant の末尾質問が次ターンへ再注入されるのを防ぐ
+      // - user 履歴は残す
+      if (role === 'assistant' && !askBackAllowedForWriter) {
+        return null;
+      }
 
-// ✅ latest user の正本は writerCalls.ts の args.userText に一本化する
-// - turnsForWriter には「履歴だけ」を渡す
-// - 末尾が user の場合は current turn 混入の可能性が高いため 1件落とす
-const turnsForWriter: any[] =
-  turnsForWriterBase.length > 0 &&
-  turnsForWriterBase[turnsForWriterBase.length - 1]?.role === 'user'
-    ? turnsForWriterBase.slice(0, -1)
-    : turnsForWriterBase;
+      if (role === 'user') {
+        return { role: 'user', content };
+      }
+
+      return { role: 'assistant', content };
+    })
+    .filter(Boolean);
+
+  // ✅ latest user の正本は writerCalls.ts の args.userText に一本化する
+  // - turnsForWriter には「履歴だけ」を渡す
+  // - 末尾が user の場合は current turn 混入の可能性が高いため 1件落とす
+  const turnsForWriter: any[] =
+    turnsForWriterBase.length > 0 &&
+    turnsForWriterBase[turnsForWriterBase.length - 1]?.role === 'user'
+      ? turnsForWriterBase.slice(0, -1)
+      : turnsForWriterBase;
+
+  console.log('[IROS/rephraseEngine][TURNS_FOR_WRITER_SHAPE]', {
+    traceId: debug.traceId ?? null,
+    conversationId: debug.conversationId ?? null,
+    userCode: debug.userCode ?? null,
+    askBackAllowedForWriter,
+    rawTailLen: Array.isArray(rawTail) ? rawTail.length : 0,
+    baseLen: turnsForWriterBase.length,
+    finalLen: turnsForWriter.length,
+    roles: turnsForWriter.map((t: any) => t?.role ?? null),
+  });
 
 // ✅ buildFirstPassMessages が持っている “会話線” をちゃんと渡す
 // ✅ さらに ctxPack/extra を渡して writerCalls 側の COORD/CARDS 注入を確実に発火させる
@@ -3449,7 +3488,26 @@ const ctxPackForWriter =
     turns: turnsForWriter,
     seedDraft,
     topicDigest: topicDigestForWriter,
+    topicDigestV2: topicDigestV2ForWriter,
     conversationLine: conversationLineForWriter,
+    outputPolicy:
+      ((opts as any)?.extra?.question?.outputPolicy &&
+      typeof (opts as any)?.extra?.question?.outputPolicy === 'object'
+        ? (opts as any).extra.question.outputPolicy
+        : (opts as any)?.userContext?.question?.outputPolicy &&
+            typeof (opts as any)?.userContext?.question?.outputPolicy === 'object'
+          ? (opts as any).userContext.question.outputPolicy
+          : (opts as any)?.userContext?.meta?.extra?.question?.outputPolicy &&
+              typeof (opts as any)?.userContext?.meta?.extra?.question?.outputPolicy === 'object'
+            ? (opts as any).userContext.meta.extra.question.outputPolicy
+            : null) ?? null,
+    questions_max:
+      (((opts as any)?.extra?.question?.outputPolicy?.askBackAllowed ??
+        (opts as any)?.userContext?.question?.outputPolicy?.askBackAllowed ??
+        (opts as any)?.userContext?.meta?.extra?.question?.outputPolicy?.askBackAllowed ??
+        null) === false)
+        ? 0
+        : null,
 
     // ✅ writerCalls.ts が最優先で拾う正本
     qCode: pickedQCode ?? null,
@@ -3460,9 +3518,9 @@ const ctxPackForWriter =
     // ✅ NEW: 末尾 user の正本
     userText: String((opts as any)?.userText ?? ''),
 
-// ✅ NEW: buildFirstPassMessages / writerCalls.ts が直接拾える経路
-extra: {
-  question:
+    // ✅ NEW: buildFirstPassMessages / writerCalls.ts が直接拾える経路
+    extra: {
+      question:
     ((opts as any)?.extra?.question) ??
     ((opts as any)?.userContext?.question) ??
     ((opts as any)?.userContext?.meta?.extra?.question) ??
@@ -4412,11 +4470,18 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
 
     const isIdeaBand = detectIdeaBandProposeFromExtracted(extracted);
 
+    // rephraseBlocks は renderGateway の正本になるため、
+    // adoptAsSlots に渡された本文を必ず同一ソースとして使う
+    const normalizedText = String(text ?? '').trim();
+
     // idea_band は「2ブロック以上」が取れないと [] になることがある。
     // その場合は通常の段落/改行分割にフォールバックして、最低でも 1 block を作る。
-    let blocksText = isIdeaBand ? makeIdeaBandCandidateBlocks(text) : toRephraseBlocks(text);
+    let blocksText = isIdeaBand
+      ? makeIdeaBandCandidateBlocks(normalizedText)
+      : toRephraseBlocks(normalizedText);
+
     if (!Array.isArray(blocksText) || blocksText.length === 0) {
-      blocksText = toRephraseBlocks(text);
+      blocksText = toRephraseBlocks(normalizedText);
     }
 
 
@@ -4897,105 +4962,151 @@ raw = await (async () => {
   })();
 
   const stateCuesText = (() => {
-    // CORE（確証つき値）
-    const coreBits = [
+    const currentStateBits = [
       `depthStage=${typeof pickedDepthStage !== 'undefined' ? String(pickedDepthStage) : 'null'}`,
       `phase=${typeof pickedPhase !== 'undefined' ? String(pickedPhase) : 'null'}`,
       `qCode=${typeof pickedQCode !== 'undefined' ? String(pickedQCode) : 'null'}`,
     ].join(' / ');
 
-    // CARDS / MIRROR（messages正本の assistant pack から拾う：無ければ null）
-    const cardsBits = (() => {
-      const assistantTexts = baseMsgs
-        .filter((m) => String(m?.role ?? '') === 'assistant')
-        .map((m) => String(m?.content ?? ''));
+    const digestTopic = safeHead(
+      String((historyDigestV1 as any)?.topic?.situationTopic ?? ''),
+      120
+    );
 
-      const patterns = [
-        /MIRROR_FLOW_SEED_V1\b/i,
-        /CARD_PACKET\s*\(DO NOT OUTPUT\)\s*:/i,
-        /CARD_SEED_V1\s*\(DO NOT OUTPUT\)\s*:/i,
-      ];
+    const digestSummary = safeHead(
+      String((historyDigestV1 as any)?.topic?.situationSummary ?? ''),
+      160
+    );
 
-      const hit = assistantTexts.find((c) => patterns.some((re) => re.test(c)));
-      if (!hit) return null;
+    const lastUserCore = safeHead(
+      String((historyDigestV1 as any)?.continuity?.last_user_core ?? ''),
+      200
+    );
 
-      const idx = patterns
-        .map((re) => hit.search(re))
-        .find((n) => typeof n === 'number' && n >= 0);
-
-      if (typeof idx !== 'number' || idx < 0) return safeHead(hit, 420);
-
-      const near = hit.slice(Math.max(0, idx - 140), Math.min(hit.length, idx + 420));
-      return safeHead(near, 420);
+    const askBackAllowedValue = (() => {
+      const v = (questionForWriter as any)?.outputPolicy?.askBackAllowed;
+      return typeof v === 'boolean' ? v : null;
     })();
-    // TOPIC_LINE / KEYWORDS
-    const topicLine = (() => {
-      try {
-        return buildTopicLineV1((historyDigestV1 ?? null) as any);
-      } catch {
-        return null;
+
+    const answerFirstValue = (() => {
+      const v = (questionForWriter as any)?.outputPolicy?.answerFirst;
+      return typeof v === 'boolean' ? v : null;
+    })();
+
+    const avoidPrematureClosureValue = (() => {
+      const v = (questionForWriter as any)?.outputPolicy?.avoidPrematureClosure;
+      return typeof v === 'boolean' ? v : null;
+    })();
+
+    const responseGoal = (() => {
+      if (questionTypeForWriter === 'meaning' && questionTModeForWriter === 'confirm') {
+        return 'explain_then_optional_question';
       }
-    })();
-
-    const keywords = (() => {
-      try {
-        const ks = extractKeywordsV1((historyDigestV1 ?? null) as any, 2);
-        return Array.isArray(ks) ? ks.slice(0, 2).filter(Boolean) : [];
-      } catch {
-        return [];
+      if (questionTypeForWriter === 'meaning') {
+        return 'explain_first';
       }
-    })();
-
-    // TOPIC_RAW
-    const topicRaw = (() => {
-      if (!historyDigestV1) return null;
-
-      if (typeof historyDigestV1 === 'string') return safeHead(historyDigestV1, 360);
-
-      try {
-        return safeHead(JSON.stringify(historyDigestV1), 360);
-      } catch {
-        return safeHead(String(historyDigestV1), 360);
+      if (questionTypeForWriter) {
+        return `respond_for_${questionTypeForWriter}`;
       }
+      return null;
     })();
+
+    const topicValue =
+      lastUserCore ||
+      digestSummary ||
+      digestTopic ||
+      safeHead(String((opts as any)?.userText ?? ''), 200);
 
     const lines: string[] = [];
     lines.push('【STATE_CUES (DO NOT OUTPUT)】');
-    lines.push(`CORE: ${coreBits}`);
+    lines.push(`CURRENT_STATE: ${currentStateBits}`);
 
-    if (topicLine) lines.push(`TOPIC_LINE: ${safeHead(String(topicLine), 200)}`);
-    if (keywords.length > 0) lines.push(`KEYWORDS: ${keywords.map((k) => String(k)).join(', ')}`);
-    if (topicRaw) lines.push(`TOPIC_RAW: ${topicRaw}`);
+    if (topicValue) {
+      lines.push(`TOPIC: userStatement=${topicValue}`);
+    }
+    if (digestTopic) {
+      lines.push(`TOPIC_HINT: ${digestTopic}`);
+    }
 
-    if (questionDomainForWriter) lines.push(`QUESTION_DOMAIN: ${safeHead(questionDomainForWriter, 80)}`);
-    if (questionTypeForWriter) lines.push(`QUESTION_TYPE: ${safeHead(questionTypeForWriter, 80)}`);
-    if (questionTModeForWriter) lines.push(`QUESTION_T_MODE: ${safeHead(questionTModeForWriter, 80)}`);
-    if (questionFocusForWriter) lines.push(`QUESTION_FOCUS: ${safeHead(questionFocusForWriter, 120)}`);
-    if (questionPolicyForWriter) lines.push(`QUESTION_POLICY: ${questionPolicyForWriter}`);
+    const intentBits = [
+      questionDomainForWriter ? `domain=${safeHead(questionDomainForWriter, 80)}` : '',
+      questionTypeForWriter ? `type=${safeHead(questionTypeForWriter, 80)}` : '',
+      questionTModeForWriter ? `mode=${safeHead(questionTModeForWriter, 80)}` : '',
+      questionFocusForWriter ? `focus=${safeHead(questionFocusForWriter, 120)}` : '',
+    ].filter(Boolean);
+
+    if (intentBits.length > 0) {
+      lines.push(`INTENT: ${intentBits.join(' / ')}`);
+    }
+
+    if (responseGoal) {
+      lines.push(`RESPONSE_GOAL: ${responseGoal}`);
+    }
+
+    const constraintBits = [
+      answerFirstValue === null ? '' : `answerFirst=${String(answerFirstValue)}`,
+      askBackAllowedValue === null
+        ? ''
+        : `askBack=${askBackAllowedValue ? 'allowed' : 'blocked'}`,
+      avoidPrematureClosureValue === null
+        ? ''
+        : `avoidPrematureClosure=${String(avoidPrematureClosureValue)}`,
+    ].filter(Boolean);
+
+    if (constraintBits.length > 0) {
+      lines.push(`CONSTRAINT: ${constraintBits.join(' / ')}`);
+    }
+
     if (questionIFrameKeysForWriter.length > 0) {
-      lines.push(`QUESTION_IFRAME_KEYS: ${questionIFrameKeysForWriter.join(', ')}`);
+      lines.push(`HYPOTHESIS_KEYS: ${questionIFrameKeysForWriter.join(', ')}`);
     }
 
     if (pastStateNoteText) {
       lines.push('PAST_STATE_RECALL: enabled');
       if (pastStateTriggerKind) lines.push(`PAST_STATE_TRIGGER: ${safeHead(pastStateTriggerKind, 80)}`);
       if (pastStateKeyword) lines.push(`PAST_STATE_KEYWORD: ${safeHead(pastStateKeyword, 120)}`);
-      lines.push('PAST_STATE_HINT: ユーザーは過去トピックを思い出そうとしている。過去状態メモを優先して回答する。');
       lines.push(`PAST_STATE_NOTE: ${safeHead(pastStateNoteText, 900)}`);
     }
 
     return lines.join('\n');
   })();
 
-  const stateCuesMsg = null;
+  const stateCuesMsg =
+    !alreadyHasStateCues && stateCuesText.trim()
+      ? {
+          role: 'assistant' as const,
+          content: stateCuesText.trim(),
+        }
+      : null;
 
-  const messagesForWriter = baseMsgs;
+  const messagesForWriter = (() => {
+    if (!stateCuesMsg) return baseMsgs;
+
+    const out = [...baseMsgs];
+
+    const firstNonSystemIdx = out.findIndex(
+      (m) => String(m?.role ?? '') !== 'system'
+    );
+
+    if (firstNonSystemIdx >= 0) {
+      out.splice(firstNonSystemIdx, 0, stateCuesMsg);
+      return out;
+    }
+
+    out.push(stateCuesMsg);
+    return out;
+  })();
+
+  const injectedStateCues =
+    !!stateCuesMsg &&
+    !alreadyHasStateCues &&
+    messagesForWriter.length > baseMsgs.length;
 
   console.log('[IROS/STATE_CUES][inject]', {
     traceId: debug.traceId ?? null,
     baseLen: baseMsgs.length,
     finalLen: messagesForWriter.length,
-    injected: false,
+    injected: injectedStateCues,
     hasStateCues: messagesForWriter.some((m) => {
       const c = String(m?.content ?? '');
       return c.includes('STATE_CUES (DO NOT OUTPUT)') || c.includes('STATE_CUES_V3 (DO NOT OUTPUT)');
@@ -5019,7 +5130,6 @@ raw = await (async () => {
     digest_last_assistant_core: safeHead(String((historyDigestV1 as any)?.continuity?.last_assistant_core ?? ''), 200),
     digest_repeat_signal: (historyDigestV1 as any)?.continuity?.repeat_signal ?? null,
   });
-
   const __writerAssistantCandidates = messagesForWriter.filter(
     (m) => m?.role === 'assistant' && typeof m?.content === 'string'
   );
@@ -5231,58 +5341,210 @@ userContext: {
   }
 
   const sanitizeNoQuestions = (text: string) => {
-    const t = String(text ?? '').trim();
+    const t = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
     if (!t) return t;
 
-    const goalKindNow = String((opts?.userContext as any)?.ctxPack?.goalKind ?? '').trim();
-    const forceNoQuestionsByGoal = goalKindNow === 'stabilize';
+    const goalKindNow = String(
+      (opts as any)?.goalKind ??
+        (opts?.userContext as any)?.ctxPack?.goalKind ??
+        ''
+    ).trim();
 
-    const forceNoQuestionsByPack =
-      typeof internalPack === 'string' &&
-      (internalPack.includes('質問は原則しない（0）') ||
-        internalPack.includes('質問はしない。') ||
-        internalPack.includes('文末を「?」で終えない。'));
+    // ✅ stabilize のときだけ質問削除を発動する
+    const noQuestions = goalKindNow === 'stabilize';
 
+    // ログ互換用（判定には使わない）
     const askBackAllowedRaw =
       (opts?.userContext as any)?.question?.outputPolicy?.askBackAllowed ??
       (opts?.userContext as any)?.meta?.extra?.question?.outputPolicy?.askBackAllowed ??
       null;
 
-    const forceNoQuestionsByPolicy = askBackAllowedRaw === false;
+    const questionsMaxNow = null;
+    const forceNoQuestionsByPack = false;
+    const forceNoQuestionsByContract = false;
 
-    const noQuestions =
-      forceNoQuestionsByGoal ||
-      forceNoQuestionsByPack ||
-      forceNoQuestionsByPolicy;
+    if (!noQuestions) {
+      console.log('[IROS/rephraseEngine][SANITIZE_NO_QUESTIONS_APPLIED]', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        noQuestions,
+        askBackAllowedRaw,
+        goalKindNow,
+        questionsMaxNow,
+        forceNoQuestionsByPack,
+        forceNoQuestionsByContract,
+        beforeLen: t.length,
+        afterLen: t.length,
+        changed: false,
+        removedTailQuestion: false,
+        beforeLast: String(t.split('\n').filter(Boolean).slice(-1)[0] ?? ''),
+        afterLast: String(t.split('\n').filter(Boolean).slice(-1)[0] ?? ''),
+      });
+      return t;
+    }
 
     const lines = t
       .split('\n')
-      .map((ln) => String(ln ?? '').replace(/\s+$/g, ''))
-      .filter((ln, idx, arr) => !(idx === arr.length - 1 && ln.trim() === ''));
+      .map((ln) => String(ln ?? '').trim())
+      .filter(Boolean);
 
-    const last = lines[lines.length - 1] ?? '';
+    const isQuestionLikeLine = (ln: string) => {
+      const s = String(ln ?? '').trim();
+      if (!s) return false;
+      if (/[?？]\s*$/.test(s)) return true;
+      if (/(ですか|ますか|でしょうか|でしたか|ましたか|ませんか|ないですか|たいですか|だろうか|かな|かね)\s*$/.test(s)) {
+        return true;
+      }
+      return false;
+    };
 
-    console.log('[IROS/rephraseEngine][SANITIZE_NO_QUESTIONS_BYPASS]', {
+    const isDanglingTail = (line: string): boolean => {
+      const t = String(line ?? '').trim();
+      if (!t) return true;
+
+      return (
+        /(?:それとも|それともまだ|それともまた)\s*$/u.test(t) ||
+        /(?:寄り|感じ|ほう|方)\s*それとも\s*$/u.test(t) ||
+        /(?:のは|のは、|のは。|って|って、|とは|とは、)\s*$/u.test(t) ||
+        /(?:今日の|今回の|いまの|今の).*(?:のは|のは、)\s*$/u.test(t) ||
+        /(?:どれ|どの|どっち|どちら|どこ|何|なに|誰|いつ)\s*$/u.test(t) ||
+        /(?:だと|だと、|だとしたら|だとすると|なら|ならば|なら、)\s*$/u.test(t) ||
+        /(?:もし|仮に)?(?:最近|今|いま|まだ)?(?:それ|これ|それが|これが)?(?:続く|ある|起きる|出る|残る).*(?:なら|ならば|場合は?)、?\s*$/u.test(
+          t
+        ) ||
+        /(?:いま|今|最近).*(?:感じてる|感じている|気になる|困ってる|困っている).*(?:のは|なら|ならば|だと|だとしたら)、?\s*$/u.test(
+          t
+        ) ||
+        /(?:その|どんな|どの).*(?:匂い|臭い|感じ|系統).*(?:なら|ならば|の場合|だと)、?\s*$/u.test(
+          t
+        ) ||
+        /(?:(?:焦げ|煙|ガス|腐敗|腐った|生ゴミ|薬品|甘い|酸っぱい|カビ|金属|血|焦臭|焦げ臭).*)?(?:\/|／).*(?:\/|／|、|,)\s*$/u.test(
+          t
+        ) ||
+        /(?:もし今|もしいま|今もし|いまもし).*(?:なら|なら、|だと|だとしたら)\s*$/u.test(t) ||
+        /(?:もし今|もしいま|今もし|いまもし).*(?:感じた|起きた|あった|出た).*(?:出来事|こと).*(?:なら|なら、|だと|だとしたら)\s*$/u.test(
+          t
+        ) ||
+        /(?:いま|今).*(?:言ってる|言っている).*(?:のは|のは、|だと|だとすると)\s*$/u.test(t) ||
+        /(?:この|その|いまの|今の).*(?:場所|箇所|ところ|部位|位置)\s*は\s*$/u.test(t) ||
+        /(?:胸|喉|のど|お腹|腹|頭|肩|背中|身体|体).*(?:だと|なら|ならば)\s*$/u.test(t) ||
+        /(?:胸|喉|のど|お腹|腹|頭|肩|背中|身体|体)[・／\/、,](?:胸|喉|のど|お腹|腹|頭|肩|背中|身体|体).*(?:だと|なら|ならば)\s*$/u.test(
+          t
+        ) ||
+        /(?:一番|いちばん).*(?:近い|強い|近そう|強そう).*(?:のは|のは、|場所は|箇所は)\s*$/u.test(t) ||
+        /(?:どこ|どちら|どっち).*(?:に近い|寄り|寄ってる).*(?:のは|なら|だと)\s*$/u.test(t) ||
+        /(?:胸|喉|のど|お腹|腹).*(?:のどこ|の辺り|あたり|付近)\s*$/u.test(t) ||
+        /(?:いまの|今の|この|その).*(?:ざわつき|違和感|感覚|反応).*(?:場所|箇所|ところ)\s*は\s*$/u.test(t) ||
+        /^(?:この|その|いまの|今の)\s*(?:ざわつき|違和感|感覚|反応)\s*、?\s*$/u.test(t) ||
+        /(?:先に|あとに|前に|手前で|途中で|この瞬間|今この瞬間|いまこの瞬間)\s*、?\s*$/u.test(t) ||
+        /.*(?:続けた先に|進んだ先に|やった先に|作った先に|考えた先に)\s*、?\s*$/u.test(t) ||
+        /^(?:もし確かめるなら|いま確かめるなら|今確かめるなら|たとえば|つまり)\s*、?\s*$/u.test(t) ||
+        (/(?:[^\n]+)(?:・|、|,|\/|／)(?:\s*[^\n]+){1,}\s*(?:だと|なら|ならば)?\s*$/u.test(t) &&
+          !/[。．!！]$/.test(t))
+      );
+    };
+
+    const trimDanglingTail = (line: string): string => {
+      let t = String(line ?? '').trim();
+      if (!t) return '';
+
+      if (
+        /(?:もし今|もしいま|今もし|いまもし).*(?:なら|なら、|だと|だとしたら)\s*$/u.test(t) ||
+        /(?:もし今|もしいま|今もし|いまもし).*(?:感じた|起きた|あった|出た).*(?:出来事|こと).*(?:なら|なら、|だと|だとしたら)\s*$/u.test(
+          t
+        ) ||
+        /(?:いま|今).*(?:感じてる|感じている|起きてる|起きている|出てる|出ている).*(?:のは|のは、|だと|だとすると)\s*$/u.test(
+          t
+        ) ||
+        /(?:いま|今).*(?:言ってる|言っている).*(?:のは|のは、|だと|だとすると)\s*$/u.test(t) ||
+        /(?:この|その|いまの|今の).*(?:場所|箇所|ところ|部位|位置)\s*は\s*$/u.test(t) ||
+        /(?:一番|いちばん).*(?:近い|強い|近そう|強そう).*(?:のは|のは、|場所は|箇所は)\s*$/u.test(t) ||
+        /(?:いまの|今の|この|その).*(?:ざわつき|違和感|感覚|反応).*(?:場所|箇所|ところ)\s*は\s*$/u.test(t) ||
+        /(?:胸|喉|のど|お腹|腹|頭|肩|背中|身体|体).*(?:だと|なら|ならば)\s*$/u.test(t) ||
+        /^(?:この|その|いまの|今の)\s*(?:ざわつき|違和感|感覚|反応)\s*、?\s*$/u.test(t) ||
+        (/(?:[^\n]+)(?:・|、|,|\/|／)(?:\s*[^\n]+){1,}\s*(?:だと|なら|ならば)?\s*$/u.test(t) &&
+          !/[。．!！]$/.test(t))
+      ) {
+        return '';
+      }
+
+      t = t.replace(/(?:それとも|それともまだ|それともまた)\s*$/u, '').trim();
+      t = t.replace(/(?:のは、|のは。|のは|って、|って|とは、|とは)\s*$/u, '').trim();
+      t = t.replace(/(?:どれ|どの|どっち|どちら|どこ|何|なに|誰|いつ)\s*$/u, '').trim();
+      t = t.replace(/(?:だとしたら|だとすると|だと、|だと|ならば|なら、|なら)\s*$/u, '').trim();
+      t = t.replace(/(?:場所|箇所|ところ|部位|位置)\s*は\s*$/u, '').trim();
+      t = t.replace(/(?:一番|いちばん)\s*(?:近い|強い|近そう|強そう)\s*(?:のは)?\s*$/u, '').trim();
+      t = t.replace(/^(?:この|その|いまの|今の)\s*(?:ざわつき|違和感|感覚|反応)\s*、?\s*$/u, '').trim();
+
+      if (
+        !t ||
+        t.length <= 3 ||
+        /^(?:この|その|いまの|今の|胸|喉|のど|お腹|腹|頭|肩|背中|身体|体)$/.test(t)
+      ) {
+        return '';
+      }
+
+      return t;
+    };
+
+    const beforeLast = String(lines[lines.length - 1] ?? '');
+
+    let removedTailQuestion = false;
+    const sanitized = [...lines];
+
+    while (sanitized.length > 0) {
+      const last = String(sanitized[sanitized.length - 1] ?? '').trim();
+      if (!last) {
+        sanitized.pop();
+        continue;
+      }
+
+      if (isQuestionLikeLine(last)) {
+        sanitized.pop();
+        removedTailQuestion = true;
+        continue;
+      }
+
+      if (removedTailQuestion && isDanglingTail(last)) {
+        const trimmed = trimDanglingTail(last);
+        if (trimmed) {
+          sanitized[sanitized.length - 1] = trimmed;
+        } else {
+          sanitized.pop();
+        }
+        continue;
+      }
+
+      break;
+    }
+
+    const out = sanitized.join('\n\n').trim();
+    const afterLines = out
+      .split('\n')
+      .map((ln) => String(ln ?? '').trim())
+      .filter(Boolean);
+    const afterLast = String(afterLines[afterLines.length - 1] ?? '');
+
+    console.log('[IROS/rephraseEngine][SANITIZE_NO_QUESTIONS_APPLIED]', {
       traceId: debug.traceId,
       conversationId: debug.conversationId,
       userCode: debug.userCode,
       noQuestions,
       askBackAllowedRaw,
       goalKindNow,
+      questionsMaxNow,
       forceNoQuestionsByPack,
-      linesLen: lines.length,
-      last,
-      reason: 'QUESTION_TEXT_PRESERVED__NO_TAIL_REWRITE',
+      forceNoQuestionsByContract,
       beforeLen: t.length,
-      afterLen: t.length,
-      changed: false,
+      afterLen: out.length,
+      changed: t !== out,
+      removedTailQuestion,
+      beforeLast,
+      afterLast,
     });
 
-    // 方針:
-    // - 質問を render/sanitize で消さない
-    // - 提案文末尾を壊さないことを最優先
-    // - 本関数では本文を書き換えない
-    return t;
+    return out || t;
   };
 
   let candidate = makeCandidate(rawGuarded, maxLines, renderEngine);
@@ -5601,95 +5863,185 @@ userContext: {
   })();
 
   if (minimalWriterRules) {
-    const sanitizeQuestionOverflow = (text: string, qMax: number): string => {
-      const raw = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-      if (!raw || qMax < 0) return raw;
+    const sanitizeNoQuestions = (text: string) => {
+      const t = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+      if (!t) return t;
 
-      const lines = raw
+      const goalKindNow = String(
+        (opts as any)?.goalKind ??
+          (opts?.userContext as any)?.ctxPack?.goalKind ??
+          ''
+      ).trim();
+
+      // ✅ stabilize のときだけ質問削除を発動する
+      const noQuestions = goalKindNow === 'stabilize';
+
+      // ログ互換用（判定には使わない）
+      const askBackAllowedRaw =
+        (opts?.userContext as any)?.question?.outputPolicy?.askBackAllowed ??
+        (opts?.userContext as any)?.meta?.extra?.question?.outputPolicy?.askBackAllowed ??
+        null;
+
+      const questionsMaxNow =
+        typeof minimalWriterRules?.questions_max === 'number'
+          ? minimalWriterRules.questions_max
+          : null;
+
+      const forceNoQuestionsByPack = false;
+      const forceNoQuestionsByContract = false;
+
+      if (!noQuestions) {
+        console.log('[IROS/rephraseEngine][SANITIZE_NO_QUESTIONS_APPLIED]', {
+          traceId: debug.traceId,
+          conversationId: debug.conversationId,
+          userCode: debug.userCode,
+          noQuestions,
+          askBackAllowedRaw,
+          goalKindNow,
+          questionsMaxNow,
+          forceNoQuestionsByPack,
+          forceNoQuestionsByContract,
+          beforeLen: t.length,
+          afterLen: t.length,
+          changed: false,
+          removedTailQuestion: false,
+          beforeLast: String(t.split('\n').filter(Boolean).slice(-1)[0] ?? ''),
+          afterLast: String(t.split('\n').filter(Boolean).slice(-1)[0] ?? ''),
+        });
+        return t;
+      }
+
+      const lines = t
         .split('\n')
-        .map((l) => l.trim())
+        .map((ln) => String(ln ?? '').trim())
         .filter(Boolean);
 
-      if (lines.length === 0) return raw;
-
-      const isQuestionLike = (line: string): boolean => {
-        const t = String(line ?? '').trim();
-        if (!t) return false;
-        if (/[?？]/.test(t)) return true;
-        if (/(ですか|ますか|でしょうか|でしたか|ましたか|ませんか|だろうか|かな|かね)([。．…]*\s*)$/.test(t)) {
+      const isQuestionLikeLine = (ln: string) => {
+        const s = String(ln ?? '').trim();
+        if (!s) return false;
+        if (/[?？]\s*$/.test(s)) return true;
+        if (
+          /(ですか|ますか|でしょうか|でしたか|ましたか|ませんか|ないですか|たいですか|だろうか|かな|かね)\s*$/.test(
+            s,
+          )
+        ) {
           return true;
         }
         return false;
       };
 
       const isDanglingTail = (line: string): boolean => {
-        const t = String(line ?? '').trim();
-        if (!t) return true;
+        const s = String(line ?? '').trim();
+        if (!s) return true;
 
-        // ぶら下がり扱いは「質問へ直接つながる未完了」だけに限定する
         return (
-          /(?:それとも|それともまだ|それともまた)\s*$/u.test(t) ||
-          /(?:寄り|感じ|ほう|方)\s*それとも\s*$/u.test(t) ||
-          /(?:のは|のは、|のは。|って|って、|とは|とは、)\s*$/u.test(t) ||
-          /(?:今日の|今回の|いまの|今の).*(?:のは|のは、)\s*$/u.test(t) ||
-          /(?:どれ|どの|どっち|どちら|どこ|何|なに|誰|いつ)\s*$/u.test(t)
+          /(?:それとも|それともまだ|それともまた)\s*$/u.test(s) ||
+          /(?:寄り|感じ|ほう|方)\s*それとも\s*$/u.test(s) ||
+          /(?:のは|のは、|のは。|って|って、|とは|とは、)\s*$/u.test(s) ||
+          /(?:今日の|今回の|いまの|今の).*(?:のは|のは、)\s*$/u.test(s) ||
+          /(?:どれ|どの|どっち|どちら|どこ|何|なに|誰|いつ)\s*$/u.test(s) ||
+          /(?:だと|だと、|だとしたら|だとすると|なら|ならば|なら、)\s*$/u.test(s) ||
+          /(?:この|その|いまの|今の).*(?:場所|箇所|ところ|部位|位置)\s*は\s*$/u.test(s) ||
+          /(?:一番|いちばん).*(?:近い|強い|近そう|強そう).*(?:のは|のは、|場所は|箇所は)\s*$/u.test(s) ||
+          /(?:いまの|今の|この|その).*(?:ざわつき|違和感|感覚|反応|落ち着き).*(?:場所|箇所|ところ)?\s*は\s*$/u.test(s) ||
+          /^(?:この|その|いまの|今の)\s*(?:ざわつき|違和感|感覚|反応|落ち着き)\s*、?\s*$/u.test(s) ||
+          /(?:この|その|いまの|今の)[“"「]?(?:落ち着き|安心感|静けさ)[”"」]?\s*は\s*、?\s*$/u.test(s) ||
+          /(?:胸|喉|のど|お腹|腹|頭|肩|背中|身体|体).*(?:だと|なら|ならば)\s*$/u.test(s) ||
+          (
+            /(?:[^\n]+)(?:・|、|,|\/|／)(?:\s*[^\n]+){1,}\s*(?:だと|なら|ならば)?\s*$/u.test(s) &&
+            !/[。．!！]$/.test(s)
+          )
         );
       };
 
       const trimDanglingTail = (line: string): string => {
-        let t = String(line ?? '').trim();
-        if (!t) return '';
+        let s = String(line ?? '').trim();
+        if (!s) return '';
 
-        t = t.replace(/(?:それとも|それともまだ|それともまた)\s*$/u, '').trim();
-        t = t.replace(/(?:のは、|のは。|のは|って、|って|とは、|とは)\s*$/u, '').trim();
-        t = t.replace(/(?:どれ|どの|どっち|どちら|どこ|何|なに|誰|いつ)\s*$/u, '').trim();
+        if (
+          /(?:この|その|いまの|今の)[“"「]?(?:落ち着き|安心感|静けさ)[”"」]?\s*は\s*、?\s*$/u.test(s) ||
+          /^(?:この|その|いまの|今の)\s*(?:ざわつき|違和感|感覚|反応|落ち着き)\s*、?\s*$/u.test(s)
+        ) {
+          return '';
+        }
 
-        return t;
+        s = s.replace(/(?:それとも|それともまだ|それともまた)\s*$/u, '').trim();
+        s = s.replace(/(?:のは、|のは。|のは|って、|って|とは、|とは)\s*$/u, '').trim();
+        s = s.replace(/(?:どれ|どの|どっち|どちら|どこ|何|なに|誰|いつ)\s*$/u, '').trim();
+        s = s.replace(/(?:だとしたら|だとすると|だと、|だと|ならば|なら、|なら)\s*$/u, '').trim();
+        s = s.replace(/(?:場所|箇所|ところ|部位|位置)\s*は\s*$/u, '').trim();
+        s = s.replace(/(?:一番|いちばん)\s*(?:近い|強い|近そう|強そう)\s*(?:のは)?\s*$/u, '').trim();
+        s = s.replace(/^(?:この|その|いまの|今の)\s*(?:ざわつき|違和感|感覚|反応|落ち着き)\s*、?\s*$/u, '').trim();
+        s = s.replace(/(?:この|その|いまの|今の)[“"「]?(?:落ち着き|安心感|静けさ)[”"」]?\s*は\s*、?\s*$/u, '').trim();
+
+        if (
+          !s ||
+          s.length <= 3 ||
+          /^(?:この|その|いまの|今の|胸|喉|のど|お腹|腹|頭|肩|背中|身体|体|落ち着き)$/.test(s)
+        ) {
+          return '';
+        }
+
+        return s;
       };
 
-      let keptQuestions = 0;
-      let removedQuestions = 0;
-      const sanitized: string[] = [];
+      const beforeLast = String(lines[lines.length - 1] ?? '');
 
-      for (const line of lines) {
-        if (isQuestionLike(line)) {
-          if (keptQuestions < qMax) {
-            keptQuestions += 1;
-            sanitized.push(line);
+      let removedTailQuestion = false;
+      const sanitized = [...lines];
+
+      while (sanitized.length > 0) {
+        const last = String(sanitized[sanitized.length - 1] ?? '').trim();
+        if (!last) {
+          sanitized.pop();
+          continue;
+        }
+
+        if (isQuestionLikeLine(last)) {
+          sanitized.pop();
+          removedTailQuestion = true;
+          continue;
+        }
+
+        if (removedTailQuestion && isDanglingTail(last)) {
+          const trimmed = trimDanglingTail(last);
+          if (trimmed) {
+            sanitized[sanitized.length - 1] = trimmed;
           } else {
-            removedQuestions += 1;
+            sanitized.pop();
           }
           continue;
         }
 
-        sanitized.push(line);
+        break;
       }
 
-      // qMax=0 で、実際に質問行を落とした時だけ末尾のぶら下がりを軽く整える
-      if (qMax === 0 && removedQuestions > 0) {
-        while (sanitized.length > 0) {
-          const tail = String(sanitized[sanitized.length - 1] ?? '').trim();
-          if (!tail) {
-            sanitized.pop();
-            continue;
-          }
+      const out = sanitized.join('\n').trim();
+      const afterLines = out
+        .split('\n')
+        .map((ln) => String(ln ?? '').trim())
+        .filter(Boolean);
+      const afterLast = String(afterLines[afterLines.length - 1] ?? '');
 
-          // 長い説明文や提案文までは巻き込まない
-          if (tail.length <= 18 && isDanglingTail(tail)) {
-            const trimmedTail = trimDanglingTail(tail);
-            if (trimmedTail) {
-              sanitized[sanitized.length - 1] = trimmedTail;
-            } else {
-              sanitized.pop();
-            }
-            continue;
-          }
+      console.log('[IROS/rephraseEngine][SANITIZE_NO_QUESTIONS_APPLIED]', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        noQuestions,
+        askBackAllowedRaw,
+        goalKindNow,
+        questionsMaxNow,
+        forceNoQuestionsByPack,
+        forceNoQuestionsByContract,
+        beforeLen: t.length,
+        afterLen: out.length,
+        changed: t !== out,
+        removedTailQuestion,
+        beforeLast,
+        afterLast,
+      });
 
-          break;
-        }
-      }
-
-      return sanitized.join('\n\n').trim();
+      return out || t;
     };
 
     const candidateText0 = String(candidate ?? '');
@@ -5704,23 +6056,38 @@ userContext: {
           ? minimalWriterRules.questions_max
           : 0;
 
-      console.warn('[IROS/WRITER_GUARD][BYPASS_Q_OVER_KEEP_QUESTION]', {
-        traceId: debug.traceId,
-        conversationId: debug.conversationId,
-        userCode: debug.userCode,
-        qMax,
-        candidateHead: safeHead(candidateText0, 160),
-        reason: 'KEEP_QUESTION_AS_IS__DO_NOT_SANITIZE',
-      });
+          if (qMax <= 0) {
+            const sanitized = sanitizeNoQuestions(candidateText0);
+            console.warn('[IROS/WRITER_GUARD][SANITIZE_Q_OVER_APPLIED]', {
+              traceId: debug.traceId,
+              conversationId: debug.conversationId,
+              userCode: debug.userCode,
+              qMax,
+              beforeHead: safeHead(candidateText0, 160),
+              afterHead: safeHead(sanitized, 160),
+              reason: 'Q_OVER_SANITIZED_BECAUSE_QUESTIONS_MAX_0',
+            });
 
-      // 方針:
-      // - WG:Q_OVER でも本文はそのまま保持する
-      // - 質問文は削除・言い換えしない
-      // - sanitizeNoQuestions でも末尾質問は保存する
-      // - seed fallback に落とさず、そのまま採用する
-      // - つまり「Q_OVER を直す」のではなく「Q_OVER を許容する」
-      wg = { ok: true };
+            wg = checkWriterGuardsMinimal({
+              text: sanitized,
+              rules: minimalWriterRules,
+            });
 
+            if (wg.ok) {
+              candidate = sanitized;
+            }
+          } else {
+        console.warn('[IROS/WRITER_GUARD][BYPASS_Q_OVER_KEEP_QUESTION]', {
+          traceId: debug.traceId,
+          conversationId: debug.conversationId,
+          userCode: debug.userCode,
+          qMax,
+          candidateHead: safeHead(candidateText0, 160),
+          reason: 'KEEP_QUESTION_AS_IS__QMAX_GT_0',
+        });
+
+        wg = { ok: true };
+      }
       // capability_reask は seed fallback に落とさず、本文側を救済する
       if (!wg.ok) {
         const shiftObjNow = parseShiftJson(String((shiftSlot as any)?.text ?? ''));

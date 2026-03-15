@@ -48,7 +48,7 @@ export function buildExprDirectiveV1(input: ExprDirectiveInput): string | null {
 
   // RETURNが続く時：つなぎを厚くし、詰問を避ける
   if (ret && streak >= 1) {
-    lines.push('会話接続：RETURN傾向。断定や詰問を避け、前の空気を受けて1歩だけ前へつなぐ。質問は0〜1。');
+    lines.push('会話接続：RETURN傾向。断定や詰問を避け、いまの場に残っているものを静かに言い換えて返す。質問は禁止。身体感覚や時間経過への誘導はしない。場の変化・残っている余韻・空気のほどけ方に焦点を置く。');
   }
 
   // e_turn別：文章構成の重み

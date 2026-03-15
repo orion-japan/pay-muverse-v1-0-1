@@ -506,11 +506,15 @@ const safeText = transformIrTemplateToMarkdown(displayText);
             : null;
 
         // ✅ 表示用 depth 候補
+        // 優先順位:
+        // observedStage（今ターン観測）→ depthStage（今ターン主座標）→ ctxPack → 旧depth
         const depthToShowRaw =
-          (m.meta?.depth as any) ??
+          ((m.meta as any)?.observedStage as any) ??
+          (m.meta?.extra?.ctxPack?.observedStage as any) ??
           ((m.meta as any)?.depthStage as any) ??
-          (m.meta?.unified?.depth?.current as any) ??
           (m.meta?.extra?.ctxPack?.depthStage as any) ??
+          (m.meta?.unified?.depth?.current as any) ??
+          (m.meta?.depth as any) ??
           ((m as any)?.depth_stage as any) ??
           ((m as any)?.depth as any) ??
           null;

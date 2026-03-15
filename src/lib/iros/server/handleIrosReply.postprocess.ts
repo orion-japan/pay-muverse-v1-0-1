@@ -1270,15 +1270,24 @@ try {
       // --- 追加: card180 由来 seedText を生成して保存（ログで見える化）
       // ※ current card の stage は observedStage を優先する
       const observedStageNow =
-        typeof (metaForSave as any)?.observedStage === 'string' &&
-        (metaForSave as any).observedStage.trim().length > 0
-          ? (metaForSave as any).observedStage.trim()
-          : typeof (metaForSave as any)?.extra?.ctxPack?.observedStage === 'string' &&
-              (metaForSave as any).extra.ctxPack.observedStage.trim().length > 0
-            ? (metaForSave as any).extra.ctxPack.observedStage.trim()
-            : null;
+      typeof (metaForSave as any)?.observedStage === 'string' &&
+      (metaForSave as any).observedStage.trim().length > 0
+        ? (metaForSave as any).observedStage.trim()
+        : typeof (metaForSave as any)?.extra?.ctxPack?.observedStage === 'string' &&
+            (metaForSave as any).extra.ctxPack.observedStage.trim().length > 0
+          ? (metaForSave as any).extra.ctxPack.observedStage.trim()
+          : null;
 
-      const cardStageNow = observedStageNow ?? depthNow ?? null;
+    // 現在ターンは continuity より observed を優先して depthStage を更新する
+    const currentDepthStageNow = observedStageNow ?? depthNow ?? null;
+    const cardStageNow = currentDepthStageNow;
+
+    if (!(metaForSave as any).extra) (metaForSave as any).extra = {};
+    if (!(metaForSave as any).extra.ctxPack) (metaForSave as any).extra.ctxPack = {};
+
+    (metaForSave as any).depthStage = currentDepthStageNow ?? null;
+    (metaForSave as any).depth = currentDepthStageNow ?? null;
+    (metaForSave as any).extra.ctxPack.depthStage = currentDepthStageNow ?? null;
 
       if (cardStageNow && polKey) {
         try {
@@ -1865,15 +1874,24 @@ const polarityMetaBand: string | null =
 
         // --- card180 seed はここで生成する（MirrorFlow 後）
         const observedStageNow =
-          typeof (metaForSave as any)?.observedStage === 'string' &&
-          (metaForSave as any).observedStage.trim().length > 0
-            ? (metaForSave as any).observedStage.trim()
-            : typeof (metaForSave as any)?.extra?.ctxPack?.observedStage === 'string' &&
-                (metaForSave as any).extra.ctxPack.observedStage.trim().length > 0
-              ? (metaForSave as any).extra.ctxPack.observedStage.trim()
-              : null;
+        typeof (metaForSave as any)?.observedStage === 'string' &&
+        (metaForSave as any).observedStage.trim().length > 0
+          ? (metaForSave as any).observedStage.trim()
+          : typeof (metaForSave as any)?.extra?.ctxPack?.observedStage === 'string' &&
+              (metaForSave as any).extra.ctxPack.observedStage.trim().length > 0
+            ? (metaForSave as any).extra.ctxPack.observedStage.trim()
+            : null;
 
-        const cardStageNow = observedStageNow ?? depthNow ?? null;
+      // 現在ターンは continuity より observed を優先して depthStage を更新する
+      const currentDepthStageNow = observedStageNow ?? depthNow ?? null;
+      const cardStageNow = currentDepthStageNow;
+
+      if (!(metaForSave as any).extra) (metaForSave as any).extra = {};
+      if (!(metaForSave as any).extra.ctxPack) (metaForSave as any).extra.ctxPack = {};
+
+      (metaForSave as any).depthStage = currentDepthStageNow ?? null;
+      (metaForSave as any).depth = currentDepthStageNow ?? null;
+      (metaForSave as any).extra.ctxPack.depthStage = currentDepthStageNow ?? null;
 
         if (cardStageNow && polKey) {
           try {
@@ -2472,11 +2490,12 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
 
 // ====== directiveV1 追記（let directiveV1 = ... の直後に置く） ======
 {
-  const mirrorObj: any = (metaForSave as any)?.mirror ?? (metaForSave as any)?.extra?.mirror ?? null;
+  const mirrorObj: any =
+    (metaForSave as any)?.mirror ?? (metaForSave as any)?.extra?.mirror ?? null;
 
   const et = String(mirrorObj?.e_turn ?? '').trim(); // e1..e5
   const polRaw = mirrorObj?.polarity_out ?? mirrorObj?.polarity ?? null;
-  const pol = (typeof polRaw === 'string' ? polRaw : '').trim(); // yin/yang など（objectは捨てる）
+  const pol = (typeof polRaw === 'string' ? polRaw : '').trim();
 
   const userTextNow =
     String((metaForSave as any)?.userText ?? '').trim() ||
@@ -2485,18 +2504,18 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
 
   if (typeof directiveV1 === 'string' && directiveV1.trim()) {
     const extraLines: string[] = [
-      // ✅ ViewShift の目的に合わせる：prefaceLine を「毎回強制」しない
-      // - prefaceLine は postprocess 側で確定（ViewShift.confirmLine を拾う）
-      // - Writer は prefaceLine を“追加生成しない”
-
       et
         ? `材料：ユーザー発話と e_turn（${et}）${pol ? ` と polarity（${pol}）` : ''}。ただし e_turn/polarity のラベルは本文に出さない。`
         : '材料：ユーザー発話。内部ラベルは本文に出さない。',
-      '禁止：状況説明や共感の羅列。焦点（何が削られているか／何が残っているか）だけを一点に絞る。',
+      '禁止：状況説明や共感の羅列。焦点（場に何が残っているか／何がほどけたか／何が静かに変わったか）だけを一点に絞る。',
+      '禁止：質問で返さない。身体感覚・部位・呼吸・時間経過（今この瞬間、3回、しばらく等）への誘導はしない。',
+      '方針：ユーザー発話そのものが作っている場・余韻・空気の変化を言い換えて返す。'
     ];
 
     if (userTextNow) {
-      extraLines.push(`prefaceLine：ユーザー発話="${userTextNow.slice(0, 80)}" を参照して具体化する。`);
+      extraLines.push(
+        `prefaceLine：ユーザー発話="${userTextNow.slice(0, 80)}" を参照して具体化する。`
+      );
     }
 
     const base = directiveV1.split('\n').filter(Boolean);

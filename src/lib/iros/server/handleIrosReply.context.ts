@@ -52,6 +52,16 @@ export type TurnContext = {
 
   // 最終モードのフォールバックに使える
   finalMode: string | null;
+
+  // ✅ downstream の digest / recall / state cues 用
+  lastUserCore: string;
+  lastAssistantCore: string;
+  situationSummary: string;
+  situationTopic: string;
+  continuity: {
+    last_user_core: string;
+    last_assistant_core: string;
+  };
 };
 
 async function resolveIsFirstTurn(
@@ -469,6 +479,41 @@ export async function buildTurnContext(
     console.warn('[IROS/Context] framePlan build failed', e);
   }
 
+  const latestUserCore = String(text ?? '').trim().slice(0, 120);
+
+  const latestAssistantCore =
+    typeof (baseMetaForTurn as any)?.lastAssistantCore === 'string'
+      ? String((baseMetaForTurn as any).lastAssistantCore).trim().slice(0, 120)
+      : '';
+
+  const rawSituationSummary =
+    typeof (memoryState as any)?.situationSummary === 'string'
+      ? String((memoryState as any).situationSummary).trim()
+      : typeof (baseMetaForTurn as any)?.situationSummary === 'string'
+        ? String((baseMetaForTurn as any).situationSummary).trim()
+        : '';
+
+  const rawSituationTopic =
+    typeof (memoryState as any)?.situationTopic === 'string'
+      ? String((memoryState as any).situationTopic).trim()
+      : typeof (baseMetaForTurn as any)?.situationTopic === 'string'
+        ? String((baseMetaForTurn as any).situationTopic).trim()
+        : '';
+
+  const isGenericTopic =
+    !rawSituationTopic ||
+    rawSituationTopic === 'その他・ライフ全般' ||
+    rawSituationTopic === 'その他ライフ全般' ||
+    rawSituationTopic === 'ライフ全般' ||
+    rawSituationTopic === 'その他';
+
+  const finalSituationSummary = (rawSituationSummary || latestUserCore).slice(0, 120);
+  const finalSituationTopic = (
+    isGenericTopic
+      ? (finalSituationSummary || latestUserCore || 'その他・ライフ全般')
+      : rawSituationTopic
+  ).slice(0, 40);
+
   return {
     isFirstTurn,
     requestedMode,
@@ -477,5 +522,14 @@ export async function buildTurnContext(
     baseMetaForTurn,
     effectiveStyle,
     finalMode: mode ?? null,
+
+    lastUserCore: latestUserCore,
+    lastAssistantCore: latestAssistantCore,
+    situationSummary: finalSituationSummary,
+    situationTopic: finalSituationTopic,
+    continuity: {
+      last_user_core: latestUserCore,
+      last_assistant_core: latestAssistantCore,
+    },
   };
 }

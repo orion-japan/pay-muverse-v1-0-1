@@ -1455,15 +1455,25 @@ void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）
   // まず slotPlan から拾う（ここが正）
   nextHintFromSlotPlan = tryPickNextHintFromSlots(extraAny);
 
-  // ✅ blocks が空（…みたいにフィルタで消えた）なら、slotPlanの hint を本文として採用して落下を止める
-  // - 今回: base='……' → splitToLines→filterで blocks=0 → fallbackがrbに落ちて「続けてください」が出た
-  if ((!blocksForRender || blocksForRender.length === 0) && nextHintFromSlotPlan) {
+  // ✅ blocks が空でも、slotPlan の micro hint（「続けてください」等）は本文に採用しない
+  // - seed 用ヒントが UI に漏れるのを止める
+  // - 本文として採用してよいのは「micro ではない nextHint」だけ
+  const nextHintIsMicro =
+    !String(nextHintFromSlotPlan ?? '').trim() ||
+    /^(続けてください|つづけてください|続けて|つづけて)$/u.test(String(nextHintFromSlotPlan ?? '').trim()) ||
+    /^[.…・。]+$/u.test(String(nextHintFromSlotPlan ?? '').trim()) ||
+    /^(ok|okay|はい|うん|了解|りょうかい)$/iu.test(String(nextHintFromSlotPlan ?? '').trim());
+
+  if (
+    (!blocksForRender || blocksForRender.length === 0) &&
+    nextHintFromSlotPlan &&
+    !nextHintIsMicro
+  ) {
     blocksForRender = [{ text: nextHintFromSlotPlan }];
     pickedFromForRender = 'nextHint';
     // fallbackTextForRender はこの時点で使わない（明示的に本文があるため）
     fallbackTextForRender = null;
   }
-
   // まず slotPlan から拾う（ここが正）
   nextHintFromSlotPlan = tryPickNextHintFromSlots(extraAny);
 

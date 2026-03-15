@@ -184,6 +184,62 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
   const topicDigest = clampStr(norm(args.topicDigest ?? ''), 260);
   const conversationLine = clampStr(norm(args.conversationLine ?? ''), 260);
   const internalPackRaw = norm(args.internalPack ?? '');
+  const topicDigestV2Raw =
+    args.topicDigestV2 && typeof args.topicDigestV2 === 'object'
+      ? args.topicDigestV2
+      : null;
+
+  const outputPolicyRaw =
+    args.outputPolicy && typeof args.outputPolicy === 'object'
+      ? args.outputPolicy
+      : null;
+
+  const topicDigestV2Block = topicDigestV2Raw
+    ? clampStr(
+        JSON.stringify(
+          {
+            mainTopic:
+              typeof topicDigestV2Raw.mainTopic === 'string'
+                ? topicDigestV2Raw.mainTopic
+                : null,
+            subTopic:
+              typeof topicDigestV2Raw.subTopic === 'string'
+                ? topicDigestV2Raw.subTopic
+                : null,
+            summary:
+              typeof topicDigestV2Raw.summary === 'string'
+                ? topicDigestV2Raw.summary
+                : null,
+            keywords: Array.isArray(topicDigestV2Raw.keywords)
+              ? topicDigestV2Raw.keywords
+              : [],
+          },
+          null,
+          0,
+        ),
+        500,
+      )
+    : '';
+
+  const outputPolicyBlock = outputPolicyRaw
+    ? clampStr(
+        JSON.stringify(
+          {
+            answerFirst:
+              outputPolicyRaw.answerFirst === true,
+            askBackAllowed:
+              outputPolicyRaw.askBackAllowed === true,
+            questions_max:
+              typeof args.questions_max === 'number'
+                ? args.questions_max
+                : null,
+          },
+          null,
+          0,
+        ),
+        220,
+      )
+    : '';
 
   const conversationLineBlock = [topicDigest, conversationLine]
     .map((x) => norm(x))
@@ -196,6 +252,12 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     systemPrompt,
     conversationLineBlockClamped
       ? `CONVERSATION_LINE (DO NOT OUTPUT):\n${conversationLineBlockClamped}`
+      : '',
+    topicDigestV2Block
+      ? `TOPIC_DIGEST_V2 (DO NOT OUTPUT):\n${topicDigestV2Block}`
+      : '',
+    outputPolicyBlock
+      ? `OUTPUT_POLICY_V1 (DO NOT OUTPUT):\n${outputPolicyBlock}`
       : '',
   ]
     .map((x) => norm(x))
@@ -1695,20 +1757,29 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   .replace(/\n{3,}/g, '\n\n')
                   .trim();
 
-                const flowMeaningBlock = (() => {
-                  const meaning = String(flowMeaningV1?.flowMeaning ?? '').trim();
-                  const hook = String(flowMeaningV1?.thisTurnHook ?? '').trim();
-                  const tension = String(flowMeaningV1?.continuingTension ?? '').trim();
-                  const openLoop = String(flowMeaningV1?.openLoop ?? '').trim();
+                    const flowMeaningBlock = (() => {
+                    const meaning = String(flowMeaningV1?.flowMeaning ?? '').trim();
+                    const hook = String(flowMeaningV1?.thisTurnHook ?? '').trim();
+                    const tension = String(flowMeaningV1?.continuingTension ?? '').trim();
 
-                  const lines = ['FLOW_CONTEXT (DO NOT OUTPUT):'];
-                  if (meaning) lines.push(`flowMeaning=${meaning}`);
-                  if (hook) lines.push(`thisTurnHook=${hook}`);
-                  if (tension) lines.push(`continuingTension=${tension}`);
-                  if (openLoop) lines.push(`openLoop=${openLoop}`);
+                    const openLoopRaw = String(flowMeaningV1?.openLoop ?? '').trim();
+                    const openLoop = openLoopRaw.replace(/\s*\/\s*mode=confirm\b/gi, '').trim();
 
-                  return lines.length > 1 ? lines.join('\n') : '';
-                })();
+                    // ✅ confirm 系の openLoop は writer に渡さない
+                    // - 「どう言い換えると腑に落ちるか」「mode=confirm」系が
+                    //   次ターンの質問生成トリガになっていたため
+                    const shouldDropOpenLoop =
+                      /mode=confirm\b/i.test(openLoopRaw) ||
+                      /どう言い換えると腑に落ちるか/.test(openLoopRaw);
+
+                    const lines = ['FLOW_CONTEXT (DO NOT OUTPUT):'];
+                    if (meaning) lines.push(`flowMeaning=${meaning}`);
+                    if (hook) lines.push(`thisTurnHook=${hook}`);
+                    if (tension) lines.push(`continuingTension=${tension}`);
+                    if (openLoop && !shouldDropOpenLoop) lines.push(`openLoop=${openLoop}`);
+
+                    return lines.length > 1 ? lines.join('\n') : '';
+                  })();
 
                 const seedBlocksForWriter = [mirrorFlowSeedText, flowMeaningBlock].filter((x) => norm(x));
                 const seedBlockForWriter = seedBlocksForWriter.join('\n\n');

@@ -76,8 +76,31 @@ function clamp(s: string, n: number) {
 function m(tag: string, payload?: Record<string, unknown>) {
   // ✅ content は必ず @ で始める（postprocess が @行を落とす）
   if (!payload || Object.keys(payload).length === 0) return `@${tag}`;
+
   try {
-    return `@${tag} ${JSON.stringify(payload)}`;
+    let safePayload: Record<string, unknown> = { ...payload };
+
+    // ✅ SHIFT は「焦点/意図」だけを持つ
+    // - 質問可否は contractObj / writer contract 側の正本に一本化する
+    // - ここで questions 系を必ず落として、SHIFT rules との矛盾を止める
+    if (tag === 'SHIFT') {
+      const rawRules = safePayload.rules;
+      if (rawRules && typeof rawRules === 'object' && !Array.isArray(rawRules)) {
+        const {
+          questions_max: _questions_max,
+          no_question_back: _no_question_back,
+          no_question_end: _no_question_end,
+          ...restRules
+        } = rawRules as Record<string, unknown>;
+
+        safePayload = {
+          ...safePayload,
+          rules: restRules,
+        };
+      }
+    }
+
+    return `@${tag} ${JSON.stringify(safePayload)}`;
   } catch {
     return `@${tag}`;
   }
@@ -111,10 +134,10 @@ function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey | null; f
 
   const hint =
     laneKey === 'T_CONCRETIZE'
-      ? '次の一手を1つに絞って実行'
+      ? '次の一手を1つに絞る'
       : laneKey === 'IDEA_BAND'
-        ? '候補を2〜3に並べて選びやすくする'
-        : '続けてください';
+        ? '候補を2〜3に並べて見えやすくする'
+        : 'いまの場に残っているものをそのまま返す';
 
   return {
     key: 'NEXT',
@@ -489,6 +512,16 @@ function buildClarify(
               : shouldAnswerTruthStructure
               ? '結論を先に1〜2文で言い切り、そのあとで「どこを変えると動くか」を2〜3点の短い箇条書き相当で示す。説明で広げすぎず、観測→芯→具体案の順で返す'
                 : clarifyMeaning.line;
+                const askBackAllowedNow =
+                questionType === 'meaning' ? true : false;
+                !isT &&
+                !questionSuggestsPastReframe &&
+                !shouldAnswerTruthStructure &&
+                !shouldReanswerCapability &&
+                clarifyMeaning.kind !== 'topic_recall' &&
+                !isDefinitionQuestion &&
+                questionType === 'meaning';
+
               return [
                 obs,
                 {
@@ -525,6 +558,7 @@ function buildClarify(
                       usePastReframe,
                       splitFactHypothesis,
                       avoidPrematureClosure,
+                      askBackAllowed: askBackAllowedNow,
                     },
                     contract: isT
                       ? pickRandom(contractsT)
@@ -534,6 +568,8 @@ function buildClarify(
                             'first_line_names_unfinished_theme_or_pattern',
                             'prefer_past_reframe_over_advice',
                             'no_premature_closure',
+                            'no_question_back',
+                            'no_question_end',
                             'plain_words',
                             'no_boilerplate',
                           ]
@@ -551,6 +587,8 @@ function buildClarify(
                                 'first_line_is_core_answer',
                                 'then_structure_brief',
                                 'no_meta_explain',
+                                'no_question_back',
+                                'no_question_end',
                                 'plain_words',
                                 'no_boilerplate',
                               ]
@@ -560,6 +598,8 @@ function buildClarify(
                                   'first_line_names_last_topic_directly',
                                   'prefer_topic_restatement_over_interpretation',
                                   'no_meta_explain',
+                                  'no_question_back',
+                                  'no_question_end',
                                   'plain_words',
                                   'no_boilerplate',
                                 ]
@@ -568,69 +608,103 @@ function buildClarify(
                                     'answer_in_one_shot',
                                     'first_line_is_definition_or_pointing',
                                     'no_meta_explain',
+                                    'no_question_back',
+                                    'no_question_end',
                                     'plain_words',
                                     'no_boilerplate',
                                   ]
-                                : pickRandom(contractsClarify.slice(1)),
-                    rules: {
-                      ...(shiftPreset?.rules ?? {}),
-                      answer_user_meaning:
-                        !questionSuggestsPastReframe &&
-                        !shouldAnswerTruthStructure &&
-                        !shouldReanswerCapability,
-                      answer_truth_structure: shouldAnswerTruthStructure,
-                      use_past_reframe: questionSuggestsPastReframe,
-                      split_fact_hypothesis: splitFactHypothesis,
-                      avoid_premature_closure: avoidPrematureClosure,
-                      keep_it_simple: true,
-                      no_flow_lecture: true,
-                      no_meta_explain: true,
-                      output_only:
-                        shouldAnswerTruthStructure ||
-                        shouldReanswerCapability ||
-                        clarifyMeaning.kind === 'topic_recall' ||
-                        isDefinitionQuestion,
-                      no_bullets:
-                        shouldAnswerTruthStructure ||
-                        shouldReanswerCapability ||
-                        clarifyMeaning.kind === 'topic_recall' ||
-                        isDefinitionQuestion,
-                      lines_max:
-                        shouldAnswerTruthStructure
-                          ? 4
-                          : shouldReanswerCapability
-                            ? 3
-                            : clarifyMeaning.kind === 'topic_recall'
-                              ? 3
-                              : isDefinitionQuestion
-                                ? 3
-                                : undefined,
-                                questions_max: isT
-                                ? 0
-                                : questionSuggestsPastReframe
-                                  ? 0
-                                  : shouldAnswerTruthStructure
-                                    ? 0
-                                    : shouldReanswerCapability
-                                      ? 1
-                                      : clarifyMeaning.kind === 'topic_recall'
+                                : questionType === 'meaning'
+                                  ? [
+                                      'answer_in_one_shot',
+                                      'first_line_is_core_answer',
+                                      'no_meta_explain',
+                                      'no_question_back',
+                                      'no_question_end',
+                                      'no_premature_closure',
+                                      'plain_words',
+                                      'no_boilerplate',
+                                    ]
+                                  : pickRandom(contractsClarify.slice(1)),
+                                  rules: {
+                                    ...(shiftPreset?.rules ?? {}),
+                                    answer_user_meaning:
+                                      !questionSuggestsPastReframe &&
+                                      !shouldAnswerTruthStructure &&
+                                      !shouldReanswerCapability,
+                                    answer_truth_structure: shouldAnswerTruthStructure,
+                                    use_past_reframe: questionSuggestsPastReframe,
+                                    split_fact_hypothesis: splitFactHypothesis,
+                                    avoid_premature_closure: avoidPrematureClosure,
+                                    keep_it_simple: true,
+                                    no_flow_lecture: true,
+                                    no_meta_explain: true,
+                                    no_question_back:
+                                      askBackAllowedNow === false ||
+                                      questionSuggestsPastReframe ||
+                                      shouldAnswerTruthStructure ||
+                                      clarifyMeaning.kind === 'topic_recall' ||
+                                      isDefinitionQuestion,
+                                    no_question_end:
+                                      askBackAllowedNow === false ||
+                                      questionSuggestsPastReframe ||
+                                      shouldAnswerTruthStructure ||
+                                      clarifyMeaning.kind === 'topic_recall' ||
+                                      isDefinitionQuestion,
+                                    output_only:
+                                      shouldAnswerTruthStructure ||
+                                      shouldReanswerCapability ||
+                                      clarifyMeaning.kind === 'topic_recall' ||
+                                      isDefinitionQuestion ||
+                                      questionType === 'meaning',
+                                    no_bullets:
+                                      shouldAnswerTruthStructure ||
+                                      shouldReanswerCapability ||
+                                      clarifyMeaning.kind === 'topic_recall' ||
+                                      isDefinitionQuestion ||
+                                      questionType === 'meaning',
+                                    lines_max:
+                                      shouldAnswerTruthStructure
+                                        ? 4
+                                        : shouldReanswerCapability
+                                          ? 3
+                                          : clarifyMeaning.kind === 'topic_recall'
+                                            ? 3
+                                            : isDefinitionQuestion
+                                              ? 3
+                                              : questionType === 'meaning'
+                                                ? 4
+                                                : undefined,
+                                    questions_max:
+                                      askBackAllowedNow === false
                                         ? 0
-                                        : isDefinitionQuestion
+                                        : isT
                                           ? 0
-                                          : 2,
-                      ...(deepReadBoost ? { no_definition: false } : {}),
-                    },
-                    allow: {
-                      ...(shiftPreset?.allow ?? {}),
-                      concrete_reply: true,
-                      short_reply_ok: isT ? false : true,
-                    },
-                    seed_text: seedText,
-                  }),
-                },
-                safe,
-                buildNextHintSlot({ userText, laneKey: lane, flowDelta: delta }),
-              ];
+                                          : questionSuggestsPastReframe
+                                            ? 0
+                                            : shouldAnswerTruthStructure
+                                              ? 0
+                                              : shouldReanswerCapability
+                                                ? 1
+                                                : clarifyMeaning.kind === 'topic_recall'
+                                                  ? 0
+                                                  : isDefinitionQuestion
+                                                    ? 0
+                                                    : questionType === 'meaning'
+                                                      ? 1
+                                                      : 2,
+                                    ...(deepReadBoost ? { no_definition: false } : {}),
+                                  },
+                                  allow: {
+                                    ...(shiftPreset?.allow ?? {}),
+                                    concrete_reply: true,
+                                    short_reply_ok: isT ? false : true,
+                                  },
+                                  seed_text: seedText,
+                                }),
+                              },
+                              safe,
+                              buildNextHintSlot({ userText, laneKey: lane, flowDelta: delta }),
+                            ];
             }
 // ✅ HowTo/方法質問（QuestionSlots）を normalChat に合わせて「@行だけ」に正規化
 function buildQuestion(
@@ -996,24 +1070,34 @@ function buildFlowReply(args: {
       String((args as any)?.ctxPack?.shiftKind ?? '').trim() ||
       String((args as any)?.meta?.extra?.ctxPack?.shiftKind ?? '').trim() ||
       '';
-      const directAnswerRequested2 =
-      hasAny(
-        '答え',
-        '結論',
-        '要するに',
-        '結局',
-        '真実が知りたい',
-        '本当のことが知りたい',
-        'そろそろ結論',
-        '今の未来',
-        '未来だよ',
-      );
+
+    const directAnswerRequested2 = hasAny(
+      '答え',
+      '結論',
+      '要するに',
+      '結局',
+      '真実が知りたい',
+      '本当のことが知りたい',
+      'そろそろ結論',
+      '今の未来',
+      '未来だよ',
+    );
+
     const resolvedAskType =
       String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
       String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
       '';
 
-    // ① 上流で確定した shiftKind を最優先
+    const isClarifyLike =
+      isClarify(t) ||
+      resolvedAskType === 'truth_structure' ||
+      resolvedAskType === 'meaning' ||
+      resolvedAskType === 'definition' ||
+      resolvedAskType === 'topic_clarify';
+
+    const isReturnFlow = String(delta ?? '').trim().toUpperCase() === 'RETURN';
+
+    // ① 上流確定があれば最優先
     if (
       stampedShiftKind === 'clarify_shift' ||
       stampedShiftKind === 'stabilize_shift' ||
@@ -1031,31 +1115,18 @@ function buildFlowReply(args: {
         | 'narrow_shift';
     }
 
-    // ② 結論要求が明示されている時は decide を優先
+    // ② 明示的な結論要求は decide
     if (directAnswerRequested2) {
       return 'decide_shift' as const;
     }
 
-    // ③ resolvedAsk が truth/meaning 系なら clarify を優先
-    if (
-      resolvedAskType === 'truth_structure' ||
-      resolvedAskType === 'meaning' ||
-      resolvedAskType === 'definition' ||
-      resolvedAskType === 'topic_clarify'
-    ) {
+    // ③ 意味/定義/真意/ツッコミ系は clarify を優先
+    //    RETURN 中でもこちらを優先して、stabilize に吸われないようにする
+    if (isClarifyLike) {
       return 'clarify_shift' as const;
     }
 
-    // ③ ここから下だけ旧ローカル判定
-    if (isClarify(t)) return 'clarify_shift' as const;
-
-    if (
-      hasAny('また同じところ', '戻ってきた', '動けない', '止まる', 'しんどい') ||
-      String((args as any)?.flowDelta ?? '').toUpperCase() === 'RETURN'
-    ) {
-      return 'stabilize_shift' as const;
-    }
-
+    // ④ 関係距離・修復・決定の明示語
     if (hasAny('距離', '近すぎる', '離れたい', '遠い', '重い')) {
       return 'distance_shift' as const;
     }
@@ -1068,6 +1139,16 @@ function buildFlowReply(args: {
       return 'decide_shift' as const;
     }
 
+    // ⑤ RETURN は「全部 stabilize」にせず、
+    //    明確な停滞語がある時だけ stabilize にする
+    if (
+      hasAny('また同じところ', '戻ってきた', '動けない', '止まる', 'しんどい') ||
+      (isReturnFlow && emotionalTemperature2 === 'high')
+    ) {
+      return 'stabilize_shift' as const;
+    }
+
+    // ⑥ それ以外は narrow
     return 'narrow_shift' as const;
   })();
 

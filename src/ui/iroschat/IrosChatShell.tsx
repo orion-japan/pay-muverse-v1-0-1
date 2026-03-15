@@ -330,23 +330,38 @@ function IrosChatInner({ open }: Props) {
             >
 <IrosMetaBadge
   qCode={
-    ((meta?.qCode ??
-      meta?.q_code ??
-      meta?.q ??
-      meta?.extra?.ctxPack?.qCode ??
-      meta?.extra?.ctxPack?.qPrimary ??
-      meta?.unified?.q?.current ??
+    (((chat as any)?.currentMeta?.qCode ??
+      (chat as any)?.currentMeta?.q_code ??
+      (chat as any)?.currentMeta?.q ??
+      (chat as any)?.currentMeta?.extra?.ctxPack?.qCode ??
+      (chat as any)?.currentMeta?.extra?.ctxPack?.qPrimary ??
+      (chat as any)?.currentMeta?.unified?.q?.current ??
+      (chat as any)?.lastMeta?.qCode ??
+      (chat as any)?.lastMeta?.q_code ??
+      (chat as any)?.lastMeta?.q ??
+      (chat as any)?.lastMeta?.extra?.ctxPack?.qCode ??
+      (chat as any)?.lastMeta?.extra?.ctxPack?.qPrimary ??
+      (chat as any)?.lastMeta?.unified?.q?.current ??
       undefined) as 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5' | undefined)
   }
   depth={
-    meta?.depth ??
-    meta?.depthStage ??
-    meta?.depth_stage ??
-    meta?.extra?.ctxPack?.depthStage ??
-    meta?.unified?.depth?.stage ??
+    (chat as any)?.currentMeta?.depth ??
+    (chat as any)?.currentMeta?.depthStage ??
+    (chat as any)?.currentMeta?.depth_stage ??
+    (chat as any)?.currentMeta?.extra?.ctxPack?.depthStage ??
+    (chat as any)?.currentMeta?.unified?.depth?.stage ??
+    (chat as any)?.lastMeta?.depth ??
+    (chat as any)?.lastMeta?.depthStage ??
+    (chat as any)?.lastMeta?.depth_stage ??
+    (chat as any)?.lastMeta?.extra?.ctxPack?.depthStage ??
+    (chat as any)?.lastMeta?.unified?.depth?.stage ??
     null
   }
-  mode={meta?.mode}
+  mode={
+    (chat as any)?.currentMeta?.mode ??
+    (chat as any)?.lastMeta?.mode ??
+    null
+  }
   compact
 />
             </div>

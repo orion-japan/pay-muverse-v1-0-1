@@ -464,8 +464,8 @@ const tryUpdateByTrace = async (row: any) => {
     .eq('conversation_id', conversationUuid)
     .eq('role', 'assistant')
     .eq('trace_id', traceIdFinal)
-    .select('id')
-    .limit(1);
+    .eq('user_code', row.user_code)
+    .select('id');
 
   return {
     data: (res as any).data ?? null,

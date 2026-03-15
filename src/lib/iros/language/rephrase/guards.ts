@@ -206,17 +206,29 @@ export function checkWriterGuardsMinimal(args: {
   const countQuestionsLike = (s: string): number => {
     const t = String(s ?? '');
 
-    // (A) 明示の疑問符
-    let count = (t.match(/[?？]/g) ?? []).length;
+    const lines = t
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
 
-    // (B) 行末の疑問終止（疑問符なしでも “質問” とみなす）
-    const lines = t.split('\n').map((l) => l.trim()).filter(Boolean);
     const endQuestionRe =
-      /(ですか|ますか|でしょうか|でしたか|ましたか|ませんか|だろうか|かな|かもね|かね)([。．…]*\s*)$/;
+      /(ですか|ますか|でしょうか|でしたか|ましたか|ませんか|だろうか|かな|かね)([。．…]*\s*)$/;
+
+    let count = 0;
 
     for (const line of lines) {
-      if (/[?？]/.test(line)) continue;
-      if (endQuestionRe.test(line)) count += 1;
+      // 1) 行末が ? / ？ で終わるものだけを「質問」とみなす
+      //    → 文中の引用「〜？」や途中の疑問符は数えない
+      if (/[?？][」』）)\]]*[。．…]*\s*$/.test(line)) {
+        count += 1;
+        continue;
+      }
+
+      // 2) 疑問符がなくても、行末が質問終止なら 1件
+      if (endQuestionRe.test(line)) {
+        count += 1;
+        continue;
+      }
     }
 
     return count;
