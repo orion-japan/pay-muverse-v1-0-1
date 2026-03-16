@@ -435,7 +435,8 @@ function buildWriterProtocol(meta: any, userText: string): string {
       '質問攻めは禁止。問いは最大1つ。基本は提案で差し出す。',
       '',
       '出力要件：',
-      '- 2〜3行ごとに改行。短く。',
+      '- 1〜2文ごとに改行。スマホで縦に読みやすい形を優先。',
+      '- 1段落を長くしすぎない。句点のあとに次文を横並びで続けすぎない。',
       '- “次の一歩” は1つだけ（戻れる形）。',
       `- 質問は ${noQuestion ? '0' : '最大1'}（原則0）。`,
       '',
@@ -480,7 +481,8 @@ function buildWriterProtocol(meta: any, userText: string): string {
       '質問攻めは禁止。問いは最大1つ。基本は提案で差し出す。',
       '',
       '出力要件：',
-      '- 2〜3行ごとに改行。短く。',
+      '- 1〜2文ごとに改行。スマホで縦に読みやすい形を優先。',
+      '- 1段落を長くしすぎない。句点のあとに次文を横並びで続けすぎない。',
       '- 1行目は「定着」の断定から開始（短く、言い換えで）。',
       '- “次の一歩” は1つだけ（戻れる形）。',
       `- 質問は ${noQuestion ? '0' : '最大1'}（原則0）。`,
@@ -508,31 +510,24 @@ function buildWriterProtocol(meta: any, userText: string): string {
 
   if (!coreIntent) {
     return [
-      base,
-      '【TURN_MODE】NORMAL',
-      'CORE_INTENT は未確定。',
-      '',
-      'やることは2つだけ：',
-      '- 1行目で「いま守りたい一点（北極星）」を自然な日本語で確定する',
-      '- 2〜3行目以降で “次の一歩” を1つだけ置く（小さく、戻れる形）',
-      '',
-      '制約：',
-      '- 固定の見出しを毎回必ず出すのは禁止',
-      `- 質問は ${noQuestion ? '0' : '最大1'}（詰問禁止。必要なら最後に短く）`,
-      '- 断定は強めでよい（「〜してみるといい」より「〜を置く」）',
-      '- 一般論/説教/説明口調は禁止',
-      '',
-      `OBS_META: phase=${String(phase)} depth=${String(depth)} q=${String(qCode)} spinLoop=${String(
-        spinLoop,
-      )} spinStep=${String(spinStep)} rank=${String(volatilityRank)} direction=${String(
-        spinDirection,
-      )} promptStyle=${String(promptStyle)}`,
-      '',
-      `USER_TEXT: ${String(userText)}`,
-      '',
-    ]
-      .filter(Boolean)
-      .join('\n');
+        base,
+        '【TURN_MODE】NORMAL',
+        'CORE_INTENT は未確定。',
+        '',
+        'やることは2つだけ：',
+        '- 1行目で「いま守りたい一点（北極星）」を自然な日本語で確定する',
+        '- その後は “次の一歩” を1つだけ置く（小さく、戻れる形）',
+        '',
+        '制約：',
+        '- 1〜2文ごとに改行。スマホで縦に読みやすい形を優先。',
+        '- 1段落を長くしすぎない。句点のあとに次文を横並びで続けすぎない。',
+        '- 固定の見出しを毎回必ず出すのは禁止',
+        `- 質問は ${noQuestion ? '0' : '最大1'}（詰問禁止。必要なら最後に短く）`,
+        '- 断定は強めでよい（「〜してみるといい」より「〜を置く」）',
+        '- 一般論/説教/説明口調は禁止',
+        '- 箇条書き/チェックリストは禁止',
+        '',
+      ].join('\n');
   }
 
   const anchorConfirmBlock =
@@ -548,37 +543,31 @@ function buildWriterProtocol(meta: any, userText: string): string {
           .join('\n')
       : '';
 
-  return [
-    base,
-    '【TURN_MODE】NORMAL',
-    'CORE_INTENT は確定。',
-    '',
-    `CORE_INTENT: 「${coreIntent}」`,
-    '',
-    '必須：',
-    '- 返答の1行目で CORE_INTENT を “言い換えて” 断定する（同文コピペ禁止）',
-    '- 2〜3行ごとに改行。短く。',
-    '- “次の一歩” は1つだけ（promptStyle=two-choice の時だけ2択まで）',
-    `- 質問は ${noQuestion ? '0' : '最大1'}（必要なら最後に1つだけ短く）`,
-    '',
-    anchorConfirmBlock ? anchorConfirmBlock : '',
-    '',
-    '禁止：',
-    '- 「まず落ち着いて」等の一般的な慰め',
-    '- 機能説明だけで終わる',
-    '- ユーザーに丸投げ（“選んでみて” の連発）',
-    '',
-    `ROTATION_META: spinLoop=${String(spinLoop)} spinStep=${String(spinStep)} phase=${String(
-      phase,
-    )} depth=${String(depth)} q=${String(qCode)} rank=${String(volatilityRank)} direction=${String(
-      spinDirection,
-    )} promptStyle=${String(promptStyle)}`,
-    '',
-    `USER_TEXT: ${String(userText)}`,
-    '',
-  ]
-    .filter(Boolean)
-    .join('\n');
+      return [
+        base,
+        'CORE_INTENT は確定。',
+        '',
+        `CORE_INTENT: 「${coreIntent}」`,
+        '',
+        '必須：',
+        '- 返答の1行目で CORE_INTENT を “言い換えて” 断定する（同文コピペ禁止）',
+        '- その後は “次の一歩” を1つだけ置く（promptStyle=two-choice の時だけ2択まで）',
+        '',
+        '制約：',
+        '- 1〜2文ごとに改行。スマホで縦に読みやすい形を優先。',
+        '- 1段落を長くしすぎない。句点のあとに次文を横並びで続けすぎない。',
+        `- 質問は ${noQuestion ? '0' : '最大1'}（必要なら最後に1つだけ短く）`,
+        '',
+        anchorConfirmBlock ? anchorConfirmBlock : '',
+        '',
+        '禁止：',
+        '- CORE_INTENT の同文反復',
+        '- 箇条書き/チェックリスト',
+        '- 一般論/説教/説明口調',
+        '- 内部語の露出（IT/ゲート/メタ/プロトコル/スロット/回転 等）',
+      ]
+        .filter(Boolean)
+        .join('\n');
 }
 
 /* =========================================================

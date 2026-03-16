@@ -5530,6 +5530,13 @@ userContext: {
 
     if (!raw) return raw;
 
+    // ✅ LLM がすでに入れた改行を正本にする
+    // - ここで再レイアウトすると、引用・強調・例文の改行位置が崩れる
+    // - 特に FINAL writer 後の本文は、MOBILE_LAYOUT_APPLIED より LLM の改行を優先する
+    if (raw.includes('\n')) {
+      return raw;
+    }
+
     const normalizeInline = (s: string): string =>
       String(s ?? '')
         .replace(/\u3000/g, ' ')

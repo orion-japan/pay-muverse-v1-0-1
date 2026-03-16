@@ -175,7 +175,15 @@ export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
                     {icon}
                   </span>
                 )}
-                <span className="iros-ptext">{children}</span>
+                <span
+                  className="iros-ptext"
+                  style={{
+                    display: 'block',
+                    whiteSpace: 'pre-wrap',
+                  }}
+                >
+                  {children}
+                </span>
               </p>
             );
           },
