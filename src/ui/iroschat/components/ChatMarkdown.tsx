@@ -3,6 +3,7 @@ import './ChatMarkdown.css';
 import React, { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 
 type ChatMarkdownProps = {
   text: string;
@@ -158,9 +159,9 @@ export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
 
   return (
     <div className={`iros-markdown ${className ?? ''}`}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
+<ReactMarkdown
+  remarkPlugins={[remarkGfm, remarkBreaks]}
+  components={{
           p: ({ children, ...props }) => {
             const raw = plainTextFromChildren(children);
             const idx = pIndex++;

@@ -234,8 +234,9 @@ export function checkWriterGuardsMinimal(args: {
     return count;
   };
   if (qMax != null) {
-    const qCount = countQuestionsLike(text);
-    if (qCount > qMax) return { ok: false, reason: 'WG:Q_OVER', detail: { qCount, qMax } };
+    // questions_max は表示制御や上流の意図には使ってよいが、
+    // writer 出力を疑問文だけで reject しない。
+    countQuestionsLike(text);
   }
 
   // -----------------------------------------

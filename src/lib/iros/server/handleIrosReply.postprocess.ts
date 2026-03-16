@@ -715,11 +715,14 @@ function sanitizeLlmRewriteSeed(seedRaw: unknown, userText?: string | null): str
   const userTrim = String(userText ?? '').replace(/\r\n/g, '\n').trim();
 
   const parts: string[] = [];
+  const seen = new Set<string>();
+
   const push = (v: unknown) => {
     const t = String(v ?? '').replace(/\r\n/g, '\n').trim();
     if (!t) return;
-    if (userTrim && t === userTrim) return; // userText 同一は混ぜない
-    if (parts.length && parts[parts.length - 1] === t) return; // 連続重複除去
+    if (userTrim && t === userTrim) return; // userText 同一の裸行は混ぜない
+    if (seen.has(t)) return; // 重複除去
+    seen.add(t);
     parts.push(t);
   };
 
@@ -729,60 +732,21 @@ function sanitizeLlmRewriteSeed(seedRaw: unknown, userText?: string | null): str
     const lineTrim = String(line0 ?? '').trim();
     if (!lineTrim) continue;
 
+    // 裸の userText 行だけ除外
     if (userTrim && lineTrim === userTrim) continue;
 
-    if (lineTrim.startsWith('@SEED_TEXT')) {
-      const json = lineTrim.slice('@SEED_TEXT'.length).trim();
-      try {
-        const obj = JSON.parse(json);
-        push(obj?.text ?? obj?.content ?? '');
-      } catch {}
+    // ✅ directive 行は writer 用 seed として保持する
+    if (lineTrim.startsWith('@')) {
+      push(lineTrim);
       continue;
     }
 
-    if (lineTrim.startsWith('@Q_SLOT')) {
-      const json = lineTrim.slice('@Q_SLOT'.length).trim();
-      try {
-        const obj = JSON.parse(json);
-        push(obj?.seed_text ?? obj?.seedText ?? obj?.content ?? obj?.text ?? '');
-      } catch {}
-      continue;
-    }
-
-    if (lineTrim.startsWith('@OBS')) {
-      const json = lineTrim.slice('@OBS'.length).trim();
-      try {
-        const obj = JSON.parse(json);
-        push(obj?.text ?? obj?.content ?? '');
-      } catch {}
-      continue;
-    }
-
-    if (lineTrim.startsWith('@NEXT_HINT')) {
-      const json = lineTrim.slice('@NEXT_HINT'.length).trim();
-      try {
-        const obj: any = JSON.parse(json);
-        const v =
-          (typeof obj?.content === 'string' && obj.content.trim()) ||
-          (typeof obj?.hint === 'string' && obj.hint.trim()) ||
-          (typeof obj?.text === 'string' && obj.text.trim()) ||
-          (typeof obj?.message === 'string' && obj.message.trim()) ||
-          '';
-        if (v) push(v);
-      } catch {
-        // 解析できない場合は落とす（内部マーカー露出防止）
-      }
-      continue;
-    }
-
-    // その他の通常行
-    if (lineTrim.startsWith('@')) continue; // 内部マーカーは露出させない
+    // 通常行だけ残す
     push(lineTrim);
   }
 
   return parts.join('\n').trim();
 }
-
 /* =========================
  * main
  * ========================= */

@@ -12,6 +12,10 @@ export type FlowMeaningInput = {
   qCode?: string | null;
   phase?: string | null;
 
+  observedStage?: string | null;
+  primaryStage?: string | null;
+  secondaryStage?: string | null;
+
   flowDelta?: string | null;
   returnStreak?: number | null;
   stingLevel?: string | null;
@@ -46,6 +50,11 @@ function lower(v: unknown): string {
   return norm(v).toLowerCase();
 }
 
+function stageHead(v: unknown): string {
+  const s = norm(v);
+  return s ? s.charAt(0).toUpperCase() : '';
+}
+
 function isFutureQuestion(questionType: string, userText: string): boolean {
   const qt = lower(questionType);
   const ut = norm(userText);
@@ -67,6 +76,15 @@ export function buildFlowMeaningV1(args: FlowMeaningInput): FlowMeaningOutput {
   const depthStage = norm(args.depthStage);
   const qCode = norm(args.qCode);
   const phase = norm(args.phase);
+
+  const observedStage = norm(args.observedStage);
+  const primaryStage = norm(args.primaryStage);
+  const secondaryStage = norm(args.secondaryStage);
+
+  const observedHead = stageHead(observedStage);
+  const primaryHead = stageHead(primaryStage);
+  const secondaryHead = stageHead(secondaryStage);
+
   const flowDelta = lower(args.flowDelta);
   const returnStreak = Number(args.returnStreak ?? 0);
   const stingLevel = lower(args.stingLevel);
@@ -132,6 +150,53 @@ export function buildFlowMeaningV1(args: FlowMeaningInput): FlowMeaningOutput {
     continuingTension = '答えがないのではなく、焦点がまだ合い切っていない';
   }
 
+  // observedStage を入口として優先する
+  if (!focusIsSelfVsPressure && !hasYesNoPressure) {
+    if (observedHead === 'I') {
+      thisTurnHook =
+        '表面の説明ではなく、いま自分が本当に取りに来ている意味の一点をはっきりさせたい';
+      openLoop = 'いま何の意味を取りに来ているか';
+
+      if (primaryHead === 'R') {
+        flowMeaning =
+          '関係の反復や配置が背景にありつつ、今回はその構造を説明するより、そこにどんな意味があるのかを取りに来ている局面';
+        continuingTension =
+          '関係テーマとしては見えていても、今回ほしいのは関係分析そのものではなく、自分にとっての意味の確定に近い';
+        openLoop = 'この関係反復が自分に何を知らせているか';
+      } else if (primaryHead === 'C') {
+        flowMeaning =
+          '動き方や作り方の前に、今回はその流れにどんな意味を置くかを見極めたい局面';
+        continuingTension =
+          '次の一手を決めるより先に、その行動がどの意図から出るのかを確かめたい';
+      } else if (primaryHead === 'S') {
+        flowMeaning =
+          '内面の揺れを見ながら、今回は感情整理そのものより、その揺れが何を指しているかを知りたい局面';
+        continuingTension =
+          '気持ちは見えていても、まだ意味の言葉に着地し切っていない';
+      }
+    } else if (observedHead === 'R') {
+      thisTurnHook =
+        '出来事の説明より、誰とのあいだで何が繰り返されているのか、その関係の核を見たい';
+      openLoop = 'どの関係配置が繰り返しを作っているか';
+    } else if (observedHead === 'S') {
+      thisTurnHook =
+        '外側の整理より、まず自分の内側で何が起きているかを静かに見たい';
+      openLoop = 'いま自分の中で何が起きているか';
+    } else if (observedHead === 'C') {
+      thisTurnHook =
+        '考えを増やすより、ここから何をどう作るかを一段だけはっきりさせたい';
+      openLoop = '次に何を作るか / どう動くか';
+    } else if (observedHead === 'F') {
+      thisTurnHook =
+        'ぼんやりした感覚をそのままにせず、いまの輪郭を一つだけ言葉にしたい';
+      openLoop = 'いま何に輪郭を与えたいか';
+    } else if (observedHead === 'T') {
+      thisTurnHook =
+        '先の展望を広げることより、その先に向かう軸が何かを確かめたい';
+      openLoop = 'どこへ向かう流れなのか';
+    }
+  }
+
   if (!focusIsSelfVsPressure && !hasYesNoPressure) {
     if (isFutureQuestion(questionType, userText) && isLossCheck(userText)) {
       thisTurnHook =
@@ -141,7 +206,7 @@ export function buildFlowMeaningV1(args: FlowMeaningInput): FlowMeaningOutput {
       thisTurnHook =
         '未来予測そのものより、自分はどこを見て次に進めばいいかを確かめたい';
       openLoop = '次の一手 / どの見方を採るか';
-    } else if (isMeaningCheck(questionType)) {
+    } else if (isMeaningCheck(questionType) && observedHead !== 'I') {
       thisTurnHook =
         '表面の言い換えではなく、自分の中で実際に向きが変わる一点をつかみたい';
       openLoop = 'その一点をどう言い換えると腑に落ちるか';
@@ -158,6 +223,10 @@ export function buildFlowMeaningV1(args: FlowMeaningInput): FlowMeaningOutput {
 
   if (stingLevel === 'high') {
     continuingTension += '。言葉の選び方しだいで刺さりにも負荷にもなりやすい';
+  }
+
+  if (secondaryHead === 'I' && observedHead !== 'I') {
+    continuingTension += '。表に出ている話題とは別に、背景では意味の整理も静かに走っている';
   }
 
   if (recallEligible) {
@@ -187,6 +256,9 @@ export function buildFlowMeaningV1(args: FlowMeaningInput): FlowMeaningOutput {
     depthStage,
     qCode,
     phase,
+    observedStage,
+    primaryStage,
+    secondaryStage,
     flowDelta,
     returnStreak,
     stingLevel,

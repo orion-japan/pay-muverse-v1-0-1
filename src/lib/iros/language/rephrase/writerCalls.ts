@@ -1117,20 +1117,16 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   ).trim();
 
                   const historyForWriterSource =
-                  (Array.isArray(userCtx?.historyForWriter) && userCtx.historyForWriter.length > 0
-                    ? userCtx.historyForWriter
-                    : Array.isArray(ctxPack?.historyForWriter) && ctxPack.historyForWriter.length > 0
-                      ? ctxPack.historyForWriter
-                      : Array.isArray((args as any)?.userContext?.turnsForWriter) &&
-                          (args as any).userContext.turnsForWriter.length > 0
-                        ? (args as any).userContext.turnsForWriter
-                        : Array.isArray((args as any)?.userContext?.ctxPack?.turnsForWriter) &&
-                            (args as any).userContext.ctxPack.turnsForWriter.length > 0
-                          ? (args as any).userContext.ctxPack.turnsForWriter
-                          : Array.isArray((args as any)?.userContext?.turns) &&
-                              (args as any).userContext.turns.length > 0
-                            ? (args as any).userContext.turns
-                            : []);
+                  (Array.isArray((args as any)?.userContext?.turnsForWriter) &&
+                    (args as any).userContext.turnsForWriter.length > 0
+                    ? (args as any).userContext.turnsForWriter
+                    : Array.isArray((args as any)?.userContext?.ctxPack?.turnsForWriter) &&
+                        (args as any).userContext.ctxPack.turnsForWriter.length > 0
+                      ? (args as any).userContext.ctxPack.turnsForWriter
+                      : Array.isArray((args as any)?.userContext?.turns) &&
+                          (args as any).userContext.turns.length > 0
+                        ? (args as any).userContext.turns
+                        : []);
 
                 const historyForWriterLen = Array.isArray(historyForWriterSource)
                   ? historyForWriterSource.length
@@ -1448,6 +1444,25 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   depthStage: depthStage || null,
                   qCode: qCode || null,
                   phase: phase || null,
+                  observedStage: pick(
+                    (ctxPack as any)?.observedStage,
+                    (extra as any)?.observedStage,
+                    currentCardAny?.observedStage,
+                    null,
+                  ),
+                  primaryStage: pick(
+                    (ctxPack as any)?.primaryStage,
+                    (extra as any)?.primaryStage,
+                    currentCardAny?.primaryStage,
+                    currentCardAny?.observedStage,
+                    null,
+                  ),
+                  secondaryStage: pick(
+                    (ctxPack as any)?.secondaryStage,
+                    (extra as any)?.secondaryStage,
+                    currentCardAny?.secondaryStage,
+                    null,
+                  ),
                   flowDelta: String(
                     ((args as any)?.extra?.flowDelta ??
                       (args as any)?.userContext?.ctxPack?.flowDelta ??
@@ -1506,17 +1521,13 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                     const uc: any = (args as any)?.userContext ?? {};
                     const cp: any = uc?.ctxPack ?? {};
                     const src =
-                      Array.isArray(uc?.historyForWriter) && uc.historyForWriter.length > 0
-                        ? uc.historyForWriter
-                        : Array.isArray(cp?.historyForWriter) && cp.historyForWriter.length > 0
-                          ? cp.historyForWriter
-                          : Array.isArray(uc?.turnsForWriter) && uc.turnsForWriter.length > 0
-                            ? uc.turnsForWriter
-                            : Array.isArray(cp?.turnsForWriter) && cp.turnsForWriter.length > 0
-                              ? cp.turnsForWriter
-                              : Array.isArray(uc?.turns) && uc.turns.length > 0
-                                ? uc.turns
-                                : [];
+                      Array.isArray(uc?.turnsForWriter) && uc.turnsForWriter.length > 0
+                        ? uc.turnsForWriter
+                        : Array.isArray(cp?.turnsForWriter) && cp.turnsForWriter.length > 0
+                          ? cp.turnsForWriter
+                          : Array.isArray(uc?.turns) && uc.turns.length > 0
+                            ? uc.turns
+                            : [];
                     return Array.isArray(src) ? src.length : 0;
                   })(),
                 });
@@ -1757,36 +1768,12 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   .replace(/\n{3,}/g, '\n\n')
                   .trim();
 
-                    const flowMeaningBlock = (() => {
-                    const meaning = String(flowMeaningV1?.flowMeaning ?? '').trim();
-                    const hook = String(flowMeaningV1?.thisTurnHook ?? '').trim();
-                    const tension = String(flowMeaningV1?.continuingTension ?? '').trim();
+                  const seedBlocksForWriter = [mirrorFlowSeedText].filter((x) => norm(x));
+                  const seedBlockForWriter = seedBlocksForWriter.join('\n\n');
 
-                    const openLoopRaw = String(flowMeaningV1?.openLoop ?? '').trim();
-                    const openLoop = openLoopRaw.replace(/\s*\/\s*mode=confirm\b/gi, '').trim();
-
-                    // ✅ confirm 系の openLoop は writer に渡さない
-                    // - 「どう言い換えると腑に落ちるか」「mode=confirm」系が
-                    //   次ターンの質問生成トリガになっていたため
-                    const shouldDropOpenLoop =
-                      /mode=confirm\b/i.test(openLoopRaw) ||
-                      /どう言い換えると腑に落ちるか/.test(openLoopRaw);
-
-                    const lines = ['FLOW_CONTEXT (DO NOT OUTPUT):'];
-                    if (meaning) lines.push(`flowMeaning=${meaning}`);
-                    if (hook) lines.push(`thisTurnHook=${hook}`);
-                    if (tension) lines.push(`continuingTension=${tension}`);
-                    if (openLoop && !shouldDropOpenLoop) lines.push(`openLoop=${openLoop}`);
-
-                    return lines.length > 1 ? lines.join('\n') : '';
-                  })();
-
-                const seedBlocksForWriter = [mirrorFlowSeedText, flowMeaningBlock].filter((x) => norm(x));
-                const seedBlockForWriter = seedBlocksForWriter.join('\n\n');
-
-                const injectedHead = [coordMinimalBlock, seedBlockForWriter]
-                  .filter((x) => norm(x))
-                  .join('\n\n');
+                  const injectedHead = [coordMinimalBlock, seedBlockForWriter]
+                    .filter((x) => norm(x))
+                    .join('\n\n');
 
                 const internalPackFixed = injectedHead.trim();
                   try {

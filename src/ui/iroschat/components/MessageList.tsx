@@ -231,7 +231,17 @@ function transformIrTemplateToMarkdown(input: string): string {
   if (/🧿\s*観測対象[:：]/.test(input) && /I\/T層の刺さる一句/.test(input)) {
     return input;
   }
+  // ②.5 通常会話は変換しない
+  // - multi7 でも新ir診断でもない本文まで旧I層テンプレ変換に流すと、
+  //   改行や段落構造がUI側で崩れる
+  // - 旧テンプレの見出し（観測対象 / 深度 / 位相 / 意識状態 / メッセージ）が
+  //   実際に含まれているときだけ下の既存変換へ進める
+  const looksLikeLegacyIrTemplate =
+    /(?:^|\n)\s*(?:観測対象|深度|位相|意識状態|メッセージ)\s*[:：]?/m.test(input);
 
+  if (!looksLikeLegacyIrTemplate) {
+    return input;
+  }
   // ③ 旧 I層テンプレ → Markdown（既存ロジック）
   const rawLines = input.split(/\r?\n/);
 

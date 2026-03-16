@@ -1114,50 +1114,105 @@ const maxLinesFinal = isIR
     let scaffoldApplied = false;
 
 
-  if (shouldUseSlotsAsLastResort) {
-    // ✅ slots last resort でも、内部ディレクティブ（@TASK/@CONSTRAINTS/...）を落としてから使う
-    // - ここは isBadBlock/stripDirectiveLines の経路を通らないため、同等の安全化をここで行う
-    const isBadDirective = (t0: string) => {
+
+    const extractRenderableDirectiveText = (t0: string): string => {
       const t = String(t0 ?? '').trim();
-      if (!t) return true;
-      if (/^@(?:CONSTRAINTS|TASK|OBS|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(t)) return true;
-      if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) return true;
-      return false;
+      if (!t) return '';
+
+      const parseJsonPayload = (prefix: string): any | null => {
+        if (!t.startsWith(prefix)) return null;
+        const json = t.slice(prefix.length).trim();
+        try {
+          return JSON.parse(json);
+        } catch {
+          return null;
+        }
+      };
+
+      if (t.startsWith('@SEED_TEXT')) {
+        const obj = parseJsonPayload('@SEED_TEXT');
+        return String(obj?.text ?? obj?.content ?? '').trim();
+      }
+
+      if (t.startsWith('@Q_SLOT')) {
+        const obj = parseJsonPayload('@Q_SLOT');
+        return String(obj?.seed_text ?? obj?.seedText ?? obj?.content ?? obj?.text ?? '').trim();
+      }
+
+      if (t.startsWith('@OBS')) {
+        const obj = parseJsonPayload('@OBS');
+        return String(obj?.text ?? obj?.content ?? '').trim();
+      }
+
+      if (t.startsWith('@NEXT_HINT')) {
+        return '';
+      }
+
+      if (t.startsWith('@')) {
+        return '';
+      }
+
+      return t;
     };
 
-    const cleaned = (slotExtracted!.blocks ?? [])
-      .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
-      .filter((t: string) => !isBadDirective(t))
-      .map((t: string) => stripDirectiveLines(t))
-      .map((t: string) => stripInternalLabels(t))
-      .map((t: string) => cutAfterIlineAndDropWriterNotes(t))
-      .map((t: string) => String(t ?? '').trim())
-      .filter(Boolean)
-      .map((t: string) => ({ text: t }));
+    const normalizeRenderableBlockText = (t0: string): string => {
+      const extracted = extractRenderableDirectiveText(t0);
+      if (!extracted) return '';
 
-    blocks = cleaned.length > 0 ? cleaned : slotExtracted!.blocks;
-    usedSlots = true;
-
-    fallbackText = fallbackText || blocks.map((b) => b.text).join('\n');
-    fallbackFrom = fallbackFrom !== 'none' ? fallbackFrom : slotExtracted!.source;
-  } else {
-    const base = picked || fallbackText || '';
-
-    const isScaffoldLike = slotPlanPolicy === 'SCAFFOLD' || (slotPlanPolicy == null && hasAnySlots && !picked);
-
-    // ✅ rephraseBlocks は block 意図を持つので splitToLines で潰さない
-    const rephraseBlocks =
-      extraAny?.rephraseBlocks ?? extraAny?.rephrase?.blocks ?? extraAny?.rephrase?.rephraseBlocks ?? null;
-
-    const isBadBlock = (t0: string) => {
-      const t = String(t0 ?? '').trim();
-      if (!t) return true;
-      // 先頭が @CONSTRAINTS/@OBS/... 系は “内部ディレクティブ”
-      if (/^@(?:CONSTRAINTS|TASK|OBS|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(t)) return true;
-      // JSONっぽい塊も UI には出さない（だいたい directive の副産物）
-      if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) return true;
-      return false;
+      return String(
+        cutAfterIlineAndDropWriterNotes(
+          stripInternalLabels(
+            stripDirectiveLines(extracted),
+          ),
+        ) ?? '',
+      ).trim();
     };
+
+    if (shouldUseSlotsAsLastResort) {
+      // ✅ slots last resort でも、内部ディレクティブ（@TASK/@CONSTRAINTS/...）を落としてから使う
+      // - ここは isBadBlock/stripDirectiveLines の経路を通らないため、同等の安全化をここで行う
+      const isBadDirective = (t0: string) => {
+        const extracted = extractRenderableDirectiveText(t0);
+        if (!extracted) return true;
+        if (/^@(?:CONSTRAINTS|TASK|OBS|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(extracted)) return true;
+        if (
+          (extracted.startsWith('{') && extracted.endsWith('}')) ||
+          (extracted.startsWith('[') && extracted.endsWith(']'))
+        ) {
+          return true;
+        }
+        return false;
+      };
+
+      const cleaned = (slotExtracted!.blocks ?? [])
+        .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
+        .filter((t: string) => !isBadDirective(t))
+        .map((t: string) => normalizeRenderableBlockText(t))
+        .filter(Boolean)
+        .map((t: string) => ({ text: t }));
+
+      blocks = cleaned.length > 0 ? cleaned : slotExtracted!.blocks;
+      usedSlots = true;
+
+      fallbackText = fallbackText || blocks.map((b) => b.text).join('\n');
+      fallbackFrom = fallbackFrom !== 'none' ? fallbackFrom : slotExtracted!.source;
+    } else {
+      const base = picked || fallbackText || '';
+
+      const isScaffoldLike = slotPlanPolicy === 'SCAFFOLD' || (slotPlanPolicy == null && hasAnySlots && !picked);
+
+      // ✅ rephraseBlocks は block 意図を持つので splitToLines で潰さない
+      const rephraseBlocks =
+        extraAny?.rephraseBlocks ?? extraAny?.rephrase?.blocks ?? extraAny?.rephrase?.rephraseBlocks ?? null;
+
+      const isBadBlock = (t0: string) => {
+        const extracted = extractRenderableDirectiveText(t0);
+        const t = String(extracted ?? '').trim();
+        if (!t) return true;
+        if (/^@(?:CONSTRAINTS|TASK|OBS|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(t)) return true;
+        if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) return true;
+        return false;
+      };
 
     // ✅ IR（診断）では “診断フォーマット” を最優先で守る
     // - rephraseBlocks は本文を置換して短文化しやすい（今回 outLen=80 が発生）
@@ -1282,11 +1337,7 @@ if (isIR && !allowRephraseBlocksInIR) {
   let cleanedBlocksText = rbTexts
     // advance計測用の内部ブロックは UI に出さない
     .filter((t: string) => t && !t.trimStart().startsWith('@NEXT_HINT'))
-    .filter((t: string) => !isBadBlock(t))
-    .map((t: string) => stripInternalLabels(t))
-    .filter(Boolean)
-    // ILINE 末尾の writer 注釈を除去して “末尾切り事故” を防ぐ
-    .map((t: string) => cutAfterIlineAndDropWriterNotes(t))
+    .map((t: string) => normalizeRenderableBlockText(t))
     .filter(Boolean);
 
   // ✅ preface を 1行だけ先頭付与（重複は避ける）
@@ -1520,8 +1571,7 @@ void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）
       const rbTexts = rbAllTexts
         // @NEXT_HINT は UI に出さない（存在しても本文に混ぜない）
         .filter((t: string) => !String(t ?? '').trimStart().startsWith('@NEXT_HINT'))
-        // 末尾切り事故防止のガードはここで継続
-        .map((t: string) => cutAfterIlineAndDropWriterNotes(stripInternalLabels(t)))
+        .map((t: string) => normalizeRenderableBlockText(t))
         .filter(Boolean) as string[];
 
       if (rbTexts.length > 0) {
@@ -2290,18 +2340,34 @@ try {
 } catch {}
 
 
-// 【置き換え②】行 2301 付近のこの1行だけ置き換え（underscore → hyphen）
-// 置換前：pickedFrom = pickedFrom === 'text' ? 'rephraseBlocks-forced' : pickedFrom;
+// 【置き換え②】行 2301 付近からこのブロック全体を置き換え
 pickedFrom = pickedFrom === 'text' ? 'rephraseBlocks-forced' : pickedFrom;
+
   // ✅ 短文化の“確定ログ”：render側が切ったのか、blocks側が短いのかを一発で判定する
   try {
     const rbDiag = (meta as any)?.extra?.renderMeta?.rbDiag ?? null;
 
     const pickedFromStr = String(pickedFrom ?? '');
+    const fallbackFromStr = String(fallbackFrom ?? '');
 
-    // ✅ rephraseBlocks “forced” のときだけ SHORT_OUT_DIAG を除外したい
-    // - 通常の pickedFrom='rephraseBlocks' は診断対象に含める（短文化事故を拾うため）
-    const isForcedBlocks = pickedFromStr === 'rephraseBlocks-forced';
+    const rephraseBlocksLen =
+      Array.isArray((meta as any)?.extra?.rephraseBlocks)
+        ? ((meta as any)?.extra?.rephraseBlocks as any[]).length
+        : Array.isArray((args as any)?.meta?.extra?.rephraseBlocks)
+          ? (((args as any)?.meta?.extra?.rephraseBlocks as any[]).length)
+          : Array.isArray((args as any)?.extra?.rephraseBlocks)
+            ? (((args as any)?.extra?.rephraseBlocks as any[]).length)
+            : Array.isArray(blocksForRender)
+              ? blocksForRender.length
+              : 0;
+
+    // ✅ rephraseBlocks 系が最終採用に絡んでいるなら short-path 診断はスキップ
+    const usesRephraseBlocks =
+      pickedFromStr === 'rephraseBlocks' ||
+      pickedFromStr === 'rephraseBlocks-forced' ||
+      fallbackFromStr === 'rephraseBlocks' ||
+      fallbackFromStr === 'rephraseBlocks-forced' ||
+      rephraseBlocksLen > 0;
 
     // ✅ blocksCount は「最終的に render に渡す blocks（= blocksForRender）」で数える
     const blocksCountForMeta = Array.isArray(blocksForRender) ? blocksForRender.length : 0;
@@ -2310,7 +2376,7 @@ pickedFrom = pickedFrom === 'text' ? 'rephraseBlocks-forced' : pickedFrom;
     const isShortOut =
       !isIR &&
       !shortException &&
-      !isForcedBlocks &&
+      !usesRephraseBlocks &&
       Number.isFinite(meta.outLen) &&
       meta.outLen > 0 &&
       meta.outLen < 160;
@@ -2331,6 +2397,18 @@ pickedFrom = pickedFrom === 'text' ? 'rephraseBlocks-forced' : pickedFrom;
         pickedHead: meta.pickedHead,
         fallbackLen: meta.fallbackLen,
         fallbackHead: meta.fallbackHead,
+      });
+    } else if (usesRephraseBlocks) {
+      console.log('[IROS/renderGateway][SHORT_OUT_DIAG_SKIPPED]', {
+        rev: IROS_RENDER_GATEWAY_REV,
+        slotPlanPolicy,
+        pickedFrom,
+        fallbackFrom,
+        rephraseBlocksLen,
+        blocksCount: blocksCountForMeta,
+        reason: 'PRESERVE_REPHRASE_BLOCKS_RAW_SHAPE',
+        outLen: meta.outLen,
+        outHead: meta.outHead,
       });
     }
   } catch {}

@@ -751,29 +751,47 @@ function runLlmGate(args: {
     const candEx: any = metaCandidate?.extra ?? null;
     const saveEx: any = metaSaved?.extra ?? null;
 
-    // ✅ seed が載ってる meta を優先（postprocess 後の metaForSave を拾えるようにする）
-    const candidateHasSeed =
-      Boolean(candEx?.slotPlanSeed) ||
-      Boolean(candEx?.llmRewriteSeed) ||
-      Boolean((metaCandidate as any)?.seed_text) ||
-      Boolean(candEx?.ctxPack?.seed_text);
+    // ✅ seed の強弱を分離
+    // 強い seed: llmRewriteSeed / slotPlanSeed
+    // 弱い seed: seed_text / ctxPack.seed_text
 
-    const savedHasSeed =
-      Boolean(saveEx?.slotPlanSeed) ||
-      Boolean(saveEx?.llmRewriteSeed) ||
-      Boolean((metaSaved as any)?.seed_text) ||
-      Boolean(saveEx?.ctxPack?.seed_text);
+    const candidateStrongSeed =
+      Boolean(candEx?.llmRewriteSeed && String(candEx.llmRewriteSeed).trim()) ||
+      Boolean(candEx?.slotPlanSeed && String(candEx.slotPlanSeed).trim());
+
+    const savedStrongSeed =
+      Boolean(saveEx?.llmRewriteSeed && String(saveEx.llmRewriteSeed).trim()) ||
+      Boolean(saveEx?.slotPlanSeed && String(saveEx.slotPlanSeed).trim());
+
+    const candidateWeakSeed =
+      Boolean((metaCandidate as any)?.seed_text && String((metaCandidate as any).seed_text).trim()) ||
+      Boolean(candEx?.ctxPack?.seed_text && String(candEx.ctxPack.seed_text).trim());
+
+    const savedWeakSeed =
+      Boolean((metaSaved as any)?.seed_text && String((metaSaved as any).seed_text).trim()) ||
+      Boolean(saveEx?.ctxPack?.seed_text && String(saveEx.ctxPack.seed_text).trim());
+
+    const candidateHasSeed = candidateStrongSeed || candidateWeakSeed;
+    const savedHasSeed = savedStrongSeed || savedWeakSeed;
 
     const metaForProbe =
-      (savedHasSeed && !candidateHasSeed) ? metaSaved :
-      (metaCandidate ?? metaSaved ?? null);
+      savedStrongSeed && !candidateStrongSeed
+        ? metaSaved
+        : candidateStrongSeed && !savedStrongSeed
+          ? metaCandidate
+          : savedStrongSeed && candidateStrongSeed
+            ? (metaSaved ?? metaCandidate ?? null)
+            : savedHasSeed && !candidateHasSeed
+              ? metaSaved
+              : (metaCandidate ?? metaSaved ?? null);
+
     const hasSlots =
       Boolean(metaForProbe?.framePlan?.slots) ||
       Boolean(metaForProbe?.framePlan?.framePlan?.slots) ||
       Boolean(metaForProbe?.slotPlan?.slots) ||
       Boolean(metaForProbe?.slots);
 
-      let slotPlanLen: number | null =
+    let slotPlanLen: number | null =
       metaForProbe?.framePlan?.slotPlanLen ??
       metaForProbe?.framePlan?.framePlan?.slotPlanLen ??
       metaForProbe?.slotPlan?.slotPlanLen ??
@@ -1538,9 +1556,7 @@ if (!wantsMicroNow) {
         if (cp.qCode) keep.qCode = cp.qCode;
         if (cp.slotPlanPolicy) keep.slotPlanPolicy = cp.slotPlanPolicy;
         if (cp.goalKind) keep.goalKind = cp.goalKind;
-        if (cp.slotPlan) keep.slotPlan = cp.slotPlan;
         if (cp.exprMeta) keep.exprMeta = cp.exprMeta;
-        if (cp.framePlan) keep.framePlan = cp.framePlan;
         if (cp.traceId) keep.traceId = cp.traceId;
 
         (ex as any).ctxPack = keep;
@@ -1650,15 +1666,14 @@ if (!wantsMicroNow) {
       if (cp.historyForWriter) keep.historyForWriter = cp.historyForWriter;
       if (cp.historyDigestV1) keep.historyDigestV1 = cp.historyDigestV1;
 
-      if (cp.phase) keep.phase = cp.phase;
-      if (cp.depthStage) keep.depthStage = cp.depthStage;
-      if (cp.qCode) keep.qCode = cp.qCode;
-      if (cp.slotPlanPolicy) keep.slotPlanPolicy = cp.slotPlanPolicy;
-      if (cp.goalKind) keep.goalKind = cp.goalKind;
-      if (cp.slotPlan) keep.slotPlan = cp.slotPlan;
-      if (cp.exprMeta) keep.exprMeta = cp.exprMeta;
-      if (cp.framePlan) keep.framePlan = cp.framePlan;
-      if (cp.traceId) keep.traceId = cp.traceId;
+        // --- 構造メタ（軽いので残す）---
+        if (cp.phase) keep.phase = cp.phase;
+        if (cp.depthStage) keep.depthStage = cp.depthStage;
+        if (cp.qCode) keep.qCode = cp.qCode;
+        if (cp.slotPlanPolicy) keep.slotPlanPolicy = cp.slotPlanPolicy;
+        if (cp.goalKind) keep.goalKind = cp.goalKind;
+        if (cp.exprMeta) keep.exprMeta = cp.exprMeta;
+        if (cp.traceId) keep.traceId = cp.traceId;
 
       (ex as any).ctxPack = keep;
     } else {
@@ -2536,15 +2551,12 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
     return '';
   })();
 
-  if (finalAssistantContent) {
-    const last = tail.length > 0 ? tail[tail.length - 1] : null;
-
-    if (last?.role === 'assistant') {
-      tail[tail.length - 1] = { role: 'assistant', content: finalAssistantContent };
-    } else {
-      tail.push({ role: 'assistant', content: finalAssistantContent });
-    }
-  }
+  // STEP1:
+  // historyForWriter へ finalAssistantContent を再注入しない
+  // - writer は current turn の assistant 本文に引っ張られず、
+  //   Seed + current user を主参照にする
+  // - 直前 assistant の参照が必要な処理は、historyForWriter ではなく
+  //   専用の軽量メタ側で扱う
 
   // 最大件数に再調整
   tail = tail.slice(-Math.max(1, maxMsgs));
@@ -5881,6 +5893,48 @@ if (shouldRunWriter) {
                     layer: (out.metaForSave as any)?.intentLayer ?? metaRoot?.intentLayer ?? null,
                     renderMode: (out.metaForSave as any)?.renderMode ?? metaRoot?.renderMode ?? null,
                     slotPlanPolicy,
+                    extra: {
+                      ...((((out.metaForSave as any)?.extra &&
+                        typeof (out.metaForSave as any).extra === 'object')
+                        ? (out.metaForSave as any).extra
+                        : {})),
+                      llmGate:
+                        ((out.metaForSave as any)?.extra?.llmGate &&
+                        typeof (out.metaForSave as any).extra.llmGate === 'object')
+                          ? ((out.metaForSave as any).extra.llmGate as any)
+                          : ((ctxPackPrev as any)?.llmGate &&
+                              typeof (ctxPackPrev as any).llmGate === 'object')
+                            ? ((ctxPackPrev as any).llmGate as any)
+                            : null,
+                      llmRewriteSeed:
+                        typeof (out.metaForSave as any)?.extra?.llmRewriteSeed === 'string'
+                          ? (out.metaForSave as any).extra.llmRewriteSeed
+                          : typeof ((out.metaForSave as any)?.extra?.ctxPack as any)?.llmRewriteSeed === 'string'
+                            ? ((out.metaForSave as any).extra.ctxPack as any).llmRewriteSeed
+                            : typeof (ctxPackPrev as any)?.llmRewriteSeed === 'string'
+                              ? (ctxPackPrev as any).llmRewriteSeed
+                              : null,
+                      llmRewriteSeedRaw:
+                        typeof (out.metaForSave as any)?.extra?.llmRewriteSeedRaw === 'string'
+                          ? (out.metaForSave as any).extra.llmRewriteSeedRaw
+                          : typeof ((out.metaForSave as any)?.extra?.ctxPack as any)?.llmRewriteSeedRaw === 'string'
+                            ? ((out.metaForSave as any).extra.ctxPack as any).llmRewriteSeedRaw
+                            : typeof (ctxPackPrev as any)?.llmRewriteSeedRaw === 'string'
+                              ? (ctxPackPrev as any).llmRewriteSeedRaw
+                              : null,
+                      slotPlanSeed:
+                        typeof (out.metaForSave as any)?.extra?.slotPlanSeed === 'string'
+                          ? (out.metaForSave as any).extra.slotPlanSeed
+                          : typeof ((out.metaForSave as any)?.extra?.ctxPack as any)?.slotPlanSeed === 'string'
+                            ? ((out.metaForSave as any).extra.ctxPack as any).slotPlanSeed
+                            : typeof (ctxPackPrev as any)?.slotPlanSeed === 'string'
+                              ? (ctxPackPrev as any).slotPlanSeed
+                              : null,
+                      finalTextPolicy:
+                        typeof (out.metaForSave as any)?.extra?.finalTextPolicy === 'string'
+                          ? (out.metaForSave as any).extra.finalTextPolicy
+                          : null,
+                    },
                     ctxPack: {
                       ...(ctxPackPrev as any),
                       ...(((out.metaForSave as any)?.extra?.ctxPack ?? {}) as any),

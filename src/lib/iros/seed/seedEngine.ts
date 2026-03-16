@@ -190,13 +190,10 @@ export function formatMirrorFlowSeed(seed: MirrorFlowSeed): FormatMirrorFlowSeed
   lines.push('SOURCE_OF_TRUTH');
   lines.push(`mirror=${seed.sourceOfTruth.mirror}`);
   lines.push(`position=${seed.sourceOfTruth.position}`);
-  lines.push(`continuity=${seed.sourceOfTruth.continuity}`);
-  lines.push(`motion=${seed.sourceOfTruth.motion}`);
 
   lines.push('');
   lines.push('MIRROR');
   lines.push(`e_turn=${seed.mirror.e_turn ?? '(null)'}`);
-  lines.push(`polarity=${seed.mirror.polarity ?? '(null)'}`);
   if (seed.mirror.basedOn) {
     lines.push(`basedOn=${seed.mirror.basedOn}`);
   }
@@ -210,45 +207,6 @@ export function formatMirrorFlowSeed(seed: MirrorFlowSeed): FormatMirrorFlowSeed
   if (seed.position.secondaryStage) {
     lines.push(`secondaryStage=${seed.position.secondaryStage}`);
   }
-
-  lines.push('');
-  lines.push('CONTINUITY');
-  lines.push(`depthStage=${seed.continuity.depthStage ?? '(null)'}`);
-  lines.push(
-    `depthHistory=${seed.continuity.depthHistoryLite.length > 0 ? seed.continuity.depthHistoryLite.join('→') : '(none)'}`,
-  );
-
-  lines.push('');
-  lines.push('MOTION');
-  lines.push(`axis=${seed.motion.axis ?? '(null)'}`);
-  lines.push(`kind=${seed.motion.kind ?? '(null)'}`);
-  if (seed.motion.reason) {
-    lines.push(`reason=${seed.motion.reason}`);
-  }
-  if (seed.motion.suggestedStage) {
-    lines.push(`suggestedStage=${seed.motion.suggestedStage}`);
-  }
-
-  lines.push('');
-  lines.push('OPENNESS');
-  lines.push(`tLayerHint=${seed.openness.tLayerHint ?? '(null)'}`);
-  lines.push(
-    `itOk=${seed.openness.itOk === null ? '(null)' : String(seed.openness.itOk)}`,
-  );
-
-  lines.push('');
-  lines.push('META');
-  lines.push(`qCode=${seed.meta.qCode ?? '(null)'}`);
-  lines.push(`flowDelta=${seed.meta.flowDelta ?? '(null)'}`);
-
-  lines.push('');
-  lines.push('WRITER_DIRECTIVES');
-  lines.push(`tone=${seed.writerDirectives.tone ?? '(null)'}`);
-  lines.push(
-    `maxLines=${seed.writerDirectives.maxLines == null ? '(null)' : String(seed.writerDirectives.maxLines)}`,
-  );
-  lines.push(`slotPolicy=${seed.writerDirectives.slotPolicy ?? '(null)'}`);
-  lines.push(`rotationMention=${seed.writerDirectives.rotationMention ?? '(null)'}`);
 
   return {
     mirrorFlowSeedText: lines.join('\n').trim(),
