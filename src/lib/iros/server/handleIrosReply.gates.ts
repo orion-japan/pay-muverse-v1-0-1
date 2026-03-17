@@ -560,9 +560,9 @@ export async function runGreetingGate(args: any): Promise<{
   // 2) greeting-only gate
   // =========================================================
   const hit =
-    (/^(こんばんは|今晩は)$/u.test(core) && 'こんばんは。') ||
-    (/^(こんにちは)$/u.test(core) && 'こんにちは。') ||
-    (/^(おはよう|おはようございます)$/u.test(core) && 'おはようございます。') ||
+    (/^(こんばんは|こんばんわ|今晩は)$/u.test(core) && 'こんばんは。') ||
+    (/^(こんにちは|こんにちわ|こんちわ)$/u.test(core) && 'こんにちは。') ||
+    (/^(おはよう|おはよ|おはようございます)$/u.test(core) && 'おはようございます。') ||
     (/^(はじめまして|初めまして)$/u.test(core) && 'はじめまして。') ||
     (/^(よろしく|宜しく)$/u.test(core) && 'よろしく。') ||
     (/^(よろしくお願いします|宜しくお願いします)$/u.test(core) && 'よろしくお願いします。') ||
@@ -583,6 +583,7 @@ export async function runGreetingGate(args: any): Promise<{
   ];
 
   const framePlan = {
+    inputKind: 'greeting',
     slotPlanPolicy: 'FINAL',
     slots,
   };
@@ -592,6 +593,7 @@ export async function runGreetingGate(args: any): Promise<{
     result: seed,
     metaForSave: {
       gate: 'greeting',
+      inputKind: 'greeting',
       prefer_llm_writer: true,
       framePlan,
       slotPlan: {
@@ -601,10 +603,12 @@ export async function runGreetingGate(args: any): Promise<{
       slotPlanPolicy: 'FINAL',
       slotPlanLen: slots.length,
       extra: {
+        inputKind: 'greeting',
         slotPlanPolicy: 'FINAL',
         slotPlanLen: slots.length,
         ctxPack: {
           shortSummary: 'greeting',
+          inputKind: 'greeting',
         },
         framePlan,
         slotPlan: {

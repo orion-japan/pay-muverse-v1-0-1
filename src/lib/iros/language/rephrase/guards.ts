@@ -250,20 +250,26 @@ export function checkWriterGuardsMinimal(args: {
       if (hasBullets) return { ok: false, reason: 'WG:BULLETS' };
     }
 
-    // “解説します/ポイント/以下/まとめ/結論から” などのメタ文章（強すぎない範囲で最小）
+    // “本文の内容語としての解説” と
+    // “これから説明しますというメタ宣言” を分ける
     const hasMeta =
-      /解説|ポイント|まとめ|結論から|要約|箇条書き|チェックリスト|手順|まずは|次に|以下/.test(text);
+      /解説します|解説すると|ポイント|まとめ|結論から|要約|箇条書き|チェックリスト|手順|まずは|次に|以下/.test(text);
 
-    // output_only でも「短い導入1行」までは許容したいが、
-    // 2行以上のメタ構造になっている場合だけ落とす（最小）
+    // output_only でも本文中の「解説AI」「短く解説できます」は許容する。
+    // 落とすのは、説明モードの宣言行が複数段落にまたがる時だけ。
     if (hasMeta) {
       const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-      const metaLines = lines.filter((l) => /解説|ポイント|まとめ|結論から|要約|以下/.test(l));
+      const metaLines = lines.filter((l) =>
+        /解説します|解説すると|ポイント|まとめ|結論から|要約|以下/.test(l),
+      );
       if (metaLines.length >= 1 && lines.length >= 5) {
-        return { ok: false, reason: 'WG:OUTPUT_ONLY_META', detail: { metaLines: metaLines.slice(0, 2) } };
+        return {
+          ok: false,
+          reason: 'WG:OUTPUT_ONLY_META',
+          detail: { metaLines: metaLines.slice(0, 2) },
+        };
       }
     }
   }
-
   return { ok: true };
 }

@@ -1130,6 +1130,14 @@ function buildFlowReply(args: {
     }
 
     // ⑥ それ以外は narrow
+    if (
+      /^(?:こんにちは|こんちわ|こんばんは|おはよう|やあ|どうも|もしもし|おつかれ|おつかれさま|ただいま)$/u.test(
+        String(t ?? '').trim(),
+      )
+    ) {
+      return 'stabilize_shift' as const;
+    }
+
     return 'narrow_shift' as const;
   })();
 

@@ -41,10 +41,11 @@ function pickQuestionType(scores: QuestionTypeScoreMap): QuestionType {
   const top = sorted[0];
   const second = sorted[1];
 
-  // ✅ 未ヒット時は structure に倒さない
-  // - 短い挨拶 / 入口文 / まだ問いになっていない文で
-  //   「主張の型」「構造確認」に誤爆するのを防ぐ
-  if (!top || top[1] <= 0) return 'meaning';
+  // ✅ 未ヒット時は meaning に倒さない
+  // - ここを meaning にすると、短い挨拶 / 入口文 / 雑談まで
+  //   「意味解説ルート」に流れて explain_first が発火しやすくなる
+  // - まずは既存型の中で explain_first 化しにくい structure を安全側 fallback にする
+  if (!top || top[1] <= 0) return 'structure';
 
   // 完全拮抗は structure に寄せる
   if (second && second[1] > 0 && top[1] === second[1]) {

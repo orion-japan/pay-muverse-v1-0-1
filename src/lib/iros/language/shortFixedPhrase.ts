@@ -29,11 +29,11 @@ const FIXED_PHRASES: FixedPhraseEntry[] = [
     reply: 'おはようございます。🪔',
   },
   {
-    kind: 'greeting',
-    pattern: /^(こんにちは)$/iu,
-    canonical: 'こんにちは',
-    reply: 'こんにちは。🪔',
-  },
+      kind: 'greeting',
+      pattern: /^(こんにちは|こんにちわ|こんちは|こんちわ)$/iu,
+      canonical: 'こんにちは',
+      reply: 'こんにちは。🪔',
+    },
   {
     kind: 'greeting',
     pattern: /^(こんばんは|こんばんわ|今晩は)$/iu,
