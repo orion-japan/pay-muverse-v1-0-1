@@ -124,7 +124,7 @@ function scoreToPolarityBand(score: number | null): PolarityBand {
 /**
  * 安定度の考え方：
  * - YLevel が高いほど「揺れ」が強い → 不安定寄り
- * - SA が高いほど「自己の足場」がある → 安定寄り
+ * - SA が高いほど「自己の基準」がある → 安定寄り
  *
  * 両方をざっくり組み合わせて 3 段階に分類する。
  */

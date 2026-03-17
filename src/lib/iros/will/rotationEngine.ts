@@ -3,7 +3,7 @@
 //
 // 憲法：
 // - 回転＝状態遷移（deterministic）。LLMの文章生成とは切り離す
-// - offered は「下降の扉」を置くだけ
+// - offered は「下降の扉」を示すだけ
 // - accepted で初めて TCF に入る
 // - LLM signals は「兆し」(boolean) として受け取るが、depth 直結は禁止（補助条件にのみ使う）
 

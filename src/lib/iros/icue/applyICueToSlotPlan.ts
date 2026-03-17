@@ -102,7 +102,7 @@ export function applyICueToSlotPlan(
 
   const target = slots[idx];
 
-  // 差し込み：先頭に I-Line を置く（“言い切り”が先に刺さる）
+  // 差し込み：先頭に I-Line を示す（“言い切り”が先に刺さる）
   // ただし既存が空に近い場合もあるので安全に。
   const injected = injectLine(target.content, cue.iLine);
 

@@ -26,7 +26,7 @@ export type SoulReplyContext = {
  * failsafe の最小返信
  * - 余計な判断をしない
  * - 行動を煽らない
- * - ここに「戻せる導線」だけ置く
+ * - ここに「戻せる導線」だけ示す
  */
 export function composeSoulReply(ctx: SoulReplyContext): string {
   const short = trimToOneLine(ctx.userText);

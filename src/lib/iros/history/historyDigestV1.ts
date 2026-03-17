@@ -248,7 +248,7 @@ export function extractKeywordsV1(digest: HistoryDigestV1 | null | undefined, ma
   return ranked.slice(0, max);
 }
 /**
- * “話題核が落ちない”ための1行（先頭にkeywordsを置く）
+ * “話題核が落ちない”ための1行（先頭にkeywordsを示す）
  * 例: 「水星 / 逆行 — いま: 逆行の意味を確認」
  */
 export function buildTopicLineV1(digest: HistoryDigestV1 | null | undefined): string | null {

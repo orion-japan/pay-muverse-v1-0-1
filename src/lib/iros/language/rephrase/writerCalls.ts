@@ -774,7 +774,7 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     flowCurrentMeaning !== '(none)' && flowNextMeaning !== '(none)'
       ? `${flowCurrentMeaning} → ${flowNextMeaning}`
       : flowDelta2 === 'RETURN'
-        ? 'いったん戻って整えることで、次に進む足場ができる'
+        ? 'いったん戻って整理することで、次に進む基準ができる'
         : flowDelta2 === 'FORWARD'
           ? 'いまの動きが、そのまま次の展開を開きやすい'
           : flowCurrentMeaning !== '(none)'
@@ -924,7 +924,7 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
 
                 if (rf.distanceLevel === 'too_close') bits.push('近すぎて苦しさが出やすい');
                 else if (rf.distanceLevel === 'far') bits.push('遠さが不安を強めやすい');
-                else if (rf.distanceLevel === 'unstable') bits.push('距離の揺れがしんどさを作りやすい');
+                else if (rf.distanceLevel === 'unstable') bits.push('距離の不安定さがしんどさを強めやすい');
                 else if (rf.distanceLevel === 'close') bits.push('距離テーマが今の中心にある');
 
                 if (rf.certaintyLevel === 'low') bits.push('確信不足が詰まりの中心にある');
@@ -937,7 +937,7 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                 if (emotionalTemperatureForSeed === 'low') return '静かに整えれば届く温度';
                 if (emotionalTemperatureForSeed === 'mid') return '視点を1つ切ると動きやすい温度';
                 if (emotionalTemperatureForSeed === 'high') return '先に受け止めてから角度を切るべき温度';
-                if (emotionalTemperatureForSeed === 'volatile') return '今は切りすぎず、揺れを増やさない方がよい温度';
+                if (emotionalTemperatureForSeed === 'volatile') return '今は切り分けすぎず、不安定さを増やさない方がよい状態';
                 return '(none)';
               })();
 
@@ -955,7 +955,7 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                 }
 
                 if (temp === 'volatile') {
-                  return 'まず焦点を増やさず、揺れを少し静める方向を優先する';
+                  return 'まず論点を増やさず、不安定さを少し落ち着かせる方向を優先する';
                 }
 
                 if (temp === 'high') {
@@ -965,8 +965,8 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                 }
 
                 if (rf) {
-                  if (rf.distanceLevel === 'far') return '相手分析を増やすより、遠さで揺れている自分の足場を戻す';
-                  if (rf.distanceLevel === 'too_close') return '近づくより先に、少し呼吸できる距離感へ戻す';
+                  if (rf.distanceLevel === 'far') return '相手分析を増やすより、遠さで不安定になっている自分の基準を戻す';
+                  if (rf.distanceLevel === 'too_close') return '近づくより先に、少し落ち着ける距離まで戻す';
                   if (rf.distanceLevel === 'unstable') return '関係全体を決めず、今ぶれている一点だけを狭く見る';
                   if (rf.certaintyLevel === 'low') return '答えを取りに行くより、何が読めないのかを1段狭める';
                   if (rf.powerBalance === 'weaker') return '相手基準で動く前に、自分の位置を先に定める';
@@ -974,7 +974,7 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
 
                 if (sk === 'stabilize_shift') return '進めるより先に、戻って整える角度を優先する';
                 if (sk === 'narrow_shift') return '問題を小さく切って、いま触る一点だけを見せる';
-                if (sk === 'repair_shift') return '修復の正解探しではなく、安全な入口を1つだけ置く';
+                if (sk === 'repair_shift') return '修復の正解探しではなく、安全な入口を1つだけ示す';
                 if (sk === 'decide_shift') return '結論を急がず、選ぶ基準を先に固定する';
                 if (sk === 'distance_shift') return '近づく/離れるの前に、いまの距離で何が苦しいかを定める';
 

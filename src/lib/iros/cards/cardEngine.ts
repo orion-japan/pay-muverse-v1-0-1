@@ -264,7 +264,7 @@ function buildSeedText(args: {
   // --- RESPONSE_GUIDE（雑談なら強めに効かせる）---
   lines.push('');
   lines.push('RESPONSE_GUIDE (DO NOT OUTPUT):');
-  lines.push('- 返答は「現状（HUMAN_STATE）」優先。まず安心の足場を1〜2文。');
+  lines.push('- 返答は「現状（HUMAN_STATE）」優先。まず安心の基準を1〜2文。');
   lines.push('- 次に、短い“次の角度”を1文だけ添える（FUTUREは断定しない）。');
   lines.push('- 雑談寄り（chat）のときは HUMAN_STATE を強めに反映してよい。');
   lines.push('- ただしカード本文の言い換えはOK。意味の改変・予言化は禁止。');

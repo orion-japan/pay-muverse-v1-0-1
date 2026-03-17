@@ -5,7 +5,7 @@ export const runtime = 'edge'; // 速さ優先。Nodeなら削除可
 export const dynamic = 'force-dynamic';
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY!; // ← 必ず Server-only に置く
+const key = process.env.SUPABASE_SERVICE_ROLE_KEY!; // ← 必ず Server-only に示す
 
 type EventPayload = {
   kind: string; // 'online'|'offline'|'page'|'api'|'api-retry'|'token-refresh'|'error'|'heartbeat'

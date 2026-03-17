@@ -192,7 +192,7 @@ export type NorthStarDecideInput = {
   nowIso: string;
   userText: string;
 
-  /** “候補として置く/固定しない” を上流で検出した場合 */
+  /** “候補として示す/固定しない” を上流で検出した場合 */
   holdCandidate?: boolean;
 
   /** “固定する/北極星にする/SUNに合わせる” を上流で検出した場合 */

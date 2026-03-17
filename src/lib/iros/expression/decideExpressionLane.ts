@@ -139,11 +139,12 @@ export function decideExpressionLane(ctx: DecideCtx): ExpressionDecision {
       techniqueId = 'stall_hard';
     }
 
-    // ✅ ここが本命：RETURN なら sofia_light（allow に依存しない）
+    // ✅ RETURN だけでは表現レーンを開かない
+    // - 戻り局面そのものは keep するが、文体を自動で sofia_light にしない
+    // - 表現レーンを開くのは explicit / stallHard など別条件に限定する
     if (!explicitLane && lane === 'off' && flowDelta === 'RETURN') {
-      lane = 'sofia_light';
-      reason = 'RETURN';
-      techniqueId = 'return';
+      reason = 'RETURN_NO_LANE';
+      techniqueId = 'return_no_lane';
     }
 
     // ✅ 連続RETURNは理由を強める（可観測性）

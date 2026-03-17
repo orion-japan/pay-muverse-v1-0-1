@@ -302,7 +302,7 @@ export function extractSlotsForRephrase(extra: any): ExtractedSlots {
 function buildFixedBoxTexts(slotCount: number): string[] {
   const ZWSP = '\u200b';
   const full = [
-    'まず整理の箱を3つだけ置く。',
+    'まず整理の箱を3つだけ示す。',
     '事実：何が起きた（誰／どこ／いつ）',
     '感情：いま一番きつい反応',
     '望み：本当はどうなってほしい（短文でOK。うまく書かなくていい。）',
@@ -414,7 +414,7 @@ function buildMustIncludeRuleText(args: {
   return [
     '',
     '【改変禁止（recall-must-include）】',
-    '以下は“復元の足場”なので、削除・言い換え・要約は禁止。',
+    '以下は“復元の基準”なので、削除・言い換え・要約は禁止。',
     body,
     '',
   ].join('\n');
@@ -425,8 +425,8 @@ function buildMustIncludeRuleText(args: {
 // ---------------------------------------------
 type SlotLike = { key?: string; text?: string; content?: string; value?: string };
 
-const SCAFFOLD_PREFACE = 'いまの足場として一つだけ置く。違ったら捨てていい。';
-const SCAFFOLD_PURPOSE = 'この文章は“答えを渡す”ためじゃなく、あなたが答えを出すための足場を置く。';
+const SCAFFOLD_PREFACE = 'いまの基準として一つだけ示す。違ったら捨てていい。';
+const SCAFFOLD_PURPOSE = 'この文章は“答えを渡す”ためじゃなく、あなたが答えを出すための基準を示す。';
 
 function normLite(s: unknown): string {
   return String(s ?? '')
@@ -625,7 +625,7 @@ function restoreOnePointInOutput(args: { llmOut: string; onePoint: string }): st
  * ✅ scaffold（ONE_POINT pack）中の “must-have 構造” チェック（意味固定版）
  * - 固定文言一致はやめる
  * - 必須は「意味（役割）」だけ：
- *   1) 足場フレーム（答えを渡さない/足場を置く）
+ *   1) 基準フレーム（答えを渡さない/基準を示す）
  *   2) 一点（焦点/一点/注目点）
  *   3) 見る軸（2個以上：例=タイミング/守る理由/引っかかり）
  *
@@ -669,9 +669,9 @@ function scaffoldMustHaveOk(args: {
 
 
   // ------- 意味検出（固定文言ではなく、役割の存在） -------
-  // 1) 足場フレーム：答えを渡さない/足場/いまは決めない…系の“姿勢”
+  // 1) 基準フレーム：答えを渡さない/基準/いまは決めない…系の“姿勢”
   const hasFrame =
-    /(答えを渡さ|足場|いまは(結論|答え)を(出さ|急が)|決めなくて|まず.*(置く|作る))/u.test(out) ||
+    /(答えを渡さ|基準|いまは(結論|答え)を(出さ|急が)|決めなくて|まず.*(示す|作る))/u.test(out) ||
     (purposeNeedle && out.includes(purposeNeedle.slice(0, Math.min(18, purposeNeedle.length))));
 
   // 2) 一点：一点/焦点/ここで見るのは一つ…系
@@ -750,9 +750,9 @@ function restoreScaffoldMustHaveInOutput(args: {
   const addFrame = () => {
     const v =
       k === 0
-        ? 'ここでは答えを渡しません。あなたが答えを出せる位置に足場を置きます。'
+        ? 'ここでは答えを渡しません。あなたが答えを出せる位置に基準を置きます。'
         : k === 1
-          ? 'いまは結論を急がない。考えるための足場だけ整えます。'
+          ? 'いまは結論を急がない。考えるための基準だけ整えます。'
           : '答えを決める前に、まず“考えが動く場所”を作ります。';
     out = v + '\n' + out;
   };
@@ -778,7 +778,7 @@ function restoreScaffoldMustHaveInOutput(args: {
     const labels = (() => {
       if (!points3Needle) return [];
       const bad = (s: string) =>
-        /(見る場所は3つだけ|見る軸|いまの一点|今ここで扱う|焦点|足場|答えを渡さ)/u.test(s);
+        /(見る場所は3つだけ|見る軸|いまの一点|今ここで扱う|焦点|基準|答えを渡さ)/u.test(s);
 
       return points3Needle
         .replace(/\r\n/g, '\n')
@@ -1085,7 +1085,7 @@ function adaptSeedDraftHintForWriter(seedDraft: string, directTask: boolean): st
     out = out.replace(/.*find_trigger_point.*(\n|$)/gi, '').trim();
     const hint = directTask
       ? '（内部ヒント：ユーザーは「具体的なコツ/手順」を求めている。最初に使える具体策を短く出す）'
-      : '（内部ヒント：ユーザーが求めている一点を「軸」として置く）';
+      : '（内部ヒント：ユーザーが求めている一点を「軸」として示す）';
     return [hint, out].filter(Boolean).join('\n');
   }
 
@@ -1226,7 +1226,7 @@ function systemPromptForFullReply(args?: {
     : [
         '',
         '【directTask=FALSE】',
-        '- 冒頭で「引っかかっている一点」を“軸”として置く。',
+        '- 冒頭で「引っかかっている一点」を“軸”として示す。',
       ].join('\n');
 
   const lockRule = buildLockRuleText(args?.lockedILines ?? []);
@@ -2021,7 +2021,7 @@ const runFlagship = (text: string) => {
       content:
         '【再生成（旗印）】\n' +
         '- 目的：読み手が“自分で答えを出せる場所”を作る。\n' +
-        '- やること：視点/角度/切り分け/輪郭を1段だけ提示し、読者の足場を作る。\n' +
+        '- やること：視点/角度/切り分け/輪郭を1段だけ提示し、読者の基準を作る。\n' +
         '- 必須：入力（userText / lastTurns / historyText / seedDraft）に含まれる具体語を最低1つ、本文に自然に入れる。\n' +
         '- 禁止：汎用応援（大丈夫/応援/きっと/焦らなくていい/少しずつ 等）、ぼかし（かもしれません/と思います 連発）、箇条書き。\n' +
         '- 禁止：入力に無い背景を推測で足さない。\n' +

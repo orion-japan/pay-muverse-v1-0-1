@@ -148,7 +148,7 @@ export const LS7Templates: Record<LS7Key, Template[]> = {
   DOLPHIN: [
     { id:'LS7_DOLPHIN_S2_self_tone', phase:'Inner', depth:'S2', tone:'自分の音色', lines:[
       '相手の感情と自分の感情が混ざりやすい時期です。',
-      '自分の音色を先に置くと、共感は澄みます。',
+      '自分の音色を先に示すと、共感は澄みます。',
       '現実では、「今の自分は◯◯」を一行で自分に宣言してから話してください。'
     ]},
     { id:'LS7_DOLPHIN_R2_clear_edge', phase:'Outer', depth:'R2', tone:'境界の明瞭', lines:[

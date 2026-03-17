@@ -21,7 +21,7 @@
 // ✅ IDEA_BAND 出力契約（仕様固定 / writer 迷い防止）
 // 目的：IDEA_BAND は「候補列挙」以外を出さない（GROUND吸い込み事故を止める）
 //
-// ※契約の“正本”は buildShiftIdeaBand() 直上のコメントに置く（重複させない）
+// ※契約の“正本”は buildShiftIdeaBand() 直上のコメントに示す（重複させない）
 // - ここ（ファイル冒頭）は概要のみ保持する
 // - 具体（行数/禁止事項/例示）は buildShiftIdeaBand() を参照
 // =========================================================
@@ -914,7 +914,7 @@ function buildFlowReply(args: {
       }
       return {
         kind: 'redefine',
-        line: '止まったのではなく、次に進む前の足場を戻って整えている流れ',
+        line: '止まったのではなく、次に進む前の基準を戻って整えている流れ',
         source: 'flow',
       };
     }
@@ -946,7 +946,7 @@ function buildFlowReply(args: {
       if (observedStage2.startsWith('I')) {
         return {
           kind: 'reframe',
-          line: '出来事を整理し切ることより、この流れにどんな意味を置くと腑に落ちるかを確かめたい段階',
+          line: '出来事を整理し切ることより、この流れにどんな意味を示すと腑に落ちるかを確かめたい段階',
           source: 'flow+observedStage',
         };
       }
@@ -1203,7 +1203,7 @@ function buildFlowReply(args: {
       }
 
       if (observedStage2.startsWith('I')) {
-        return '出来事の説明を増やすより、今回はその流れにどんな意味を置くと腑に落ちるかを先に確かめる';
+        return '出来事の説明を増やすより、今回はその流れにどんな意味を示すと腑に落ちるかを先に確かめる';
       }
 
       if (observedStage2.startsWith('R') && secondaryStage2.startsWith('I')) {
@@ -1221,7 +1221,7 @@ function buildFlowReply(args: {
       if (hasAny('また同じところ', '戻ってきた')) {
         return 'いまは進めることより、同じところに見える一点を静かに整え直す角度が合っている';
       }
-      return 'いまは進めるより、足場を戻して整える角度のほうが合っている';
+      return 'いまは進めるより、基準を戻して整える角度のほうが合っている';
     }
 
     if (shiftKind2 === 'distance_shift') {
@@ -1229,7 +1229,7 @@ function buildFlowReply(args: {
     }
 
     if (shiftKind2 === 'repair_shift') {
-      return '正解の修復を急ぐより、関係を壊さない入口を一つだけ置く角度が合っている';
+      return '正解の修復を急ぐより、関係を壊さない入口を一つだけ示す角度が合っている';
     }
 
     if (shiftKind2 === 'decide_shift') {

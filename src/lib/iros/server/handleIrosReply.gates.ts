@@ -480,7 +480,7 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
 }
 // --- greeting gate -------------------------------------------------
 // ✅ greeting-only input を “素材” に変換する（判断しない）
-// - ここは gate 層（handleIrosReply.gates.ts）に置く
+// - ここは gate 層（handleIrosReply.gates.ts）に示す
 // - 上位で「このターンもLLM整形に流す」ための印も返す
 export async function runGreetingGate(args: any): Promise<{
   ok: boolean;

@@ -329,7 +329,7 @@ function buildSafeSystemMessage(meta: any, userText: string): ChatMessage | null
   if (isOffered) {
     lines.push('');
     lines.push('制動の方針（offered）：');
-    lines.push('- “整える/保留する/一旦置く” の方向へ寄せる');
+    lines.push('- “整える/保留する/一旦示す” の方向へ寄せる');
     lines.push('- 次の一歩は「小さく」「戻れる」形で1つだけ');
   }
 
@@ -516,14 +516,14 @@ function buildWriterProtocol(meta: any, userText: string): string {
         '',
         'やることは2つだけ：',
         '- 1行目で「いま守りたい一点（北極星）」を自然な日本語で確定する',
-        '- その後は “次の一歩” を1つだけ置く（小さく、戻れる形）',
+        '- その後は “次の一歩” を1つだけ示す（小さく、戻れる形）',
         '',
         '制約：',
         '- 1〜2文ごとに改行。スマホで縦に読みやすい形を優先。',
         '- 1段落を長くしすぎない。句点のあとに次文を横並びで続けすぎない。',
         '- 固定の見出しを毎回必ず出すのは禁止',
         `- 質問は ${noQuestion ? '0' : '最大1'}（詰問禁止。必要なら最後に短く）`,
-        '- 断定は強めでよい（「〜してみるといい」より「〜を置く」）',
+        '- 断定は強めでよい（「〜してみるといい」より「〜を示す」）',
         '- 一般論/説教/説明口調は禁止',
         '- 箇条書き/チェックリストは禁止',
         '',
@@ -551,7 +551,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
         '',
         '必須：',
         '- 返答の1行目で CORE_INTENT を “言い換えて” 断定する（同文コピペ禁止）',
-        '- その後は “次の一歩” を1つだけ置く（promptStyle=two-choice の時だけ2択まで）',
+        '- その後は “次の一歩” を1つだけ示す（promptStyle=two-choice の時だけ2択まで）',
         '',
         '制約：',
         '- 1〜2文ごとに改行。スマホで縦に読みやすい形を優先。',

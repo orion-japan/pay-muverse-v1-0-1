@@ -4,7 +4,7 @@
 // 目的：
 // - 「LLMを呼ぶ資格（allowLLM_final）」と「実際に呼ぶか」を分離する
 // - 入口4通り（CALL_LLM / SKIP_SLOTPLAN / SKIP_SILENCE / SKIP_POLICY）を確定して meta に刻む
-// - slotPlan は「最終(FINAL)」と「足場(SCAFFOLD)」を分離する
+// - slotPlan は「最終(FINAL)」と「基準(SCAFFOLD)」を分離する
 // - ここでは “OpenAIを叩かない”。叩く直前に finalize を呼ぶ運用
 //
 // ✅ v2 方針（重要 / 新憲法 正式）

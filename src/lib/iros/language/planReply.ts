@@ -19,7 +19,7 @@ export type ContainerId = 'NONE' | 'PLAIN' | 'HEADING' | 'NUMBERED' | 'BULLET';
  * - mirror  : 芯（刺し / 滲ませ）
  * - elevate : 一段上の俯瞰（Sofiaっぽいが上から語らない）
  * - move    : 次の一歩（0.5未来）
- * - ask     : 確認（問いを「置く」）
+ * - ask     : 確認（問いを「示す」）
  */
 export type ReplySlotKey = 'opener' | 'facts' | 'mirror' | 'elevate' | 'move' | 'ask';
 

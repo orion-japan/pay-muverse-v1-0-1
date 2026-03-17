@@ -2,7 +2,7 @@
 // iros — Flow Meaning Builder v1
 // 目的:
 // - state / flow / question を、writer が使える意味ラベルへ変換する
-// - ここでは “説明” ではなく “刺さりの足場” を作る
+// - ここでは “説明” ではなく “刺さりの基準” を作る
 // - 実際の注入は writerCalls 側で行う
 
 export type FlowMeaningInput = {
@@ -165,7 +165,7 @@ export function buildFlowMeaningV1(args: FlowMeaningInput): FlowMeaningOutput {
         openLoop = 'この関係反復が自分に何を知らせているか';
       } else if (primaryHead === 'C') {
         flowMeaning =
-          '動き方や作り方の前に、今回はその流れにどんな意味を置くかを見極めたい局面';
+          '動き方や作り方の前に、今回はその流れにどんな意味を示すかを見極めたい局面';
         continuingTension =
           '次の一手を決めるより先に、その行動がどの意図から出るのかを確かめたい';
       } else if (primaryHead === 'S') {

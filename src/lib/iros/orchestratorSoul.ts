@@ -86,7 +86,7 @@ export async function applySoul(args: ApplySoulArgs): Promise<ApplySoulResult> {
   let soulNote: any = null;
 
   try {
-    // ✅ meta が作られた直後〜SoulInput を作る前に置く（現行挙動）
+    // ✅ meta が作られた直後〜SoulInput を作る前に示す（現行挙動）
     const thisTurnText = String(text ?? '').trim();
 
     if (thisTurnText) {

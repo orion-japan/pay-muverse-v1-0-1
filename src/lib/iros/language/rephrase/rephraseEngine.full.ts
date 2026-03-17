@@ -538,6 +538,14 @@ const obsCard = (() => {
     const sa = pickAny(ctx.sa, cp?.sa, cp?.selfAcceptance, cp?.self_acceptance);
     const fixedNorth = pickStr(cp?.fixedNorth?.key, cp?.fixedNorth_meta, cp?.fixedNorthKey);
 
+    const depthBandForMeta =
+      typeof depthStage === 'string' && depthStage.trim()
+        ? depthStage.trim().toUpperCase().charAt(0)
+        : '';
+
+    const allowHighMetaInPack =
+      depthBandForMeta !== 'S' && depthBandForMeta !== 'F';
+
     const lines: string[] = [];
     if (inputKind) lines.push(`inputKind=${inputKind}`);
     if (depthStage) lines.push(`depthStage=${depthStage}`);
@@ -547,8 +555,8 @@ const obsCard = (() => {
     if (modeNorm) lines.push(`mode=${modeNorm}`);
     if (openingPolicy) lines.push(`openingPolicy=${openingPolicy}`);
 
-    if (intentBand) lines.push(`intentBand=${intentBand}`);
-    if (tLayerHint) lines.push(`tLayerHint=${tLayerHint}`);
+    if (allowHighMetaInPack && intentBand) lines.push(`intentBand=${intentBand}`);
+    if (allowHighMetaInPack && tLayerHint) lines.push(`tLayerHint=${tLayerHint}`);
 
     if (flowDelta) lines.push(`flowDelta=${flowDelta}`);
     if (returnStreak !== null) lines.push(`returnStreak=${String(returnStreak)}`);
@@ -561,7 +569,7 @@ const obsCard = (() => {
     if (polarity) lines.push(`polarity=${polarity}`);
     if (sa !== null) lines.push(`sa=${String(sa)}`);
 
-    if (fixedNorth) lines.push(`fixedNorth=${fixedNorth}`);
+    if (fixedNorth && allowHighMetaInPack) lines.push(`fixedNorth=${fixedNorth}`);
 
     return lines.length ? lines.join('\n') : '';
   })();
@@ -597,6 +605,14 @@ const obsCard = (() => {
     String(cp?.qCode ?? '').trim() ||
     '(null)';
 
+  const depthBandForStatePack =
+    typeof depthStage === 'string' && depthStage.trim()
+      ? depthStage.trim().toUpperCase().charAt(0)
+      : '';
+
+  const allowHighMetaInStatePack =
+    depthBandForStatePack !== 'S' && depthBandForStatePack !== 'F';
+
   parts.push('', `STATE: depthStage=${depthStage} phase=${phase} qCode=${qCode}`);
 
   // META（さらに短く）※STATEはここに入れない
@@ -604,18 +620,19 @@ const obsCard = (() => {
     parts.push('', 'META:', clampLines(String(metaText), 8));
   }
 
-// FLOW（短く）※生文/オブジェクト事故を落とす
-const flowOne = sanitizeFlowDigest(flowDigest);
-const flowStory = String(flowDigest ?? '').trim();
+  // FLOW（短く）※生文/オブジェクト事故を落とす
+  const flowOne = sanitizeFlowDigest(flowDigest);
+  const flowStory = String(flowDigest ?? '').trim();
 
-if (flowOne && flowOne.trim()) {
-  parts.push('', `FLOW: ${flowOne}`);
-}
+  if (allowHighMetaInStatePack && flowOne && flowOne.trim()) {
+    parts.push('', `FLOW: ${flowOne}`);
+  }
 
-// 会話の流れをLLMに渡す（長すぎる場合はカット）
-if (flowStory && flowStory.length < 120) {
-  parts.push('', `FLOW_STORY: ${flowStory}`);
-}
+  // 会話の流れをLLMに渡す（長すぎる場合はカット）
+  if (allowHighMetaInStatePack && flowStory && flowStory.length < 120) {
+    parts.push('', `FLOW_STORY: ${flowStory}`);
+  }
+
   // 重要フラグ（最小）
   if (args.goalKind) parts.push('', `goalKind=${String(args.goalKind)}`);
   if (args.itOk != null) parts.push(`itOk=${String(args.itOk)}`);
@@ -1008,7 +1025,7 @@ const pickTextDeep = (v: any): string => {
 function buildFixedBoxTexts(slotCount: number): string[] {
   const ZWSP = '\u200b';
   const full = [
-    'まず整理の箱を3つだけ置く。',
+    'まず整理の箱を3つだけ示す。',
     '事実：何が起きた（誰／どこ／いつ）',
     '感情：いま一番きつい反応',
     '望み：本当はどうなってほしい（短文でOK。うまく書かなくていい。）',
@@ -1131,11 +1148,11 @@ function buildMustIncludeRuleText(args: {
   // ✅ recall が無いときは MUST_INCLUDE を空にする（“常時テンプレ化”を止める）
   if (!recallBody) return '';
 
-  // ✅ recall があるときだけ “改変禁止” を追加（復元の足場）
+  // ✅ recall があるときだけ “改変禁止” を追加（復元の基準）
   const blocks: string[] = [
     '',
     '【改変禁止（recall-must-include）】',
-    '以下は“復元の足場”なので、削除・言い換え・要約は禁止。',
+    '以下は“復元の基準”なので、削除・言い換え・要約は禁止。',
     recallBody,
     '',
   ];
@@ -1147,8 +1164,8 @@ function buildMustIncludeRuleText(args: {
 // ---------------------------------------------
 type SlotLike = { key?: string; text?: string; content?: string; value?: string };
 
-const SCAFFOLD_PREFACE = 'いまの足場として一つだけ置く。違ったら捨てていい。';
-const SCAFFOLD_PURPOSE = 'この文章は“答えを渡す”ためじゃなく、あなたが答えを出すための足場を置く。';
+const SCAFFOLD_PREFACE = 'いまの基準を一つだけ示す。違ったら外していい。';
+const SCAFFOLD_PURPOSE = 'この文章は“答えを渡す”ためではなく、あなたが答えを出すための基準を一つ示す。';
 
 function getSlotText(s: SlotLike): string | null {
   const v = normLite(s.text ?? s.content ?? s.value ?? '');
@@ -1334,7 +1351,7 @@ function ensureOnePointInOutput(args: {
   const restoredNorm = normLite(restored);
   const bodyNorm = normLite(
     String(picked.onePoint)
-      .replace(/^(いまの一点|今の状況|ワンポイント|ポイント|足場)[:：]\s*/u, '')
+      .replace(/^(いまの一点|今の状況|ワンポイント|ポイント|基準)[:：]\s*/u, '')
       .trim(),
   );
   if (!restoredNorm.includes(bodyNorm)) {
@@ -1376,9 +1393,9 @@ function scaffoldMustHaveOk(args: {
   const onePointNeedle = onePointSlot ? take(onePointSlot) : '';
   const points3Needle = points3Slot ? take(points3Slot) : '';
 
-  // 1) 足場フレーム
+  // 1) 基準フレーム
   const hasFrame =
-    /(答えを渡さ|足場|いまは(結論|答え)を(出さ|急が)|決めなくて|まず.*(置く|作る))/u.test(out) ||
+    /(答えを渡さ|基準|いまは(結論|答え)を(出さ|急が)|決めなくて|まず.*(示す|作る))/u.test(out) ||
     (purposeNeedle && out.includes(purposeNeedle.slice(0, Math.min(18, purposeNeedle.length))));
 
   // 2) 一点
@@ -1443,9 +1460,9 @@ function restoreScaffoldMustHaveInOutput(args: {
   const addFrame = () => {
     const v =
       k === 0
-        ? 'ここでは答えを渡しません。あなたが答えを出せる位置に足場を置きます。'
+        ? 'ここでは答えを渡しません。あなたが答えを出せる位置に基準を置きます。'
         : k === 1
-          ? 'いまは結論を急がない。考えるための足場だけ整えます。'
+          ? 'いまは結論を急がない。考えるための基準だけ整えます。'
           : '答えを決める前に、まず“考えが動く場所”を作ります。';
     out = v + '\n' + out;
   };
@@ -1475,7 +1492,7 @@ function restoreScaffoldMustHaveInOutput(args: {
     const labels = (() => {
       if (!points3Needle) return [];
       const bad = (s: string) =>
-        /(見る場所は3つだけ|見る軸|いまの一点|今ここで扱う|焦点|足場|答えを渡さ)/u.test(s);
+        /(見る場所は3つだけ|見る軸|いまの一点|今ここで扱う|焦点|基準|答えを渡さ)/u.test(s);
 
       return points3Needle
         .replace(/\r\n/g, '\n')
@@ -2972,7 +2989,7 @@ const shiftKindForLane =
       null,
   });
 
-  // ✅ レーン契約は「最後」に置く（後段の詳細指示が勝つ）
+  // ✅ レーン契約は「最後」に示す（後段の詳細指示が勝つ）
   const laneContractTail = (tConcretizeHeader || '') + (ideaBandHeader || '');
 
   const systemPrompt = baseSystemPrompt + mustIncludeRuleText + laneContractTail;
@@ -5359,7 +5376,9 @@ userContext: {
         userContextAny?.meta?.extra?.questionType ??
         extraAny?.questionType ??
         ''
-    ).trim();
+    )
+      .trim()
+      .toLowerCase();
 
     const questionTModeNow = String(
       questionAny?.tState?.mode ??
@@ -5367,7 +5386,9 @@ userContext: {
         userContextAny?.meta?.extra?.question?.tState?.mode ??
         extraAny?.tState?.mode ??
         ''
-    ).trim();
+    )
+      .trim()
+      .toLowerCase();
 
     const goalKindRaw = String(
       (opts as any)?.goalKind ??
@@ -5375,7 +5396,9 @@ userContext: {
         userContextAny?.meta?.extra?.goalKind ??
         extraAny?.goalKind ??
         ''
-    ).trim();
+    )
+      .trim()
+      .toLowerCase();
 
     const askBackAllowedRaw =
       questionAny?.outputPolicy?.askBackAllowed ??
@@ -5412,89 +5435,6 @@ userContext: {
 
     const beforeLast = String(t.split('\n').filter(Boolean).slice(-1)[0] ?? '');
 
-    if (!forceNoQuestionsByMeaningConfirm) {
-      console.log('[IROS/rephraseEngine][SANITIZE_NO_QUESTIONS_APPLIED]', {
-        traceId: debug.traceId,
-        conversationId: debug.conversationId,
-        userCode: debug.userCode,
-        noQuestions,
-        askBackAllowedRaw: askBackAllowedResolved,
-        goalKindNow,
-        questionsMaxNow,
-        forceNoQuestionsByPack: false,
-        forceNoQuestionsByContract,
-        beforeLen: t.length,
-        afterLen: t.length,
-        changed: false,
-        removedTailQuestion: false,
-        beforeLast,
-        afterLast: beforeLast,
-        reason: 'QUESTION_SANITIZE_DISABLED_GLOBALLY',
-      });
-      return t;
-    }
-
-    const lines = t.split('\n');
-    let end = lines.length - 1;
-
-    while (end >= 0 && !String(lines[end] ?? '').trim()) end -= 1;
-
-    if (end < 0) {
-      console.log('[IROS/rephraseEngine][SANITIZE_NO_QUESTIONS_APPLIED]', {
-        traceId: debug.traceId,
-        conversationId: debug.conversationId,
-        userCode: debug.userCode,
-        noQuestions,
-        askBackAllowedRaw: askBackAllowedResolved,
-        goalKindNow,
-        questionsMaxNow,
-        forceNoQuestionsByPack: false,
-        forceNoQuestionsByContract,
-        beforeLen: t.length,
-        afterLen: t.length,
-        changed: false,
-        removedTailQuestion: false,
-        beforeLast,
-        afterLast: beforeLast,
-        reason: 'FORCED_BY_MEANING_CONFIRM_CONTRACT_EMPTY',
-      });
-      return t;
-    }
-
-    const tailBlock: string[] = [];
-    let cursor = end;
-
-    while (cursor >= 0) {
-      const line = String(lines[cursor] ?? '');
-      if (!line.trim()) {
-        if (tailBlock.length === 0) {
-          cursor -= 1;
-          continue;
-        }
-        break;
-      }
-      tailBlock.unshift(line);
-      cursor -= 1;
-    }
-
-    const tailText = tailBlock.join('\n').trim();
-    const tailLooksQuestion =
-      /[？?]\s*$/.test(tailText) ||
-      /(?:でしょうか|ですか|ますか|ませんか|いかが|どちら|どっち|どう|どうする|どうしよう|どうかな)\s*[？?]?\s*$/.test(
-        tailText
-      );
-
-    let out = t;
-    let removedTailQuestion = false;
-
-    if (tailBlock.length > 0 && tailLooksQuestion) {
-      const kept = lines.slice(0, Math.max(0, cursor + 1)).join('\n').trimEnd();
-      out = kept.trim();
-      removedTailQuestion = out !== t;
-    }
-
-    const afterLast = String(out.split('\n').filter(Boolean).slice(-1)[0] ?? '');
-
     console.log('[IROS/rephraseEngine][SANITIZE_NO_QUESTIONS_APPLIED]', {
       traceId: debug.traceId,
       conversationId: debug.conversationId,
@@ -5506,17 +5446,16 @@ userContext: {
       forceNoQuestionsByPack: false,
       forceNoQuestionsByContract,
       beforeLen: t.length,
-      afterLen: out.length,
-      changed: out !== t,
-      removedTailQuestion,
+      afterLen: t.length,
+      changed: false,
+      removedTailQuestion: false,
       beforeLast,
-      afterLast,
-      reason: 'FORCED_BY_MEANING_CONFIRM_CONTRACT',
+      afterLast: beforeLast,
+      reason: 'QUESTION_SANITIZE_DISABLED_GLOBALLY',
     });
 
-    return out;
+    return t;
   };
-
   let candidate = String(rawGuarded ?? '').trim();
 
   const candidateBeforeSanitize = String(candidate ?? '');

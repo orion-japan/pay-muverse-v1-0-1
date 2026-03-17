@@ -3195,7 +3195,7 @@ if (preReturnStreakRaw != null) {
   sessionBreak: false,
 };
 
-// 互換：extra.flow にも薄く置く（既存が参照している可能性があるため）
+// 互換：extra.flow にも薄く示す（既存が参照している可能性があるため）
 if (!extra2.flow || typeof extra2.flow !== 'object') extra2.flow = {};
 (extra2.flow as any).delta = (extra2.flow as any).delta ?? flowDeltaNorm ?? null;
 (extra2.flow as any).confidence = (extra2.flow as any).confidence ?? flowConfidence ?? null;
@@ -5045,7 +5045,7 @@ if (shouldRunWriter) {
       ctxPack.topicDigest = String(ctxPack.conversationLine);
     }
 
-    // ✅ rephraseEngine.full.ts が拾いやすい経路にも置く
+    // ✅ rephraseEngine.full.ts が拾いやすい経路にも示す
     if (!exAny.topicDigest && (ctxPack.topicDigest || ctxPack.conversationLine)) {
       exAny.topicDigest = String(ctxPack.topicDigest ?? ctxPack.conversationLine);
     }

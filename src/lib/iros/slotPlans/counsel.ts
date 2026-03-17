@@ -233,7 +233,7 @@ function buildSeedDraft(task: CounselTask, userText: string, lastSummary?: strin
   const last = norm(lastSummary);
 
   // DRAFTは「思想説明」や「講義」にならない。短く、最大2行。
-  // writerが落ちたときでも会話が噛む「保険」だけを置く。
+  // writerが落ちたときでも会話が噛む「保険」だけを示す。
   switch (task) {
     case 'clarify_answer_first': {
       const x = clamp(t || 'それ', 56);
@@ -260,7 +260,7 @@ function buildSeedDraft(task: CounselTask, userText: string, lastSummary?: strin
 
     case 'uncover_one_point':
     default: {
-      // 相談入口（短文）でも“復唱だけ”で終わらないように、開く一文を置く
+      // 相談入口（短文）でも“復唱だけ”で終わらないように、開く一文を示す
       if (looksLikeConsultOpen(t) && t.length <= 12) {
         return twoLines(['了解。続けて。', 'いま一番ひっかかってるところから。']);
       }

@@ -521,7 +521,7 @@ if (shouldRepairBlockPlanOnly && String(baseDraftForRepair ?? '').trim().length 
             normalizeIdeaBandLine(String(candidate ?? '').replace(/[。?？]/g, '')),
             36
           );
-          const a = head || 'いまの状態をそのまま置く';
+          const a = head || 'いまの状態をそのまま示す';
           const b = tail && tail !== a ? tail : '少しだけ視点を変えてみる';
           lines = [a, b].slice(0, maxLinesLocal);
         }
@@ -561,7 +561,7 @@ if (shouldRepairBlockPlanOnly && String(baseDraftForRepair ?? '').trim().length 
 
         // ここで空になったらUI死回避の最終保険
         if (lines.length < 2) {
-          const a = clampLen(normalizeIdeaBandLine(String(userText ?? '').replace(/[。?？]/g, '')), 36) || 'いまの状態をそのまま置く';
+          const a = clampLen(normalizeIdeaBandLine(String(userText ?? '').replace(/[。?？]/g, '')), 36) || 'いまの状態をそのまま示す';
           const b = clampLen(normalizeIdeaBandLine(String(candidate ?? '').replace(/[。?？]/g, '')), 36) || '少しだけ視点を変えてみる';
           lines = [a, b].slice(0, maxLinesLocal);
         }

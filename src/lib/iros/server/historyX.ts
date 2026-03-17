@@ -408,7 +408,7 @@ export async function loadRecentHistoryAcrossConversations(params: {
   );
 
   // 5) 返却用に結合
-  // ✅ LLMに「直近の流れ」を見せたいので、same を最後に置く（末尾が最新）
+  // ✅ LLMに「直近の流れ」を見せたいので、same を最後に示す（末尾が最新）
   const merged = includeSameConversation ? [...crossPicked, ...samePicked] : crossPicked;
 
   console.log('[IROS][HistoryX] loaded', {

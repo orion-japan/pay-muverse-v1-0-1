@@ -1378,7 +1378,7 @@ function detectCounselCommand(raw: unknown): { forced: boolean; strippedText: st
 // - 意味を作らない
 // - 解釈しない
 // - 分岐に使わない
-// - meta に「流れ」だけを置く
+// - meta に「流れ」だけを示す
 // =========================================================
 
 {
@@ -1558,7 +1558,7 @@ function detectCounselCommand(raw: unknown): { forced: boolean; strippedText: st
     String(metaLike?.ctxPack?.shortSummary ?? '') === 'greeting' ||
     String(metaLike?.extra?.ctxPack?.shortSummary ?? '') === 'greeting';
 
-  // ✅ この下（QuestionSlots / normalChat fallback）が参照するので outer scope に置く
+  // ✅ この下（QuestionSlots / normalChat fallback）が参照するので outer scope に示す
   let shouldUseCounsel = false;
 
   // ※重要：ir診断ターンは slotPlan を上書きしない（counsel/normalChat/flagReply を通さない）

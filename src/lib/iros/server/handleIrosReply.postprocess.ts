@@ -317,7 +317,7 @@ function sanitizeIntentAnchor(meta: any): void {
 
 /* =========================
  * rotationState single shape (MIN)
- * - 値は変えない：拾えたものだけ正規化して置く
+ * - 値は変えない：拾えたものだけ正規化して示す
  * ========================= */
 
 type DescentGate = 'closed' | 'offered' | 'accepted';
@@ -1251,6 +1251,7 @@ try {
 
     (metaForSave as any).depthStage = currentDepthStageNow ?? null;
     (metaForSave as any).depth = currentDepthStageNow ?? null;
+    (metaForSave as any).depth_stage = currentDepthStageNow ?? null;
     (metaForSave as any).extra.ctxPack.depthStage = currentDepthStageNow ?? null;
 
       if (cardStageNow && polKey) {
@@ -1855,6 +1856,7 @@ const polarityMetaBand: string | null =
 
       (metaForSave as any).depthStage = currentDepthStageNow ?? null;
       (metaForSave as any).depth = currentDepthStageNow ?? null;
+      (metaForSave as any).depth_stage = currentDepthStageNow ?? null;
       (metaForSave as any).extra.ctxPack.depthStage = currentDepthStageNow ?? null;
 
         if (cardStageNow && polKey) {
@@ -2119,10 +2121,10 @@ console.log('[IROS/PP][RS_SNAPSHOT]', {
 
 (metaForSave as any).extra = (metaForSave as any).extra ?? {};
 
-// ✅ 正本：meta.extra に置く（snapshot だけ）
+// ✅ 正本：meta.extra に示す（snapshot だけ）
 (metaForSave as any).extra.resonanceState = stateSnap;
 
-// ✅ 次ターン用：ctxPack には “別参照” を置く（同一参照だと "[Circular]" になる）
+// ✅ 次ターン用：ctxPack には “別参照” を示す（同一参照だと "[Circular]" になる）
 (metaForSave as any).extra.ctxPack = (metaForSave as any).extra.ctxPack ?? {};
 // ✅ 正本：ctxPack.flow を必ず埋める（snapshot 優先）
 // - DB の has_flowdelta/has_returnstreak が assistant 側で落ちる原因は
@@ -2452,7 +2454,7 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
       }) || '')
     : '';
 
-// ====== directiveV1 追記（let directiveV1 = ... の直後に置く） ======
+// ====== directiveV1 追記（let directiveV1 = ... の直後に示す） ======
 {
   const mirrorObj: any =
     (metaForSave as any)?.mirror ?? (metaForSave as any)?.extra?.mirror ?? null;

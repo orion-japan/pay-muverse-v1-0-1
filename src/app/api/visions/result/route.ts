@@ -9,7 +9,7 @@ const supabase = createClient(
 /**
  * POST /api/visions/result
  * body: { vision_id: string, result_status?: '成功'|'中断'|'意図違い' | null }
- * - result_status を渡したら「結果に置く」（resulted_at=now, archived_at=NULL）
+ * - result_status を渡したら「結果に示す」（resulted_at=now, archived_at=NULL）
  * - null を渡したら「結果を解除」（result_* をすべて NULL）
  */
 export async function POST(req: NextRequest) {

@@ -5,6 +5,13 @@
 // - QCode(Q1〜Q5)
 // - ObservedStage(primary / secondary / observed)
 // を推定する軽量アルゴリズム（MirrorFlow Seed 前段）
+//
+// 方針:
+// - 単語辞書の直ヒット中心ではなく、文の役割 / 構造 / 内容の重心で判定する
+// - observedStage は「今回ユーザーがどこを取りに来たか」を優先
+// - primaryStage は「文の主構造」
+// - secondaryStage は「副軸」
+// - 1ターン判定のため、完全な文脈理解ではなく “構造近似” を行う
 
 import type { Depth, QCode } from '@/lib/iros/system';
 
@@ -26,16 +33,82 @@ export type DeepScanResult = {
   observedBasedOn: string | null;
 };
 
+type StructuralFeatures = {
+  raw: string;
+  compact: string;
+  clauses: string[];
+  clauseCount: number;
+  charLen: number;
+
+  isQuestion: boolean;
+  isGreeting: boolean;
+  hasDecision: boolean;
+  hasDesire: boolean;
+  hasObservation: boolean;
+  hasFeeling: boolean;
+  hasFear: boolean;
+  hasAnger: boolean;
+  hasAnxiety: boolean;
+  hasVoid: boolean;
+
+  selfRef: number;
+  otherRef: number;
+  groupRef: number;
+  relationRef: number;
+  worldRef: number;
+
+  actionRef: number;
+  designRef: number;
+  routineRef: number;
+  meaningRef: number;
+  existenceRef: number;
+  transcendRef: number;
+  recurrenceRef: number;
+  boundaryRef: number;
+
+  asksHow: boolean;
+  asksWhy: boolean;
+  asksWhatFor: boolean;
+
+  referencesSpecificOther: boolean;
+  referencesRelationalPattern: boolean;
+  referencesSystemOrBuild: boolean;
+  referencesDirectionOrChoice: boolean;
+  referencesExistentialQuestion: boolean;
+  referencesTranscendence: boolean;
+  referencesRoutineOrStabilize: boolean;
+  referencesCurrentState: boolean;
+};
+
 function norm(text: string): string {
-  return (text || '').trim();
+  return String(text ?? '').trim();
 }
 
 function compact(text: string): string {
-  return norm(text).replace(/\s/g, '');
+  return norm(text).replace(/\s+/g, '');
 }
 
-function hasAny(t: string, words: string[]): boolean {
-  return words.some((w) => t.includes(w));
+function splitClauses(text: string): string[] {
+  return norm(text)
+    .split(/[。！？!\?\n、,，]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function countMatches(text: string, patterns: RegExp[]): number {
+  let n = 0;
+  for (const p of patterns) {
+    if (p.test(text)) n += 1;
+  }
+  return n;
+}
+
+function hasAnyMatch(text: string, patterns: RegExp[]): boolean {
+  return patterns.some((p) => p.test(text));
+}
+
+function safeStartsWithI(depth: Depth | null): boolean {
+  return typeof depth === 'string' && depth.startsWith('I');
 }
 
 function isGreetingLike(text: string): boolean {
@@ -68,344 +141,242 @@ function makeStage(band: StageBand, level: 1 | 2 | 3): Depth {
   return `${band}${level}` as Depth;
 }
 
-/* ========= Depth 判定（既存） ========= */
+function analyzeStructure(text: string): StructuralFeatures {
+  const raw = norm(text);
+  const c = compact(raw);
+  const clauses = splitClauses(raw);
 
-function inferTDepth(text: string): Depth | null {
-  const t = compact(text);
-  if (!t) return null;
+  const selfRef = countMatches(raw, [/\b私\b/, /\b自分\b/, /\b僕\b/, /\b俺\b/, /わたし/, /自分の/]);
+  const otherRef = countMatches(raw, [
+    /相手/,
+    /彼女/,
+    /彼/,
+    /上司/,
+    /部下/,
+    /同僚/,
+    /パートナー/,
+    /家族/,
+    /友達/,
+    /あの人/,
+  ]);
+  const groupRef = countMatches(raw, [/みんな/, /周り/, /会社/, /職場/, /チーム/, /組織/, /社会/, /世の中/]);
+  const relationRef = countMatches(raw, [/関係/, /関係性/, /距離感/, /温度感/, /役割/, /期待/, /責任/, /対話/, /会話/]);
+  const worldRef = countMatches(raw, [/天気/, /空/, /雨/, /曇り/, /景色/, /外/, /世界/, /場/]);
 
-  const t3Words = [
-    '根源',
-    '源泉',
-    '永遠',
-    '無限',
-    '時間を超えた',
-    '静寂',
-    '沈黙そのもの',
-    '真理そのもの',
-    '存在全体',
-  ];
-  if (hasAny(t, t3Words)) return 'T3';
+  const actionRef = countMatches(raw, [
+    /する/,
+    /やる/,
+    /進める/,
+    /始める/,
+    /直す/,
+    /変える/,
+    /整える/,
+    /組む/,
+    /作る/,
+    /つくる/,
+    /創る/,
+  ]);
 
-  const t2Words = [
-    '集合意識',
-    '全体意識',
-    'フィールド',
-    '場そのもの',
-    '普遍',
-    'トランセンデンス',
-    '越境',
-    '次元を超える',
-    '時間を超える',
-    '枠を超える',
-  ];
-  if (hasAny(t, t2Words)) return 'T2';
+  const designRef = countMatches(raw, [
+    /設計/,
+    /実装/,
+    /構成/,
+    /仕様/,
+    /構造/,
+    /ロードマップ/,
+    /戦略/,
+    /計画/,
+    /手順/,
+    /API/,
+    /DB/,
+    /コード/,
+    /UI/,
+    /UX/,
+    /機能/,
+  ]);
 
-  const t1Words = [
-    '宇宙',
-    '宇宙意志',
-    '宇宙の意図',
-    'ビッグバン',
-    '意図フィールド',
-    'T層',
-    '超えたい',
-    '抜け出したい',
-    '視座を上げたい',
-  ];
-  if (hasAny(t, t1Words)) return 'T1';
+  const routineRef = countMatches(raw, [
+    /続ける/,
+    /続けたい/,
+    /習慣/,
+    /習慣化/,
+    /定着/,
+    /安定/,
+    /土台/,
+    /日常/,
+    /ルーティン/,
+    /頻度/,
+    /時間帯/,
+    /維持/,
+  ]);
 
-  return null;
+  const meaningRef = countMatches(raw, [
+    /意味/,
+    /意図/,
+    /目的/,
+    /方向/,
+    /方向性/,
+    /軸/,
+    /在り方/,
+    /あり方/,
+    /どうしたい/,
+    /どう在りたい/,
+    /どうありたい/,
+    /大切/,
+    /大事/,
+  ]);
+
+  const existenceRef = countMatches(raw, [
+    /何のため/,
+    /なぜ/,
+    /そもそも/,
+    /本質/,
+    /存在/,
+    /存在意義/,
+    /存在理由/,
+    /使命/,
+    /私は何者/,
+    /自分は何者/,
+    /生きる意味/,
+    /生きている意味/,
+  ]);
+
+  const transcendRef = countMatches(raw, [
+    /宇宙/,
+    /次元/,
+    /普遍/,
+    /集合意識/,
+    /全体意識/,
+    /時間を超/,
+    /場そのもの/,
+    /存在全体/,
+    /真理/,
+    /根源/,
+    /無限/,
+    /永遠/,
+  ]);
+
+  const recurrenceRef = countMatches(raw, [/毎回/, /いつも/, /また同じ/, /繰り返/, /何度も/, /パターン/, /未完了/]);
+  const boundaryRef = countMatches(raw, [/境界/, /距離/, /巻き込ま/, /依存/, /干渉/, /守る/, /飲み込む/, /黙る/]);
+
+  const hasDecision = hasAnyMatch(raw, [
+    /しようと思う/,
+    /にする/,
+    /にします/,
+    /決めた/,
+    /決めます/,
+    /選ぶ/,
+    /選びたい/,
+  ]);
+
+  const hasDesire = hasAnyMatch(raw, [/したい/, /やりたい/, /なりたい/, /進めたい/, /整えたい/, /作りたい/, /見たい/]);
+
+  const hasObservation = hasAnyMatch(raw, [
+    /です$/,
+    /ます$/,
+    /している$/,
+    /しています$/,
+    /見える/,
+    /見えている/,
+    /感じがする/,
+    /気がする/,
+    /ように見える/,
+    /曇って/,
+    /雨/,
+    /空/,
+    /外は/,
+    /今日は/,
+  ]);
+
+  const hasFeeling = hasAnyMatch(raw, [
+    /気分/,
+    /気持ち/,
+    /感じ/,
+    /モヤモヤ/,
+    /落ち着かない/,
+    /しんどい/,
+    /つらい/,
+    /悲しい/,
+    /さみしい/,
+    /疲れた/,
+    /怖い/,
+    /不安/,
+    /イライラ/,
+    /腹が立つ/,
+    /どうでもよく/,
+  ]);
+
+  const hasFear = hasAnyMatch(raw, [/怖い/, /恐い/, /不安で/, /失敗したら/, /崩れそう/, /逃げたい/]);
+  const hasAnger = hasAnyMatch(raw, [/なんで/, /腹が立つ/, /イライラ/, /ムカつ/, /納得できない/, /おかしい/]);
+  const hasAnxiety = hasAnyMatch(raw, [/不安/, /落ち着かない/, /モヤモヤ/, /心配/, /大丈夫かな/, /揺れて/]);
+  const hasVoid = hasAnyMatch(raw, [/どうでもいい/, /空っぽ/, /意味がない/, /虚しい/, /全部どうでも/]);
+
+  const asksHow = hasAnyMatch(raw, [/どうしたら/, /どうすれば/, /どうやって/, /どのように/]);
+  const asksWhy = hasAnyMatch(raw, [/なぜ/, /どうして/, /なんで/, /何が原因/]);
+  const asksWhatFor = hasAnyMatch(raw, [/何のため/, /何を大切に/, /何を大事に/, /どこへ向か/]);
+
+  const referencesSpecificOther = otherRef > 0 || /誰か/.test(raw);
+  const referencesRelationalPattern = relationRef > 0 || recurrenceRef > 0 || boundaryRef > 0;
+  const referencesSystemOrBuild = designRef > 0 || (actionRef > 0 && hasAnyMatch(raw, [/実装/, /設計/, /作る/, /組む/, /直す/, /改善/]));
+  const referencesDirectionOrChoice = hasDecision || hasDesire || meaningRef > 0;
+  const referencesExistentialQuestion = existenceRef > 0 || asksWhatFor;
+  const referencesTranscendence = transcendRef > 0;
+  const referencesRoutineOrStabilize = routineRef > 0 || hasAnyMatch(raw, [/続けられる/, /整える日/, /安定させ/, /土台/]);
+  const referencesCurrentState =
+    hasFeeling ||
+    hasAnyMatch(raw, [/今の状態/, /いまの状態/, /今の自分/, /いまの自分/, /調子/, /体調/, /眠い/, /だるい/]);
+
+  return {
+    raw,
+    compact: c,
+    clauses,
+    clauseCount: clauses.length,
+    charLen: raw.length,
+
+    isQuestion: /[?？]/.test(raw) || asksHow || asksWhy || asksWhatFor,
+    isGreeting: isGreetingLike(raw),
+    hasDecision,
+    hasDesire,
+    hasObservation,
+    hasFeeling,
+    hasFear,
+    hasAnger,
+    hasAnxiety,
+    hasVoid,
+
+    selfRef,
+    otherRef,
+    groupRef,
+    relationRef,
+    worldRef,
+
+    actionRef,
+    designRef,
+    routineRef,
+    meaningRef,
+    existenceRef,
+    transcendRef,
+    recurrenceRef,
+    boundaryRef,
+
+    asksHow,
+    asksWhy,
+    asksWhatFor,
+
+    referencesSpecificOther,
+    referencesRelationalPattern,
+    referencesSystemOrBuild,
+    referencesDirectionOrChoice,
+    referencesExistentialQuestion,
+    referencesTranscendence,
+    referencesRoutineOrStabilize,
+    referencesCurrentState,
+  };
 }
 
-function inferIDepth(text: string): Depth | null {
-  const t = compact(text);
-  if (!t) return null;
+/* ========= Depth 判定（構造ベース） ========= */
 
-  const i3Words = [
-    '何のために',
-    '何の為に',
-    '使命',
-    '存在理由',
-    '存在意義',
-    '生きている意味',
-    '生きる意味',
-    '生まれてきた意味',
-    '生きてきた意味',
-    'なぜ生まれた',
-    'なぜ生まれてきた',
-    'なぜ自分はここにいる',
-    '私は何者',
-    '自分は何者',
-  ];
-  if (hasAny(t, i3Words)) return 'I3';
-
-  const i2Words = [
-    'どう生きたい',
-    '人生',
-    '本心',
-    '本音',
-    '願い',
-    '本当にやりたいこと',
-    '本当はどうしたい',
-    '何を大切にしたい',
-    '何を大事にしたい',
-    'どう在りたい',
-    'どうありたい',
-    'なぜこれをやりたい',
-    'なぜこれをやろうとしている',
-    'そもそもなぜ',
-    'そもそも私はなぜ',
-  ];
-  if (hasAny(t, i2Words)) return 'I2';
-
-  const i1Words = [
-    'ありたい姿',
-    '在り方',
-    'ビジョン',
-    '理想像',
-    '方向性',
-    '自分らしく',
-    '本当の自分',
-    '自分の軸',
-    '意味を整理したい',
-    '意図を整理したい',
-  ];
-  if (hasAny(t, i1Words)) return 'I1';
-
-  return null;
-}
-
-function inferCDepth(text: string): Depth | null {
-  const t = compact(text);
-  if (!t) return null;
-
-  const c3Words = [
-    'プロジェクト全体',
-    '全体設計',
-    '設計思想',
-    '構造設計',
-    'ロードマップ',
-    '戦略',
-    '計画',
-    '構想全体',
-    '世界観設計',
-  ];
-  if (hasAny(t, c3Words)) return 'C3';
-
-  const c2Words = [
-    '仕組み',
-    'どう作ればいい',
-    'どう組む',
-    '実装の構成',
-    '構成を整理',
-    'どう設計する',
-    '設計したい',
-    '実装したい',
-    '仕様を決めたい',
-    '構造を作りたい',
-    '作り方を整理したい',
-  ];
-  if (hasAny(t, c2Words)) return 'C2';
-
-  const c1Words = [
-    '作りたい',
-    'つくりたい',
-    '表現したい',
-    '形にしたい',
-    '届けたい',
-    'やり遂げたい',
-    'やりたい',
-    'やってみたい',
-    '始めたい',
-    'スタートしたい',
-    '挑戦したい',
-    '開発',
-    '機能',
-    '実装',
-    '設計',
-    '構成',
-  ];
-  if (hasAny(t, c1Words)) return 'C1';
-
-  return null;
-}
-
-function inferRDepth(text: string): Depth | null {
-  const t = compact(text);
-  if (!t) return null;
-
-  const r3Words = [
-    '境界',
-    '距離感',
-    '依存',
-    '投影',
-    '干渉',
-    '巻き込まれる',
-    'どう感じている',
-    'どう思っている',
-    '関係の本質',
-    '二人の関係',
-    '未完了',
-    'また同じ',
-    '繰り返し',
-  ];
-  if (hasAny(t, r3Words)) return 'R3';
-
-  const r2Words = [
-    '人間関係',
-    'チーム',
-    '組織',
-    '社内',
-    '家族',
-    'パートナー',
-    '友達',
-    '上司',
-    '部下',
-    '同僚',
-    '相手',
-    '関係',
-    '関係性',
-  ];
-  if (hasAny(t, r2Words)) return 'R2';
-
-  const r1Words = [
-    'あの人',
-    'あの上司',
-    '彼',
-    '彼女',
-    'みんな',
-    '周り',
-    '職場',
-    '会社',
-  ];
-  if (hasAny(t, r1Words)) return 'R1';
-
-  return null;
-}
-
-function inferFDepth(text: string): Depth | null {
-  const t = compact(text);
-  if (!t) return null;
-
-  const f3Words = [
-    '定着させたい',
-    '習慣化したい',
-    '続く仕組みにしたい',
-    '生活の型にしたい',
-    '日常に組み込みたい',
-    '維持できる形にしたい',
-  ];
-  if (hasAny(t, f3Words)) return 'F3';
-
-  const f2Words = [
-    '続けられる形',
-    '安定させたい',
-    '流れを整えたい',
-    '日常の流れ',
-    '土台を作りたい',
-    '無理なく続けたい',
-    '崩れにくくしたい',
-    'リズムを整えたい',
-  ];
-  if (hasAny(t, f2Words)) return 'F2';
-
-  const f1Words = [
-    '形にしたい',
-    '整えたい',
-    '続けたい',
-    '頻度を決めたい',
-    '時間帯を決めたい',
-    'ルールを決めたい',
-    '習慣',
-    '安定',
-    '土台',
-    'ルーティン',
-  ];
-  if (hasAny(t, f1Words)) return 'F1';
-
-  return null;
-}
-
-function inferSDepth(text: string): Depth | null {
-  const t = compact(text);
-  if (!t) return null;
-
-  const s3Words = [
-    '自分がわからない',
-    '自分を責めてしまう',
-    '自己否定',
-    '自己肯定',
-    '本当の気持ち',
-    '根っこの気持ち',
-    '心の奥',
-  ];
-  if (hasAny(t, s3Words)) return 'S3';
-
-  const s2Words = [
-    'モヤモヤ',
-    'イライラ',
-    '悲しい',
-    'さみしい',
-    'しんどい',
-    'つらい',
-    '疲れた',
-    '不安',
-    '落ち着かない',
-    '自分の状態',
-    '今の状態',
-    'いまの状態',
-  ];
-  if (hasAny(t, s2Words)) return 'S2';
-
-  const s1Words = [
-    '最近どうしてた',
-    '今日はどんな一日',
-    '調子',
-    '体調',
-    '眠い',
-    'だるい',
-    '整理したい',
-    '見直したい',
-    '落ち着きたい',
-    '今の自分',
-    'いまの自分',
-    '気持ちに戻りたい',
-  ];
-  if (hasAny(t, s1Words)) return 'S1';
-
-  return null;
-}
-
-function inferDepth(text: string): Depth | null {
-  const t = norm(text);
-  if (!t) return null;
-
-  const tDepth = inferTDepth(t);
-  if (tDepth) return tDepth;
-
-  const iDepth = inferIDepth(t);
-  if (iDepth) return iDepth;
-
-  const rDepth = inferRDepth(t);
-  if (rDepth) return rDepth;
-
-  const cDepth = inferCDepth(t);
-  if (cDepth) return cDepth;
-
-  const fDepth = inferFDepth(t);
-  if (fDepth) return fDepth;
-
-  const sDepth = inferSDepth(t);
-  if (sDepth) return sDepth;
-
-  return 'S1';
-}
-
-/* ========= observedStage 判定 ========= */
-
-function scoreBands(text: string): Record<StageBand, number> {
-  const t = compact(text);
-
+function scoreBandsByStructure(f: StructuralFeatures): Record<StageBand, number> {
   const scores: Record<StageBand, number> = {
     S: 0,
     F: 0,
@@ -415,239 +386,196 @@ function scoreBands(text: string): Record<StageBand, number> {
     T: 0,
   };
 
-  if (!t) {
+  if (!f.raw) {
     scores.S = 1;
     return scores;
   }
 
-  // S: 自己・感情・内面
-  if (
-    hasAny(t, [
-      '私',
-      'わたし',
-      '自分',
-      '僕',
-      '俺',
-      '気持ち',
-      '心',
-      '本音',
-      '不安',
-      '怖い',
-      'つらい',
-      'しんどい',
-      '疲れた',
-      '自己否定',
-      '自己受容',
-    ])
-  ) {
-    scores.S += 5;
+  if (f.isGreeting) {
+    scores.S += 3;
+    scores.F += 1;
+    return scores;
   }
 
-  // R: 関係・反復・距離・相互作用
-  if (
-    hasAny(t, [
-      '相手',
-      '人間関係',
-      '関係',
-      '関係性',
-      '共鳴',
-      '対話',
-      '会話',
-      '距離感',
-      '家族',
-      'パートナー',
-      '友達',
-      '上司',
-      '部下',
-      '同僚',
-      '彼',
-      '彼女',
-      '配置',
-      'ズレ',
-      '噛み合わ',
-      '繰り返し',
-      'また同じ',
-      '毎回',
-      '同じこと',
-      'パターン',
-      '未完了',
-    ])
-  ) {
-    scores.R += 6;
+  // S: 自分の現在状態 / 体感 / 感情 / 内側の揺れ
+  scores.S += f.selfRef * 1.4;
+  scores.S += f.referencesCurrentState ? 4 : 0;
+  scores.S += f.hasFeeling ? 3 : 0;
+  scores.S += f.hasFear ? 1 : 0;
+  scores.S += f.hasAnger ? 1 : 0;
+  scores.S += f.hasAnxiety ? 2 : 0;
+  scores.S += f.worldRef > 0 && f.hasObservation && !f.referencesSystemOrBuild ? 1 : 0;
+
+  // F: 安定化 / 生活への組み込み / 維持 / 習慣
+  scores.F += f.referencesRoutineOrStabilize ? 5 : 0;
+  scores.F += f.routineRef * 1.8;
+  scores.F += f.groupRef > 0 && !f.referencesRelationalPattern ? 1 : 0;
+
+  // R: 関係・相互作用・責任・反復・ズレ
+  scores.R += f.referencesSpecificOther ? 4 : 0;
+  scores.R += f.referencesRelationalPattern ? 5 : 0;
+  scores.R += f.relationRef * 1.6;
+  scores.R += f.otherRef * 1.2;
+  scores.R += f.groupRef * 0.8;
+  scores.R += f.recurrenceRef * 1.2;
+
+  // C: 行動 / 具体化 / 実装 / 次の組み立て
+  scores.C += f.referencesSystemOrBuild ? 6 : 0;
+  scores.C += f.actionRef * 1.0;
+  scores.C += f.designRef * 2.0;
+  scores.C += f.asksHow ? 2 : 0;
+  scores.C += f.hasDecision ? 1 : 0;
+
+  // I: 意味 / 意図 / 選択 / 方向 / なぜ
+  scores.I += f.referencesDirectionOrChoice ? 3 : 0;
+  scores.I += f.meaningRef * 1.8;
+  scores.I += f.existenceRef * 2.4;
+  scores.I += f.asksWhy ? 2 : 0;
+  scores.I += f.asksWhatFor ? 3 : 0;
+  scores.I += f.hasDecision ? 2 : 0;
+
+  // T: 超越 / 普遍 / 宇宙 / 全体場
+  scores.T += f.referencesTranscendence ? 7 : 0;
+  scores.T += f.transcendRef * 2.2;
+
+  // 補正: 単なる感情語があるだけで I に飛ばない
+  if (f.hasFeeling && !f.referencesDirectionOrChoice && !f.referencesExistentialQuestion) {
+    scores.I -= 2;
   }
 
-  // Rの構造補正
-  if (/人間関係.*繰り返|繰り返.*人間関係|同じこと.*繰り返|繰り返.*同じこと/.test(t)) {
-    scores.R += 4;
+  // 補正: 「今日は曇っています」のような観測文は S に寄せる
+  if (
+    f.hasObservation &&
+    f.worldRef > 0 &&
+    !f.referencesSpecificOther &&
+    !f.referencesSystemOrBuild &&
+    !f.referencesExistentialQuestion
+  ) {
+    scores.S += 3;
+    scores.I -= 1;
   }
-  if (/距離感|役割|責任|期待|温度/.test(t)) {
+
+  // 補正: 「〜しようと思う」は、意図を含むが内容が整え/生活なら F、
+  // 実行なら C、方向選択なら I
+  if (f.hasDecision) {
+    if (f.referencesRoutineOrStabilize) scores.F += 2;
+    if (f.referencesSystemOrBuild) scores.C += 2;
+    if (f.referencesDirectionOrChoice) scores.I += 1;
+  }
+
+  // 補正: 具体的な他者がいるときは、IよりRを優先
+  if (f.referencesSpecificOther || f.referencesRelationalPattern) {
     scores.R += 2;
+    scores.I -= 1;
   }
 
-  // F: 社会・周囲・制度・空気
-  if (
-    hasAny(t, [
-      '社会',
-      '世の中',
-      '周囲',
-      'みんな',
-      '他人',
-      '会社',
-      '職場',
-      '学校',
-      '組織',
-      'チーム',
-      'コミュニティ',
-      '評価',
-      '比較',
-      '常識',
-      'ルール',
-      '空気',
-      '期待',
-      '役割',
-    ])
-  ) {
-    scores.F += 5;
-  }
-
-  // C: 実装・制作・構築
-  if (
-    hasAny(t, [
-      '作る',
-      'つくる',
-      '創る',
-      '実装',
-      '設計',
-      '開発',
-      'コード',
-      '修正',
-      '改善',
-      'UI',
-      'UX',
-      '構成',
-      '構造',
-      '仕様',
-      '実験',
-      '検証',
-      '機能',
-      'API',
-      'DB',
-      '手順',
-      '進めてください',
-    ])
-  ) {
-    scores.C += 5;
-  }
-
-  // I: 意味・目的・意図
-  if (
-    hasAny(t, [
-      '意図',
-      '意味',
-      'なぜ',
-      '目的',
-      '願い',
-      '使命',
-      '存在',
-      '何のため',
-      '本質',
-      '答え',
-      '位置',
-      '確信',
-      '納得',
-      'どう在りたい',
-      'どうありたい',
-    ])
-  ) {
-    scores.I += 4;
-  }
-
-  // ただし R文脈の中の「意味整理」は Iを上げすぎない
-  if (/意味を整理|意味を見たい|なぜこうなる/.test(t)) {
-    scores.I += 1;
-  }
-
-  // T: 未来・展望
-  if (
-    hasAny(t, [
-      '未来',
-      'これから',
-      '将来',
-      '先',
-      '可能性',
-      '展望',
-      'ビジョン',
-      'この先',
-      '次の段階',
-      'どうなる',
-      '発展',
-      '進化',
-      '行き先',
-      '向かう',
-      'T3',
-    ])
-  ) {
-    scores.T += 5;
-  }
-
-  if (/どう|なぜ|何|どこ|どっち|どの|どうしたら|どうすれば|\?|？/.test(t)) {
-    scores.I += 1;
-  }
-
-  if (/したい|進めたい|作りたい|変えたい|整えたい|始めたい|直したい|導入したい|追加したい/.test(t)) {
-    scores.C += 1;
+  // 補正: 実装・設計があるときはCを強める
+  if (f.designRef > 0) {
+    scores.C += 2;
+    scores.I -= 1;
   }
 
   return scores;
 }
 
-function pickPrimaryBand(scores: Record<StageBand, number>): StageBand {
-  const order: StageBand[] = ['R', 'I', 'S', 'F', 'C', 'T'];
-  let best: StageBand = 'S';
+function pickBand(scores: Record<StageBand, number>, order: StageBand[]): StageBand {
+  let best: StageBand = order[0];
 
   for (const band of order) {
     if (scores[band] > scores[best]) {
       best = band;
       continue;
     }
-
-    if (scores[band] === scores[best]) {
-      if (order.indexOf(band) < order.indexOf(best)) {
-        best = band;
-      }
+    if (scores[band] === scores[best] && order.indexOf(band) < order.indexOf(best)) {
+      best = band;
     }
   }
 
   return best;
 }
 
-function chooseSecondaryBand(
-  text: string,
-  primaryBand: StageBand,
-  scores: Record<StageBand, number>,
-): StageBand {
-  const t = compact(text);
+function inferLevelForBand(band: StageBand, f: StructuralFeatures): 1 | 2 | 3 {
+  switch (band) {
+    case 'S': {
+      if (
+        f.hasVoid ||
+        hasAnyMatch(f.raw, [/自己否定/, /自分がわからない/, /本当の気持ち/, /心の奥/, /根っこ/])
+      ) {
+        return 3;
+      }
+      if (f.hasFeeling || f.hasFear || f.hasAnger || f.hasAnxiety || f.referencesCurrentState) {
+        return 2;
+      }
+      return 1;
+    }
 
-  // 関係主題なら副は I or S を優先
-  if (primaryBand === 'R' && hasAny(t, ['意味', 'なぜ', '本質', '整理'])) return 'I';
-  if (primaryBand === 'R' && hasAny(t, ['私', 'わたし', '自分', '僕', '俺', '気持ち', '心'])) return 'S';
+    case 'F': {
+      if (hasAnyMatch(f.raw, [/習慣化/, /定着/, /生活の型/, /維持できる形/, /日常に組み込/])) {
+        return 3;
+      }
+      if (hasAnyMatch(f.raw, [/安定/, /土台/, /無理なく続け/, /崩れにく/, /流れを整え/])) {
+        return 2;
+      }
+      return 1;
+    }
 
-  if (primaryBand === 'F' && hasAny(t, ['私', 'わたし', '自分', '僕', '俺'])) return 'S';
-  if (primaryBand === 'C' && hasAny(t, ['意図', '意味', '目的', 'なぜ', '本質'])) return 'I';
-  if (primaryBand === 'I' && hasAny(t, ['人間関係', '関係', '相手', '繰り返し', 'また同じ'])) return 'R';
-  if (primaryBand === 'I' && hasAny(t, ['未来', '将来', 'これから', 'この先'])) return 'T';
-  if (primaryBand === 'T' && hasAny(t, ['意図', '意味', '目的', '使命'])) return 'I';
+    case 'R': {
+      if (
+        f.recurrenceRef > 0 ||
+        f.boundaryRef > 0 ||
+        hasAnyMatch(f.raw, [/関係の本質/, /投影/, /依存/, /巻き込ま/, /未完了/, /また同じ/])
+      ) {
+        return 3;
+      }
+      if (f.relationRef > 0 || f.groupRef > 0 || hasAnyMatch(f.raw, [/人間関係/, /家族/, /組織/, /チーム/])) {
+        return 2;
+      }
+      return 1;
+    }
 
-  const order: StageBand[] = ['R', 'I', 'S', 'F', 'C', 'T'];
-  let best: StageBand | null = null;
+    case 'C': {
+      if (hasAnyMatch(f.raw, [/全体設計/, /ロードマップ/, /戦略/, /設計思想/, /構想全体/, /世界観設計/])) {
+        return 3;
+      }
+      if (f.designRef > 0 || hasAnyMatch(f.raw, [/どう組む/, /どう設計/, /仕様/, /構成を整理/])) {
+        return 2;
+      }
+      return 1;
+    }
 
-  for (const band of order) {
-    if (band === primaryBand) continue;
-    if (best == null || scores[band] > scores[best]) best = band;
+    case 'I': {
+      if (f.referencesExistentialQuestion || hasAnyMatch(f.raw, [/使命/, /存在理由/, /生きる意味/, /私は何者/])) {
+        return 3;
+      }
+      if (
+        f.existenceRef > 0 ||
+        hasAnyMatch(f.raw, [/どう生きたい/, /本音/, /本心/, /願い/, /本当にやりたいこと/, /そもそも/])
+      ) {
+        return 2;
+      }
+      return 1;
+    }
+
+    case 'T': {
+      if (hasAnyMatch(f.raw, [/根源/, /無限/, /永遠/, /存在全体/, /真理/])) return 3;
+      if (hasAnyMatch(f.raw, [/集合意識/, /全体意識/, /普遍/, /時間を超/, /次元を超/])) return 2;
+      return 1;
+    }
   }
-
-  return best ?? 'S';
 }
+
+function inferDepthStructurally(text: string): Depth | null {
+  const f = analyzeStructure(text);
+  if (!f.raw) return null;
+  if (f.isGreeting) return 'S1';
+
+  const scores = scoreBandsByStructure(f);
+  const primaryBand = pickBand(scores, ['S', 'R', 'C', 'F', 'I', 'T']);
+  const primaryLevel = inferLevelForBand(primaryBand, f);
+  return makeStage(primaryBand, primaryLevel);
+}
+
+/* ========= observedStage 判定 ========= */
 
 function inferObservedStages(text: string): {
   primaryStage: Depth | null;
@@ -659,9 +587,9 @@ function inferObservedStages(text: string): {
   secondaryDepth: 1 | 2 | 3 | null;
   observedBasedOn: string | null;
 } {
-  const t = norm(text);
+  const f = analyzeStructure(text);
 
-  if (!t || isGreetingLike(t)) {
+  if (!f.raw || f.isGreeting) {
     return {
       primaryStage: 'S1',
       secondaryStage: 'F1',
@@ -674,148 +602,100 @@ function inferObservedStages(text: string): {
     };
   }
 
-  // --- 明示的な観測意図は最優先で observedStage に反映する ---
-  // ここは「今回ユーザーが自分で取りに来た入口」を優先する
-  const directObserved = (() => {
-    if (
-      /自分の中で何が起きている|自分の状態を知りたい|内側を見たい|いま何が起きているか見たい/.test(t)
-    ) {
-      return {
-        observedStage: 'S1' as Depth,
-        observedBand: 'S' as StageBand,
-        observedDepth: 1 as 1 | 2 | 3,
-        observedBasedOn: 'direct-intent:S',
-      };
-    }
+  const scores = scoreBandsByStructure(f);
+  const primaryBand = pickBand(scores, ['S', 'R', 'C', 'F', 'I', 'T']);
+  const primaryDepth = inferLevelForBand(primaryBand, f);
+  const primaryStage = makeStage(primaryBand, primaryDepth);
 
-    if (
-      /ぼんやりしていたものを少し形にしたい|この感覚を言葉にすると何になる|輪郭を出したい|形にしたい/.test(t)
-    ) {
-      return {
-        observedStage: 'F1' as Depth,
-        observedBand: 'F' as StageBand,
-        observedDepth: 1 as 1 | 2 | 3,
-        observedBasedOn: 'direct-intent:F',
-      };
-    }
+  // observedStage は「今回どこを取りに来たか」
+  let observedBand: StageBand = primaryBand;
+  let observedDepth: 1 | 2 | 3 = primaryDepth;
+  let observedBasedOn = `structure-entry primary=${primaryBand}`;
 
-    if (
-      /誰かとの関係の中で起きてる|相手との関係で起きてる|人との関係の中で起きてる|関係の中で起きてる/.test(t)
-    ) {
-      return {
-        observedStage: 'R1' as Depth,
-        observedBand: 'R' as StageBand,
-        observedDepth: 1 as 1 | 2 | 3,
-        observedBasedOn: 'direct-intent:R',
-      };
-    }
-
-    if (
-      /ここから何を作ればいいか考えたい|何を作ればいいか考えたい|次にどう動くかを組み立てたい|何を作るか考えたい/.test(t)
-    ) {
-      return {
-        observedStage: 'C1' as Depth,
-        observedBand: 'C' as StageBand,
-        observedDepth: 1 as 1 | 2 | 3,
-        observedBasedOn: 'direct-intent:C',
-      };
-    }
-
-    if (
-      /何のために|この流れの意味をはっきりさせたい|いちばん奥にある意図を知りたい|意味をはっきりさせたい/.test(t)
-    ) {
-      return {
-        observedStage: 'I1' as Depth,
-        observedBand: 'I' as StageBand,
-        observedDepth: 1 as 1 | 2 | 3,
-        observedBasedOn: 'direct-intent:I',
-      };
-    }
-
-    return null;
-  })();
-
-  const primaryStage = inferDepth(t);
-  const primaryBand = depthToBand(primaryStage);
-  const primaryDepth = depthToLevel(primaryStage);
-
-  if (!primaryStage || !primaryBand || !primaryDepth) {
-    return {
-      primaryStage: 'S1',
-      secondaryStage: 'F1',
-      observedStage: directObserved?.observedStage ?? 'S1',
-      primaryBand: 'S',
-      secondaryBand: 'F',
-      primaryDepth: 1,
-      secondaryDepth: 1,
-      observedBasedOn: directObserved?.observedBasedOn ?? 'fallback/default => S1',
-    };
+  if (f.referencesTranscendence) {
+    observedBand = 'T';
+    observedDepth = inferLevelForBand('T', f);
+    observedBasedOn = 'entry:transcend';
+  } else if (f.referencesExistentialQuestion || f.asksWhatFor) {
+    observedBand = 'I';
+    observedDepth = inferLevelForBand('I', f);
+    observedBasedOn = 'entry:existential-meaning';
+  } else if (f.asksHow || f.referencesSystemOrBuild) {
+    observedBand = 'C';
+    observedDepth = inferLevelForBand('C', f);
+    observedBasedOn = 'entry:build-or-how';
+  } else if (f.referencesRoutineOrStabilize) {
+    observedBand = 'F';
+    observedDepth = inferLevelForBand('F', f);
+    observedBasedOn = 'entry:stabilize';
+  } else if (f.referencesSpecificOther || f.referencesRelationalPattern) {
+    observedBand = 'R';
+    observedDepth = inferLevelForBand('R', f);
+    observedBasedOn = 'entry:relation';
+  } else if (f.referencesCurrentState || (f.hasObservation && f.worldRef > 0)) {
+    observedBand = 'S';
+    observedDepth = inferLevelForBand('S', f);
+    observedBasedOn = 'entry:state-or-observation';
   }
 
-  const scores = scoreBands(t);
-  const scoredPrimaryBand = pickPrimaryBand(scores);
-  const effectivePrimaryBand = scoredPrimaryBand || primaryBand;
+  const observedStage = makeStage(observedBand, observedDepth);
 
-  const effectivePrimaryStage =
-    effectivePrimaryBand === primaryBand ? primaryStage : makeStage(effectivePrimaryBand, primaryDepth);
+  // secondary は “副軸”
+  const secondaryOrder: StageBand[] =
+    primaryBand === 'S'
+      ? ['R', 'F', 'I', 'C', 'T']
+      : primaryBand === 'R'
+        ? ['S', 'I', 'F', 'C', 'T']
+        : primaryBand === 'C'
+          ? ['I', 'F', 'R', 'S', 'T']
+          : primaryBand === 'F'
+            ? ['S', 'C', 'I', 'R', 'T']
+            : primaryBand === 'I'
+              ? ['R', 'S', 'C', 'F', 'T']
+              : ['I', 'S', 'R', 'C', 'F'];
 
-  const secondaryBand = chooseSecondaryBand(t, effectivePrimaryBand, scores);
-  let secondaryDepth = primaryDepth;
-
-  if (secondaryBand === effectivePrimaryBand) {
-    secondaryDepth = primaryDepth === 3 ? 2 : ((primaryDepth + 1) as 1 | 2 | 3);
-  } else {
-    secondaryDepth = primaryDepth;
-  }
-
+  const reducedScores: Record<StageBand, number> = { ...scores };
+  reducedScores[primaryBand] = -9999;
+  const secondaryBand = pickBand(
+    reducedScores,
+    secondaryOrder.filter((b) => b !== primaryBand),
+  );
+  const secondaryDepth = inferLevelForBand(secondaryBand, f);
   const secondaryStage = makeStage(secondaryBand, secondaryDepth);
 
-  // observed は「構造主軸」ではなく「今回取りに来た入口」
-  // 明示意図があればそれを使い、なければ今回のスコア焦点を使う
-  const observedBand =
-    directObserved?.observedBand ??
-    (() => {
-      const order: StageBand[] = ['I', 'R', 'S', 'F', 'C', 'T'];
-      let best: StageBand | null = null;
-      for (const band of order) {
-        if (best == null || scores[band] > scores[best]) {
-          best = band;
-        }
-      }
-      return best ?? effectivePrimaryBand;
-    })();
-
-  const observedDepth = directObserved?.observedDepth ?? primaryDepth;
-  const observedStage =
-    directObserved?.observedStage ?? makeStage(observedBand, observedDepth);
-
   return {
-    primaryStage: effectivePrimaryStage,
+    primaryStage,
     secondaryStage,
     observedStage,
-    primaryBand: effectivePrimaryBand,
+    primaryBand,
     secondaryBand,
     primaryDepth,
     secondaryDepth,
-    observedBasedOn:
-      directObserved?.observedBasedOn ??
-      `meaning/structure observed=${observedBand} primary=${effectivePrimaryBand} secondary=${secondaryBand}`,
+    observedBasedOn,
   };
 }
+
 /* ========= Phase 判定 ========= */
 
 function inferPhase(text: string): 'Inner' | 'Outer' | null {
-  const t = norm(text);
-  if (!t) return null;
+  const f = analyzeStructure(text);
+  if (!f.raw) return null;
 
-  const innerHit = /(私|自分|わたし|僕|気持ち|心|本音|不安|怖い|つらい|疲れた|しんどい)/.test(t);
-  const outerHit = /(上司|部下|同僚|会社|職場|チーム|家族|彼|彼女|相手|お客さん|クライアント)/.test(t);
+  const innerScore =
+    f.selfRef * 2 +
+    (f.referencesCurrentState ? 3 : 0) +
+    (f.hasFeeling ? 2 : 0) +
+    (f.referencesExistentialQuestion ? 1 : 0);
 
-  if (innerHit && !outerHit) return 'Inner';
-  if (!innerHit && outerHit) return 'Outer';
-  if (innerHit && outerHit) return 'Inner';
+  const outerScore =
+    f.otherRef * 2 +
+    f.groupRef * 1.5 +
+    f.relationRef * 1.5 +
+    (f.referencesSystemOrBuild ? 1 : 0);
 
-  return null;
+  if (innerScore === 0 && outerScore === 0) return null;
+  if (innerScore >= outerScore) return 'Inner';
+  return 'Outer';
 }
 
 /* ========= QCode 判定 ========= */
@@ -869,7 +749,7 @@ function buildIntentSummary(depth: Depth | null): string {
 
 export function deepScan(text: string): DeepScanResult {
   const observed = inferObservedStages(text);
-  const depth = observed.observedStage ?? inferDepth(text);
+  const depth = observed.observedStage ?? inferDepthStructurally(text);
   const phase = inferPhase(text);
   const q = inferQ(text);
   const intentSummary = buildIntentSummary(depth);
