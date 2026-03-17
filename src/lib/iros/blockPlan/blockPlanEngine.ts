@@ -274,16 +274,16 @@ export function buildBlockPlanWithDiag(
       Boolean(itTriggered) &&
       (consultishGoal || (userText ? detectWantsDeeper(userText) : false)));
 
-  // autoCrack（相談ゴール + 裂け目）
-  const autoCrack = consultishGoal && userText ? detectCrackWords(userText) : false;
+// autoCrack（相談ゴール + 裂け目）
+const autoCrack = consultishGoal && userText ? detectCrackWords(userText) : false;
 
-  // ✅ autoMini（相談ゴール + 迷い/不安/決められなさ）→ mini3
-  // - multi6 の “裂け目” ほど強くないが、相談の節目で再配置したいときに出す
-  const autoMini = consultishGoal && userText ? detectMiniReframeTrigger(userText) : false;
+// ✅ autoMini（相談ゴール + 迷い/不安/決められなさ）→ mini3
+// - multi6 の “裂け目” ほど強くないが、相談の節目で再配置したいときに出す
+const autoMini = consultishGoal && userText ? detectMiniReframeTrigger(userText) : false;
 
-  // =========================================================
-  // gate decision
-  // =========================================================
+// =========================================================
+// gate decision
+// =========================================================
 
   // 1) userText が空 → NONE
   if (!userText) {

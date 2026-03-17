@@ -4955,6 +4955,116 @@ raw = await (async () => {
 
   const baseMsgs = Array.isArray(messages) ? (messages as any[]) : [];
 
+  const __sanitizeAssistantContinuity = (input: string): string => {
+    let s = String(input ?? '');
+    if (!s) return s;
+
+    const lines = s
+      .split(/\r?\n/)
+      .map((v) => String(v ?? '').trim())
+      .filter(Boolean);
+
+    const bannedLinePatterns: RegExp[] = [
+      // 1) オウム返し
+      /そうなんだね/i,
+      /なんだね[。．!！?？]*$/i,
+      /という感じなんだね/i,
+      /残ってるんだね/i,
+
+      // 2) 時間誘導
+      /\b\d+\s*分(?:だけ)?\b/,
+      /\b\d+\s*時間(?:だけ)?\b/,
+      /30\s*[〜~\-]\s*60\s*分/,
+      /ここからここまで/,
+      /今日は.*終える/,
+      /締めを.*作って終える/,
+
+      // 3) 身体誘導
+      /呼吸して/,
+      /体を動かして/,
+      /少し休んで/,
+      /休みに寄せる/,
+      /落ち着いて/,
+
+      // 4) コーチ断定
+      /いちばん効きます/,
+      /効きます/,
+      /したほうがいい/,
+      /まず.*が大事/,
+      /最初に整えるのは/,
+      /動きやすいです/,
+      /戻りやすいです/,
+
+      // 5) 具体例持ち越し
+      /机の上.*片づける/,
+      /明日やること.*メモ/,
+      /動画やSNS/,
+    ];
+
+    const kept = lines.filter((line) => {
+      return !bannedLinePatterns.some((re) => re.test(line));
+    });
+
+    let out = kept.join('\n').trim();
+
+    // 文中に残る時間表現なども念のため削る
+    out = out
+      .replace(/\b\d+\s*分(?:だけ)?\b/g, '')
+      .replace(/\b\d+\s*時間(?:だけ)?\b/g, '')
+      .replace(/30\s*[〜~\-]\s*60\s*分/g, '')
+      .replace(/ここからここまで/g, '')
+      .replace(/いちばん効きます/g, '')
+      .replace(/したほうがいい/g, '')
+      .replace(/動きやすいです/g, '動きやすくなります')
+      .replace(/戻りやすいです/g, '戻りやすくなります')
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+    // 全消しは避ける
+    if (!out) {
+      const firstSafe = lines.find((line) => {
+        return !bannedLinePatterns.some((re) => re.test(line));
+      });
+      return String(firstSafe ?? '').trim();
+    }
+
+    return out;
+  };
+
+  const sanitizedBaseMsgs = baseMsgs.map((m: any) => {
+    const role = String(m?.role ?? '');
+    const content = String(m?.content ?? '');
+
+    // system はそのまま
+    if (role === 'system') return m;
+
+    // assistant のうち、内部注入パックはそのまま
+    if (
+      role === 'assistant' &&
+      (
+        /COORD\s*\(DO NOT OUTPUT\):/i.test(content) ||
+        /MIRROR_FLOW_SEED_V1\b/i.test(content) ||
+        /CARD_PACKET\s*\(DO NOT OUTPUT\):/i.test(content) ||
+        /CARDS_LITE_SEED\s*\(DO NOT OUTPUT\):/i.test(content) ||
+        /FLOW_CONTEXT\s*\(DO NOT OUTPUT\):/i.test(content) ||
+        /STATE_CUES\s*\(DO NOT OUTPUT\)/i.test(content) ||
+        /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/i.test(content)
+      )
+    ) {
+      return m;
+    }
+
+    // 通常 assistant 履歴だけ sanitize
+    if (role === 'assistant') {
+      const nextContent = __sanitizeAssistantContinuity(content);
+      return { ...m, content: nextContent };
+    }
+
+    // user はそのまま
+    return m;
+  });
+
   // 既に注入済みなら二重に入れない（安全策）
   const alreadyHasStateCues = baseMsgs.some((m) => {
     const roleOk = String(m?.role ?? '') === 'assistant';
@@ -5153,7 +5263,7 @@ raw = await (async () => {
   // - writer 入力の assistant 本数が増える
   // - lastRole が assistant になりうる
   // - INTERNAL_PACK / COORD / FLOW_MEANING で十分な局面理解を持てる
-  const messagesForWriter = baseMsgs;
+  const messagesForWriter = sanitizedBaseMsgs;
 
   const injectedStateCues = false;
   const stateCuesDisabledReason = 'DISABLED_FOR_LIGHTWEIGHT_WRITER';
@@ -6350,6 +6460,7 @@ userContext: {
 
     // IDEA_BAND は「2〜maxLines」の“候補行”が必須
     if (lines.length < 2) return false;
+    if (lines.length >= 2) return false;
     if (typeof maxLines === 'number' && maxLines > 0 && lines.length > maxLines) return false;
 
     // 各行：箇条書き/質問/長文語り を弾く（最低限）

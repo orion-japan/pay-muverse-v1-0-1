@@ -128,29 +128,17 @@ function turnsToMessages(
   const out: WriterMessage[] = [];
 
   for (const t of raw) {
-    const role =
-      t?.role === 'assistant'
-        ? 'assistant'
-        : t?.role === 'user'
-          ? 'user'
-          : null;
-
+    const role = t?.role === 'user' ? 'user' : null;
     if (!role) continue;
 
     const content0 = String(t?.content ?? t?.text ?? '').trim();
     if (!content0) continue;
 
-    if (role === 'user') {
-      const s0 = stripInternalMarkersFromUserText(content0);
-      const s1 = clampStr(s0, MAX_USER_LEN);
-      if (!s1) continue;
-      out.push({ role: 'user', content: s1 });
-      continue;
-    }
+    const s0 = stripInternalMarkersFromUserText(content0);
+    const s1 = clampStr(s0, MAX_USER_LEN);
+    if (!s1) continue;
 
-    const a1 = clampStr(content0, MAX_TURN_LEN);
-    if (!a1) continue;
-    out.push({ role: 'assistant', content: norm(a1) });
+    out.push({ role: 'user', content: s1 });
   }
 
   return ensureEndsWithUser(mergeConsecutiveSameRole(out));
@@ -1783,6 +1771,7 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                     const tensionBase = String(flowMeaningV1?.continuingTension ?? '').trim();
                     const hookBase = String(flowMeaningV1?.thisTurnHook ?? '').trim();
                     const openLoop = String(flowMeaningV1?.openLoop ?? '').trim();
+                    const core = String(coreAssertionLine ?? '').trim();
 
                     const tension =
                       tensionBase && hookBase
@@ -1793,6 +1782,15 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                     if (flow) lines.push(`flow=${flow}`);
                     if (tension) lines.push(`tension=${tension}`);
                     if (openLoop) lines.push(`openLoop=${openLoop}`);
+
+                    // ✅ 「なんでわかるの？」の核
+                    // - 先頭で断定させず、観測のあとに1行だけ置かせる
+                    // - 無理に毎回出さず、一定の長さがある核だけ渡す
+                    if (core && core.length >= 16) lines.push(`core=${core}`);
+
+                    lines.push('placement=after_observation_once');
+                    lines.push('core_rule=Do not open with core. First observe the visible flow, then place the core insight in one sentence if it fits.');
+                    lines.push('core_style=Not diagnosis. Not advice-first. Not a forced reveal.');
 
                     if (lines.length === 0) return '';
                     return ['FLOW (DO NOT OUTPUT):', ...lines].join('\n');
@@ -1805,54 +1803,56 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                     .filter((x) => norm(x))
                     .join('\n\n');
 
-                const internalPackFixed = injectedHead.trim();
-                  try {
-                    const packNorm = norm(internalPackFixed);
-                    const h = packNorm.slice(0, 900);
+                    const internalPackFixed = injectedHead.trim();
+                    try {
+                      const packNorm = norm(internalPackFixed);
+                      const h = packNorm.slice(0, 900);
 
-                    const flowMatch = packNorm.match(/FLOW_CONTEXT(?:\s*\(DO NOT OUTPUT\))?:|FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:/);
-                    const flowIdx = flowMatch ? flowMatch.index ?? -1 : -1;
-                    const flowSnippet =
-                      flowIdx >= 0 ? packNorm.slice(flowIdx, Math.min(packNorm.length, flowIdx + 520)) : '';
+                      const flowMatch = packNorm.match(/FLOW_CONTEXT(?:\s*\(DO NOT OUTPUT\))?:|FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:/);
+                      const flowIdx = flowMatch ? flowMatch.index ?? -1 : -1;
+                      const flowSnippet =
+                        flowIdx >= 0 ? packNorm.slice(flowIdx, Math.min(packNorm.length, flowIdx + 520)) : '';
 
-                    const hasOpenness =
-                      /(?:^|\n)OPENNESS(?:\n|$)/.test(packNorm) ||
-                      /tLayerHint=|itOk=/.test(packNorm);
+                      const hasOpenness =
+                        /(?:^|\n)OPENNESS(?:\n|$)/.test(packNorm) ||
+                        /tLayerHint=|itOk=/.test(packNorm);
 
-                    const hasWriterDirectives =
-                      /(?:^|\n)WRITER_DIRECTIVES(?:\n|$)/.test(packNorm) ||
-                      /tone=|maxLines=|slotPolicy=|rotationMention=/.test(packNorm);
+                      const hasWriterDirectives =
+                        /(?:^|\n)WRITER_DIRECTIVES(?:\n|$)/.test(packNorm) ||
+                        /tone=|maxLines=|slotPolicy=|rotationMention=/.test(packNorm);
 
-                    console.log('[IROS/writerCalls][INJECTED_PACK_HEAD]', {
-                      traceId: (args as any)?.traceId ?? null,
-                      conversationId: (args as any)?.conversationId ?? null,
-                      packLen: packNorm.length,
-                      head: h,
-                      hasCOORD: /COORD\s*\(DO NOT OUTPUT\)/.test(packNorm),
-                      hasPolarity: /polarity=/.test(packNorm),
-                      hasSA: /sa=/.test(packNorm),
+                      console.log('[IROS/writerCalls][INJECTED_PACK_HEAD_RAW]', h);
 
-                      // 旧 itx_step / itx_reason だけでなく、MirrorFlow Seed v1 の OPENNESS も検知する
-                      hasITX:
-                        /itx_step=|itx_reason=/.test(packNorm) ||
-                        /tLayerHint=|itOk=/.test(packNorm),
+                      console.log('[IROS/writerCalls][INJECTED_PACK_HEAD]', {
+                        traceId: (args as any)?.traceId ?? null,
+                        conversationId: (args as any)?.conversationId ?? null,
+                        packLen: packNorm.length,
+                        head: h,
+                        hasCOORD: /COORD\s*\(DO NOT OUTPUT\)/.test(packNorm),
+                        hasPolarity: /polarity=/.test(packNorm),
+                        hasSA: /sa=/.test(packNorm),
 
-                      hasFuture: /future=/.test(packNorm),
-                      hasStateCues: /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/.test(packNorm),
-                      hasFlowMeaning: flowIdx >= 0,
+                        // 旧 itx_step / itx_reason だけでなく、MirrorFlow Seed v1 の OPENNESS も検知する
+                        hasITX:
+                          /itx_step=|itx_reason=/.test(packNorm) ||
+                          /tLayerHint=|itOk=/.test(packNorm),
 
-                      hasMirrorFlowSeed: /MIRROR_FLOW_SEED_V1\b/.test(packNorm),
-                      hasOpenness,
-                      hasWriterDirectives,
+                        hasFuture: /future=/.test(packNorm),
+                        hasStateCues: /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/.test(packNorm),
+                        hasFlowMeaning: flowIdx >= 0,
 
-                      flowSnippet,
-                      saRhythm: saRhythm || null,
-                      saTone: saTone || null,
-                      saBrevity: saBrevity || null,
-                      itxStep: itxStep || null,
-                      itxReason: itxReason || null,
-                    });
-                  } catch {}
+                        hasMirrorFlowSeed: /MIRROR_FLOW_SEED_V1\b/.test(packNorm),
+                        hasOpenness,
+                        hasWriterDirectives,
+
+                        flowSnippet,
+                        saRhythm: saRhythm || null,
+                        saTone: saTone || null,
+                        saBrevity: saBrevity || null,
+                        itxStep: itxStep || null,
+                        itxReason: itxReason || null,
+                      });
+                    } catch {}
 
   const shiftMeta = (() => {
     const s = String(internalPackFixed ?? '');
@@ -2026,26 +2026,21 @@ export function buildRetryMessages(args: {
   const turns = Array.isArray(args.turns) ? args.turns : [];
   const turnMsgs: WriterMessage[] = turns
     .map((t: any) => {
-      const role = t?.role === 'assistant' ? 'assistant' : t?.role === 'user' ? 'user' : null;
+      const role = t?.role === 'user' ? 'user' : null;
       if (!role) return null;
 
-      if (role === 'user') {
-        const s0 = stripInternalMarkersFromUserText(String(t?.content ?? t?.text ?? ''));
-        const s1 = clampStr(s0, 900);
-        if (!s1) return null;
-        return { role: 'user', content: s1 } as WriterMessage;
-      }
+      const s0 = norm(String(t?.content ?? t?.text ?? ''));
+      const s1 = clampStr(stripInternalMarkersFromUserText(s0), 900);
+      if (!s1) return null;
 
-      const a0 = norm(String(t?.content ?? t?.text ?? ''));
-      const a1 = clampStr(a0, 900);
-      return a1 ? ({ role: 'assistant', content: a1 } as WriterMessage) : null;
+      return { role: 'user', content: s1 } as WriterMessage;
     })
     .filter(Boolean) as WriterMessage[];
 
-    const userTextSanitized = clampStr(
-      stripInternalMarkersFromUserText(String(args.userText ?? '')),
-      900,
-    );
+  const userTextSanitized = clampStr(
+    stripInternalMarkersFromUserText(String(args.userText ?? '')),
+    900,
+  );
 
     const retryUserContent =
       baseDraft && baseDraft !== '(empty)' && baseDraft !== '（入力なし）'
@@ -2123,7 +2118,7 @@ export async function callWriterLLM(args: {
   // ✅ 末尾 user を保証（念のため）
   messagesFinal = ensureEndsWithUser(messagesFinal);
 
-  // ✅ 全 user 生文を通す（ただし strip/clamp は維持）
+  // ✅ user は通す。assistant は「内部 pack / 制御用」だけ残し、通常 assistant 会話は落とす
   const MAX_USER = 900;
   const MAX_ASSIST = 900;
 
@@ -2137,9 +2132,20 @@ export async function callWriterLLM(args: {
         if (!s1) return null;
         return { role: 'user', content: s1 } as WriterMessage;
       }
+
       if (m.role === 'assistant') {
-        const a1 = clampStr(norm(m.content ?? ''), MAX_ASSIST);
-        return a1 ? ({ role: 'assistant', content: a1 } as WriterMessage) : null;
+        const a0 = norm(String(m.content ?? ''));
+        const a1 = clampStr(a0, MAX_ASSIST);
+        if (!a1) return null;
+
+        const isInternalPack =
+          /^INTERNAL PACK \(DO NOT OUTPUT\):/i.test(a1) ||
+          /^COORD \(DO NOT OUTPUT\):/i.test(a1) ||
+          /^TOPIC_RECALL_NO_EVIDENCE \(DO NOT OUTPUT\):/i.test(a1);
+
+        return isInternalPack
+          ? ({ role: 'assistant', content: a1 } as WriterMessage)
+          : null;
       }
 
       // system はそのまま（正規化のみ）

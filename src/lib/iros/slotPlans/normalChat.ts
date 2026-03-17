@@ -129,22 +129,22 @@ function normalizeLaneKeyOrNull(v: unknown): LaneKey | null {
 // - evidenceLog.ts は key==='NEXT' または content.startsWith('@NEXT_HINT') を検出し、
 //   さらに mode==='advance_hint' を拾えれば advance=1 になる。
 function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey | null; flowDelta?: string | null }): NormalChatSlot {
-  const laneKey = safeLaneKey(args.laneKey); // LaneKey | null
+  const laneKey = safeLaneKey(args.laneKey);
   const delta = args.flowDelta ? String(args.flowDelta) : null;
 
   const hint =
     laneKey === 'T_CONCRETIZE'
-      ? '次の一手を1つに絞る'
+      ? 'いま表に出ている一点をそのまま保つ'
       : laneKey === 'IDEA_BAND'
-        ? '候補を2〜3に並べて見えやすくする'
-        : 'いまの場に残っているものをそのまま返す';
+        ? '候補を増やさず、いま出ている差だけを見やすくする'
+        : 'いま出ている流れを崩さず、そのまま整えて返す';
 
   return {
     key: 'NEXT',
     role: 'assistant',
     style: 'neutral',
     content: `@NEXT_HINT ${JSON.stringify({
-      mode: 'advance_hint',
+      mode: 'observe_hint',
       laneKey: laneKey ?? null,
       delta,
       hint: clamp(hint, 80),
@@ -510,8 +510,8 @@ function buildClarify(
             : directAnswerRequested
               ? '結論を先に短く言い切り、そのあと必要最小限の具体だけを添えて閉じる'
               : shouldAnswerTruthStructure
-              ? '結論を先に1〜2文で言い切り、そのあとで「どこを変えると動くか」を2〜3点の短い箇条書き相当で示す。説明で広げすぎず、観測→芯→具体案の順で返す'
-                : clarifyMeaning.line;
+              ? '結論を先に1〜2文で言い切り、そのあとでどこが未確定なのかを短い本文でそのまま続ける。見出しや箇条書きにはせず、観測→芯→具体の順を一続きの文脈で返す'
+              : clarifyMeaning.line;
                 const askBackAllowedNow =
                   !isT &&
                   !questionSuggestsPastReframe &&
@@ -1198,53 +1198,53 @@ function buildFlowReply(args: {
       const isDefinitionQuestion2 =
         /(?:って何|とは|意味|違い|定義)/.test(t) || /[?？]/.test(t);
 
-      if (resolvedAskType2 === 'truth_structure') {
-        return '結論をぼかさず先に核を答え、そのあとで構造（論点分解・検証条件・どこまで言えるか）を短く添える';
+        if (resolvedAskType2 === 'truth_structure') {
+          return '答えの核と、そのまわりの構造を混ぜずに整理します';
+        }
+
+        if (isTopicCorrection) {
+          return '補正された話題の範囲を広げず、そのテーマの中で整理します';
+        }
+
+        if (observedStage2.startsWith('I') && primaryStage2.startsWith('R')) {
+          return '関係の繰り返しと、その受け取り方を分けて見ていきます';
+        }
+
+        if (observedStage2.startsWith('I')) {
+          return '出来事より、その流れの受け取り方に焦点を当てて整理します';
+        }
+
+        if (observedStage2.startsWith('R') && secondaryStage2.startsWith('I')) {
+          return '関係の繰り返しと、その背景にある意味づけを分けて見ていきます';
+        }
+
+        if (isDefinitionQuestion2) {
+          return shiftMeaning.line;
+        }
+
+        return '質問の広がりを抑え、このテーマの核に焦点を当てます';
       }
 
-      if (isTopicCorrection) {
-        return '話題の補正として受け取り、何の話かを勝手に広げず、その話題の中で確認する';
+      if (shiftKind2 === 'stabilize_shift') {
+        if (hasAny('また同じところ', '戻ってきた')) {
+          return '同じ場所に戻っている一点を基準に整理します';
+        }
+        return '揺れている基準の位置を、そのまま見直す方向で整理します';
       }
 
-      if (observedStage2.startsWith('I') && primaryStage2.startsWith('R')) {
-        return '関係の反復をそのまま分析し続けるより、今回はその流れが自分にとって何を意味しているのかを先に確かめる';
+      if (shiftKind2 === 'distance_shift') {
+        return '苦しさを強めている距離の一点に焦点を当てて整理します';
       }
 
-      if (observedStage2.startsWith('I')) {
-        return '出来事の説明を増やすより、今回はその流れにどんな意味を示すと腑に落ちるかを先に確かめる';
+      if (shiftKind2 === 'repair_shift') {
+        return '問題を解決に急ぐ流れから離れ、関係のほどけ方を見つける方向で示します';
       }
 
-      if (observedStage2.startsWith('R') && secondaryStage2.startsWith('I')) {
-        return '関係の中で何が繰り返されているかを見ながら、その背景で何を意味づけようとしているのかも短く拾う';
+      if (shiftKind2 === 'decide_shift') {
+        return '結論を急いでいる状態を整理し、まず一つ決めたいことの具体へ絞ります';
       }
 
-      if (isDefinitionQuestion2) {
-        return shiftMeaning.line;
-      }
-
-      return '質問の向きをそのまま受け取り、話題を広げずに、このテーマのどこを知りたいのかを狭く確かめる';
-    }
-
-    if (shiftKind2 === 'stabilize_shift') {
-      if (hasAny('また同じところ', '戻ってきた')) {
-        return 'いまは進めることより、同じところに見える一点を静かに整え直す角度が合っている';
-      }
-      return 'いまは進めるより、基準を戻して整える角度のほうが合っている';
-    }
-
-    if (shiftKind2 === 'distance_shift') {
-      return '相手を読み切るより先に、いま苦しくしている距離の一点を狭く見たほうが動きやすい';
-    }
-
-    if (shiftKind2 === 'repair_shift') {
-      return '正解の修復を急ぐより、関係を壊さない入口を一つだけ示す角度が合っている';
-    }
-
-    if (shiftKind2 === 'decide_shift') {
-      return '結論を先に短く言い切り、そのあと必要最小限の具体だけを添えて閉じる';
-    }
-
-    return '全部を動かすより、いま引っかかっている一点だけを狭くすると動きやすい';
+      return '焦点が散らばっている状態を、一点に収束させる方向で進めます';
   })();
 
   const questionForFlow =
