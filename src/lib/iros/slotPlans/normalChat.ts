@@ -595,12 +595,10 @@ function buildClarify(
                                       clarifyMeaning.kind === 'topic_recall' ||
                                       isDefinitionQuestion ||
                                       isMeaningConfirm,
-                                    no_bullets:
-                                      shouldAnswerTruthStructure ||
-                                      shouldReanswerCapability ||
-                                      clarifyMeaning.kind === 'topic_recall' ||
-                                      isDefinitionQuestion ||
-                                      isMeaningConfirm,
+                                    // ✅ Markdown許可:
+                                    // writer guard の WG:BULLETS を止める
+                                    // output_only は維持しつつ、箇条書き・見出し・区切り線を許可する
+                                    no_bullets: false,
                                     lines_max:
                                       shouldAnswerTruthStructure
                                         ? 4
