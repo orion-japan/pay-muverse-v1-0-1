@@ -53,7 +53,7 @@ export default function MeditationClient() {
     return () => clearInterval(t);
   }, []);
 
-  // 参加可能時間：平日 05:50〜06:10（JST）
+  // 参加可能時間：平日 05:50〜07:10（JST）
   const canJoinAinoriFixed = () => {
     const d = new Date(now);
     const dow = d.getDay();
@@ -62,14 +62,14 @@ export default function MeditationClient() {
       m = d.getMonth(),
       day = d.getDate();
     const open = new Date(y, m, day, 5, 50, 0, 0).getTime();
-    const close = new Date(y, m, day, 6, 10, 0, 0).getTime();
+    const close = new Date(y, m, day, 7, 15, 0, 0).getTime();
     const cur = d.getTime();
     return cur >= open && cur <= close;
   };
 
   const handleJoinAinori = async () => {
     if (!canJoinAinoriFixed()) {
-      alert('愛祈は平日6:00開始です（05:50〜06:10のみ参加可能／日曜・祝日休み）');
+      alert('愛祈は平日7:00開始です（05:50〜07:10のみ参加可能／日曜・祝日休み）');
       return;
     }
 
@@ -126,11 +126,11 @@ export default function MeditationClient() {
         <div className="km-schedule">
           <div className="km-schedule-row">
             <span className="km-label">開始（固定）</span>
-            <span className="km-value">毎朝 6:00（平日）</span>
+            <span className="km-value">毎朝 7:00（平日）</span>
           </div>
           <div className="km-schedule-row">
             <span className="km-label">OPEN時間</span>
-            <span className="km-value">05:50〜06:10（JST）</span>
+            <span className="km-value">05:50〜07:10（JST）</span>
           </div>
           <div className="km-schedule-row">
             <span className="km-label">休止日</span>
@@ -175,7 +175,7 @@ export default function MeditationClient() {
             </button>
           </div>
           <p style={{ marginTop: 6 }}>
-            ※ 平日のみ 05:50〜06:10（JST）にOPEN／日曜・祝日休み。
+            ※ 平日のみ 05:50〜07:10（JST）にOPEN／日曜・祝日休み。
             <br />※ 瞑想会は参加資格なし、<b>全員参加OK</b>です。
           </p>
         </div>
@@ -184,7 +184,7 @@ export default function MeditationClient() {
           <button
             className={`km-button primary ${!canJoinAinoriFixed() ? 'disabled' : ''}`}
             onClick={handleJoinAinori}
-            title="平日05:50〜06:10（JST）のみ参加可能／日曜・祝日休み"
+            title="平日05:50〜07:10（JST）のみ参加可能／日曜・祝日休み"
             type="button"
           >
             参加する

@@ -77,10 +77,10 @@ export function buildOutputPolicy(input: BuildOutputPolicyInput): OutputPolicy {
     avoidPrematureClosure = true;
   }
 
-  if (pastResolve?.detected) {
+  if (questionType === 'structure' && pastResolve?.detected) {
     usePastReframe = true;
+    askBackAllowed = true;
   }
-
   return {
     answerFirst,
     askBackAllowed,
