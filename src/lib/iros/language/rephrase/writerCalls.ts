@@ -94,17 +94,26 @@ function ensureEndsWithUser(messages: WriterMessage[], finalUserText?: string): 
   const normFinal = typeof finalUserText === 'string' ? norm(finalUserText) : '';
   const last = out[out.length - 1];
 
-  // ✅ user で終わっていない場合は、finalUserText がある時だけ追加
+  // ✅ 末尾が user でない場合は、finalUserText がある時だけ追加
   if (!last || last.role !== 'user') {
     if (normFinal) out.push({ role: 'user', content: normFinal });
     return out;
   }
 
-  // placeholder上書き（finalUserText が渡った時だけ）
+  // ✅ 末尾が user の場合は「今回の正本」を優先する
+  // - placeholder だけでなく、
+  // - 1ターン前の user が末尾に残っているケースもここで置き換える
   if (normFinal) {
     const prev = norm(String(last.content ?? ''));
+
+    if (prev !== normFinal) {
+      out[out.length - 1] = { role: 'user', content: normFinal };
+      return out;
+    }
+
     if (prev === '（入力なし）' || prev.length === 0) {
       out[out.length - 1] = { role: 'user', content: normFinal };
+      return out;
     }
   }
 
