@@ -1117,16 +1117,22 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   ).trim();
 
                   const historyForWriterSource =
-                  (Array.isArray((args as any)?.userContext?.turnsForWriter) &&
-                    (args as any).userContext.turnsForWriter.length > 0
-                    ? (args as any).userContext.turnsForWriter
-                    : Array.isArray((args as any)?.userContext?.ctxPack?.turnsForWriter) &&
-                        (args as any).userContext.ctxPack.turnsForWriter.length > 0
-                      ? (args as any).userContext.ctxPack.turnsForWriter
-                      : Array.isArray((args as any)?.userContext?.turns) &&
-                          (args as any).userContext.turns.length > 0
-                        ? (args as any).userContext.turns
-                        : []);
+                    (Array.isArray((args as any)?.userContext?.historyForWriter) &&
+                      (args as any).userContext.historyForWriter.length > 0
+                      ? (args as any).userContext.historyForWriter
+                      : Array.isArray((args as any)?.userContext?.ctxPack?.historyForWriter) &&
+                          (args as any).userContext.ctxPack.historyForWriter.length > 0
+                        ? (args as any).userContext.ctxPack.historyForWriter
+                        : Array.isArray((args as any)?.userContext?.turnsForWriter) &&
+                            (args as any).userContext.turnsForWriter.length > 0
+                          ? (args as any).userContext.turnsForWriter
+                          : Array.isArray((args as any)?.userContext?.ctxPack?.turnsForWriter) &&
+                              (args as any).userContext.ctxPack.turnsForWriter.length > 0
+                            ? (args as any).userContext.ctxPack.turnsForWriter
+                            : Array.isArray((args as any)?.userContext?.turns) &&
+                                (args as any).userContext.turns.length > 0
+                              ? (args as any).userContext.turns
+                              : []);
 
                 const historyForWriterLen = Array.isArray(historyForWriterSource)
                   ? historyForWriterSource.length
@@ -1521,13 +1527,17 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                     const uc: any = (args as any)?.userContext ?? {};
                     const cp: any = uc?.ctxPack ?? {};
                     const src =
-                      Array.isArray(uc?.turnsForWriter) && uc.turnsForWriter.length > 0
-                        ? uc.turnsForWriter
-                        : Array.isArray(cp?.turnsForWriter) && cp.turnsForWriter.length > 0
-                          ? cp.turnsForWriter
-                          : Array.isArray(uc?.turns) && uc.turns.length > 0
-                            ? uc.turns
-                            : [];
+                      Array.isArray(uc?.historyForWriter) && uc.historyForWriter.length > 0
+                        ? uc.historyForWriter
+                        : Array.isArray(cp?.historyForWriter) && cp.historyForWriter.length > 0
+                          ? cp.historyForWriter
+                          : Array.isArray(uc?.turnsForWriter) && uc.turnsForWriter.length > 0
+                            ? uc.turnsForWriter
+                            : Array.isArray(cp?.turnsForWriter) && cp.turnsForWriter.length > 0
+                              ? cp.turnsForWriter
+                              : Array.isArray(uc?.turns) && uc.turns.length > 0
+                                ? uc.turns
+                                : [];
                     return Array.isArray(src) ? src.length : 0;
                   })(),
                 });
@@ -1768,7 +1778,27 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   .replace(/\n{3,}/g, '\n\n')
                   .trim();
 
-                  const seedBlocksForWriter = [mirrorFlowSeedText].filter((x) => norm(x));
+                  const flowMeaningBlock = (() => {
+                    const flow = String(flowMeaningV1?.flowMeaning ?? '').trim();
+                    const tensionBase = String(flowMeaningV1?.continuingTension ?? '').trim();
+                    const hookBase = String(flowMeaningV1?.thisTurnHook ?? '').trim();
+                    const openLoop = String(flowMeaningV1?.openLoop ?? '').trim();
+
+                    const tension =
+                      tensionBase && hookBase
+                        ? `${tensionBase} / ${hookBase}`
+                        : (tensionBase || hookBase);
+
+                    const lines: string[] = [];
+                    if (flow) lines.push(`flow=${flow}`);
+                    if (tension) lines.push(`tension=${tension}`);
+                    if (openLoop) lines.push(`openLoop=${openLoop}`);
+
+                    if (lines.length === 0) return '';
+                    return ['FLOW (DO NOT OUTPUT):', ...lines].join('\n');
+                  })();
+
+                  const seedBlocksForWriter = [mirrorFlowSeedText, flowMeaningBlock].filter((x) => norm(x));
                   const seedBlockForWriter = seedBlocksForWriter.join('\n\n');
 
                   const injectedHead = [coordMinimalBlock, seedBlockForWriter]
@@ -2178,5 +2208,4 @@ export async function callWriterLLM(args: {
     },
   });
 
-  return stripLeadingEcho(out ?? '');
-}
+  return stripLeadingEcho(out ?? '');}

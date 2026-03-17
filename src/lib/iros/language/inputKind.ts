@@ -2,6 +2,7 @@
 // iros — InputKind classifier (shared utility)
 
 import type { InputKind } from './frameSelector';
+import { isShortFixedPhrase } from './shortFixedPhrase';
 
 /**
  * 入力テキストから InputKind を判定する
@@ -17,8 +18,8 @@ export function classifyInputKind(t: string): InputKind {
 
   const s = s0.replace(/\s+/g, ''); // 空白ゆらぎ吸収（相槌判定を安定させる）
 
-  // greeting
-  if (/^(おはよう|こんにちは|こんばんは|やあ|hi|hello)\b/i.test(s0)) return 'greeting';
+// greeting / short fixed phrases
+if (isShortFixedPhrase(s)) return 'greeting';
 
   // debug / logs
   if (/(error|stack|tsc|typecheck|例外|エラー|ログ|stack trace)/i.test(s0)) return 'debug';

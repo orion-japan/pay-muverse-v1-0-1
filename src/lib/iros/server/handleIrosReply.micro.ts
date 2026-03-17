@@ -5,6 +5,8 @@
 // - 判定理由を可視化できる構造にする
 // - history拾い漏れを減らす
 
+import { isShortFixedPhrase } from '../language/shortFixedPhrase';
+
 function normalizeTailPunct(s: string): string {
   return (s ?? '')
     .trim()
@@ -59,29 +61,10 @@ function isAckCore(coreRaw: string): boolean {
 }
 
 // --------------------------------------------------
-// 挨拶
+// 短い定型語
 // --------------------------------------------------
-export function isGreetingTurn(raw: string): boolean {
-  const s = (raw ?? '').trim();
-  if (!s) return false;
-
-  const core = normalizeTailPunct(s)
-    .replace(/[?？]/g, '')
-    .replace(/[🙏🌀🌱🪔🌸✨]+$/gu, '')
-    .trim();
-
-  const patterns = [
-    /^(おはよう|おはようございます)$/u,
-    /^(こんにちは)$/u,
-    /^(こんばんは|こんばんわ)$/u,
-    /^(はじめまして)$/u,
-    /^(よろしく|よろしくお願いします)$/u,
-    /^(失礼します|失礼しました)$/u,
-    /^(ありがとう|ありがとうございます)$/u,
-    /^(お疲れ|おつかれ|お疲れさま|おつかれさま)$/u,
-  ];
-
-  return patterns.some((re) => re.test(core));
+function isShortGreetingLike(core: string): boolean {
+  return isShortFixedPhrase(core);
 }
 
 // --------------------------------------------------
@@ -183,10 +166,12 @@ export function shouldBypassMicroGateByHistory(args: {
   const tail = normalizeTailPunct(lastA);
 
   if (/[?？]$/.test(tail)) return true;
-  if (/(どれ|どこ|いつ|なに|何|どう|なぜ|どうして|教えて|選んで|どっち)/.test(lastA))
+  if (/(どれ|どこ|いつ|なに|何|どう|なぜ|どうして|教えて|選んで|どっち)/.test(lastA)) {
     return true;
-  if (/(話して|聞かせて|続けて|もう少し|そのまま|どこからでも)/.test(lastA))
+  }
+  if (/(話して|聞かせて|続けて|もう少し|そのまま|どこからでも)/.test(lastA)) {
     return true;
+  }
 
   return false;
 }
@@ -202,7 +187,7 @@ export function classifyMicroTurn(raw: string): {
 
   if (!rawTrim) return { ok: false, reason: 'EMPTY' };
   if (hasQuestion) return { ok: false, reason: 'QUESTION' };
-  if (isGreetingTurn(rawTrim)) return { ok: false, reason: 'GREETING' };
+  if (isShortGreetingLike(rawTrim)) return { ok: false, reason: 'GREETING' };
   if (isAckCore(core)) return { ok: true, reason: 'ACK' };
 
   const isSingleToken =

@@ -82,8 +82,12 @@ export function sanitizeVisibleText(
   // 1) 改行統一
   s = s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-  // ✅ 重要：本文中の🪔は必ず除去（付けるなら末尾だけ）
-  s = s.replace(/🪔/g, '');
+  // ✅ 重要：
+  // - appendLamp=true の互換モードだけ、既存の 🪔 を一旦外して末尾1個に正規化する
+  // - 通常表示では本文に含まれる 🪔 を保持する
+  if (opts?.appendLamp) {
+    s = s.replace(/🪔/g, '');
+  }
 
   const keepMd = !!opts?.keepMarkdown;
 

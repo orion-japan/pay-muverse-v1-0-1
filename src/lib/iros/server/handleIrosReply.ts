@@ -4501,7 +4501,7 @@ try {
       ? rotationStateFinal.descentGate.trim()
       : ((out.metaForSave as any)?.descentGate ?? null);
 
-  ctxPackFinal.willRotation = {
+  const willRotationStamped = {
     ...(ctxPackFinal.willRotation && typeof ctxPackFinal.willRotation === 'object'
       ? ctxPackFinal.willRotation
       : {}),
@@ -4513,18 +4513,45 @@ try {
     descentGate: willRotationDescentGateFinal,
   };
 
+  ctxPackFinal.willRotation = willRotationStamped;
+
+  // ✅ result.meta.extra.ctxPack にも同じ正本を反映する
+  if (!(out as any).meta || typeof (out as any).meta !== 'object') {
+    (out as any).meta = {};
+  }
+  if (!(out as any).meta.extra || typeof (out as any).meta.extra !== 'object') {
+    (out as any).meta.extra = {};
+  }
+  if (!(out as any).meta.extra.ctxPack || typeof (out as any).meta.extra.ctxPack !== 'object') {
+    (out as any).meta.extra.ctxPack = {};
+  }
+  (out as any).meta.extra.ctxPack.willRotation = willRotationStamped;
+
+  if (!(out as any).result || typeof (out as any).result !== 'object') {
+    (out as any).result = {};
+  }
+  if (!(out as any).result.meta || typeof (out as any).result.meta !== 'object') {
+    (out as any).result.meta = {};
+  }
+  if (!(out as any).result.meta.extra || typeof (out as any).result.meta.extra !== 'object') {
+    (out as any).result.meta.extra = {};
+  }
+  if (
+    !(out as any).result.meta.extra.ctxPack ||
+    typeof (out as any).result.meta.extra.ctxPack !== 'object'
+  ) {
+    (out as any).result.meta.extra.ctxPack = {};
+  }
+  (out as any).result.meta.extra.ctxPack.willRotation = willRotationStamped;
+
   console.log('[IROS/Reply][FINAL_META_CTXPACK_WILLROTATION_RESTAMP]', {
     conversationId: (ctx as any)?.conversationId ?? null,
     userCode:
       (ctx as any)?.userCode ??
       (ctx as any)?.user_code ??
-      (ctx as any)?.user?.code ??
+      (ctx as any)?.headersUserCode ??
       null,
-    traceId:
-      (ctx as any)?.traceId ??
-      (out.metaForSave as any)?.extra?.traceId ??
-      (out.metaForSave as any)?.extra?.ctxPack?.traceId ??
-      null,
+    traceId: ((ctx as any)?.traceId ?? (ctx as any)?.extra?.traceId ?? null) as any,
     rotationState: rotationStateFinal
       ? {
           spinLoop: rotationStateFinal.spinLoop ?? null,
@@ -4534,6 +4561,8 @@ try {
         }
       : null,
     ctxPack_willRotation: ctxPackFinal.willRotation ?? null,
+    result_meta_extra_ctxPack_willRotation:
+      (out as any)?.result?.meta?.extra?.ctxPack?.willRotation ?? null,
   });
 } catch (e) {
   console.warn('[IROS/Reply][FINAL_META_CTXPACK_WILLROTATION_RESTAMP] failed', e);
@@ -6545,15 +6574,47 @@ try {
 } catch {}
 
 // ✅ 最後に single-writer stamp を確定（念押し）
-    out.metaForSave = stampSingleWriter(out.metaForSave);
+out.metaForSave = stampSingleWriter(out.metaForSave);
 
-    return {
-      ok: true,
-      result: orch,
-      assistantText: out.assistantText,
-      metaForSave: out.metaForSave,
-      finalMode,
-    };
+const resultForReturn: any =
+  orch && typeof orch === 'object' ? { ...(orch as any) } : {};
+
+const willRotationForReturn =
+  ((out.metaForSave as any)?.extra?.ctxPack?.willRotation &&
+  typeof (out.metaForSave as any).extra.ctxPack.willRotation === 'object')
+    ? ((out.metaForSave as any).extra.ctxPack.willRotation as any)
+    : null;
+
+if (!resultForReturn.meta || typeof resultForReturn.meta !== 'object') {
+  resultForReturn.meta = {};
+}
+if (!resultForReturn.meta.extra || typeof resultForReturn.meta.extra !== 'object') {
+  resultForReturn.meta.extra = {};
+}
+
+resultForReturn.meta.extra.ctxPack_willRotation = willRotationForReturn;
+resultForReturn.ctxPack_willRotation = willRotationForReturn;
+
+try {
+  console.log('[IROS/Reply][FINAL_RETURN_WILLROTATION]', {
+    conversationId,
+    userCode,
+    willRotationForReturn,
+    result_meta_extra_ctxPack_willRotation:
+      resultForReturn?.meta?.extra?.ctxPack_willRotation ?? null,
+    result_ctxPack_willRotation:
+      resultForReturn?.ctxPack_willRotation ?? null,
+  });
+} catch {}
+
+return {
+  ok: true,
+  result: resultForReturn,
+  assistantText: out.assistantText,
+  metaForSave: out.metaForSave,
+  finalMode,
+};
+
   } catch (e) {
     console.error('[IROS/Reply] handleIrosReply failed', {
       conversationId,

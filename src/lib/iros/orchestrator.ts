@@ -2045,11 +2045,22 @@ if (shouldFallbackNormalChat) {
         ? 'clarify_shift'
         : null;
 
-    const ctxPackForNormalChat = {
-      ...(((meta as any)?.extra?.ctxPack ?? {}) as any),
-      ...(earlyShiftKindForNormalChat ? { shiftKind: earlyShiftKindForNormalChat } : {}),
-      ...(earlyResolvedAskForNormalChat ? { resolvedAsk: earlyResolvedAskForNormalChat } : {}),
-    };
+        const existingCtxPackForNormalChat = (((meta as any)?.extra?.ctxPack ?? {}) as any);
+        const questionForNormalChat =
+          (existingCtxPackForNormalChat?.question &&
+          typeof existingCtxPackForNormalChat.question === 'object')
+            ? existingCtxPackForNormalChat.question
+            : (((meta as any)?.extra?.question &&
+                typeof (meta as any).extra.question === 'object')
+                ? (meta as any).extra.question
+                : null);
+
+        const ctxPackForNormalChat = {
+          ...existingCtxPackForNormalChat,
+          ...(questionForNormalChat ? { question: questionForNormalChat } : {}),
+          ...(earlyShiftKindForNormalChat ? { shiftKind: earlyShiftKindForNormalChat } : {}),
+          ...(earlyResolvedAskForNormalChat ? { resolvedAsk: earlyResolvedAskForNormalChat } : {}),
+        };
 
     const fallback = buildNormalChatSlotPlan({
       userText: textForCounsel,

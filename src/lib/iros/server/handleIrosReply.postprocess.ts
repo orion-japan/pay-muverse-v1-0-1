@@ -25,6 +25,7 @@ import { decideExpressionLane } from '@/lib/iros/expression/decideExpressionLane
 import { buildMirrorFlowV1, type PolarityV1 } from '@/lib/iros/mirrorFlow/mirrorFlow.v1';
 import { buildExprDirectiveV1 } from '@/lib/iros/expression/exprDirectiveV1';
 import { normalizeIrosStyleFinal } from '../language/normalizeIrosStyleFinal';
+import { getShortFixedPhrase } from '../language/shortFixedPhrase';
 
 import {
   buildUnifiedAnalysis,
@@ -902,6 +903,18 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
         ? (metaForSave as any).extra.ctxPack
         : {};
 
+    const questionForCtxPack =
+      ((metaForSave as any)?.extra?.ctxPack?.question &&
+      typeof (metaForSave as any).extra.ctxPack.question === 'object')
+        ? (metaForSave as any).extra.ctxPack.question
+        : (((metaForSave as any)?.extra?.question &&
+            typeof (metaForSave as any).extra.question === 'object')
+            ? (metaForSave as any).extra.question
+            : null);
+
+    if (questionForCtxPack) {
+      (metaForSave as any).extra.ctxPack.question = questionForCtxPack;
+    }
     // 既に mirrorFlowV1 があるなら再生成しない（stopgap側で作られた場合に備える）
     const hasMirrorFlowAlready = !!(metaForSave as any)?.extra?.mirrorFlowV1;
 
@@ -2721,30 +2734,45 @@ try {
         llmRewriteSeedAt: new Date().toISOString(),
       };
 
-      // allowLLM=false のときだけ deterministic commit
-      if (allowLLM === false) {
+      const shortFixed = getShortFixedPhrase(String(userText ?? ''));
+      const shouldDeterministicCommit = allowLLM === false || shortFixed !== null;
+
+      // allowLLM=false、または短い定型語なら deterministic commit
+      if (shouldDeterministicCommit) {
         const commitText =
-          String(seedForWriterSanitized ?? '').trim() || String(coreLine ?? '').trim() || '（受信しました）';
+          String(shortFixed?.reply ?? '').trim() ||
+          String(seedForWriterSanitized ?? '').trim() ||
+          String(coreLine ?? '').trim() ||
+          '（受信しました）';
 
         finalAssistantText = commitText;
 
         metaForSave.extra = {
           ...(metaForSave.extra ?? {}),
-          finalTextPolicy: 'SLOTPLAN_COMMIT_FINAL__NO_LLM',
+          finalTextPolicy:
+            allowLLM === false
+              ? 'SLOTPLAN_COMMIT_FINAL__NO_LLM'
+              : 'SLOTPLAN_COMMIT_FINAL__SHORT_FIXED',
           slotPlanCommitted: true,
           slotPlanCommittedLen: commitText.length,
+          shortFixedKind: shortFixed?.kind,
+          shortFixedCanonical: shortFixed?.canonical,
         };
 
-        console.log('[IROS/PostProcess] SLOTPLAN_COMMIT_FINAL__NO_LLM', {
+        console.log('[IROS/PostProcess] SLOTPLAN_COMMIT_FINAL', {
           conversationId,
           userCode,
           slotPlanPolicy: det.policy,
           slotPlanPolicy_from: det.from,
           slotPlanLen,
           hasSlots,
+          commitMode: allowLLM === false ? 'NO_LLM' : 'SHORT_FIXED',
+          shortFixedKind: shortFixed?.kind ?? null,
+          shortFixedCanonical: shortFixed?.canonical ?? null,
           head: commitText.slice(0, 64),
         });
       } else {
+
         // writer に委ねる（UI本文は空に固定し、seedは meta にだけ持つ）
         let baseVisible =
         String(seedForWriterSanitized ?? '').trim() || String(coreLine ?? '').trim() || '';
@@ -2818,16 +2846,13 @@ try {
           seedLen: seed.length,
         });
       } else {
-        const callName =
-          metaForSave?.userProfile?.user_call_name ?? (metaForSave.extra as any)?.userProfile?.user_call_name ?? 'orion';
 
         const u = String(userText ?? '').replace(/\s+/g, ' ').trim();
         const ul = u.toLowerCase();
 
-        const looksLikeGreeting =
-          ul === 'こんにちは' || ul === 'こんばんは' || ul === 'おはよう' || ul.includes('はじめまして') || ul.includes('よろしく');
+        const shortFixed = getShortFixedPhrase(u);
 
-        finalAssistantText = looksLikeGreeting ? `こんにちは、${callName}さん。🪔` : 'うん、届きました。🪔';
+        finalAssistantText = shortFixed?.reply ?? 'うん、届きました。🪔';
 
         metaForSave.extra = { ...(metaForSave.extra ?? {}), finalTextPolicy: 'ACK_FALLBACK', emptyFinalPatched: true };
       }

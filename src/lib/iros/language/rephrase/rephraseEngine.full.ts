@@ -56,6 +56,7 @@ import {
   renderBlockPlanSystem4,
 } from '../../blockPlan/blockPlanEngine';
 import { flagshipGuard } from '../../quality/flagshipGuard';
+import { getShortFixedPhrase } from '../shortFixedPhrase';
 import { buildTopicLineV1, extractKeywordsV1 } from '@/lib/iros/history/historyDigestV1';
 import {
   extractLockedILines,
@@ -2435,22 +2436,44 @@ const toRephraseBlocks = (s: string): string[] => {
   };
 
   const historyText = (() => {
-    const q =
-      (opts as any)?.extra?.question ??
+    const ctxPackForHistoryText =
+      (opts as any)?.ctxPack ??
+      (opts as any)?.userContext?.ctxPack ??
+      (opts as any)?.userContext?.ctxPackV1 ??
+      null;
+
+    const primaryQuestion =
+      (ctxPackForHistoryText as any)?.question ??
       (opts as any)?.userContext?.question ??
+      (opts as any)?.extra?.question ??
       (opts as any)?.userContext?.meta?.extra?.question ??
       null;
 
-    const questionType = String(q?.questionType ?? '').trim();
-    const tMode = String(q?.tState?.mode ?? '').trim();
+    const questionType = String(primaryQuestion?.questionType ?? '').trim();
+    const tMode = String(primaryQuestion?.tState?.mode ?? '').trim();
 
-    // ✅ 確認用の最小止血:
+    const hfw =
+      (ctxPackForHistoryText as any)?.historyForWriter ??
+      (opts as any)?.userContext?.historyForWriter ??
+      (opts as any)?.userContext?.ctxPack?.historyForWriter ??
+      null;
+
+    const hasHistoryForWriter = Array.isArray(hfw) && hfw.length > 0;
+
+    // ✅ historyForWriter がある時は、HISTORY_LITE を使わない
+    // - writer の正式履歴は historyForWriter
+    // - HISTORY_LITE は fallback 専用
+    if (hasHistoryForWriter) {
+      return '';
+    }
+
+    // ✅ 旧 stopgap も維持
     // meaning + confirm では HISTORY_LITE を writer に渡さない
-    // - 前回 assistant 自然文の system 再混入を止める
     if (questionType === 'meaning' && tMode === 'confirm') {
       return '';
     }
 
+    // ✅ fallback: 履歴正本が無い時だけ使う
     return buildHistoryTextLite(lastTurns);
   })();
 // slot由来の下書き（露出禁止）
@@ -3497,51 +3520,66 @@ const ctxPackForWriter =
   (opts as any)?.userContext?.ctxPackV1 ??
   null;
 
-  try {
-    console.log('[IROS/rephraseEngine][QUESTION_SOURCE_CHECK]', {
-      traceId: debug.traceId ?? null,
-      conversationId: debug.conversationId ?? null,
-      userCode: debug.userCode ?? null,
+// question の正本をここで一度だけ決める
+const primaryQuestionForWriter =
+  (ctxPackForWriter?.question &&
+  typeof ctxPackForWriter.question === 'object')
+    ? ctxPackForWriter.question
+    : ((opts as any)?.userContext?.question &&
+        typeof (opts as any).userContext.question === 'object')
+      ? (opts as any).userContext.question
+      : ((opts as any)?.extra?.question &&
+          typeof (opts as any).extra.question === 'object')
+        ? (opts as any).extra.question
+        : ((opts as any)?.userContext?.meta?.extra?.question &&
+            typeof (opts as any).userContext.meta.extra.question === 'object')
+          ? (opts as any).userContext.meta.extra.question
+          : ((opts as any)?.meta?.extra?.question &&
+              typeof (opts as any).meta.extra.question === 'object')
+            ? (opts as any).meta.extra.question
+            : null;
 
-      extra_question: (opts as any)?.extra?.question ?? null,
-      userContext_question: (opts as any)?.userContext?.question ?? null,
-      userContext_meta_extra_question:
-        (opts as any)?.userContext?.meta?.extra?.question ?? null,
-      meta_extra_question:
-        (opts as any)?.meta?.extra?.question ?? null,
-      ctxPack_question:
-        (opts as any)?.ctxPack?.question ??
-        (opts as any)?.userContext?.ctxPack?.question ??
-        null,
-    });
-  } catch {}
+const primaryQuestionSource =
+  (ctxPackForWriter?.question &&
+  typeof ctxPackForWriter.question === 'object')
+    ? 'ctxPack.question'
+    : ((opts as any)?.userContext?.question &&
+        typeof (opts as any).userContext.question === 'object')
+      ? 'userContext.question'
+      : ((opts as any)?.extra?.question &&
+          typeof (opts as any).extra.question === 'object')
+        ? 'extra.question'
+        : ((opts as any)?.userContext?.meta?.extra?.question &&
+            typeof (opts as any).userContext.meta.extra.question === 'object')
+          ? 'userContext.meta.extra.question'
+          : ((opts as any)?.meta?.extra?.question &&
+              typeof (opts as any).meta.extra.question === 'object')
+            ? 'meta.extra.question'
+            : 'none';
 
-  let messages = buildFirstPassMessages({
-    systemPrompt,
-    internalPack,
-    turns: turnsForWriter,
-    seedDraft,
-    topicDigest: topicDigestForWriter,
-    topicDigestV2: topicDigestV2ForWriter,
-    conversationLine: conversationLineForWriter,
-    outputPolicy:
-      ((opts as any)?.extra?.question?.outputPolicy &&
-      typeof (opts as any)?.extra?.question?.outputPolicy === 'object'
-        ? (opts as any).extra.question.outputPolicy
-        : (opts as any)?.userContext?.question?.outputPolicy &&
-            typeof (opts as any)?.userContext?.question?.outputPolicy === 'object'
-          ? (opts as any).userContext.question.outputPolicy
-          : (opts as any)?.userContext?.meta?.extra?.question?.outputPolicy &&
-              typeof (opts as any)?.userContext?.meta?.extra?.question?.outputPolicy === 'object'
-            ? (opts as any).userContext.meta.extra.question.outputPolicy
-            : null) ?? null,
-    questions_max:
-      (((opts as any)?.extra?.question?.outputPolicy?.askBackAllowed ??
-        (opts as any)?.userContext?.question?.outputPolicy?.askBackAllowed ??
-        (opts as any)?.userContext?.meta?.extra?.question?.outputPolicy?.askBackAllowed ??
-        null) === false)
-        ? 0
-        : null,
+try {
+  console.log('[IROS/rephraseEngine][QUESTION_SOURCE_CHECK]', {
+    traceId: debug.traceId ?? null,
+    conversationId: debug.conversationId ?? null,
+    userCode: debug.userCode ?? null,
+    primary_source: primaryQuestionSource,
+    primary_question: primaryQuestionForWriter,
+  });
+} catch {}
+
+let messages = buildFirstPassMessages({
+  systemPrompt,
+  internalPack,
+  turns: turnsForWriter,
+  seedDraft,
+  topicDigest: topicDigestForWriter,
+  topicDigestV2: topicDigestV2ForWriter,
+  conversationLine: conversationLineForWriter,
+  outputPolicy:
+    (primaryQuestionForWriter?.outputPolicy &&
+    typeof primaryQuestionForWriter.outputPolicy === 'object')
+      ? primaryQuestionForWriter.outputPolicy
+      : null,
 
     // ✅ writerCalls.ts が最優先で拾う正本
     qCode: pickedQCode ?? null,
@@ -4739,12 +4777,14 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
     const fixed: any = { ...(extracted as any) };
 
     const naturalSeed = stripInternalAndHintLines(seedDraftTrim);
+    const shortFixed = getShortFixedPhrase(userTextTrim);
 
-    // ✅ greeting は userText を返さない
+    // ✅ greeting は userText をそのまま返さない
+    // ✅ ただし greeting/courtesy/thanks/fatigue は共通定型語 reply を優先する
     // ✅ micro も echo を避ける
     const visibleText = (() => {
-      if (inputKind === 'greeting') {
-        return 'こんにちは。';
+      if (shortFixed) {
+        return shortFixed.reply;
       }
 
       if (naturalSeed && !isEchoLike(naturalSeed, userTextTrim)) {
@@ -5107,17 +5147,24 @@ raw = await (async () => {
 
   const stateCuesMsg = null;
 
+  // 今回は軽量優先:
+  // STATE_CUES_V3 を assistant message としては注入しない。
+  // 理由:
+  // - writer 入力の assistant 本数が増える
+  // - lastRole が assistant になりうる
+  // - INTERNAL_PACK / COORD / FLOW_MEANING で十分な局面理解を持てる
   const messagesForWriter = baseMsgs;
-  const injectedStateCues =
-    !!stateCuesMsg &&
-    !alreadyHasStateCues &&
-    messagesForWriter.length > baseMsgs.length;
+
+  const injectedStateCues = false;
+  const stateCuesDisabledReason = 'DISABLED_FOR_LIGHTWEIGHT_WRITER';
 
   console.log('[IROS/STATE_CUES][inject]', {
     traceId: debug.traceId ?? null,
     baseLen: baseMsgs.length,
     finalLen: messagesForWriter.length,
     injected: injectedStateCues,
+    disabled: true,
+    disabledReason: stateCuesDisabledReason,
     hasStateCues: messagesForWriter.some((m) => {
       const c = String(m?.content ?? '');
       return c.includes('STATE_CUES (DO NOT OUTPUT)') || c.includes('STATE_CUES_V3 (DO NOT OUTPUT)');
@@ -5139,7 +5186,7 @@ raw = await (async () => {
     digest_summary: safeHead(String((historyDigestV1 as any)?.topic?.situationSummary ?? ''), 160),
     digest_last_user_core: safeHead(String((historyDigestV1 as any)?.continuity?.last_user_core ?? ''), 200),
     digest_last_assistant_core: safeHead(String((historyDigestV1 as any)?.continuity?.last_assistant_core ?? ''), 200),
-    digest_repeat_signal: (historyDigestV1 as any)?.continuity?.repeat_signal ?? null,
+    digest_repeat_signal: !!((historyDigestV1 as any)?.continuity?.repeatSignal),
   });
   const __writerAssistantCandidates = messagesForWriter.filter(
     (m) => m?.role === 'assistant' && typeof m?.content === 'string'

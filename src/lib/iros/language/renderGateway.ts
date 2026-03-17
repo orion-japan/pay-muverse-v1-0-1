@@ -2186,7 +2186,7 @@ pipe('after_renderV2_empty_rescue', content);
   }
 
   // ✅ 念のため最後にもう一回 🪔 を全除去（renderEngine=true の契約）
-  content = stripLampEverywhere(content);
+// content = stripLampEverywhere(content);
   pipe('after_stripLampEverywhere', content);
 
   // ✅ 末尾の空行を落とす
@@ -2231,7 +2231,7 @@ pipe('after_renderV2_empty_rescue', content);
         .filter((t: string) => t && !t.trimStart().startsWith('@NEXT_HINT'))
         .join('\n');
       visibleFromBlocks = sanitizeVisibleText(visibleFromBlocks);
-      visibleFromBlocks = stripLampEverywhere(visibleFromBlocks);
+// visibleFromBlocks = stripLampEverywhere(visibleFromBlocks);
       visibleFromBlocks = String(visibleFromBlocks ?? '').trim();
     }
 
@@ -2522,7 +2522,7 @@ if (String(content ?? '').trim() === '') {
   rescued = stripDirectiveLines(rescued);
   rescued = stripILINETags(rescued);
   rescued = sanitizeVisibleText(rescued);
-  rescued = stripLampEverywhere(rescued);
+// rescued = stripLampEverywhere(rescued);
 
   content = String(rescued ?? '').replace(/(\n\s*)+$/g, '').trim();
 
