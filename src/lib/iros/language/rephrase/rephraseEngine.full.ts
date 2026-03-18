@@ -5592,6 +5592,43 @@ userContext: {
 
     const beforeLast = String(t.split('\n').filter(Boolean).slice(-1)[0] ?? '');
 
+    let out = t;
+    let removedTailQuestion = false;
+
+    if (noQuestions) {
+      const lines = out.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+
+      let lastNonEmptyIdx = -1;
+      for (let i = lines.length - 1; i >= 0; i -= 1) {
+        if (String(lines[i] ?? '').trim()) {
+          lastNonEmptyIdx = i;
+          break;
+        }
+      }
+
+      if (lastNonEmptyIdx >= 0) {
+        const lastLine = String(lines[lastNonEmptyIdx] ?? '').trim();
+        const tailIsQuestion = /[？?]\s*$/u.test(lastLine);
+
+        if (tailIsQuestion) {
+          lines.splice(lastNonEmptyIdx, 1);
+          removedTailQuestion = true;
+
+          // 質問だけ消したあとに末尾に区切り線だけ残るのを防ぐ
+          while (lines.length > 0 && !String(lines[lines.length - 1] ?? '').trim()) {
+            lines.pop();
+          }
+          if (lines.length > 0 && /^\s*---+\s*$/u.test(String(lines[lines.length - 1] ?? ''))) {
+            lines.pop();
+          }
+
+          out = lines.join('\n').replace(/[ \t]+\n/g, '\n').trim();
+        }
+      }
+    }
+
+    const afterLast = String(out.split('\n').filter(Boolean).slice(-1)[0] ?? '');
+
     console.log('[IROS/rephraseEngine][SANITIZE_NO_QUESTIONS_APPLIED]', {
       traceId: debug.traceId,
       conversationId: debug.conversationId,
@@ -5603,15 +5640,19 @@ userContext: {
       forceNoQuestionsByPack: false,
       forceNoQuestionsByContract,
       beforeLen: t.length,
-      afterLen: t.length,
-      changed: false,
-      removedTailQuestion: false,
+      afterLen: out.length,
+      changed: out !== t,
+      removedTailQuestion,
       beforeLast,
-      afterLast: beforeLast,
-      reason: 'QUESTION_SANITIZE_DISABLED_GLOBALLY',
+      afterLast,
+      reason: noQuestions
+        ? removedTailQuestion
+          ? 'TAIL_QUESTION_REMOVED'
+          : 'NO_TAIL_QUESTION'
+        : 'NO_NO_QUESTIONS_CONTRACT',
     });
 
-    return t;
+    return out;
   };
   let candidate = String(rawGuarded ?? '').trim();
 

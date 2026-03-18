@@ -72,18 +72,6 @@ function fallbackTMode(
   });
 }
 
-function fallbackOutputPolicy(
-  questionType: QuestionType,
-  tState: TState,
-  pastResolve: PastResolveState | null,
-): OutputPolicy {
-  return buildOutputPolicy({
-    questionType,
-    tMode: tState.mode,
-    pastResolve,
-  });
-}
-
 export function runQuestionEngine(input: QuestionEngineInput): QuestionEngineResult {
   console.log('[IROS/IT][INPUT]', {
     hasUserText: String(input.userText ?? '').trim().length > 0,
@@ -121,7 +109,13 @@ export function runQuestionEngine(input: QuestionEngineInput): QuestionEngineRes
   const tState = fallbackTMode(input, questionType, pastResolve, iframe);
   console.log('[IROS/IT][T_MODE]', tState);
 
-  const outputPolicy = fallbackOutputPolicy(questionType, tState, pastResolve);
+  const sameTopicTurns =
+    typeof (input.context as any)?.sameTopicTurns === 'number'
+      ? (input.context as any).sameTopicTurns
+      : 0;
+  console.log('[IROS/IT][SAME_TOPIC_TURNS]', { sameTopicTurns });
+
+  const outputPolicy = buildOutputPolicy(questionType, tState.mode, pastResolve, sameTopicTurns);
   console.log('[IROS/IT][OUTPUT_POLICY]', outputPolicy);
 
   return {

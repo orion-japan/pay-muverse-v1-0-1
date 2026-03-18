@@ -1,8 +1,11 @@
 import type { BuildOutputPolicyInput, OutputPolicy } from './types';
 
-export function buildOutputPolicy(input: BuildOutputPolicyInput): OutputPolicy {
-  const { questionType, tMode, pastResolve } = input;
-
+export function buildOutputPolicy(
+  questionType: BuildOutputPolicyInput['questionType'],
+  tMode: BuildOutputPolicyInput['tMode'],
+  pastResolve?: BuildOutputPolicyInput['pastResolve'],
+  sameTopicTurns?: number,
+): OutputPolicy {
   let answerFirst = true;
   let askBackAllowed = false;
   let splitFactHypothesis = false;
@@ -10,10 +13,6 @@ export function buildOutputPolicy(input: BuildOutputPolicyInput): OutputPolicy {
   let avoidPrematureClosure = false;
 
   if (questionType === 'truth') {
-    // 18日向け:
-    // truth でも「即・整理で閉じる」を弱める
-    // - 先に断定しすぎない
-    // - 返しの余白を残す
     answerFirst = false;
     askBackAllowed = true;
     splitFactHypothesis = false;
@@ -21,10 +20,6 @@ export function buildOutputPolicy(input: BuildOutputPolicyInput): OutputPolicy {
   }
 
   if (questionType === 'structure') {
-    // ✅ 仕様確認・定義確認・理由説明は、まず答えを返す。
-    //    ここで askBackAllowed=true だと、
-    //    「名前は？」「何ができるの？」「なぜe3？」のような
-    //    説明要求に対して、答えより先に深読み質問へ流れやすい。
     answerFirst = true;
     askBackAllowed = false;
     splitFactHypothesis = false;
@@ -77,10 +72,18 @@ export function buildOutputPolicy(input: BuildOutputPolicyInput): OutputPolicy {
     avoidPrematureClosure = true;
   }
 
-  if (questionType === 'structure' && pastResolve?.detected) {
-    usePastReframe = true;
+  if (
+    questionType === 'structure' &&
+    (pastResolve?.detected === true || (sameTopicTurns ?? 0) >= 3)
+  ) {
     askBackAllowed = true;
+    avoidPrematureClosure = true;
   }
+
+  if (pastResolve?.detected) {
+    usePastReframe = true;
+  }
+
   return {
     answerFirst,
     askBackAllowed,

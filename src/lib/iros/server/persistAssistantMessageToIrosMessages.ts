@@ -372,14 +372,107 @@ if (ex.ctxPack && typeof ex.ctxPack === 'object') {
   const qCode = cp.qCode;
   if (typeof qCode === 'string' && qCode) nextCp.qCode = qCode;
 
-  // digest は軽いなら残す（重ければ落とす）
+  // digest は軽く保ちながら、sameTopic 判定に必要な芯は残す
   const d = cp.historyDigestV1;
   if (d && typeof d === 'object') {
-    // 文字数が大きい場合に備えて、chars 等があればそれだけ残す
+    const src: any = d;
     const dd: any = {};
-    if (typeof (d as any).chars === 'number') dd.chars = (d as any).chars;
-    if (typeof (d as any).head === 'string') dd.head = (d as any).head.slice(0, 140);
-    if (Object.keys(dd).length) nextCp.historyDigestV1 = dd;
+
+    if (src.topic && typeof src.topic === 'object') {
+      const topic: any = {};
+
+      if (typeof src.topic.situationTopic === 'string' && src.topic.situationTopic.trim()) {
+        topic.situationTopic = src.topic.situationTopic.trim().slice(0, 200);
+      }
+
+      if (typeof src.topic.situationSummary === 'string' && src.topic.situationSummary.trim()) {
+        topic.situationSummary = src.topic.situationSummary.trim().slice(0, 280);
+      }
+
+      if (typeof src.topic.topic === 'string' && src.topic.topic.trim()) {
+        topic.topic = src.topic.topic.trim().slice(0, 200);
+      }
+
+      if (typeof src.topic.summary === 'string' && src.topic.summary.trim()) {
+        topic.summary = src.topic.summary.trim().slice(0, 280);
+      }
+
+      if (Array.isArray(src.topic.keywords)) {
+        const keywords = src.topic.keywords
+          .map((v: any) => String(v ?? '').trim())
+          .filter(Boolean)
+          .slice(0, 8);
+
+        if (keywords.length > 0) topic.keywords = keywords;
+      }
+
+      if (Object.keys(topic).length > 0) {
+        dd.topic = topic;
+      }
+    }
+
+    if (src.continuity && typeof src.continuity === 'object') {
+      const continuity: any = {};
+
+      if (typeof src.continuity.last_user_core === 'string' && src.continuity.last_user_core.trim()) {
+        continuity.last_user_core = src.continuity.last_user_core.trim().slice(0, 240);
+      }
+
+      if (
+        typeof src.continuity.last_assistant_core === 'string' &&
+        src.continuity.last_assistant_core.trim()
+      ) {
+        continuity.last_assistant_core = src.continuity.last_assistant_core.trim().slice(0, 240);
+      }
+
+      if (typeof src.continuity.repeatSignal === 'boolean') {
+        continuity.repeatSignal = src.continuity.repeatSignal;
+      }
+
+      if (Object.keys(continuity).length > 0) {
+        dd.continuity = continuity;
+      }
+    }
+
+    if (src.anchor && typeof src.anchor === 'object') {
+      const anchor: any = {};
+
+      if (typeof src.anchor.key === 'string' && src.anchor.key.trim()) {
+        anchor.key = src.anchor.key.trim().slice(0, 40);
+      }
+
+      if (typeof src.anchor.phrase === 'string' && src.anchor.phrase.trim()) {
+        anchor.phrase = src.anchor.phrase.trim().slice(0, 120);
+      }
+
+      if (Object.keys(anchor).length > 0) {
+        dd.anchor = anchor;
+      }
+    }
+
+    if (typeof src.shortSummary === 'string' && src.shortSummary.trim()) {
+      dd.shortSummary = src.shortSummary.trim().slice(0, 200);
+    }
+
+    if (typeof src.summary === 'string' && src.summary.trim()) {
+      dd.summary = src.summary.trim().slice(0, 280);
+    }
+
+    if (typeof src.digest === 'string' && src.digest.trim()) {
+      dd.digest = src.digest.trim().slice(0, 280);
+    }
+
+    if (typeof src.chars === 'number' && Number.isFinite(src.chars)) {
+      dd.chars = src.chars;
+    }
+
+    if (typeof src.head === 'string' && src.head.trim()) {
+      dd.head = src.head.trim().slice(0, 140);
+    }
+
+    if (Object.keys(dd).length > 0) {
+      nextCp.historyDigestV1 = dd;
+    }
   }
 
   // ✅ turns/historyForWriter 等、巨大化しやすいキーは絶対に残さない

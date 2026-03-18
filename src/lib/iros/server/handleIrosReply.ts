@@ -2135,6 +2135,11 @@ function normForRecall(v: any): string {
             }
           : null;
 
+      const pickCtxFromMsg = (m: any) =>
+        m?.meta?.extra?.ctxPack ??
+        m?.meta?.ctxPack ??
+        null;
+
       let snap: any =
         (baseMetaMergedForTurn as any)?.extra?.ctxPack?.viewShiftSnapshot ??
         (baseMetaMergedForTurn as any)?.ctxPack?.viewShiftSnapshot ??
@@ -2142,13 +2147,25 @@ function normForRecall(v: any): string {
         (baseMetaMergedForTurn as any)?.viewShiftSnapshot ??
         null;
 
-      if (!snap && Array.isArray(historyForTurn)) {
+      let lastCtxPackFromHistory: any = null;
+
+      if (Array.isArray(historyForTurn)) {
         for (let i = historyForTurn.length - 1; i >= 0; i--) {
-          const found = pickSnapFromMsg(historyForTurn[i]);
-          if (found && typeof found === 'object') {
-            snap = found;
-            break;
+          const msg = historyForTurn[i];
+          const foundCtx = pickCtxFromMsg(msg);
+
+          if (!lastCtxPackFromHistory && foundCtx && typeof foundCtx === 'object') {
+            lastCtxPackFromHistory = foundCtx;
           }
+
+          if (!snap) {
+            const foundSnap = pickSnapFromMsg(msg);
+            if (foundSnap && typeof foundSnap === 'object') {
+              snap = foundSnap;
+            }
+          }
+
+          if (lastCtxPackFromHistory && snap) break;
         }
       }
 
@@ -2164,18 +2181,76 @@ function normForRecall(v: any): string {
           ? (baseMetaMergedForTurn as any).extra.ctxPack
           : {};
 
+      const preOrchCtxPack = (baseMetaMergedForTurn as any).extra.ctxPack as any;
+      const histCtx = lastCtxPackFromHistory && typeof lastCtxPackFromHistory === 'object'
+        ? lastCtxPackFromHistory
+        : null;
+
       if (snap && typeof snap === 'object') {
-        (baseMetaMergedForTurn as any).extra.ctxPack.viewShiftSnapshot = snap;
+        preOrchCtxPack.viewShiftSnapshot = snap;
       }
 
       if (resolvedAskEarly) {
-        (baseMetaMergedForTurn as any).extra.ctxPack.resolvedAsk = resolvedAskEarly;
+        preOrchCtxPack.resolvedAsk = resolvedAskEarly;
+      }
+
+      if (
+        !preOrchCtxPack.topicDigest &&
+        typeof histCtx?.topicDigest === 'string' &&
+        histCtx.topicDigest.trim()
+      ) {
+        preOrchCtxPack.topicDigest = histCtx.topicDigest.trim();
+      }
+
+      if (
+        !preOrchCtxPack.conversationLine &&
+        typeof histCtx?.conversationLine === 'string' &&
+        histCtx.conversationLine.trim()
+      ) {
+        preOrchCtxPack.conversationLine = histCtx.conversationLine.trim();
+      }
+
+      if (
+        !preOrchCtxPack.observedBasedOn &&
+        typeof histCtx?.observedBasedOn === 'string' &&
+        histCtx.observedBasedOn.trim()
+      ) {
+        preOrchCtxPack.observedBasedOn = histCtx.observedBasedOn.trim();
+      }
+
+      if (
+        !preOrchCtxPack.historyDigestV1 &&
+        histCtx?.historyDigestV1 &&
+        typeof histCtx.historyDigestV1 === 'object'
+      ) {
+        preOrchCtxPack.historyDigestV1 = histCtx.historyDigestV1;
+      }
+
+      if (
+        !preOrchCtxPack.flow &&
+        histCtx?.flow &&
+        typeof histCtx.flow === 'object'
+      ) {
+        preOrchCtxPack.flow = histCtx.flow;
+      }
+
+      if (
+        preOrchCtxPack.returnStreak == null &&
+        histCtx?.returnStreak != null
+      ) {
+        preOrchCtxPack.returnStreak = histCtx.returnStreak;
       }
 
       console.log('[IROS/VIEWSHIFT][pre-orch][inject]', {
         hasSnap: Boolean(snap),
         snapKeys: snap && typeof snap === 'object' ? Object.keys(snap).slice(0, 20) : null,
         earlyResolvedAskType: resolvedAskEarly?.askType ?? '',
+        injectedTopicDigest: typeof preOrchCtxPack.topicDigest === 'string' ? preOrchCtxPack.topicDigest.slice(0, 80) : '',
+        injectedConversationLine: typeof preOrchCtxPack.conversationLine === 'string' ? preOrchCtxPack.conversationLine.slice(0, 80) : '',
+        injectedObservedBasedOn: typeof preOrchCtxPack.observedBasedOn === 'string' ? preOrchCtxPack.observedBasedOn.slice(0, 80) : '',
+        hasHistoryDigestV1: Boolean(preOrchCtxPack.historyDigestV1),
+        hasFlow: Boolean(preOrchCtxPack.flow),
+        returnStreak: preOrchCtxPack.returnStreak ?? null,
       });
     } catch (e) {
       console.log('[IROS/VIEWSHIFT][pre-orch][inject][ERR]', { err: String(e ?? '') });
@@ -2863,6 +2938,7 @@ if (intensityForSting > 0.6) stingLevel2 = bumpStingLevel(stingLevel2);
 // 注意：重いキーや演出系は継続禁止。最小キーだけ戻す。
 const restoreCtxPackFromHistory = (historyForTurn: any[]): any | null => {
   const hft = Array.isArray(historyForTurn) ? (historyForTurn as any[]) : [];
+
   for (let i = hft.length - 1; i >= 0; i--) {
     const m = hft[i];
     if ((m as any)?.role !== 'assistant') continue;
@@ -2882,13 +2958,79 @@ const restoreCtxPackFromHistory = (historyForTurn: any[]): any | null => {
             .slice(-5)
         : [];
 
+    const restoredHistoryDigestV1 =
+      (ctx as any).historyDigestV1 && typeof (ctx as any).historyDigestV1 === 'object'
+        ? (ctx as any).historyDigestV1
+        : null;
+
+    const restoredFlow = (() => {
+      const f =
+        (ctx as any).flow && typeof (ctx as any).flow === 'object'
+          ? (ctx as any).flow
+          : null;
+
+      if (!f) return null;
+
+      const out: any = {};
+
+      if (typeof f.delta === 'string' && f.delta.trim()) {
+        out.delta = f.delta.trim();
+      }
+
+      if (
+        typeof f.returnStreak === 'number' &&
+        Number.isFinite(f.returnStreak)
+      ) {
+        out.returnStreak = f.returnStreak;
+      } else if (
+        typeof f.returnStreak === 'string' &&
+        f.returnStreak.trim() &&
+        Number.isFinite(Number(f.returnStreak))
+      ) {
+        out.returnStreak = Number(f.returnStreak);
+      }
+
+      if (typeof f.at === 'string' && f.at.trim()) {
+        out.at = f.at.trim();
+      }
+
+      if (typeof f.sessionBreak === 'boolean') {
+        out.sessionBreak = f.sessionBreak;
+      }
+
+      if (
+        typeof f.ageSec === 'number' &&
+        Number.isFinite(f.ageSec)
+      ) {
+        out.ageSec = f.ageSec;
+      }
+
+      return Object.keys(out).length > 0 ? out : null;
+    })();
+
     const restored: any = {
-      qCode: typeof ctx.qCode === 'string' ? ctx.qCode : null,
-      depthStage: typeof ctx.depthStage === 'string' ? ctx.depthStage : null,
-      phase: typeof ctx.phase === 'string' ? ctx.phase : null,
-      conversationLine: typeof ctx.conversationLine === 'string' ? ctx.conversationLine : null,
-      stingLevel: typeof ctx.stingLevel === 'string' ? ctx.stingLevel : null,
+      qCode: typeof (ctx as any).qCode === 'string' ? (ctx as any).qCode : null,
+      depthStage: typeof (ctx as any).depthStage === 'string' ? (ctx as any).depthStage : null,
+      phase: typeof (ctx as any).phase === 'string' ? (ctx as any).phase : null,
+      conversationLine:
+        typeof (ctx as any).conversationLine === 'string' ? (ctx as any).conversationLine : null,
+      topicDigest:
+        typeof (ctx as any).topicDigest === 'string' ? (ctx as any).topicDigest : null,
+      observedBasedOn:
+        typeof (ctx as any).observedBasedOn === 'string' ? (ctx as any).observedBasedOn : null,
+      stingLevel:
+        typeof (ctx as any).stingLevel === 'string' ? (ctx as any).stingLevel : null,
       depthHistoryLite: restoredDepthHistoryLite,
+      historyDigestV1: restoredHistoryDigestV1,
+      flow: restoredFlow,
+      returnStreak:
+        typeof (ctx as any).returnStreak === 'number' && Number.isFinite((ctx as any).returnStreak)
+          ? (ctx as any).returnStreak
+          : typeof (ctx as any).returnStreak === 'string' &&
+              String((ctx as any).returnStreak).trim() &&
+              Number.isFinite(Number((ctx as any).returnStreak))
+            ? Number((ctx as any).returnStreak)
+            : null,
     };
 
     if (
@@ -2896,12 +3038,18 @@ const restoreCtxPackFromHistory = (historyForTurn: any[]): any | null => {
       restored.depthStage ||
       restored.phase ||
       restored.conversationLine ||
+      restored.topicDigest ||
+      restored.observedBasedOn ||
       restored.stingLevel ||
+      restored.historyDigestV1 ||
+      restored.flow ||
+      restored.returnStreak != null ||
       restoredDepthHistoryLite.length > 0
     ) {
       return restored;
     }
   }
+
   return null;
 };
 

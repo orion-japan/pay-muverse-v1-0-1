@@ -6,7 +6,7 @@ import Link from 'next/link';
 export default function SecretToolsPage() {
   const buttons = [
     { id: 'slideshow', label: 'スライドショー', href: '/slideshow' },
-    { id: 'app1', label: 'iros 開発中', href: '/iros' },
+    { id: 'app1', label: 'iros 開発中', href: '/iros-ai' },
     { id: 'app2', label: 'mui 開発中', href: '/mui' },
     { id: 'test', label: 'テストページ', href: '/dev/test' },
   ];

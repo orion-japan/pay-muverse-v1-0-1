@@ -1628,13 +1628,15 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                           '- Keep the response soft, narrow, and low-pressure.',
                         ];
 
-                      default:
-                        return [
-                          '- Keep it narrow and grounded.',
-                          '- Answer the user’s meaning before expanding.',
-                          '- Avoid generic broadening.',
-                          '- Do not add a closing question when questions_max is 0.',
-                        ];
+                        default:
+                          return [
+                            '- Keep it narrow and grounded.',
+                            '- Answer the user’s meaning before expanding.',
+                            '- Avoid generic broadening.',
+                            '- When questions_max is 0, do not add a closing question.',
+                            '- When questions_max is 1 and askBackAllowed is true, end with exactly one narrow closing question.',
+                            '- The closing question must stay on the current topic and must not broaden the scope.',
+                          ];
                   }
                 })();
 

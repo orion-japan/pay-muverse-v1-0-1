@@ -119,4 +119,5 @@ export type BuildOutputPolicyInput = {
   questionType: QuestionType;
   tMode: TMode;
   pastResolve?: PastResolveState | null;
+  sameTopicTurns?: number | null;
 };

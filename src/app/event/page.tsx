@@ -34,7 +34,7 @@ export default function EventHubPage() {
             <div className="km-hthumb">🧘</div>
             <div className="km-hbody">
               <div className="km-htitle">瞑想（愛祈）</div>
-              <div className="km-hdesc">平日 05:50–06:30 OPEN／開始±10分で出席カウント</div>
+              <div className="km-hdesc">平日 06:50–07:10 OPEN／開始±10分で出席カウント</div>
             </div>
             <div className="km-hcta">開く →</div>
           </a>

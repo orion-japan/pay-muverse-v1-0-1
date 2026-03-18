@@ -458,7 +458,7 @@ function buildClarify(
   const directAnswerRequested =
     /答え|結論|要するに|結局|真実が知りたい|本当のことが知りたい|そろそろ結論|今の未来|未来だよ/.test(seedText);
 
-  const hasTruthStructureLexeme =
+    const hasTruthStructureLexeme =
     /(真実|事実|本当|構造|論点|検証|仮説|どこまで言える|切り分け|整理)/.test(normalizedUserText) ||
     (
       /(地球外生命体|宇宙人)/.test(normalizedUserText) &&
@@ -466,15 +466,15 @@ function buildClarify(
       /(作った|作られた|介入)/.test(normalizedUserText)
     );
 
-    const isStructureQuestion = questionType === 'structure';
+  const isStructureQuestion = questionType === 'structure';
 
-    const shouldAnswerTruthStructure =
-      resolvedAskType === 'truth_structure' ||
-      isStructureQuestion ||
-      (questionSuggestsTruthStructure && hasTruthStructureLexeme);
+  const shouldAnswerTruthStructure =
+    resolvedAskType === 'truth_structure' ||
+    isStructureQuestion ||
+    (questionSuggestsTruthStructure && hasTruthStructureLexeme);
 
-    const shouldReanswerCapability =
-      resolvedAskType === 'capability_reask';
+  const shouldReanswerCapability =
+    resolvedAskType === 'capability_reask';
 
     const shiftIntentBase =
       isT

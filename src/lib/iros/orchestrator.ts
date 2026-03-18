@@ -1383,6 +1383,7 @@ function detectCounselCommand(raw: unknown): { forced: boolean; strippedText: st
 
 {
   const historyArr = Array.isArray(history) ? (history as any[]) : [];
+  let returnStreakNowForQuestion = 0;
 
   // 直前の user 発話のみ取得（assistant は見ない）
   const lastUserText = (() => {
@@ -1442,6 +1443,7 @@ function detectCounselCommand(raw: unknown): { forced: boolean; strippedText: st
 
     const returnStreakNow =
       deltaNow === 'RETURN' ? prevReturnStreak + 1 : 0;
+    returnStreakNowForQuestion = returnStreakNow;
 
     // -------------------------------------------------------
     // 👁 ViewShift: 前回スナップショット回収（判定は後段）
@@ -1710,7 +1712,7 @@ if (!isIrDiagnosisTurn_here && !isGreetingTurn) {
       (meta as any)?.extra?.intentTransition ??
       null;
 
-    const lastSummaryForQuestion =
+      const lastSummaryForQuestion =
       (ms as any)?.situation_summary ??
       (ms as any)?.situationSummary ??
       (memoryState as any)?.situation_summary ??
@@ -1719,6 +1721,92 @@ if (!isIrDiagnosisTurn_here && !isGreetingTurn) {
       (mergedBaseMeta as any)?.situationSummary ??
       null;
 
+    const ctxPackForQuestion =
+      (meta as any)?.extra?.ctxPack ??
+      (meta as any)?.ctxPack ??
+      (mergedBaseMeta as any)?.extra?.ctxPack ??
+      (mergedBaseMeta as any)?.ctxPack ??
+      null;
+
+    const historyDigestForQuestion =
+      (ctxPackForQuestion as any)?.historyDigestV1 ??
+      (meta as any)?.extra?.historyDigestV1 ??
+      (mergedBaseMeta as any)?.extra?.historyDigestV1 ??
+      null;
+
+      const sameTopicTurnsForQuestion = (() => {
+        const toNorm = (v: unknown): string =>
+          String(v ?? '')
+            .trim()
+            .replace(/\s+/g, ' ')
+            .slice(0, 200);
+
+        const currentText = toNorm(textForCounsel);
+        const topicDigest = toNorm((ctxPackForQuestion as any)?.topicDigest);
+        const conversationLine = toNorm((ctxPackForQuestion as any)?.conversationLine);
+        const digestTopic = toNorm((historyDigestForQuestion as any)?.topic?.situationTopic);
+        const digestSummary = toNorm((historyDigestForQuestion as any)?.topic?.situationSummary);
+        const lastUserCore = toNorm((historyDigestForQuestion as any)?.continuity?.last_user_core);
+        const observedBasedOn = toNorm((ctxPackForQuestion as any)?.observedBasedOn);
+
+        const includesLoose = (a: string, b: string): boolean => {
+          if (!a || !b) return false;
+          return a.includes(b) || b.includes(a);
+        };
+
+        let continuityCount = 0;
+
+        if (includesLoose(currentText, topicDigest)) continuityCount += 1;
+        if (includesLoose(currentText, conversationLine)) continuityCount += 1;
+        if (includesLoose(currentText, digestTopic)) continuityCount += 1;
+        if (includesLoose(currentText, digestSummary)) continuityCount += 1;
+        if (includesLoose(currentText, lastUserCore)) continuityCount += 1;
+        if (includesLoose(currentText, observedBasedOn)) continuityCount += 1;
+
+        const returnCandidates = [
+          returnStreakNowForQuestion,
+          (meta as any)?.extra?.flow?.returnStreak,
+          (meta as any)?.flow?.returnStreak,
+          (ctxPackForQuestion as any)?.flow?.returnStreak,
+          (ctxPackForQuestion as any)?.returnStreak,
+        ];
+
+        let returnLike = 0;
+        for (const v of returnCandidates) {
+          if (typeof v === 'number' && Number.isFinite(v)) {
+            returnLike = v;
+            break;
+          }
+          if (typeof v === 'string' && v.trim() && Number.isFinite(Number(v))) {
+            returnLike = Number(v);
+            break;
+          }
+        }
+
+        console.log('[IROS/IT][SAME_TOPIC_INPUTS]', {
+          currentText,
+          topicDigest,
+          conversationLine,
+          digestTopic,
+          digestSummary,
+          lastUserCore,
+          observedBasedOn,
+          continuityCount,
+          returnLike,
+          hasCtxPackForQuestion: !!ctxPackForQuestion,
+          hasHistoryDigestForQuestion: !!historyDigestForQuestion,
+        });
+
+        if (continuityCount >= 2) {
+          return Math.max(returnLike, 3);
+        }
+
+        if (continuityCount === 1) {
+          return Math.max(returnLike, 1);
+        }
+
+        return returnLike;
+      })();
     ex.question =
       ex.question ??
       runQuestionEngine({
@@ -1728,8 +1816,45 @@ if (!isIrDiagnosisTurn_here && !isGreetingTurn) {
         signals: signalsNow,
         context: {
           conversationId: args.conversationId ?? null,
-          topicHint: (signalsNow as any)?.topicHint ?? null,
+          topicHint:
+            (signalsNow as any)?.topicHint ??
+            (ctxPackForQuestion as any)?.topicDigest ??
+            (ctxPackForQuestion as any)?.conversationLine ??
+            null,
           situationSummary: typeof lastSummaryForQuestion === 'string' ? lastSummaryForQuestion : null,
+          sameTopicTurns: sameTopicTurnsForQuestion,
+
+          // continuity を QuestionEngine 側で使えるように渡す
+          conversationLine:
+            typeof (ctxPackForQuestion as any)?.conversationLine === 'string'
+              ? (ctxPackForQuestion as any).conversationLine
+              : null,
+          topicDigest:
+            typeof (ctxPackForQuestion as any)?.topicDigest === 'string'
+              ? (ctxPackForQuestion as any).topicDigest
+              : null,
+          historyDigestV1:
+            historyDigestForQuestion && typeof historyDigestForQuestion === 'object'
+              ? historyDigestForQuestion
+              : null,
+          lastUserCore:
+            typeof (historyDigestForQuestion as any)?.continuity?.last_user_core === 'string'
+              ? (historyDigestForQuestion as any).continuity.last_user_core
+              : null,
+          lastAssistantCore:
+            typeof (historyDigestForQuestion as any)?.continuity?.last_assistant_core === 'string'
+              ? (historyDigestForQuestion as any).continuity.last_assistant_core
+              : null,
+          repeatSignal:
+            typeof (ctxPackForQuestion as any)?.repeatSignal === 'string'
+              ? (ctxPackForQuestion as any).repeatSignal
+              : ((historyDigestForQuestion as any)?.continuity?.repeat_signal ?? null),
+          flowDelta:
+            typeof (ctxPackForQuestion as any)?.flow?.delta === 'string'
+              ? (ctxPackForQuestion as any).flow.delta
+              : (typeof (ctxPackForQuestion as any)?.flow?.flowDelta === 'string'
+                  ? (ctxPackForQuestion as any).flow.flowDelta
+                  : null),
         },
         intentLine: intentLineNow,
         intentTransition: intentTransitionNow,
