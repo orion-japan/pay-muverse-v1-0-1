@@ -3118,204 +3118,109 @@ const shiftKindForLane =
 
 
 // =========================================================
-// ✅ NEW: CARD seedin（B：seed を LLM に渡す）
-// - inputKind === 'card' のときだけ通す
-// - env(IROS_DISABLE_CARD_SEEDIN=1) は最優先停止
-// - ただし「カード要求があるのに seed が作れない」場合は
-//   “未観測メッセージ” を固定で返すためのルールを注入する
+// ✅ FLOW seedin（card完全削除版）
+// - 常に flow をベースに扱う
+// - inputKind に依存しない
 // =========================================================
 
-const disableCardSeedin =
-  String(process.env.IROS_DISABLE_CARD_SEEDIN ?? '').trim() === '1';
+const disableFlowSeedin =
+  String(process.env.IROS_DISABLE_FLOW_SEEDIN ?? '').trim() === '1';
 
 const inputKindForSeed: string =
   String((opts as any)?.inputKind ?? '').toLowerCase();
 
-// ✅ “カード要求” をここでも判定（inputKind がズレても拾えるように）
-// - できるだけ緩めに（「カード」「引いて/引く/引き直して」等）
-const wantsCardByText = (() => {
-  const t = String(userText ?? '').trim();
-  if (!t) return false;
+if (!disableFlowSeedin) {
+  const ctxPack0: any = (opts as any)?.userContext?.ctxPack ?? null;
 
-  const hasCardWord = /カード|card|タロット/i.test(t);
-  if (!hasCardWord) return false;
+  const ip = String(internalPack ?? '');
 
-  const hasDrawWord =
-    /引(?:い|き|く|け)|ひ(?:い|き|く|け)|引き直|引きなお|引き直し|引きなおし|引き直して|引きなおして/.test(t);
-  if (!hasDrawWord) return false;
+  if (!/FLOW180_SEED\s*\(DO NOT OUTPUT\)/.test(ip)) {
+    const { buildFlowEngineResult } = await import('@/lib/iros/flow/flowEngine');
+    const { listFlow180 } = await import('@/lib/iros/flow/flow180');
 
-  return true;
-})();
+    const basedOn = String(userText ?? '').trim().slice(0, 80) || null;
 
-// =========================================================
-// ✅ “カード未観測” の固定メッセージ（エラーにせず、適当返答もしない）
-// - ここでは一切の追加文を許可しない
-// =========================================================
+    const e_turn =
+      (ctxPack0?.mirror?.e_turn ?? ctxPack0?.e_turn ?? null) as any;
 
-const CARD_UNDETECTABLE_TEXT =
-  '今は場が乱れているので観測できませんでした。';
+    const polarity =
+      (ctxPack0?.mirror?.polarity ?? ctxPack0?.polarity ?? null) as any;
 
-// ✅ LLM に強制するためのルール注入（internalPack に入れる）
-// - 固定文を完全一致で1回だけ出力させる
-// - 補足・質問・改行・装飾を禁止する
-const injectCardUndetectableRule = (reason: string) => {
-  try {
-    const ip = String(internalPack ?? '');
+    const sa = (ctxPack0?.sa ?? null) as any;
 
-    // 既に入ってたら重ねない
-    if (/CARD_UNDETECTABLE_RULE\s*\(DO NOT OUTPUT\)/.test(ip)) return;
+    const confidence =
+      (ctxPack0?.mirror?.confidence ?? ctxPack0?.confidence ?? null) as any;
 
-    internalPack = [
-      ip.trim(),
-      [
-        'CARD_UNDETECTABLE_RULE (DO NOT OUTPUT):',
-        `- reason=${reason}`,
-        '- ユーザーは「カード」を要求しているが、カードseedを用意できなかった。',
-        '- あなたの出力は次の固定文を**完全一致で1回のみ**出力すること。',
-        '- 追加の文、質問、提案、絵文字、装飾（**太字等**）、改行は禁止。',
-        `OUTPUT_EXACT: ${CARD_UNDETECTABLE_TEXT}`,
-      ].join('\n'),
-    ]
+    const flowResult = buildFlowEngineResult({
+      current: {
+        depthStage: (pickedDepthStage ?? null) as any,
+        e_turn,
+        polarity,
+        sa,
+        basedOn,
+        confidence,
+        phase: (ctxPack0?.phase ?? null) as any,
+      },
+    });
+// ✅ ctxPack に flow を反映
+if (ctxPack0) {
+  ctxPack0.flow = {
+    current: flowResult?.currentFlow ?? null,
+    previous: flowResult?.previousFlow ?? null,
+    futureRandom: flowResult?.futureFlowRandom ?? null,
+    delta: flowResult?.delta ?? null,
+    at: new Date().toISOString(),
+  };
+}
+    const flow180List = listFlow180();
+    const flow180SeedText = flow180List
+      .map((f: any) => {
+        const id = String(f?.id ?? '').trim();
+        const short = String(f?.short ?? '').trim();
+        return id && short ? `${id}: ${short}` : null;
+      })
       .filter(Boolean)
-      .join('\n\n');
-  } catch {}
-};
+      .join('\n')
+      .trim();
 
-  // ✅ chat/card でも ctxPack.cards があるなら seed に入れる
-  // 旧FLOW_MEANING / FLOW180_SEED は STATE_CUES_V3 に移管済みのため注入しない
-  if (!disableCardSeedin) {
-    const ctxPack0: any = (opts as any)?.userContext?.ctxPack ?? null;
-
-    const c = ctxPack0?.cards?.current ?? null;
-    const f = ctxPack0?.cards?.future ?? null;
-
-    const hasLightCards = !!(c || f);
-
-    const liteOk =
-      inputKindForSeed === 'chat' ||
-      inputKindForSeed === 'card' ||
-      inputKindForSeed === '';
-
-    if (liteOk && hasLightCards) {
-      const ip = String(internalPack ?? '');
-
-      if (!/(?:FLOW180_SEED|CARD180_SEED)\s*\(DO NOT OUTPUT\)/.test(ip)) {
-        const { buildDualCardPacket, formatDualCardPacketForLLM } =
-          await import('@/lib/iros/cards/card180');
-
-        const basedOn = String(userText ?? '').trim().slice(0, 80) || null;
-
-        const e_turn =
-          (ctxPack0?.mirror?.e_turn ?? ctxPack0?.e_turn ?? null) as any;
-
-        const polarity =
-          (ctxPack0?.mirror?.polarity ?? ctxPack0?.polarity ?? null) as any;
-
-        const sa = (ctxPack0?.sa ?? null) as any;
-        const confidence =
-          (ctxPack0?.mirror?.confidence ?? ctxPack0?.confidence ?? null) as any;
-
-        const packet = buildDualCardPacket(
-          {
-            current: {
-              stage: (pickedDepthStage ?? null) as any,
-              e_turn,
-              polarity,
-              sa,
-              basedOn,
-              confidence,
-            },
-            previous: null,
-            randomSeed: null,
-          },
-          {
-            currentUndetectablePolicy: 'null',
-          }
-        );
-
-        const raw = String(formatDualCardPacketForLLM(packet) ?? '').trim();
-        const flowSeedText = clampLines(raw, 18).trim();
-
-        if (flowSeedText) {
-          console.log('[IROS/rephraseEngine][FLOW_SEEDIN] skipped_for_writer', {
-            traceId: debug.traceId,
-            conversationId: debug.conversationId,
-            userCode: debug.userCode,
-            inputKind: inputKindForSeed,
-            len: flowSeedText.length,
-            head: flowSeedText.slice(0, 220),
-            pickedDepthStage: pickedDepthStage ?? null,
-            e_turn: e_turn ?? null,
-            polarity: polarity ?? null,
-            sa: sa ?? null,
-            confidence: confidence ?? null,
-            skipped: true,
-            reason: 'FLOW_MOVED_TO_WRITER_INJECTED_PACK',
-          });
-        }
-      }
-    }
-  } else if (inputKindForSeed === 'card') {
-    // inputKind=card のときだけ full seed を作る（card180）
-    try {
-      const { buildDualCardPacket, formatDualCardPacketForLLM } =
-        await import('@/lib/iros/cards/card180');
-
-      const ctxPack: any = (opts as any)?.userContext?.ctxPack ?? null;
-
-      const packet = buildDualCardPacket(
-        {
-          current: {
-            stage: pickedDepthStage ?? null,
-            e_turn: (ctxPack?.mirror?.e_turn ?? ctxPack?.e_turn ?? null) as any,
-            polarity: (ctxPack?.mirror?.polarity ?? ctxPack?.polarity ?? null) as any,
-            sa: (ctxPack?.sa ?? null) as any,
-            basedOn: String(userText ?? '').trim().slice(0, 80) || null,
-            confidence: (ctxPack?.mirror?.confidence ?? ctxPack?.confidence ?? null) as any,
-          },
-          previous: null,
-          randomSeed: null,
-        },
-        {
-          currentUndetectablePolicy: 'null',
-        }
-      );
-
-      const raw = String(formatDualCardPacketForLLM(packet) ?? '').trim();
-      const flowSeedText = clampLines(raw, 15).trim();
-
-      if (flowSeedText) {
-        internalPack = [
-          String(internalPack ?? '').trim(),
-          ['FLOW180_SEED (DO NOT OUTPUT):', flowSeedText].join('\n'),
-        ]
-          .filter(Boolean)
-          .join('\n\n');
-
-        console.log('[IROS/rephraseEngine][FLOW_SEEDIN] appended', {
+      console.log(
+        '[IROS/rephraseEngine][FLOW_ENGINE_RESULT]',
+        JSON.stringify({
           traceId: debug.traceId,
           conversationId: debug.conversationId,
           userCode: debug.userCode,
-          len: flowSeedText.length,
-        });
-      } else {
-        try {
-          console.warn('[IROS/rephraseEngine][FLOW_SEEDIN] empty_seed', {
-            traceId: debug.traceId,
-            conversationId: debug.conversationId,
-            userCode: debug.userCode,
-          });
-        } catch {}
-        injectCardUndetectableRule('empty_seed');
-      }
-    } catch (e) {
-      console.warn('[IROS/rephraseEngine][FLOW_SEEDIN] error', e);
-      injectCardUndetectableRule('error');
+          currentFlow: flowResult?.currentFlow?.id ?? null,
+          previousFlow: flowResult?.previousFlow?.id ?? null,
+          futureFlowRandom: flowResult?.futureFlowRandom?.id ?? null,
+          delta: flowResult?.delta ?? null,
+        })
+      );
+
+    if (flow180SeedText) {
+      internalPack = [
+        String(internalPack ?? '').trim(),
+        ['FLOW180_SEED (DO NOT OUTPUT):', flow180SeedText].join('\n'),
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+
+      console.log('[IROS/rephraseEngine][FLOW_SEEDIN] appended', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        len: flow180SeedText.length,
+        count: flow180List.length,
+      });
+    } else {
+      console.warn('[IROS/rephraseEngine][FLOW_SEEDIN] empty_seed', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+      });
     }
-  } else {
-    // card 以外は full seed を作らない（lite だけで十分）
-    // ✅ wantsCardByText でも “未観測固定” は入れない：まずは seed で回す
   }
+}
+
 // ✅ upstream 観測（internalPack 時点の事実だけを見る）
 // - ここは messages 注入前なので injected 側は見ない
 // - downstream の injected 実体確認は writerCalls / STATE_CUES 側ログを正とする
@@ -3330,11 +3235,22 @@ const __pickBlockNear = (src: string, pattern: RegExp, span = 520) => {
   const end = nextBlank >= 0 ? nextBlank : Math.min(src.length, start + span);
   return src.slice(start, end);
 };
+const flow180SeedRaw =
+  __ip.match(/FLOW180_SEED\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ ]+\(DO NOT OUTPUT\):|$)/i)?.[0] ??
+  null;
 
+console.log('[IROS/FLOW180]', flow180SeedRaw);
+
+const flowSeedNearInternal = __pickBlockNear(
+  __ip,
+  /FLOW\s*\(DO NOT OUTPUT\)\s*:/i,
+  520,
+);
+
+console.log('[IROS/SEED]', flowSeedNearInternal);
 const __patterns = {
   mirror: /MIRROR_FLOW_SEED_V1\b/i,
-  card: /CARD_PACKET\s*\(DO NOT OUTPUT\)|CARD_SEED_V1\s*\(DO NOT OUTPUT\)/i,
-  lite: /CARDS_LITE_SEED\s*\(DO NOT OUTPUT\)/i,
+  flow: /FLOW180_SEED\s*\(DO NOT OUTPUT\)/i,
 };
 
 const __traceId = String((opts as any)?.traceId ?? '');
@@ -3363,12 +3279,10 @@ console.log('[IROS/rephraseEngine][STATE_SNAPSHOT_UPSTREAM]', {
   pickedQCode,
 
   internalHasMirrorFlowSeed: __patterns.mirror.test(String(internalPack ?? '')),
-  internalHasCardPacket: __patterns.card.test(String(internalPack ?? '')),
-  internalHasCardsLite: __patterns.lite.test(String(internalPack ?? '')),
+  internalHasFlowSeed: __patterns.flow.test(String(internalPack ?? '')),
 
   upstreamHasMirrorFlowSeed: __patterns.mirror.test(__injectedPack),
-  upstreamHasCardPacket: __patterns.card.test(__injectedPack),
-  upstreamHasCardsLite: __patterns.lite.test(__injectedPack),
+  upstreamHasFlowSeed: __patterns.flow.test(__injectedPack),
 
   head: String(internalPack ?? '').slice(0, 800),
 });
@@ -4830,6 +4744,7 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
  * ========================================= */
 {
   const pack = String(internalPack ?? '');
+  console.log('[IROS/SEED_PACK_DUMP]', pack.slice(0, 1800));
 
   // marker は揺れるので広めに拾う（RESONANCE_STATE_SEED / RESONANCE_STATE / seedin）
   const seedIdx = pack.search(
@@ -4847,27 +4762,26 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
       ? pack.slice(Math.max(0, textSeedIdx - 140), Math.min(pack.length, textSeedIdx + 260))
       : null;
 
-  // ✅ 新形式 seed / cards（internalPack 側）
+// ✅ 新形式 seed / flow（internalPack 側）
   const seedPatterns = [
     /MIRROR_FLOW_SEED_V1\b/i,
-    /CARD_PACKET\s*\(DO NOT OUTPUT\)\s*:/i,
-    /CARD_SEED_V1\s*\(DO NOT OUTPUT\)\s*:/i,
+    /FLOW180_SEED\s*\(DO NOT OUTPUT\)\s*:/i,
   ];
 
-  const cardsIdxInternal = seedPatterns
+  const flowSeedIdxInternal = seedPatterns
     .map((re) => pack.search(re))
     .find((n) => typeof n === 'number' && n >= 0);
 
-  const cardsNearInternal =
-    typeof cardsIdxInternal === 'number' && cardsIdxInternal >= 0
+  const flowSeedNearInternal =
+    typeof flowSeedIdxInternal === 'number' && flowSeedIdxInternal >= 0
       ? pack.slice(
-          Math.max(0, cardsIdxInternal - 140),
-          Math.min(pack.length, cardsIdxInternal + 420),
+          Math.max(0, flowSeedIdxInternal - 140),
+          Math.min(pack.length, flowSeedIdxInternal + 420),
         )
       : null;
-
+      console.log('[IROS/SEED_NEAR]', flowSeedNearInternal);
   // ✅ messages 側（注入された assistant pack）も検査する
-  // - 先頭の assistant（通常: COORD + MIRROR_FLOW_SEED_V1 + CARD_PACKET が入る）を拾う
+// - 先頭の assistant（通常: COORD + MIRROR_FLOW_SEED_V1 + FLOW180_SEED が入る）を拾う
   const assistant0 = (messages as any[])?.find((m) => m?.role === 'assistant') ?? null;
   const injectedPack = String((assistant0 as any)?.content ?? '');
 
@@ -4880,17 +4794,17 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
         )
       : null;
 
-  const injectedCardsLiteIdx = seedPatterns
-    .map((re) => injectedPack.search(re))
-    .find((n) => typeof n === 'number' && n >= 0);
+      const injectedFlowSeedIdx = seedPatterns
+      .map((re) => injectedPack.search(re))
+      .find((n) => typeof n === 'number' && n >= 0);
 
-  const injectedCardsLiteNear =
-    typeof injectedCardsLiteIdx === 'number' && injectedCardsLiteIdx >= 0
-      ? injectedPack.slice(
-          Math.max(0, injectedCardsLiteIdx - 140),
-          Math.min(injectedPack.length, injectedCardsLiteIdx + 420),
-        )
-      : null;
+    const injectedFlowSeedNear =
+      typeof injectedFlowSeedIdx === 'number' && injectedFlowSeedIdx >= 0
+        ? injectedPack.slice(
+            Math.max(0, injectedFlowSeedIdx - 140),
+            Math.min(injectedPack.length, injectedFlowSeedIdx + 420),
+          )
+        : null;
 }
 // ✅ writer input pack debug (LEN)
 // - 現在の正本は messages（callWriterLLM に渡す実体）
@@ -5045,11 +4959,9 @@ raw = await (async () => {
       (
         /COORD\s*\(DO NOT OUTPUT\):/i.test(content) ||
         /MIRROR_FLOW_SEED_V1\b/i.test(content) ||
-        /CARD_PACKET\s*\(DO NOT OUTPUT\):/i.test(content) ||
-        /CARDS_LITE_SEED\s*\(DO NOT OUTPUT\):/i.test(content) ||
+        /FLOW180_SEED\s*\(DO NOT OUTPUT\):/i.test(content) ||
         /FLOW_CONTEXT\s*\(DO NOT OUTPUT\):/i.test(content) ||
-        /STATE_CUES\s*\(DO NOT OUTPUT\)/i.test(content) ||
-        /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/i.test(content)
+        /STATE_CUES\s*\(DO NOT OUTPUT\)/i.test(content)
       )
     ) {
       return m;
@@ -5308,8 +5220,7 @@ raw = await (async () => {
       return (
         /COORD\s*\(DO NOT OUTPUT\):/i.test(c) ||
         /MIRROR_FLOW_SEED_V1\b/i.test(c) ||
-        /CARD_PACKET\s*\(DO NOT OUTPUT\):/i.test(c) ||
-        /CARDS_LITE_SEED\s*\(DO NOT OUTPUT\):/i.test(c) ||
+        /FLOW180_SEED\s*\(DO NOT OUTPUT\):/i.test(c) ||
         /FLOW_CONTEXT\s*\(DO NOT OUTPUT\):/i.test(c)
       );
     }) ?? null;
@@ -5343,8 +5254,6 @@ raw = await (async () => {
     messagesLen: messagesForWriter.length,
     roles: messagesForWriter.map((m) => m?.role),
     hasMirrorFlowSeed: __patterns.mirror.test(__writerInjectedPack),
-    hasCardPacket: __patterns.card.test(__writerInjectedPack),
-    hasCardsLite: __patterns.lite.test(__writerInjectedPack),
     injectedPackHead: __writerInjectedPack.slice(0, 800),
     stateAssistantHead: __writerStateHead,
     lastAssistantHead: String(__writerAssistantLast?.content ?? '').slice(0, 300),

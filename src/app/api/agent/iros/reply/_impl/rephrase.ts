@@ -909,39 +909,38 @@ const intentBandForCtx =
       ? { ...(ctxPackFromUpstream as any) }
       : {};
 
-  const cardsFromCtx: any =
-    ctxPack?.cards && typeof ctxPack.cards === 'object'
-      ? ctxPack.cards
-      : null;
+      const flowFromCtx: any =
+      ctxPack?.flow && typeof ctxPack.flow === 'object'
+        ? ctxPack.flow
+        : null;
 
-  const currentCardFromCtx: any =
-    cardsFromCtx?.currentCard && typeof cardsFromCtx.currentCard === 'object'
-      ? cardsFromCtx.currentCard
-      : null;
+    const currentFlowFromCtx: any =
+      flowFromCtx?.currentFlow && typeof flowFromCtx.currentFlow === 'object'
+        ? flowFromCtx.currentFlow
+        : null;
 
-  if (
-    !pickStr(ctxPack.observedStage, ctxPack.primaryStage) &&
-    currentCardFromCtx &&
-    typeof currentCardFromCtx === 'object'
-  ) {
-    const observedStageFromCard = pickStr(
-      currentCardFromCtx.observedStage,
-      currentCardFromCtx.stage,
-    );
+    if (
+      !pickStr(ctxPack.observedStage, ctxPack.primaryStage) &&
+      currentFlowFromCtx &&
+      typeof currentFlowFromCtx === 'object'
+    ) {
+      const observedStageFromFlow = pickStr(
+        currentFlowFromCtx.observedStage,
+        currentFlowFromCtx.stage,
+      );
 
-    if (observedStageFromCard) {
-      ctxPack.observedStage = ctxPack.observedStage ?? observedStageFromCard;
-      ctxPack.primaryStage = ctxPack.primaryStage ?? observedStageFromCard;
+      if (observedStageFromFlow) {
+        ctxPack.observedStage = ctxPack.observedStage ?? observedStageFromFlow;
+        ctxPack.primaryStage = ctxPack.primaryStage ?? observedStageFromFlow;
+      }
     }
-  }
 
-  if (!pickStr((ctxPack as any).polarity) && currentCardFromCtx && typeof currentCardFromCtx === 'object') {
-    const polarityFromCard = pickStr(currentCardFromCtx.polarity);
-    if (polarityFromCard) {
-      (ctxPack as any).polarity = polarityFromCard;
+    if (!pickStr((ctxPack as any).polarity) && currentFlowFromCtx && typeof currentFlowFromCtx === 'object') {
+      const polarityFromFlow = pickStr(currentFlowFromCtx.polarity);
+      if (polarityFromFlow) {
+        (ctxPack as any).polarity = polarityFromFlow;
+      }
     }
-  }
-
   if (!Array.isArray(ctxPack.depthHistoryLite)) {
     const histSeed = pickStr(ctxPack.observedStage, ctxPack.depthStage);
     if (histSeed && /^[SFRCIT][123]$/.test(histSeed)) {
@@ -1178,7 +1177,7 @@ const depthForLLM =
 
   // inputKind
   // - 明示スタンプ（meta / framePlan / userContext）をまず拾う
-  // - ただし stamped='chat' は “デフォルト” 扱いにして、カード要求があれば card を優先する
+  // - ただし stamped='chat' は “デフォルト” 扱いにして、flow要求があれば flow を優先する
   const inputKindStampedRaw =
     (meta as any)?.framePlan?.inputKind ??
     (meta as any)?.inputKind ??
@@ -1186,80 +1185,6 @@ const depthForLLM =
     '';
 
   const inputKindStamped = String(inputKindStampedRaw).trim().toLowerCase();
-
-// ✅ 厳しめ：カード要求（「カード」+「引く/引いて/ひく/引き直す」系）が同時にある時だけ
-// const wantsCardByText = (() => { ... })();
-
-  // ✅ カード要求判定
-  // - 初回は「カード|card」必須
-  // - 追加は「引く/引いて」だけでもOKだが、直近にカード文脈がある場合に限定
-  const wantsCardByText = (() => {
-    const t = String(userText ?? '').trim();
-    if (!t) return false;
-
-    const hasDrawWord =
-      /引(?:い|き|く|け)|ひ(?:い|き|く|け)|引き直|引きなお|引き直し|引きなおし|引き直して|引きなおして/.test(t);
-    if (!hasDrawWord) return false;
-
-    const hasCardWord = /カード|card/i.test(t);
-    if (hasCardWord) return true; // ✅ 初回起動OK
-
-    // ✅ ここから先は「追加」判定：カード文脈が直近にある時だけ許可
-    const lastAssistantText = (() => {
-      try {
-        const hfw: any[] =
-          (userContext as any)?.ctxPack?.historyForWriter ??
-          (userContext as any)?.historyForWriter ??
-          (userContext as any)?.turnsForWriter ??
-          [];
-        if (!Array.isArray(hfw) || hfw.length === 0) return '';
-        for (let i = hfw.length - 1; i >= 0; i--) {
-          if (hfw[i]?.role === 'assistant') return String(hfw[i]?.content ?? '').trim();
-        }
-        return '';
-      } catch {
-        return '';
-      }
-    })();
-
-    const hasCardContext =
-      /カード|card/i.test(lastAssistantText) ||
-      /引くね|引いてみる|引いてみよう|引いてみて|カードを引/i.test(lastAssistantText);
-
-    return hasCardContext;
-  })();
-
-  // stamped が空/不明 → 推定へ
-  // stamped が 'chat' はデフォルト扱いで wantsCardByText があれば card を優先
-  // stamped が 'micro'/'greeting' も “デフォルト扱い” にして、カード要求があれば card に上書き（ここが重要）
-  // stamped が 'card' 等 → そのまま尊重（明示指定）
-  const inputKindForLLM = (() => {
-    if (!inputKindStamped) return wantsCardByText ? 'card' : '';
-
-    if (inputKindStamped === 'chat') return wantsCardByText ? 'card' : 'chat';
-
-    if (inputKindStamped === 'micro' || inputKindStamped === 'greeting') {
-      return wantsCardByText ? 'card' : inputKindStamped;
-    }
-
-    return inputKindStamped;
-  })();
-
-  console.log('[IROS/_impl/rephrase.ts][INPUT_KIND_DIAG]', {
-    inputKindStampedRaw,
-    inputKindStamped,
-    wantsCardByText,
-    inputKindForLLM,
-    userTextHead: String(userText ?? '').slice(0, 40),
-  });
-
-  console.log('[IROS/_impl/rephrase.ts][INPUT_KIND_DIAG]', {
-    inputKindStampedRaw,
-    inputKindStamped,
-    wantsCardByText,
-    inputKindForLLM,
-    userTextHead: String(userText ?? '').slice(0, 40),
-  });
 
 // ctxPack.historyDigestV1 を “最終注入”（hasDigest を true にする）
 // + historyForWriter が空なら ctxPack.turns から救済して turnsForWriter を作る（user生文は伏せる）
@@ -1824,7 +1749,7 @@ try {
         null,
       qCode: qCodeForLLM,
       depthStage: depthForLLM,
-      inputKind: inputKindForLLM,
+      inputKind: inputKindStamped || '',
 
       // ✅ upstream snapshot 用の会話列を明示配線
       messages: rephraseMessages,

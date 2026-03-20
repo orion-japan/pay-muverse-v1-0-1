@@ -40,7 +40,7 @@ function stripInternalMarkersFromUserText(s: string): string {
   let t = String(s ?? '');
   // 露出禁止ヘッダっぽい行を落とす（丸ごと隠すのではなく「制御片」だけ避ける）
   t = t.replace(
-    /^(?:COORD|STATE_CUES_V3|CARDS_LITE_SEED|CARDS|INTERNAL PACK)\s*\(DO NOT OUTPUT\)\s*:?\s*$/gim,
+    /^(?:COORD|STATE_CUES_V3|FLOW180_SEED|INTERNAL PACK)\s*\(DO NOT OUTPUT\)\s*:?\s*$/gim,
     '',
   );
   // タグ行や明らかな制御行を軽く除去（過剰に消さない）
@@ -54,7 +54,7 @@ function mergeConsecutiveSameRole(messages: WriterMessage[]): WriterMessage[] {
   const normS = (s: any) => norm(String(s ?? ''));
 
   const isInternalPackLike = (s: string) =>
-    /COORD\s*\(DO NOT OUTPUT\)|STATE_CUES_V3\s*\(DO NOT OUTPUT\)|CARDS_LITE_SEED\s*\(DO NOT OUTPUT\)|INTERNAL PACK\s*\(DO NOT OUTPUT\)|CARDS\s*\(DO NOT OUTPUT\)/i.test(
+    /COORD\s*\(DO NOT OUTPUT\)|STATE_CUES_V3\s*\(DO NOT OUTPUT\)|FLOW180_SEED\s*\(DO NOT OUTPUT\)|INTERNAL PACK\s*\(DO NOT OUTPUT\)/i.test(
       s,
     );
 
@@ -85,9 +85,9 @@ function mergeConsecutiveSameRole(messages: WriterMessage[]): WriterMessage[] {
     }
   }
 
-  // assistant 空は弾く（念のため）
-  return out.filter((m) => m.role !== 'assistant' || (m.content?.length ?? 0) > 0);
+  return out;
 }
+
 function ensureEndsWithUser(messages: WriterMessage[], finalUserText?: string): WriterMessage[] {
   const out = Array.isArray(messages) ? [...messages] : [];
 
@@ -391,15 +391,15 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
 
   const phase = pick(args?.phase, ctxPack?.phase, extra?.phase);
 
-  const cardsAny: any = firstNonNull(
-    (ctxPack as any)?.cards,
-    (extra as any)?.ctxPack?.cards,
-    (extra as any)?.cards,
+  const flowAny: any = firstNonNull(
+    (ctxPack as any)?.flow,
+    (extra as any)?.ctxPack?.flow,
+    (extra as any)?.flow,
     null,
   );
-  const currentCardAny: any = firstNonNull(
-    cardsAny?.currentCard,
-    cardsAny?.current,
+  const currentFlowAny: any = firstNonNull(
+    flowAny?.currentFlow,
+    flowAny?.current,
     null,
   );
 
@@ -434,7 +434,7 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     mirror?.eTurn,
     mirrorFlowV1ForSeed?.mirror?.e_turn,
     mirrorFlowV1ForSeed?.mirror?.eTurn,
-    currentCardAny?.e_turn,
+    currentFlowAny?.e_turn,
     qCountsForSeed?.e_turn_now,
     qCountsForSeed?.eTurnNow,
     qCountsForSeed?.e_turn,
@@ -458,7 +458,7 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     mirrorFlowV1ForSeed?.mirror?.polarity,
     mirrorFlowV1ForSeed?.mirror?.polarity_out,
     mirrorFlowV1ForSeed?.mirror?.polarityBand,
-    currentCardAny?.polarity,
+    currentFlowAny?.polarity,
     ctxPack?.polarity,
     extra?.polarity,
     null,
@@ -502,11 +502,8 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
 
   const flowHints = (
     args?.flows ??
-    args?.cards ??
     ctxPack?.flows ??
-    ctxPack?.cards ??
     extra?.flows ??
-    extra?.cards ??
     null
   ) as any;
 
@@ -514,13 +511,9 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     firstNonNull<any>(
       flowHints?.now,
       flowHints?.flow_now,
-      flowHints?.card_now,
       flowHints?.FLOW_NOW,
-      flowHints?.CARD_NOW,
       args?.flowNow,
-      args?.cardNow,
       ctxPack?.flowNow,
-      ctxPack?.cardNow,
       null,
     ),
   );
@@ -529,13 +522,9 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     firstNonNull<any>(
       flowHints?.next,
       flowHints?.flow_next,
-      flowHints?.card_next,
       flowHints?.FLOW_NEXT,
-      flowHints?.CARD_NEXT,
       args?.flowNext,
-      args?.cardNext,
       ctxPack?.flowNext,
-      ctxPack?.cardNext,
       null,
     ),
   );
@@ -707,28 +696,16 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
       flowNow,
       (args as any)?.flowNow,
       (args as any)?.flow_now,
-      (args as any)?.cardNow,
-      (args as any)?.card_now,
       (ctxPack as any)?.flowNow,
       (ctxPack as any)?.flow_now,
-      (ctxPack as any)?.cardNow,
-      (ctxPack as any)?.card_now,
       (extra as any)?.flowNow,
       (extra as any)?.flow_now,
-      (extra as any)?.cardNow,
-      (extra as any)?.card_now,
       (ctxPack as any)?.flows?.current,
       (args as any)?.flows?.current,
       (extra as any)?.flows?.current,
-      (ctxPack as any)?.cards?.current,
-      (args as any)?.cards?.current,
-      (extra as any)?.cards?.current,
       (ctxPack as any)?.flows?.now,
       (args as any)?.flows?.now,
       (extra as any)?.flows?.now,
-      (ctxPack as any)?.cards?.now,
-      (args as any)?.cards?.now,
-      (extra as any)?.cards?.now,
       '',
     ) ?? '',
   );
@@ -738,28 +715,16 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
       flowNext,
       (args as any)?.flowNext,
       (args as any)?.flow_next,
-      (args as any)?.cardNext,
-      (args as any)?.card_next,
       (ctxPack as any)?.flowNext,
       (ctxPack as any)?.flow_next,
-      (ctxPack as any)?.cardNext,
-      (ctxPack as any)?.card_next,
       (extra as any)?.flowNext,
       (extra as any)?.flow_next,
-      (extra as any)?.cardNext,
-      (extra as any)?.card_next,
       (ctxPack as any)?.flows?.next,
       (args as any)?.flows?.next,
       (extra as any)?.flows?.next,
-      (ctxPack as any)?.cards?.next,
-      (args as any)?.cards?.next,
-      (extra as any)?.cards?.next,
       (ctxPack as any)?.flows?.future,
       (args as any)?.flows?.future,
       (extra as any)?.flows?.future,
-      (ctxPack as any)?.cards?.future,
-      (args as any)?.cards?.future,
-      (extra as any)?.cards?.future,
       '',
     ) ?? '',
   );
@@ -1450,20 +1415,20 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   observedStage: pick(
                     (ctxPack as any)?.observedStage,
                     (extra as any)?.observedStage,
-                    currentCardAny?.observedStage,
+                    currentFlowAny?.observedStage,
                     null,
                   ),
                   primaryStage: pick(
                     (ctxPack as any)?.primaryStage,
                     (extra as any)?.primaryStage,
-                    currentCardAny?.primaryStage,
-                    currentCardAny?.observedStage,
+                    currentFlowAny?.primaryStage,
+                    currentFlowAny?.observedStage,
                     null,
                   ),
                   secondaryStage: pick(
                     (ctxPack as any)?.secondaryStage,
                     (extra as any)?.secondaryStage,
-                    currentCardAny?.secondaryStage,
+                    currentFlowAny?.secondaryStage,
                     null,
                   ),
                   flowDelta: String(
@@ -1665,20 +1630,20 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   observedStage: pick(
                     (ctxPack as any)?.observedStage,
                     (extra as any)?.observedStage,
-                    currentCardAny?.observedStage,
+                    currentFlowAny?.observedStage,
                     null,
                   ),
                   primaryStage: pick(
                     (ctxPack as any)?.primaryStage,
                     (extra as any)?.primaryStage,
-                    currentCardAny?.primaryStage,
-                    currentCardAny?.observedStage,
+                    currentFlowAny?.primaryStage,
+                    currentFlowAny?.observedStage,
                     null,
                   ),
                   secondaryStage: pick(
                     (ctxPack as any)?.secondaryStage,
                     (extra as any)?.secondaryStage,
-                    currentCardAny?.secondaryStage,
+                    currentFlowAny?.secondaryStage,
                     null,
                   ),
 
@@ -1746,14 +1711,6 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                 const mirrorFlowSeedFormatted = formatMirrorFlowSeed(mirrorFlowSeedBuilt);
                 const mirrorFlowSeedText = String(mirrorFlowSeedFormatted.mirrorFlowSeedText ?? '').trim();
 
-                const cardsSeedText = String(
-                  pick(
-                    (ctxPack as any)?.cards?.seedText,
-                    (extra as any)?.ctxPack?.cards?.seedText,
-                    (extra as any)?.cards?.seedText,
-                    '',
-                  ) ?? '',
-                ).trim();
 
                 const coordMinimal: string[] = [];
                 coordMinimal.push('COORD (DO NOT OUTPUT):');
@@ -1766,10 +1723,10 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                 const coordMinimalBlock = coordMinimal.length > 1 ? coordMinimal.join('\n') : '';
 
                 const internalPackRawLight = String(internalPackRaw ?? '')
-                  .replace(
-                    /\n*CARD_PACKET\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\nSTATE_CUES_V3\s*\(DO NOT OUTPUT\):|\nINTERNAL PACK\s*\(DO NOT OUTPUT\):|$)/g,
-                    '\n',
-                  )
+                .replace(
+                  /\n*FLOW180_SEED\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\nSTATE_CUES_V3\s*\(DO NOT OUTPUT\):|\nINTERNAL PACK\s*\(DO NOT OUTPUT\):|$)/g,
+                  '\n',
+                )
                   .replace(
                     /\n*STATE_CUES_V3\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\nINTERNAL PACK\s*\(DO NOT OUTPUT\):|$)/g,
                     '\n',

@@ -14,7 +14,6 @@ export type InputKind =
   | 'request'
   | 'question'
   | 'micro'
-  | 'card'
   | 'chat'
   | 'review'
   | 'task';
@@ -109,14 +108,11 @@ export function selectFrame(
   // 2) デバッグ系は NONE（余計な装飾なし）
   if (inputKind === 'debug') return 'NONE';
 
-  // 3) 実装依頼 / 作業依頼は C（整理された器）
-  if (inputKind === 'request') return 'C';
+// 3) 実装依頼 / 作業依頼は C（整理された器）
+if (inputKind === 'request') return 'C';
 
-  // 3.5) カード要求は R（観測・反映の器）
-  if (inputKind === 'card') return 'R';
-
-  // 4) 挨拶は NONE（軽く）
-  if (inputKind === 'greeting') return 'NONE';
+// 4) 挨拶は NONE（軽く）
+if (inputKind === 'greeting') return 'NONE';
 
   // 5) 下降中（TCF）なら T/C/F を優先
   if (isDescending(dg)) {

@@ -3953,21 +3953,21 @@ if (extra2.ctxPack && typeof extra2.ctxPack === 'object') {
       (out.metaForSave as any)?.extra?.unified?.observed ??
       null) as any;
 
-  const currentCardForStamp: any =
-    ((extra2.ctxPack as any)?.cards?.currentCard ??
-      (out.metaForSave as any)?.extra?.ctxPack?.cards?.currentCard ??
-      null) as any;
+      const currentFlowForStamp: any =
+      ((extra2.ctxPack as any)?.flow?.currentFlow ??
+        (out.metaForSave as any)?.extra?.ctxPack?.flow?.currentFlow ??
+        null) as any;
 
-  const observedStageForStamp =
-    (typeof (extra2.ctxPack as any)?.observedStage === 'string' && (extra2.ctxPack as any).observedStage.trim()
-      ? (extra2.ctxPack as any).observedStage.trim()
-      : typeof unifiedObservedForStamp?.observedStage === 'string' && unifiedObservedForStamp.observedStage.trim()
-        ? unifiedObservedForStamp.observedStage.trim()
-        : typeof currentCardForStamp?.observedStage === 'string' && currentCardForStamp.observedStage.trim()
-          ? currentCardForStamp.observedStage.trim()
-          : typeof currentCardForStamp?.stage === 'string' && currentCardForStamp.stage.trim()
-            ? currentCardForStamp.stage.trim()
-            : null);
+        const observedStageForStamp =
+        (typeof (extra2.ctxPack as any)?.observedStage === 'string' && (extra2.ctxPack as any).observedStage.trim()
+          ? (extra2.ctxPack as any).observedStage.trim()
+          : typeof unifiedObservedForStamp?.observedStage === 'string' && unifiedObservedForStamp.observedStage.trim()
+            ? unifiedObservedForStamp.observedStage.trim()
+            : typeof currentFlowForStamp?.observedStage === 'string' && currentFlowForStamp.observedStage.trim()
+              ? currentFlowForStamp.observedStage.trim()
+              : typeof currentFlowForStamp?.stage === 'string' && currentFlowForStamp.stage.trim()
+                ? currentFlowForStamp.stage.trim()
+                : null);
 
   const primaryStageForStamp =
     (typeof (extra2.ctxPack as any)?.primaryStage === 'string' && (extra2.ctxPack as any).primaryStage.trim()
@@ -5071,21 +5071,21 @@ if (shouldRunWriter) {
           ctxPack.observedBasedOn ??
           null;
 
-        const cardsCanon: any =
-          ((out.metaForSave as any)?.extra?.ctxPack as any)?.cards ??
-          ctxPack.cards ??
+          const flowCanon: any =
+          ((out.metaForSave as any)?.extra?.ctxPack as any)?.flow ??
+          ctxPack.flow ??
           null;
 
-        const currentCardCanon: any =
-          cardsCanon?.currentCard ??
+        const currentFlowCanon: any =
+          flowCanon?.currentFlow ??
           null;
 
         const observedStageCanonFixed =
           observedStageCanon ??
-          (typeof currentCardCanon?.observedStage === 'string' && currentCardCanon.observedStage.trim()
-            ? currentCardCanon.observedStage.trim()
-            : typeof currentCardCanon?.stage === 'string' && currentCardCanon.stage.trim()
-              ? currentCardCanon.stage.trim()
+          (typeof currentFlowCanon?.observedStage === 'string' && currentFlowCanon.observedStage.trim()
+            ? currentFlowCanon.observedStage.trim()
+            : typeof currentFlowCanon?.stage === 'string' && currentFlowCanon.stage.trim()
+              ? currentFlowCanon.stage.trim()
               : null);
 
         const primaryStageCanonFixed =
@@ -5103,12 +5103,11 @@ if (shouldRunWriter) {
             ? mirrorCanon.polarity_out.trim()
             : typeof mirrorCanon?.polarity === 'string' && mirrorCanon.polarity.trim()
               ? mirrorCanon.polarity.trim()
-              : typeof currentCardCanon?.polarity === 'string' && currentCardCanon.polarity.trim()
-                ? currentCardCanon.polarity.trim()
+              : typeof currentFlowCanon?.polarity === 'string' && currentFlowCanon.polarity.trim()
+                ? currentFlowCanon.polarity.trim()
                 : typeof (ctxPack as any)?.polarity === 'string' && (ctxPack as any).polarity.trim()
                   ? (ctxPack as any).polarity.trim()
                   : null);
-
         const normalizeStageList = (src: any): string[] => {
           if (!Array.isArray(src)) return [];
           return src
@@ -5365,42 +5364,30 @@ if (shouldRunWriter) {
     return s ? s : null;
   })();
 
-  // ✅ inputKind をこの場で一回だけ正規化（rephraseEngine.full.ts の CARD_SEEDIN 判定は opts.inputKind を見る）
-  const inputKindCanon: string | null = (() => {
-    const raw =
-      // まず “カード/診断系” の手掛かりになり得るものを優先
-      (out.metaForSave as any)?.inputKind_classified ??
-      (out.metaForSave as any)?.framePlan?.inputKind ??
-      (out.metaForSave as any)?.extra?.ctxPack?.inputKind ??
-      (out.metaForSave as any)?.extra?.inputKind ??
-      null;
+// ✅ inputKind をこの場で一回だけ正規化（flow前提）
+// - card判定は完全削除
+const inputKindCanon: string | null = (() => {
+  const raw =
+    (out.metaForSave as any)?.inputKind_classified ??
+    (out.metaForSave as any)?.framePlan?.inputKind ??
+    (out.metaForSave as any)?.extra?.ctxPack?.inputKind ??
+    (out.metaForSave as any)?.extra?.inputKind ??
+    null;
 
-    const s0 = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
-    if (s0) return s0;
+  const s0 = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (s0) return s0;
 
-    // ctx.inputKind が "chat" しかない場合は、カードseedinのためには役に立たないので採用しない
-    const ctxKind =
-      typeof (ctx as any)?.inputKind === 'string' ? (ctx as any).inputKind.trim().toLowerCase() : '';
-    if (ctxKind && ctxKind !== 'chat') return ctxKind;
+  // ctx.inputKind fallback（chat以外のみ）
+  const ctxKind =
+    typeof (ctx as any)?.inputKind === 'string'
+      ? (ctx as any).inputKind.trim().toLowerCase()
+      : '';
 
-    // ✅ 最後の確定：カード要求（日本語/英語）＋引く系を拾う
-    const ut = typeof text === 'string' ? text.trim() : '';
-    if (ut) {
-      const hasCardWord = /カード|card/i.test(ut);
-      const hasDrawWord =
-        /引(?:い|き|く|け)|ひ(?:い|き|く|け)|引き直|引きなお|引き直し|引きなおし|引き直して|引きなおして/.test(
-          ut,
-        );
+  if (ctxKind && ctxKind !== 'chat') return ctxKind;
 
-      // 初回：カード語があれば card
-      if (hasCardWord) return 'card';
-
-      // 継続：引く系だけでも card（ここで落とすと継続が死ぬ）
-      if (hasDrawWord) return 'card';
-    }
-
-    return ctxKind || null;
-  })();
+  // ✅ 最終fallback（flow固定）
+  return 'flow';
+})();
 
   console.log('[IROS/GOALKIND_BRIDGE][BEFORE_REPHRASE_CALL]', {
     traceId: traceIdCanon,
@@ -5874,10 +5861,10 @@ if (shouldRunWriter) {
                       observedStage:
                       (out.metaForSave as any)?.observedStage ??
                       ((out.metaForSave as any)?.extra?.ctxPack as any)?.observedStage ??
-                      (((out.metaForSave as any)?.extra?.ctxPack as any)?.cards?.currentCard as any)?.observedStage ??
-                      (((out.metaForSave as any)?.extra?.ctxPack as any)?.cards?.currentCard as any)?.stage ??
-                      ((ctxPackPrev as any)?.cards?.currentCard as any)?.observedStage ??
-                      ((ctxPackPrev as any)?.cards?.currentCard as any)?.stage ??
+                      (((out.metaForSave as any)?.extra?.ctxPack as any)?.flow?.currentFlow as any)?.observedStage ??
+                      (((out.metaForSave as any)?.extra?.ctxPack as any)?.flow?.currentFlow as any)?.stage ??
+                      ((ctxPackPrev as any)?.flow?.currentFlow as any)?.observedStage ??
+                      ((ctxPackPrev as any)?.flow?.currentFlow as any)?.stage ??
                       (ctxPackPrev as any)?.observedStage ??
                       null,
 
@@ -5969,8 +5956,8 @@ if (shouldRunWriter) {
                           ((out.metaForSave as any)?.mirror as any)?.polarity ??
                           ((out.metaForSave as any)?.extra?.polarity as any) ??
                           ((out.metaForSave as any)?.extra?.ctxPack as any)?.polarity ??
-                          (((out.metaForSave as any)?.extra?.ctxPack as any)?.cards?.currentCard as any)?.polarity ??
-                          ((ctxPackPrev as any)?.cards?.currentCard as any)?.polarity ??
+                          (((out.metaForSave as any)?.extra?.ctxPack as any)?.flow?.currentFlow as any)?.polarity ??
+                          ((ctxPackPrev as any)?.flow?.currentFlow as any)?.polarity ??
                           ((ctxPackPrev as any)?.mirror as any)?.polarity ??
                           (ctxPackPrev as any)?.polarity ??
                           null,

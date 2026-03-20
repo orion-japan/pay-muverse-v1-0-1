@@ -64,12 +64,10 @@ function safeInputKind(v: unknown): InputKind {
     s === 'request' ||
     s === 'question' ||
     s === 'micro' ||
-    s === 'card' ||
     s === 'chat'
   ) {
     return s as InputKind;
   }
-
   // ✅ 互換吸収（旧呼称を正本に寄せる）
   if (s === 'task') return 'request';
   if (s === 'review') return 'chat';
