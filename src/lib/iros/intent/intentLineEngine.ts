@@ -110,7 +110,7 @@ export function deriveIntentLine(snapshot: ResonanceSnapshot): IntentLineAnalysi
       case 'Q2':
         return 'expand';
       case 'Q3':
-        return 'stabilize';
+        return 'cutOff';
       case 'Q4':
         return 'reconnect';
       case 'Q5':

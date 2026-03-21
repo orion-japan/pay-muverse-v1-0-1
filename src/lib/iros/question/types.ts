@@ -69,7 +69,7 @@ export type PastResolveState = {
 };
 
 export type TState = {
-  mode: TMode;
+  mode: TMode | null;
   focus: string | null;
   reason?: string | null;
 };
@@ -84,11 +84,11 @@ export type OutputPolicy = {
 
 export type QuestionEngineResult = {
   domain: DomainType;
-  questionType: QuestionType;
-  iframe: IFrame;
+  questionType: QuestionType | null;
+  iframe: IFrame | null;
   pastResolve?: PastResolveState | null;
-  tState: TState;
-  outputPolicy: OutputPolicy;
+  tState: TState | null;
+  outputPolicy: OutputPolicy | null;
 };
 
 export type DetectDomainInput = Pick<QuestionEngineInput, 'userText' | 'context'>;
@@ -117,7 +117,7 @@ export type DetectTModeInput = {
 
 export type BuildOutputPolicyInput = {
   questionType: QuestionType;
-  tMode: TMode;
+  tMode: TMode | null;
   pastResolve?: PastResolveState | null;
   sameTopicTurns?: number | null;
 };

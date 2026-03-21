@@ -78,16 +78,67 @@ export function deriveIrosGoal(args: {
       reason: 'ユーザーが判断を委ねたため、行動・選択の方向を優先',
     };
   }
+// 1.7) 離脱・区切り宣言 → uncover / enableAction
+if (containsSeparationDecisionWords(text)) {
+  const explicitCommit =
+    text.includes('辞めます') ||
+    text.includes('やめます') ||
+    text.includes('退職します') ||
+    text.includes('退職する') ||
+    text.includes('離れます') ||
+    text.includes('離れると決め') ||
+    text.includes('辞めると決め') ||
+    text.includes('やめると決め');
 
-  // 2) ネガティブ強め → stabilize
+  if (explicitCommit) {
+    const targetDepth = chooseActionDepth(lastDepth);
+    return {
+      kind: 'enableAction',
+      targetDepth,
+      targetQ: lastQ,
+      reason: '離脱・区切りの決定が明示されているため、次の一手を優先',
+    };
+  }
+
+  const targetDepth = chooseStabilizeDepth(lastDepth);
+  return {
+    kind: 'uncover',
+    targetDepth,
+    targetQ: lastQ ?? 'Q3',
+    reason: '離脱・区切りの意向が出ているため、安定化ではなく核の観測を優先',
+  };
+}
+
+function containsSeparationDecisionWords(text: string): boolean {
+  const words = [
+    '辞めよう',
+    'やめよう',
+    '辞めたい',
+    'やめたい',
+    '辞める',
+    'やめる',
+    '退職',
+    '会社を辞め',
+    '仕事を辞め',
+    '離れたい',
+    '離れよう',
+    '離れる',
+    '手放したい',
+    '区切りをつけたい',
+    '終わりにしたい',
+  ];
+
+  return words.some((w) => text.includes(w));
+}
+  // 2) ネガティブ強め → uncover
   if (sentiment === 'negative' || containsStressWords(text)) {
     const targetDepth = chooseStabilizeDepth(lastDepth);
-    const targetQ: QCode = 'Q3';
+    const targetQ: QCode = lastQ ?? 'Q3';
     return {
-      kind: 'stabilize',
+      kind: 'uncover',
       targetDepth,
       targetQ,
-      reason: 'ストレス・しんどさ系の兆候が強いため、安定を最優先',
+      reason: 'ストレス・しんどさ系の兆候が強いため、安定化ではなく核の観測を優先',
     };
   }
 

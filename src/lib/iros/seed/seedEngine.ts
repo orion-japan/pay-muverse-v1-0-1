@@ -1,93 +1,49 @@
-export type MirrorFlowSeedSourceOfTruth = {
-  mirror: 'e_turn';
-  position: 'observedStage';
-  continuity: 'depthStage';
-  motion: 'willRotation';
+// =============================================
+// file: src/lib/iros/seed/seedEngine.ts
+// SEED ENGINE v2.1改
+// - flowEngine = 状態（点）
+// - seedEngine = 文脈理解＋圧縮（線）
+// - LLM = 表現（音）
+// =============================================
+
+export type FlowSeedV21 = {
+  flow: {
+    current: string | null;
+    prev: string | null;
+    delta: string | null;
+    energy: string | null;
+    futureRandom: string | null;
+  };
+
+  context: {
+    userCore: string | null;
+    historyLine: string | null;
+    memoryLine: string | null;
+  };
+
+  compression: {
+    focus: string;
+    tone: string;
+    pressure: string;
+  };
+
+  goalKind?: string | null;
 };
 
-export type MirrorFlowSeedWriterDirectives = {
-  tone: string | null;
-  maxLines: number | null;
-  slotPolicy: string | null;
-  rotationMention: string | null;
-};
 
-export type MirrorFlowSeedInput = {
-  observedStage: string | null;
-  primaryStage?: string | null;
-  secondaryStage?: string | null;
+export type FlowSeedV21Input = {
+  flow?: {
+    current?: string | null;
+    prev?: string | null;
+    delta?: string | null;
+    energy?: string | null;
+    futureRandom?: string | null;
+  } | null;
 
-  depthStage: string | null;
-  depthHistoryLite?: string[] | null;
-
-  e_turn: string | null;
-  polarity: string | null;
-  basedOn?: string | null;
-
-  willRotation?:
-    | {
-        axis?: string | null;
-        kind?: string | null;
-        reason?: string | null;
-        suggestedStage?: string | null;
-      }
-    | null;
-
-  tLayerHint?: string | null;
-  itOk?: boolean | null;
-
-  qCode?: string | null;
-  flowDelta?: string | null;
-
-  writerDirectives?:
-    | Partial<MirrorFlowSeedWriterDirectives>
-    | null;
-};
-
-export type MirrorFlowSeed = {
-  sourceOfTruth: MirrorFlowSeedSourceOfTruth;
-
-  mirror: {
-    e_turn: string | null;
-    polarity: string | null;
-    basedOn: string | null;
-  };
-
-  position: {
-    observedStage: string | null;
-    primaryStage: string | null;
-    secondaryStage: string | null;
-  };
-
-  continuity: {
-    depthStage: string | null;
-    depthHistoryLite: string[];
-  };
-
-  motion: {
-    axis: string | null;
-    kind: string | null;
-    reason: string | null;
-    suggestedStage: string | null;
-  };
-
-  openness: {
-    tLayerHint: string | null;
-    itOk: boolean | null;
-  };
-
-  meta: {
-    qCode: string | null;
-    flowDelta: string | null;
-  };
-
-  writerDirectives: MirrorFlowSeedWriterDirectives;
-};
-
-export type FormatMirrorFlowSeedResult = {
-  mirrorFlowSeedText: string;
-  writerDirectives: MirrorFlowSeedWriterDirectives;
-  sourceOfTruth: MirrorFlowSeedSourceOfTruth;
+  userCore?: string | null;
+  historyLine?: string | null;
+  memoryLine?: string | null;
+  goalKind?: string | null;
 };
 
 function pickString(v: unknown): string | null {
@@ -96,121 +52,129 @@ function pickString(v: unknown): string | null {
   return s.length > 0 ? s : null;
 }
 
-function pickBool(v: unknown): boolean | null {
-  return typeof v === 'boolean' ? v : null;
+function hasArrowLike(delta: string | null): boolean {
+  if (!delta) return false;
+  return /→|->|⇒|=>/.test(delta);
 }
 
-function normalizeDepthHistoryLite(input: unknown): string[] {
-  if (!Array.isArray(input)) return [];
-  return input
-    .map((v) => pickString(v))
-    .filter((v): v is string => !!v)
-    .slice(-5);
+function deriveFocus(ctx: FlowSeedV21['context']): string {
+  if (ctx.userCore) return ctx.userCore;
+  if (ctx.historyLine) return ctx.historyLine;
+  if (ctx.memoryLine) return ctx.memoryLine;
+  return '次の一手';
 }
 
-function normalizePolarity(input: string | null): string | null {
-  const s = pickString(input);
-  if (!s) return null;
-  const n = s.toLowerCase();
-  if (n === 'yin' || n === 'negative' || n === 'neg') return 'yin';
-  if (n === 'yang' || n === 'positive' || n === 'pos') return 'yang';
-  return s;
+function deriveTone(
+  flow: FlowSeedV21['flow'],
+  ctx: FlowSeedV21['context'],
+): string {
+  const energy = pickString(flow.energy)?.toLowerCase() ?? '';
+  const focus = pickString(ctx.userCore)?.toLowerCase() ?? '';
+
+  if (
+    energy.includes('weak') ||
+    energy.includes('low') ||
+    energy.includes('quiet') ||
+    energy.includes('静') ||
+    energy.includes('弱')
+  ) {
+    return 'quiet';
+  }
+
+  if (
+    focus.includes('整理') ||
+    focus.includes('明確') ||
+    energy.includes('clear')
+  ) {
+    return 'clear';
+  }
+
+  return 'clear';
 }
 
-function normalizeWriterDirectives(
-  input: Partial<MirrorFlowSeedWriterDirectives> | null | undefined,
-): MirrorFlowSeedWriterDirectives {
-  const maxLinesRaw = input?.maxLines;
-  const maxLines =
-    typeof maxLinesRaw === 'number' && Number.isFinite(maxLinesRaw)
-      ? Math.max(1, Math.floor(maxLinesRaw))
-      : 6;
+function derivePressure(
+  flow: FlowSeedV21['flow'],
+  ctx: FlowSeedV21['context'],
+): string {
+  const focus = pickString(ctx.userCore) ?? '';
+  const delta = pickString(flow.delta);
+
+  if (!delta) return 'observe';
+
+  if (
+    focus.includes('迷い') ||
+    focus.includes('分からない') ||
+    focus.includes('整理')
+  ) {
+    return 'reflect';
+  }
+
+  if (hasArrowLike(delta)) {
+    return 'propose';
+  }
+
+  return 'reflect';
+}
+
+export function buildFlowSeedV1(input: FlowSeedV21Input): FlowSeedV21 {
+  const flow: FlowSeedV21['flow'] = {
+    current: pickString(input.flow?.current),
+    prev: pickString(input.flow?.prev),
+    delta: pickString(input.flow?.delta),
+    energy: pickString(input.flow?.energy),
+    futureRandom: pickString(input.flow?.futureRandom),
+  };
+
+  const context: FlowSeedV21['context'] = {
+    userCore: pickString(input.userCore),
+    historyLine: pickString(input.historyLine),
+    memoryLine: pickString(input.memoryLine),
+  };
+
+  const compression: FlowSeedV21['compression'] = {
+    focus: deriveFocus(context),
+    tone: deriveTone(flow, context),
+    pressure: derivePressure(flow, context),
+  };
 
   return {
-    tone: pickString(input?.tone) ?? 'reflective',
-    maxLines,
-    slotPolicy: pickString(input?.slotPolicy) ?? 'OBS_FIRST',
-    rotationMention: pickString(input?.rotationMention) ?? '1sentence',
+    flow,
+    context,
+    compression,
+    goalKind: pickString(input.goalKind),
   };
 }
 
-export function buildMirrorFlowSeed(input: MirrorFlowSeedInput): MirrorFlowSeed {
-  const seed: MirrorFlowSeed = {
-    sourceOfTruth: {
-      mirror: 'e_turn',
-      position: 'observedStage',
-      continuity: 'depthStage',
-      motion: 'willRotation',
-    },
-
-    mirror: {
-      e_turn: pickString(input.e_turn),
-      polarity: normalizePolarity(pickString(input.polarity)),
-      basedOn: pickString(input.basedOn),
-    },
-
-    position: {
-      observedStage: pickString(input.observedStage),
-      primaryStage: pickString(input.primaryStage),
-      secondaryStage: pickString(input.secondaryStage),
-    },
-
-    continuity: {
-      depthStage: pickString(input.depthStage),
-      depthHistoryLite: normalizeDepthHistoryLite(input.depthHistoryLite),
-    },
-
-    motion: {
-      axis: pickString(input.willRotation?.axis),
-      kind: pickString(input.willRotation?.kind),
-      reason: pickString(input.willRotation?.reason),
-      suggestedStage: pickString(input.willRotation?.suggestedStage),
-    },
-
-    openness: {
-      tLayerHint: pickString(input.tLayerHint),
-      itOk: pickBool(input.itOk),
-    },
-
-    meta: {
-      qCode: pickString(input.qCode),
-      flowDelta: pickString(input.flowDelta),
-    },
-
-    writerDirectives: normalizeWriterDirectives(input.writerDirectives),
-  };
-
-  return seed;
-}
-
-export function formatMirrorFlowSeed(seed: MirrorFlowSeed): FormatMirrorFlowSeedResult {
+export function formatFlowSeedV1(seed: FlowSeedV21): string {
   const lines: string[] = [];
 
-  lines.push('MIRROR_FLOW_SEED_V1');
-  lines.push('SOURCE_OF_TRUTH');
-  lines.push(`mirror=${seed.sourceOfTruth.mirror}`);
-  lines.push(`position=${seed.sourceOfTruth.position}`);
+  lines.push('FLOW:');
+  lines.push(`current=${seed.flow.current ?? '(null)'}`);
+  lines.push(`prev=${seed.flow.prev ?? '(null)'}`);
+  lines.push(`delta=${seed.flow.delta ?? '(null)'}`);
+  lines.push(`energy=${seed.flow.energy ?? '(null)'}`);
+  lines.push(`futureRandom=${seed.flow.futureRandom ?? '(null)'}`);
 
   lines.push('');
-  lines.push('MIRROR');
-  lines.push(`e_turn=${seed.mirror.e_turn ?? '(null)'}`);
-  if (seed.mirror.basedOn) {
-    lines.push(`basedOn=${seed.mirror.basedOn}`);
-  }
+  lines.push('CONTEXT:');
+  lines.push(`userCore=${seed.context.userCore ?? '(null)'}`);
+  lines.push(`historyLine=${seed.context.historyLine ?? '(null)'}`);
+  lines.push(`memoryLine=${seed.context.memoryLine ?? '(null)'}`);
 
   lines.push('');
-  lines.push('POSITION');
-  lines.push(`observedStage=${seed.position.observedStage ?? '(null)'}`);
-  if (seed.position.primaryStage) {
-    lines.push(`primaryStage=${seed.position.primaryStage}`);
-  }
-  if (seed.position.secondaryStage) {
-    lines.push(`secondaryStage=${seed.position.secondaryStage}`);
-  }
+  lines.push('FOCUS:');
+  lines.push(seed.compression.focus);
 
-  return {
-    mirrorFlowSeedText: lines.join('\n').trim(),
-    writerDirectives: seed.writerDirectives,
-    sourceOfTruth: seed.sourceOfTruth,
-  };
+  lines.push('');
+  lines.push('TONE:');
+  lines.push(seed.compression.tone);
+
+  lines.push('');
+  lines.push('PRESSURE:');
+  lines.push(
+    seed.goalKind === 'uncover' && seed.compression.pressure === 'observe'
+      ? 'uncover'
+      : seed.compression.pressure
+  );
+  return lines.join('\n').trim();
 }

@@ -199,57 +199,14 @@ function buildSeedText(args: {
   missing: Array<'e_turn' | 'depthStage' | 'polarity'>;
   context: FlowEngineResult['pack']['context'];
 }): string {
-  const ctxParts = [
-    args.context.phase ? `phase=${args.context.phase}` : null,
-    args.context.sa != null ? `sa=${args.context.sa.toFixed(2)}` : null,
-    args.context.yuragi != null ? `yuragi=${args.context.yuragi.toFixed(2)}` : null,
-    args.context.yohaku != null ? `yohaku=${args.context.yohaku.toFixed(2)}` : null,
-    args.context.saBiasHint ? `saBias=${args.context.saBiasHint}` : null,
-    args.context.confidenceHint ? `confidence=${args.context.confidenceHint}` : null,
-  ].filter(Boolean);
-
   const lines: string[] = [];
 
-  lines.push('FLOW180_SEED (DO NOT OUTPUT)');
-  lines.push('LEGEND:');
-  lines.push('- CURRENT は「いまの状態エネルギー」。');
-  lines.push('- DELTA は「どこからどこへ動いたか」。');
-  lines.push('- FUTURE_RANDOM は「未来予測」ではなく、ランダムな次の角度。');
-
-  if (ctxParts.length) {
-    lines.push(`META: ${ctxParts.join(' / ')}`);
-  }
-
-  lines.push('');
-  lines.push('CURRENT_FLOW:');
-  if (args.currentFlow) {
-    lines.push(`- id=${args.currentFlow.id} / src=${args.currentFlow.source}`);
-    lines.push(`- ${args.currentFlow.short}`);
-  } else {
-    lines.push(`- (null) missing=${args.missing.join(',') || 'none'}`);
-  }
-
-  lines.push('');
-  lines.push('FLOW_DELTA:');
-  if (args.delta) {
-    lines.push(`- prev=${args.delta.prev ?? '(none)'} / now=${args.delta.now}`);
-    lines.push(`- type=${args.delta.deltaType}`);
-    lines.push(`- ${args.delta.short}`);
-  } else {
-    lines.push('- (null)');
-  }
-
-  lines.push('');
-  lines.push('FUTURE_FLOW_RANDOM:');
-  lines.push(`- id=${args.futureFlowRandom.id} / src=random`);
-  lines.push(`- ${args.futureFlowRandom.short}`);
-
-  lines.push('');
-  lines.push('RESPONSE_GUIDE (DO NOT OUTPUT):');
-  lines.push('- 返答は CURRENT_FLOW を優先する。');
-  lines.push('- 可能なら DELTA を一度だけ反映する。');
-  lines.push('- FUTURE_FLOW_RANDOM は断定・予言に使わず、「次の角度」としてのみ扱う。');
-  lines.push('- 長い説明は足さない。状態エネルギーを軸に返す。');
+  lines.push('FLOW_V2 (DO NOT OUTPUT):');
+  lines.push(`current=${args.currentFlow?.id ?? '(null)'}`);
+  lines.push(`prev=${args.previousFlow?.id ?? '(null)'}`);
+  lines.push(`delta=${args.delta?.deltaType ?? '(null)'}`);
+  lines.push(`energy=${args.currentFlow?.energy ?? '(null)'}`);
+  lines.push(`futureRandom=${args.futureFlowRandom?.id ?? '(null)'}`);
 
   return lines.join('\n').trim();
 }

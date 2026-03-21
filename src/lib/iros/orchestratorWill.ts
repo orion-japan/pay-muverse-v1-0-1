@@ -193,12 +193,19 @@ export function computeGoalAndPriority(args: ComputeGoalAndPriorityArgs): Comput
       const anyGoal: any = goal;
 
       if (typeof anyGoal.kind === 'string') {
-        anyGoal.kind = 'stabilize';
-        anyGoal.reason = 'SoulLayer が Q5_depress を検出したため、このターンは安定・保護を最優先する';
+        const currentKind = String(anyGoal.kind).toLowerCase();
+
+        if (currentKind !== 'uncover') {
+          anyGoal.kind = 'stabilize';
+        }
+
+        anyGoal.reason =
+          'SoulLayer が Q5_depress を検出したため、このターンは安定・保護を最優先する';
 
         anyGoal.detail = {
           ...(anyGoal.detail && typeof anyGoal.detail === 'object' ? anyGoal.detail : {}),
           bySoulQ5Depress: true,
+          goalKindBeforeSoulAdjust: currentKind,
         };
       }
 
@@ -228,7 +235,6 @@ export function computeGoalAndPriority(args: ComputeGoalAndPriorityArgs): Comput
       goal = anyGoal as IrosGoalType;
     }
   }
-
   /* =========================================================
      ② Continuity Engine：前回の意志を踏まえて補正（Goal 用）
      ※ ContinuityContext は「null運用」(undefined禁止) に統一

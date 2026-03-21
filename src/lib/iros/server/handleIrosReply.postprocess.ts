@@ -54,6 +54,7 @@ export type PostProcessReplyArgs = {
   requestedMode: string | undefined;
 
   orchResult: any;
+  flowSeed?: string | null;
 
   history?: unknown[];
   topicLabel?: string | null;
@@ -153,7 +154,6 @@ function buildResonanceState(args: { metaForSave: any; userText: string }): any 
     },
   };
 
-  state.seed.seed_text = buildResonanceSeedText(state);
   return state;
 }
 /* =========================
@@ -755,7 +755,7 @@ function sanitizeLlmRewriteSeed(seedRaw: unknown, userText?: string | null): str
  * ========================= */
 
 export async function postProcessReply(args: PostProcessReplyArgs): Promise<PostProcessReplyOutput> {
-  const { orchResult, supabase, userCode, userText, conversationId } = args;
+  const { orchResult, supabase, userCode, userText, conversationId, flowSeed } = args;
 
   // 1) 本文抽出
   let finalAssistantText = extractAssistantText(orchResult);
@@ -767,6 +767,11 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
 
   // extra は必ず存在
   metaForSave.extra = metaForSave.extra ?? {};
+
+  // ✅ FLOW_SEED_V1 正本
+  if (typeof flowSeed === 'string' && flowSeed.trim()) {
+    metaForSave.extra.flowSeed = flowSeed.trim();
+  }
 
   // ✅ 正本一本化：metaForSave.framePlan が無い場合だけ orchResult.framePlan で補完
   if (metaForSave.framePlan == null) {
@@ -1484,13 +1489,17 @@ const polarityMetaBand: string | null =
   (typeof polarityBand === 'string' && polarityBand.trim() ? polarityBand.trim() : null);
   // ✅ MirrorFlow へは object で渡す（stringにすると metaBand が 'yang' になってしまう）
   const polarity: any =
-    polarityCanon == null
-      ? null
-      : {
-          in: polarityCanon,
-          out: polarityCanon,
-          metaBand: polarityMetaBand,
-        };
+  polarityCanon == null
+    ? {
+        in: 'neg',
+        out: 'neg',
+        metaBand: polarityMetaBand ?? 'negative',
+      }
+    : {
+        in: polarityCanon,
+        out: polarityCanon,
+        metaBand: polarityMetaBand,
+      };
 
   console.info('[IROS/PP][POLARITY_BRIDGE]', {
     polarityBand_raw: polarityBand ?? null,
@@ -1523,13 +1532,31 @@ const polarityMetaBand: string | null =
     },
   });
 
-  metaForSave.extra = {
-    ...(metaForSave.extra ?? {}),
-    mirrorFlowV1: mf,
-    mirror: (metaForSave as any)?.extra?.mirror ?? mf.mirror,
-    flowMirror: (metaForSave as any)?.extra?.flowMirror ?? mf.flow,
-  };
+  const prevExtra: any = (metaForSave as any)?.extra ?? {};
+  const prevCtxPack: any = prevExtra?.ctxPack ?? {};
 
+  metaForSave.extra = {
+    ...prevExtra,
+    mirrorFlowV1: mf,
+    mirror: prevExtra?.mirror ?? mf.mirror,
+    flowMirror: prevExtra?.flowMirror ?? mf.flow,
+    ctxPack: {
+      ...prevCtxPack,
+      mirrorFlowV1: mf,
+      mirror: prevCtxPack?.mirror ?? prevExtra?.mirror ?? mf.mirror,
+    },
+  };
+  // 🔥 ctxPack に polarity を強制反映
+  if ((metaForSave as any)?.extra?.ctxPack) {
+    const p =
+      (metaForSave as any)?.extra?.mirror?.polarity ??
+      (metaForSave as any)?.extra?.mirrorFlowV1?.mirror?.polarity ??
+      null;
+
+    if (p) {
+      (metaForSave as any).extra.ctxPack.polarity = p;
+    }
+  }
   if ((metaForSave as any).mirror == null) {
     (metaForSave as any).mirror = mf.mirror;
   }
@@ -1965,10 +1992,7 @@ const stateSnap = {
     (state as any)?.phase ??
     null,
 
-  seed_text:
-    typeof (state as any)?.seed?.seed_text === 'string'
-      ? (state as any).seed.seed_text.trim()
-      : null,
+    seed_text: null,
 
   // instant（このターンの反応）
   e_turn: (state as any)?.instant?.mirror?.e_turn ?? (state as any)?.instant?.e_turn ?? null,
@@ -2001,26 +2025,8 @@ const stateSnap = {
 // ✅ 正本：snapshot を保存
 (metaForSave as any).extra.resonanceState = stateSnap;
 
-// ✅ 互換：seed_text（RESONANCE_STATE 判定 & 旧キー拾いのため）
-if (
-  (metaForSave as any).extra.seed_text == null &&
-  typeof stateSnap.seed_text === 'string' &&
-  stateSnap.seed_text.trim()
-) {
-  (metaForSave as any).extra.seed_text = stateSnap.seed_text.trim();
-}
-
 // ✅ 次ターン用：ctxPack には別参照 clone
 (metaForSave as any).extra.ctxPack.resonanceState = cloneSnap(stateSnap);
-
-// ✅ ctxPack 側にも seed_text（rephraseEngine の拾い口を太くする）
-if (
-  (metaForSave as any).extra.ctxPack.seed_text == null &&
-  typeof stateSnap.seed_text === 'string' &&
-  stateSnap.seed_text.trim()
-) {
-  (metaForSave as any).extra.ctxPack.seed_text = stateSnap.seed_text.trim();
-}
 
 // =============================
 // デバッグログ（SEED材料確認用）
@@ -2033,8 +2039,8 @@ console.log('[IROS/PP][RS_SNAPSHOT]', {
   mirror_confidence: stateSnap.mirror_confidence,
   flow_delta: stateSnap.flow_delta,
   flow_returnStreak: stateSnap.flow_returnStreak,
-  seedLen: typeof stateSnap.seed_text === 'string' ? stateSnap.seed_text.length : 0,
-  seedHead: String(stateSnap.seed_text ?? '').slice(0, 96),
+  seedLen: 0,
+  seedHead: '',
   futureFlowRandom: (stateSnap as any)?.futureFlowRandom?.id ?? null,
 });
 /* =========================================

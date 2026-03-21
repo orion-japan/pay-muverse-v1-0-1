@@ -12,6 +12,7 @@
 // - callWriterLLM の “[USER] マスク互換” を完全撤去
 // - allowRawUserText は互換フィールドとして残すが、ここでは参照しない
 // - 「全部 user を生で渡す（ただし strip/clamp は維持）」に統一
+// FLOW_SEED_V1 = new compression-based seed (not legacy MIRROR_FLOW_SEED_V1)
 // =============================================
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -21,7 +22,7 @@ import type { HistoryDigestV1 } from '../../history/historyDigestV1';
 import { injectHistoryDigestV1 } from '../../history/historyDigestV1';
 import { decideRecallV1 } from '../../memory/recallGate';
 import { buildFlowMeaningV1 } from '../../memory/buildFlowMeaning';
-import { buildMirrorFlowSeed, formatMirrorFlowSeed } from '../../seed/seedEngine';
+import { buildFlowSeedV1, formatFlowSeedV1 } from '../../seed/seedEngine';
 
 export type WriterMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 type TurnMsg = { role: 'user' | 'assistant'; content: string };
@@ -392,16 +393,72 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
   const phase = pick(args?.phase, ctxPack?.phase, extra?.phase);
 
   const flowAny: any = firstNonNull(
+    // 🔥 最優先：rephraseEngine直のmeta
+    (args as any)?.meta?.extra?.flowEngineResult,
+    (args as any)?.meta?.flowEngineResult,
+
+    // 🔥 extra直
+    (extra as any)?.flowEngineResult,
+    (extra as any)?.flowEngine,
+
+    // ctxPack
+    (ctxPack as any)?.flowEngineResult,
+
+    // fallback
     (ctxPack as any)?.flow,
     (extra as any)?.ctxPack?.flow,
     (extra as any)?.flow,
+
     null,
   );
-  const currentFlowAny: any = firstNonNull(
-    flowAny?.currentFlow,
-    flowAny?.current,
+  // 🔥 internalPackRaw の FLOW_V2 から currentFlow を復元
+  let flowFromSeed: any = null;
+
+  if (internalPackRaw.includes('FLOW_V2')) {
+    const m = internalPackRaw.match(/current=([^\n]+)/);
+    if (m) {
+      flowFromSeed = {
+        currentFlow: m[1].trim(),
+      };
+    }
+  }
+
+const currentFlowAny: any = firstNonNull(
+  flowAny?.currentFlow,
+  flowAny?.current,
+  flowFromSeed?.currentFlow, // 🔥 追加
+  null,
+);
+
+  const futureFlowRaw: any = firstNonNull(
+    flowAny?.futureRandom,
+    flowAny?.future_flow,
+    flowAny?.future,
+    flowAny?.futureFlowRandom,
     null,
   );
+
+  let futureFlowAny: any = null;
+
+  if (typeof futureFlowRaw === 'string') {
+    // 例: e3-S1-neg
+    const m = futureFlowRaw.match(/(e\d)-([A-Z]\d)-(pos|neg)/);
+    if (m) {
+      futureFlowAny = {
+        energy: m[1],
+        stage: m[2],
+        polarity: m[3],
+      };
+    }
+  } else if (futureFlowRaw && typeof futureFlowRaw === 'object') {
+    futureFlowAny = {
+      energy: futureFlowRaw?.energy ?? null,
+      stage: futureFlowRaw?.stage ?? null,
+      polarity: futureFlowRaw?.polarity ?? null,
+    };
+  } else {
+    futureFlowAny = null;
+  }
 
   const mirrorFlowV1ForSeed: any =
     pick(
@@ -426,7 +483,6 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     (extra as any)?.ctxPack?.mirror,
     null,
   );
-
   const eTurn = pick(
     args?.e_turn,
     args?.eTurn,
@@ -562,17 +618,26 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     .trim()
     .toLowerCase();
 
-  const seedTextRaw = String(
-    pick(
-      (args as any)?.seed_text,
-      (args as any)?.seedText,
-      (ctxPack as any)?.seed_text,
-      (ctxPack as any)?.seedText,
-      (extra as any)?.seed_text,
-      (extra as any)?.seedText,
-      '',
-    ) ?? '',
-  ).trim();
+    const seedTextRaw = String(
+      pick(
+        // 🔥 ここを最優先に追加
+        args?.internalPack,
+
+        // 既存
+        (args as any)?.flowSeed,
+        (ctxPack as any)?.flowSeed,
+        (extra as any)?.flowSeed,
+
+        // 後方互換
+        (args as any)?.seed_text,
+        (args as any)?.seedText,
+        (ctxPack as any)?.seed_text,
+        (ctxPack as any)?.seedText,
+        (extra as any)?.seed_text,
+        (extra as any)?.seedText,
+        '',
+      ) ?? '',
+    ).trim();
 
   const flowDelta2 = String(pick(flow?.delta, (flow as any)?.flowDelta) ?? '').trim();
   const returnStreak2 = String(
@@ -1412,6 +1477,7 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   depthStage: depthStage || null,
                   qCode: qCode || null,
                   phase: phase || null,
+                  goalKind: pick((extra as any)?.goalKind, (args as any)?.extra?.goalKind, null),
                   observedStage: pick(
                     (ctxPack as any)?.observedStage,
                     (extra as any)?.observedStage,
@@ -1601,6 +1667,9 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                             '- When questions_max is 0, do not add a closing question.',
                             '- When questions_max is 1 and askBackAllowed is true, end with exactly one narrow closing question.',
                             '- The closing question must stay on the current topic and must not broaden the scope.',
+                            '- The closing question must directly narrow the user’s current statement.',
+'- Do not ask abstract or broad questions.',
+'- Do not introduce new topics.',
                           ];
                   }
                 })();
@@ -1626,155 +1695,166 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                   return picked.replace(/\s+/g, ' ').trim();
                 })();
 
-                const mirrorFlowSeedBuilt = buildMirrorFlowSeed({
-                  observedStage: pick(
-                    (ctxPack as any)?.observedStage,
-                    (extra as any)?.observedStage,
-                    currentFlowAny?.observedStage,
+                const futureHintLine = (() => {
+                  if (!futureFlowAny) return null;
+
+                  const stage = String(futureFlowAny?.stage ?? '').trim();
+                  const eTurn = String(futureFlowAny?.energy ?? '').trim();
+                  const polarity = String(futureFlowAny?.polarity ?? '').trim();
+
+                  const parts = [stage, eTurn, polarity].filter((v) => v.length > 0);
+                  if (!parts.length) return null;
+
+                  return `future:${parts.join('/')}`;
+                })();
+
+                const flowSeedV1 = buildFlowSeedV1({
+                  flow: flow,
+
+                  goalKind: pick(
+                    (extra as any)?.goalKind,
+                    (args as any)?.extra?.goalKind,
                     null,
                   ),
-                  primaryStage: pick(
-                    (ctxPack as any)?.primaryStage,
-                    (extra as any)?.primaryStage,
-                    currentFlowAny?.primaryStage,
-                    currentFlowAny?.observedStage,
-                    null,
-                  ),
-                  secondaryStage: pick(
-                    (ctxPack as any)?.secondaryStage,
-                    (extra as any)?.secondaryStage,
-                    currentFlowAny?.secondaryStage,
-                    null,
-                  ),
 
-                  depthStage: depthStage ?? null,
-                  depthHistoryLite: Array.isArray((ctxPack as any)?.depthHistoryLite)
-                    ? (ctxPack as any).depthHistoryLite
-                    : Array.isArray((extra as any)?.depthHistoryLite)
-                      ? (extra as any).depthHistoryLite
-                      : null,
+                  memoryLine: (() => {
+                    const rawMemoryLine = String(
+                      (args as any)?.memoryLine ??
+                        (extra as any)?.memoryLine ??
+                        ''
+                    ).trim();
 
-                  e_turn: eTurn || eTurn2 || null,
-                  polarity: polarity ?? null,
-                  basedOn:
-                    latestUserText ||
-                    String((ctxPack as any)?.conversationLine ?? '').trim() ||
-                    String((ctxPack as any)?.topicDigest ?? '').trim() ||
-                    null,
+                    const isHeavyInput =
+                      (extra as any)?.goalKind === 'uncover' ||
+                      (args as any)?.extra?.goalKind === 'uncover';
 
-                  willRotation:
-                    (ctxPack as any)?.willRotation ??
-                    (extra as any)?.willRotation ??
-                    null,
+                    if (!rawMemoryLine) return null;
 
-                    tLayerHint: pick(
-                      (ctxPack as any)?.tLayerHint,
-                      (extra as any)?.tLayerHint,
-                      null,
-                    ),
-                    itOk: (() => {
-                      if (typeof (ctxPack as any)?.itOk === 'boolean') return (ctxPack as any).itOk;
-                      if (typeof (ctxPack as any)?.itTriggered === 'boolean') return (ctxPack as any).itTriggered;
-                      if (typeof (ctxPack as any)?.it_triggered === 'boolean') return (ctxPack as any).it_triggered;
+                    if (isHeavyInput) {
+                      return rawMemoryLine.startsWith('recent_turn_only:')
+                        ? rawMemoryLine
+                        : null;
+                    }
 
-                      if (typeof (extra as any)?.itOk === 'boolean') return (extra as any).itOk;
-                      if (typeof (extra as any)?.itTriggered === 'boolean') return (extra as any).itTriggered;
-                      if (typeof (extra as any)?.it_triggered === 'boolean') return (extra as any).it_triggered;
+                    return rawMemoryLine;
+                  })(),
 
-                      const itxReasonNorm = String(itxReason ?? '').trim().toUpperCase();
-                      if (itxReasonNorm.includes('IT_TRIGGER_OK') || itxReasonNorm.includes('IT_HOLD')) {
-                        return true;
-                      }
-
-                      const itxStepNorm = String(itxStep ?? '').trim().toUpperCase();
-                      if (/^T[123]$/.test(itxStepNorm)) return true;
-
-                      return null;
-                    })(),
-
-                  qCode: qCode ?? null,
-                  flowDelta: flowDelta2 || null,
-
-                  writerDirectives: {
-                    tone: 'reflective',
-                    maxLines: 6,
-                    slotPolicy:
-                      flowDelta2 === 'RETURN' &&
-                      String((ctxPack as any)?.willRotation?.descentGate ?? (extra as any)?.willRotation?.descentGate ?? '').trim().toLowerCase() === 'closed' &&
-                      /^R[1-3]$/i.test(String(depthStage ?? '').trim())
-                        ? 'CONTINUITY_FIRST'
-                        : 'OBS_FIRST',
-                    rotationMention: '1sentence',
-                  },
-                });
-
-                const mirrorFlowSeedFormatted = formatMirrorFlowSeed(mirrorFlowSeedBuilt);
-                const mirrorFlowSeedText = String(mirrorFlowSeedFormatted.mirrorFlowSeedText ?? '').trim();
-
-
-                const coordMinimal: string[] = [];
-                coordMinimal.push('COORD (DO NOT OUTPUT):');
-                if (eTurn) coordMinimal.push(`e_turn=${eTurn}`);
-                if (depthStage) coordMinimal.push(`depthStage=${depthStage}`);
-                if (qCode) coordMinimal.push(`qCode=${qCode}`);
-                if (phase) coordMinimal.push(`phase=${phase}`);
-                if (polarity) coordMinimal.push(`polarity=${polarity}`);
-
-                const coordMinimalBlock = coordMinimal.length > 1 ? coordMinimal.join('\n') : '';
-
-                const internalPackRawLight = String(internalPackRaw ?? '')
-                .replace(
-                  /\n*FLOW180_SEED\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\nSTATE_CUES_V3\s*\(DO NOT OUTPUT\):|\nINTERNAL PACK\s*\(DO NOT OUTPUT\):|$)/g,
-                  '\n',
-                )
-                  .replace(
-                    /\n*STATE_CUES_V3\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\nINTERNAL PACK\s*\(DO NOT OUTPUT\):|$)/g,
-                    '\n',
-                  )
-                  .replace(/\n{3,}/g, '\n\n')
-                  .trim();
-
-                  const flowMeaningBlock = (() => {
-                    const flow = String(flowMeaningV1?.flowMeaning ?? '').trim();
-                    const tensionBase = String(flowMeaningV1?.continuingTension ?? '').trim();
-                    const hookBase = String(flowMeaningV1?.thisTurnHook ?? '').trim();
-                    const openLoop = String(flowMeaningV1?.openLoop ?? '').trim();
+                  userCore: (() => {
+                    const latest = String(latestUserText ?? '').trim();
                     const core = String(coreAssertionLine ?? '').trim();
 
-                    const tension =
-                      tensionBase && hookBase
-                        ? `${tensionBase} / ${hookBase}`
-                        : (tensionBase || hookBase);
+                    const isHeavyInput =
+                      (extra as any)?.goalKind === 'uncover' ||
+                      (args as any)?.extra?.goalKind === 'uncover';
 
-                    const lines: string[] = [];
-                    if (flow) lines.push(`flow=${flow}`);
-                    if (tension) lines.push(`tension=${tension}`);
-                    if (openLoop) lines.push(`openLoop=${openLoop}`);
+                    const base = latest || core || null;
+                    if (!base) return null;
 
-                    // ✅ 「なんでわかるの？」の核
-                    // - 先頭で断定させず、観測のあとに1行だけ置かせる
-                    // - 無理に毎回出さず、一定の長さがある核だけ渡す
-                    if (core && core.length >= 16) lines.push(`core=${core}`);
+                    // uncover でも future の方向だけは薄く残す
+                    if (futureHintLine) {
+                      return `${base}\n${futureHintLine}`;
+                    }
 
-                    lines.push('placement=after_observation_once');
-                    lines.push('core_rule=Do not open with core. First observe the visible flow, then place the core insight in one sentence if it fits.');
-                    lines.push('core_style=Not diagnosis. Not advice-first. Not a forced reveal.');
+                    if (isHeavyInput) {
+                      return base;
+                    }
 
-                    if (lines.length === 0) return '';
-                    return ['FLOW (DO NOT OUTPUT):', ...lines].join('\n');
-                  })();
+                    return base;
+                  })(),
 
-                  const seedBlocksForWriter = [mirrorFlowSeedText, flowMeaningBlock].filter((x) => norm(x));
-                  const seedBlockForWriter = seedBlocksForWriter.join('\n\n');
+                  historyLine: (() => {
+                    const rawHistory = String(
+                      (args as any)?.conversationLine ??
+                        (extra as any)?.conversationLine ??
+                        (args as any)?.topicDigest ??
+                        (extra as any)?.topicDigest ??
+                        ''
+                    ).trim();
 
-                  const injectedHead = [coordMinimalBlock, seedBlockForWriter]
-                    .filter((x) => norm(x))
-                    .join('\n\n');
+                    const isHeavyInput =
+                      (extra as any)?.goalKind === 'uncover' ||
+                      (args as any)?.extra?.goalKind === 'uncover';
 
-                    const internalPackFixed = injectedHead.trim();
-                    try {
-                      const packNorm = norm(internalPackFixed);
-                      const h = packNorm.slice(0, 900);
+                    if (!rawHistory) return futureHintLine ?? null;
+
+                    // uncover時は履歴を完全遮断。ただし futureHint だけは残す
+                    if (isHeavyInput) return futureHintLine ?? null;
+
+                    return [rawHistory, futureHintLine].filter(Boolean).join('\n');
+                  })(),
+                });
+
+                const flowSeedText = (() => {
+                  const base = formatFlowSeedV1(flowSeedV1).trim();
+
+                  const currentFromSeed =
+                    typeof flowFromSeed?.currentFlow === 'string'
+                      ? flowFromSeed.currentFlow.trim()
+                      : '';
+
+                  const prevFromSeed =
+                    typeof internalPackRaw === 'string'
+                      ? (internalPackRaw.match(/prev=([^\n]+)/)?.[1] ?? '').trim()
+                      : '';
+
+                  const deltaFromSeed =
+                    typeof internalPackRaw === 'string'
+                      ? (internalPackRaw.match(/delta=([^\n]+)/)?.[1] ?? '').trim()
+                      : '';
+
+                  const energyFromSeed =
+                    typeof internalPackRaw === 'string'
+                      ? (internalPackRaw.match(/energy=([^\n]+)/)?.[1] ?? '').trim()
+                      : '';
+
+                  const futureFromSeed =
+                    typeof internalPackRaw === 'string'
+                      ? (internalPackRaw.match(/futureRandom=([^\n]+)/)?.[1] ?? '').trim()
+                      : '';
+
+                  let out = base;
+
+                  if (currentFromSeed) {
+                    out = out.replace(/current=[^\n]*/g, `current=${currentFromSeed}`);
+                  }
+                  if (prevFromSeed) {
+                    out = out.replace(/prev=[^\n]*/g, `prev=${prevFromSeed}`);
+                  }
+                  if (deltaFromSeed) {
+                    out = out.replace(/delta=[^\n]*/g, `delta=${deltaFromSeed}`);
+                  }
+                  if (energyFromSeed) {
+                    out = out.replace(/energy=[^\n]*/g, `energy=${energyFromSeed}`);
+                  }
+                  if (futureFromSeed) {
+                    out = out.replace(/futureRandom=[^\n]*/g, `futureRandom=${futureFromSeed}`);
+                  }
+
+                  return out.trim();
+                })();
+
+                const seedBlocksForWriter = [flowSeedText].filter((x) => norm(x));
+                const seedBlockForWriter = seedBlocksForWriter.join('\n\n');
+
+                const injectedHead = [seedBlockForWriter]
+                  .filter((x) => norm(x))
+                  .join('\n\n');
+
+                  const internalPackFixed = injectedHead.trim();
+
+                  let injectedPack = internalPackFixed;
+
+                  if (futureFlowAny) {
+                    injectedPack += `\nfutureRandom=${JSON.stringify({
+                      stage: futureFlowAny?.stage ?? null,
+                      e_turn: futureFlowAny?.energy ?? null,
+                      polarity: futureFlowAny?.polarity ?? null,
+                    })}`;
+                  }
+
+                  try {
+                    const packNorm = norm(injectedPack);
+                    const h = packNorm.slice(0, 900);
 
                       const flowMatch = packNorm.match(/FLOW_CONTEXT(?:\s*\(DO NOT OUTPUT\))?:|FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:/);
                       const flowIdx = flowMatch ? flowMatch.index ?? -1 : -1;
@@ -1800,18 +1880,23 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
                         hasPolarity: /polarity=/.test(packNorm),
                         hasSA: /sa=/.test(packNorm),
 
-                        // 旧 itx_step / itx_reason だけでなく、MirrorFlow Seed v1 の OPENNESS も検知する
+                        // 旧 itx_step / itx_reason に加えて、FLOW_SEED_V1 内の itOk も検知する
                         hasITX:
                           /itx_step=|itx_reason=/.test(packNorm) ||
-                          /tLayerHint=|itOk=/.test(packNorm),
+                          /itOk=/.test(packNorm),
 
-                        hasFuture: /future=/.test(packNorm),
+                        hasFuture:
+                          /future=/.test(packNorm) ||
+                          /futureRandom=/.test(packNorm),
+
                         hasStateCues: /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/.test(packNorm),
                         hasFlowMeaning: flowIdx >= 0,
 
-                        hasMirrorFlowSeed: /MIRROR_FLOW_SEED_V1\b/.test(packNorm),
-                        hasOpenness,
-                        hasWriterDirectives,
+                        hasMirrorFlowSeed:
+                        /FLOW_SEED_V1\b/.test(packNorm) ||
+                        /FLOW:\s*\n/.test(packNorm),
+                      hasOpenness,
+                      hasWriterDirectives,
 
                         flowSnippet,
                         saRhythm: saRhythm || null,

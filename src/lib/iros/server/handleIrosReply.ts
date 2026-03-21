@@ -18,6 +18,8 @@ import { runGreetingGate } from './handleIrosReply.gates';
 import { buildTurnContext } from './handleIrosReply.context';
 import { runOrchestratorTurn } from './handleIrosReply.orchestrator';
 import { postProcessReply } from './handleIrosReply.postprocess';
+import { buildFlowSeedV1, formatFlowSeedV1 } from '@/lib/iros/seed/seedEngine';
+import { buildBlockPlanWithDiag } from '@/lib/iros/blockPlan/blockPlanEngine';
 import { extractSlotsForRephrase, rephraseSlotsFinal } from '@/lib/iros/language/rephraseEngine';
 import {
   loadConversationHistory,
@@ -826,9 +828,7 @@ function runLlmGate(args: {
 // ✅ runLlmGate() の中（metaForProbe / slotPlanPolicy を決めた直後あたり）に追加
 // --- BLOCK_PLAN を meta.extra に stamp（LLM_GATE / inject が同一turnで見れるようにする）---
 try {
-  // lazy import（server側で依存増を避ける）
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { buildBlockPlanWithDiag } = require('@/lib/iros/blockPlan/blockPlanEngine');
+  // static import に統一（runtime 安定化）
 
   const stampOne = (metaAny: any, from: string) => {
     if (!metaAny || typeof metaAny !== 'object') return;
@@ -2257,7 +2257,6 @@ function normForRecall(v: any): string {
     }
 
     // ✅ Orchestrator（V2: 判断のみ。本文生成はしない）
-    // ✅ Orchestrator（V2: 判断のみ。本文生成はしない）
     const to = nowNs();
     const orch = await (runOrchestratorTurn as any)({
       conversationId,
@@ -2278,6 +2277,66 @@ function normForRecall(v: any): string {
     });
     t.orchestrator_ms = msSince(to);
 
+    const orchMeta = (orch as any)?.meta ?? {};
+    const orchExtra = orchMeta?.extra ?? {};
+    const orchCtxPack = orchExtra?.ctxPack ?? {};
+    const orchFlow = orchCtxPack?.flow ?? orchExtra?.flow ?? orchMeta?.flow ?? null;
+
+    const flowSeedObj = buildFlowSeedV1({
+      flow: {
+        current:
+          orchFlow?.labels?.current ??
+          orchFlow?.current ??
+          orchFlow?.currentId ??
+          null,
+        prev:
+          orchFlow?.labels?.prev ??
+          orchFlow?.prev ??
+          orchFlow?.prevId ??
+          null,
+        delta:
+          orchFlow?.flowDelta ??
+          orchFlow?.delta ??
+          null,
+        energy:
+          orchCtxPack?.emotionalTemperature ??
+          orchExtra?.emotionalTemperature ??
+          null,
+        futureRandom:
+          orchFlow?.labels?.future ??
+          orchFlow?.futureRandom ??
+          null,
+      },
+      userCore:
+        String(text ?? '').trim() || null,
+        historyLine: (() => {
+          const rawHistory = String(
+            orchCtxPack?.conversationLine ??
+              orchExtra?.conversationLine ??
+              '',
+          ).trim();
+
+          const isHeavyInput =
+            String(orchCtxPack?.shiftKind ?? '').trim() === 'uncover_shift' ||
+            String(orchCtxPack?.goalKind ?? '').trim() === 'uncover';
+
+          if (!rawHistory) return null;
+
+          // 🔥 uncoverは履歴完全遮断
+          if (isHeavyInput) return null;
+
+          return rawHistory;
+        })(),
+      memoryLine:
+        String(
+          orchCtxPack?.topicDigest ??
+            orchExtra?.topicDigest ??
+            '',
+        ).trim() || null,
+    });
+
+    const flowSeed = formatFlowSeedV1(flowSeedObj).trim();
+
     /* ---------------------------
        4) PostProcess
     ---------------------------- */
@@ -2293,6 +2352,7 @@ function normForRecall(v: any): string {
       requestedMode: ctx.requestedMode,
 
       orchResult: orch,
+      flowSeed,
       history: historyForTurn,
       extra: extraLocal ?? null,
     });
@@ -2660,6 +2720,80 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
   const shiftSlot = slotPlanArr.find(
     (s: any) => String(s?.key ?? s?.id ?? '').toUpperCase() === 'SHIFT',
   );
+
+  {
+    const metaAny: any = (out.metaForSave ??= {});
+    const exAny: any = (metaAny.extra ??= {});
+    const cpAny: any =
+      exAny.ctxPack && typeof exAny.ctxPack === 'object'
+        ? exAny.ctxPack
+        : (exAny.ctxPack = {});
+
+    const shiftText = String((shiftSlot as any)?.text ?? '').trim();
+
+    const shiftPayload: any = (() => {
+      if (!shiftText) return null;
+
+      const m = shiftText.match(/^@SHIFT\s+(\{[\s\S]*\})$/);
+      if (!m) return null;
+
+      try {
+        return JSON.parse(m[1]);
+      } catch {
+        return null;
+      }
+    })();
+
+    const finalShiftKind =
+      typeof shiftPayload?.kind === 'string' && shiftPayload.kind.trim()
+        ? shiftPayload.kind.trim()
+        : null;
+
+    const finalGoalKind = (() => {
+      const v = String(finalShiftKind ?? '').trim().toLowerCase();
+
+      if (v === 'uncover_shift') return 'uncover';
+      if (v === 'stabilize_shift') return 'stabilize';
+      if (v === 'narrow_shift') return 'narrow';
+      if (v === 'clarify_shift') return 'clarify';
+      if (v === 'decide_shift') return 'decide';
+      if (v === 'cutoff_shift' || v === 'cut_off_shift') return 'cutOff';
+
+      return null;
+    })();
+
+    if (finalShiftKind) {
+      cpAny.shiftKind = finalShiftKind;
+    }
+
+    if (finalGoalKind) {
+      cpAny.goalKind = finalGoalKind;
+
+      metaAny.targetKind = finalGoalKind;
+      metaAny.target_kind = finalGoalKind;
+
+      exAny.goalKind = exAny.goalKind ?? finalGoalKind;
+      exAny.targetKind = exAny.targetKind ?? finalGoalKind;
+      exAny.target_kind = exAny.target_kind ?? finalGoalKind;
+
+      if (cpAny.replyGoal == null) {
+        cpAny.replyGoal = { kind: finalGoalKind };
+      }
+    }
+
+    try {
+      console.log('[IROS/SHIFT_SYNC][FINAL_SLOTPLAN_TO_META]', {
+        traceId: exAny.traceId ?? cpAny.traceId ?? null,
+        finalShiftKind,
+        finalGoalKind,
+        targetKind: metaAny.targetKind ?? null,
+        target_kind: metaAny.target_kind ?? null,
+        ctxPack_shiftKind: cpAny.shiftKind ?? null,
+        ctxPack_goalKind: cpAny.goalKind ?? null,
+        ctxPack_replyGoal: cpAny.replyGoal ?? null,
+      });
+    } catch {}
+  }
 
   const shiftText = String(
     shiftSlot?.content ?? shiftSlot?.text ?? '',
@@ -3710,6 +3844,14 @@ if (digestV1Raw) {
       emotionalTemperature === 'volatile' ||
       hasAny('戻ってきた', '動けない', '止まる', 'しんどい')
     ) {
+      if (
+        shift2_goalKind === 'uncover' ||
+        shift2_goalKind === 'cutOff' ||
+        hasAny('辞めようと思っています', '辞めたい', 'やめたい', '終わらせたい', '切りたい', '離れたい')
+      ) {
+        return 'uncover_shift' as const;
+      }
+
       return 'stabilize_shift' as const;
     }
 
@@ -5446,11 +5588,40 @@ const inputKindCanon: string | null = (() => {
       })(),
 
       userText: typeof text === 'string' ? text : null,
-      goalKind:
-        ((out.metaForSave as any)?.extra?.ctxPack as any)?.goalKind ??
-        (out.metaForSave as any)?.targetKind ??
-        (out.metaForSave as any)?.target_kind ??
-        null,
+      goalKind: (() => {
+        const cp: any = ((out.metaForSave as any)?.extra?.ctxPack as any) ?? null;
+        const replyGoalRaw = cp?.replyGoal ?? null;
+
+        const replyGoalKindNormalized =
+          typeof replyGoalRaw === 'string'
+            ? String(replyGoalRaw).trim() || null
+            : typeof replyGoalRaw === 'object' && replyGoalRaw
+              ? String((replyGoalRaw as any).kind ?? '').trim() || null
+              : null;
+
+        const resolved =
+          replyGoalKindNormalized ??
+          cp?.goalKind ??
+          (out.metaForSave as any)?.targetKind ??
+          (out.metaForSave as any)?.target_kind ??
+          null;
+
+        console.log('[IROS/GOALKIND_BRIDGE][REPHRASE_GOALKIND_RESOLVED]', {
+          traceId: traceIdCanon,
+          conversationId: _conversationId ?? null,
+          userCode: _userCode ?? null,
+          top_goalKind:
+            (out.metaForSave as any)?.targetKind ??
+            (out.metaForSave as any)?.target_kind ??
+            null,
+          ctxPack_goalKind: cp?.goalKind ?? null,
+          replyGoal: replyGoalRaw,
+          replyGoalKindNormalized,
+          resolved,
+        });
+
+        return resolved;
+      })(),
 
       extra: {
         ...(((out.metaForSave as any)?.extra ?? {}) as any),

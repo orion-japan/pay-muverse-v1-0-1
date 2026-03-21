@@ -11,6 +11,7 @@ export type FlowMeaningInput = {
   depthStage?: string | null;
   qCode?: string | null;
   phase?: string | null;
+  goalKind?: string | null;
 
   observedStage?: string | null;
   primaryStage?: string | null;
@@ -76,7 +77,7 @@ export function buildFlowMeaningV1(args: FlowMeaningInput): FlowMeaningOutput {
   const depthStage = norm(args.depthStage);
   const qCode = norm(args.qCode);
   const phase = norm(args.phase);
-
+  const goalKind = norm(args.goalKind);
   const observedStage = norm(args.observedStage);
   const primaryStage = norm(args.primaryStage);
   const secondaryStage = norm(args.secondaryStage);
@@ -213,7 +214,10 @@ export function buildFlowMeaningV1(args: FlowMeaningInput): FlowMeaningOutput {
     }
   }
 
-  if (depthStage.startsWith('S') || qCode === 'Q3') {
+  if (goalKind === 'uncover') {
+    flowMeaning =
+      'いまは輪郭整理ではなく、戻れない変化点と本音の核を観測する局面';
+  } else if (depthStage.startsWith('S') || qCode === 'Q3') {
     flowMeaning += '。強く断定するより、まず安全な理解を作るほうが合う';
   }
 
@@ -222,7 +226,11 @@ export function buildFlowMeaningV1(args: FlowMeaningInput): FlowMeaningOutput {
   }
 
   if (stingLevel === 'high') {
-    continuingTension += '。言葉の選び方しだいで刺さりにも負荷にもなりやすい';
+    if (goalKind === 'uncover') {
+      continuingTension += '。いまは言葉を弱めるより、何がもう戻れないくらい変わったのかを見抜く必要がある';
+    } else {
+      continuingTension += '。言葉の選び方しだいで刺さりにも負荷にもなりやすい';
+    }
   }
 
   if (secondaryHead === 'I' && observedHead !== 'I') {

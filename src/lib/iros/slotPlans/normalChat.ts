@@ -238,7 +238,9 @@ function buildCompose(userText: string, laneKey?: LaneKey, flowDelta?: string | 
           no_advice: true,
           no_summary: true,
           no_checklist: true,
-          questions_max: 1,
+          questions_max: 0,
+          no_question_back: true,
+          no_question_end: false,
         },
       }),
     },
@@ -832,7 +834,9 @@ function buildShiftTConcretize(seedText: string, focusLabel?: string) {
       no_checklist: true,
       no_lecture: true,
       no_future_instruction: true, // 「〜しておくといい」系の未来講釈を抑制
-      questions_max: 1,
+      questions_max: 0,
+      no_question_back: true,
+      no_question_end: false,
       // 追加の“テンプレ抑制”は seed 側で強く縛る（ここは既存互換を維持）
     },
     seed_text: packedSeed,
@@ -1031,7 +1035,7 @@ function buildFlowReply(args: {
 
     return 'low' as const;
   })();
-  console.log('[IROS/NORMAL_CHAT][SHIFT_INPUTS]', {
+  console.log('[IROS/NORMAL_CHAT][SHIFT_INPUTS_REAL]', {
     stampedShiftKind:
       String((args as any)?.ctxPack?.shiftKind ?? '').trim() ||
       String((args as any)?.meta?.extra?.ctxPack?.shiftKind ?? '').trim() ||
@@ -1040,10 +1044,21 @@ function buildFlowReply(args: {
       String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
       String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
       '',
+    goalKind_metaExtra:
+      String((args as any)?.meta?.extra?.goalKind ?? '').trim() ||
+      '',
+    goalKind_ctxPack:
+      String((args as any)?.ctxPack?.goalKind ?? '').trim() ||
+      '',
+    targetKind:
+      String((args as any)?.targetKind ?? '').trim() ||
+      '',
     hasCtxPack: !!(args as any)?.ctxPack,
     hasMeta: !!(args as any)?.meta,
     userHead: String(args.userText ?? '').slice(0, 60),
+    typeof_userText: typeof args.userText,
   });
+
   const shiftKind2 = (() => {
     const stampedShiftKind =
       String((args as any)?.ctxPack?.shiftKind ?? '').trim() ||
@@ -1077,6 +1092,9 @@ function buildFlowReply(args: {
     const isReturnFlow = String(delta ?? '').trim().toUpperCase() === 'RETURN';
 
     // ① 上流確定があれば最優先
+    // ※ blockPlan は明示トリガー専用（explicit trigger）であり、
+    //    通常の会話フローでは発火しないため、
+    //    ここ（normalChat）の分岐が実質的なSHIFT決定の本体になる
     if (
       stampedShiftKind === 'clarify_shift' ||
       stampedShiftKind === 'stabilize_shift' ||
@@ -1120,10 +1138,49 @@ function buildFlowReply(args: {
 
     // ⑤ RETURN は「全部 stabilize」にせず、
     //    明確な停滞語がある時だけ stabilize にする
-    if (
+    // ※ blockPlan は明示トリガー専用のため、通常フローではここが実質的な最終決定ポイント
+    // ※ goalKind=uncover の場合は stabilize に吸われないようにする（探索優先）
+
+    const goalKind2 =
+    String((args as any)?.meta?.extra?.goalKind ?? '').trim() ||
+    String((args as any)?.ctxPack?.goalKind ?? '').trim() ||
+    String((args as any)?.targetKind ?? '').trim() ||
+    '';
+
+    const shouldStabilize =
       hasAny('また同じところ', '戻ってきた', '動けない', '止まる', 'しんどい') ||
-      (isReturnFlow && emotionalTemperature2 === 'high')
-    ) {
+      (isReturnFlow && emotionalTemperature2 === 'high');
+
+    // 🔍 ログ
+    try {
+      console.log('[IROS/SHIFT_DECISION][STABILIZE_CHECK_REAL]', {
+        goalKind2: goalKind2 ?? null,
+        shouldStabilize: shouldStabilize ?? null,
+        isReturnFlow: isReturnFlow ?? null,
+        emotionalTemperature2: emotionalTemperature2 ?? null,
+        text: t ?? null,
+        hasAnyResult: hasAny(
+          'また同じところ',
+          '戻ってきた',
+          '動けない',
+          '止まる',
+          'しんどい'
+        ),
+      });
+    } catch {}
+    if (shouldStabilize) {
+      // uncover の場合は stabilize を回避
+      if (goalKind2 === 'uncover') {
+        try {
+          console.log('[IROS/SHIFT_DECISION][SKIP_STABILIZE_BY_GOALKIND]', {
+            goalKind2,
+            reason: 'uncover_prefer_explore',
+          });
+        } catch {}
+
+        return 'narrow_shift' as const;
+      }
+
       return 'stabilize_shift' as const;
     }
 
@@ -1252,6 +1309,68 @@ function buildFlowReply(args: {
 
   const outputPolicyForFlow = questionForFlow?.outputPolicy ?? null;
 
+  const goalKindForShift = (() => {
+    const metaGoalKind =
+      String((args as any)?.meta?.extra?.goalKind ?? '').trim() ||
+      String((args as any)?.ctxPack?.goalKind ?? '').trim() ||
+      String((args as any)?.targetKind ?? '').trim() ||
+      '';
+
+    if (metaGoalKind) return metaGoalKind;
+
+    const hasLimitCue = hasAny(
+      'もう耐えられない',
+      '耐えられない',
+      '限界',
+      'もう無理',
+      '無理です',
+      'しんどすぎる',
+      '苦しすぎる',
+      '壊れそう',
+      '消えたい',
+      '逃げたい'
+    );
+
+    const hasAbuseCue = hasAny(
+      'パワハラ',
+      'モラハラ',
+      '暴言',
+      '怒鳴',
+      '威圧',
+      '人格否定',
+      'いじめ',
+      '支配',
+      '脅し'
+    );
+
+    const hasSeparationCue = hasAny(
+      '辞めたい',
+      'やめたい',
+      '辞めようと思っています',
+      '終わらせたい',
+      '切りたい',
+      '離れたい'
+    );
+
+    const inferred =
+      hasSeparationCue || hasAbuseCue || hasLimitCue
+        ? 'uncover'
+        : '';
+
+    try {
+      console.log('[IROS/SHIFT_DECISION][GOALKIND_FOR_SHIFT_REAL]', {
+        metaGoalKind: metaGoalKind || null,
+        hasLimitCue,
+        hasAbuseCue,
+        hasSeparationCue,
+        inferred: inferred || null,
+        text: t ?? null,
+      });
+    } catch {}
+
+    return inferred;
+  })();
+
   const questionsMax2 =
     outputPolicyForFlow?.askBackAllowed === false ||
     shiftKind2 === 'clarify_shift' ||
@@ -1263,34 +1382,75 @@ function buildFlowReply(args: {
       ? 0
       : 1;
 
+  const useUncoverShift =
+    goalKindForShift === 'uncover' &&
+    !useTConcretize &&
+    !useIdeaBand;
+
+  try {
+    console.log('[IROS/SHIFT_DECISION][UNLOCK_UNCOVER_SHIFT_CHECK]', {
+      goalKindForShift,
+      useTConcretize,
+      useIdeaBand,
+      useUncoverShift,
+      shiftKind2,
+      shiftIntent2,
+      shiftHint2,
+    });
+  } catch {}
+
   const shift =
-    useTConcretize
-      ? buildShiftTConcretize(seedText, args.focusLabel)
-      : useIdeaBand
-        ? buildShiftIdeaBand(seedText)
-        : m('SHIFT', {
-            kind: shiftKind2,
-            intent: shiftIntent2,
-            hint: shiftHint2,
-            line: shiftLine2,
-            source: 'phase2_shift',
-            rules: {
-              answer_user_meaning: shiftKind2 !== 'decide_shift',
-              answer_in_one_shot: shiftKind2 === 'decide_shift',
-              first_line_is_core_answer: shiftKind2 === 'decide_shift',
-              no_question_back: shiftKind2 === 'decide_shift',
-              no_question_end: shiftKind2 === 'decide_shift',
-              keep_it_simple: true,
-              no_flow_lecture: true,
-              no_meta_explain: true,
-              questions_max: questionsMax2,
-            },
-            allow: {
-              concrete_reply: true,
-              short_reply_ok: true,
-            },
-            seed_text: seedText,
-          });
+    useUncoverShift
+      ? m('SHIFT', {
+          kind: 'uncover_shift',
+          intent: 'uncover_meaning',
+          hint: 'uncover_shift_v1',
+          line: shiftLine2,
+          source: 'goalKind_uncover',
+          rules: {
+            answer_user_meaning: true,
+            answer_in_one_shot: true,
+            first_line_is_core_answer: true,
+            no_question_back: true,
+            no_question_end: false,
+            keep_it_simple: true,
+            no_flow_lecture: true,
+            no_meta_explain: true,
+            questions_max: 0,
+          },
+          allow: {
+            concrete_reply: false,
+            short_reply_ok: true,
+          },
+          seed_text: seedText,
+        })
+      : useTConcretize
+        ? buildShiftTConcretize(seedText, args.focusLabel)
+        : useIdeaBand
+          ? buildShiftIdeaBand(seedText)
+          : m('SHIFT', {
+              kind: shiftKind2,
+              intent: shiftIntent2,
+              hint: shiftHint2,
+              line: shiftLine2,
+              source: 'phase2_shift',
+              rules: {
+                answer_user_meaning: shiftKind2 !== 'decide_shift',
+                answer_in_one_shot: shiftKind2 === 'decide_shift',
+                first_line_is_core_answer: shiftKind2 === 'decide_shift',
+                no_question_back: shiftKind2 === 'decide_shift',
+                no_question_end: shiftKind2 === 'decide_shift',
+                keep_it_simple: true,
+                no_flow_lecture: true,
+                no_meta_explain: true,
+                questions_max: questionsMax2,
+              },
+              allow: {
+                concrete_reply: true,
+                short_reply_ok: true,
+              },
+              seed_text: seedText,
+            });
 
   return [
     {

@@ -87,7 +87,17 @@ export function runQuestionEngine(input: QuestionEngineInput): QuestionEngineRes
 
   const questionType = fallbackQuestionType(input, domain);
   console.log('[IROS/IT][QTYPE]', { questionType });
-
+// ✅ 非質問はここで完全スキップ
+if (!questionType) {
+  return {
+    domain,
+    questionType: null,
+    iframe: null,
+    pastResolve: null,
+    tState: null,
+    outputPolicy: null,
+  };
+}
   const iframe = fallbackIFrame(input, domain, questionType);
   console.log('[IROS/IT][IFRAME]', {
     domain: iframe.domain,

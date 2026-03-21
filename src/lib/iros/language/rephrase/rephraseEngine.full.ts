@@ -3134,93 +3134,156 @@ if (!disableFlowSeedin) {
 
   const ip = String(internalPack ?? '');
 
-  if (!/FLOW180_SEED\s*\(DO NOT OUTPUT\)/.test(ip)) {
-    const { buildFlowEngineResult } = await import('@/lib/iros/flow/flowEngine');
-    const { listFlow180 } = await import('@/lib/iros/flow/flow180');
+  const { buildFlowEngineResult } = await import('@/lib/iros/flow/flowEngine');
 
-    const basedOn = String(userText ?? '').trim().slice(0, 80) || null;
+  const basedOn = String(userText ?? '').trim().slice(0, 80) || null;
 
-    const e_turn =
-      (ctxPack0?.mirror?.e_turn ?? ctxPack0?.e_turn ?? null) as any;
+  const ucExtra: any =
+    (opts as any)?.userContext?.meta?.extra ??
+    (opts as any)?.userContext?.extra ??
+    null;
 
-    const polarity =
-      (ctxPack0?.mirror?.polarity ?? ctxPack0?.polarity ?? null) as any;
+  const mirrorFlowV1Any: any =
+    ctxPack0?.mirrorFlowV1 ??
+    ucExtra?.ctxPack?.mirrorFlowV1 ??
+    ucExtra?.mirrorFlowV1 ??
+    null;
 
-    const sa = (ctxPack0?.sa ?? null) as any;
+  const mirrorAny: any =
+    ctxPack0?.mirror ??
+    ucExtra?.ctxPack?.mirror ??
+    ucExtra?.mirror ??
+    mirrorFlowV1Any?.mirror ??
+    null;
 
-    const confidence =
-      (ctxPack0?.mirror?.confidence ?? ctxPack0?.confidence ?? null) as any;
+  const e_turn =
+    (mirrorFlowV1Any?.mirror?.e_turn ??
+      mirrorAny?.e_turn ??
+      ctxPack0?.e_turn ??
+      ucExtra?.ctxPack?.e_turn ??
+      ucExtra?.e_turn ??
+      null) as any;
 
-    const flowResult = buildFlowEngineResult({
-      current: {
-        depthStage: (pickedDepthStage ?? null) as any,
-        e_turn,
-        polarity,
-        sa,
-        basedOn,
-        confidence,
-        phase: (ctxPack0?.phase ?? null) as any,
-      },
-    });
-// ✅ ctxPack に flow を反映
-if (ctxPack0) {
-  ctxPack0.flow = {
-    current: flowResult?.currentFlow ?? null,
-    previous: flowResult?.previousFlow ?? null,
-    futureRandom: flowResult?.futureFlowRandom ?? null,
-    delta: flowResult?.delta ?? null,
-    at: new Date().toISOString(),
-  };
-}
-    const flow180List = listFlow180();
-    const flow180SeedText = flow180List
-      .map((f: any) => {
-        const id = String(f?.id ?? '').trim();
-        const short = String(f?.short ?? '').trim();
-        return id && short ? `${id}: ${short}` : null;
+  const polarity =
+    (mirrorFlowV1Any?.mirror?.polarity ??
+      mirrorAny?.polarity ??
+      ctxPack0?.polarity ??
+      ucExtra?.ctxPack?.polarity ??
+      ucExtra?.polarity ??
+      null) as any;
+      const polarityNorm =
+        (() => {
+          const raw =
+            typeof polarity === 'string'
+              ? polarity
+              : polarity?.in ?? polarity?.out ?? null;
+
+          const s = String(raw ?? '').trim().toLowerCase();
+
+          if (s === 'pos' || s === 'positive' || s === 'yang') return 'pos';
+          if (s === 'neg' || s === 'negative' || s === 'yin') return 'neg';
+
+          return null;
+        })();
+      typeof polarity === 'string'
+        ? polarity
+        : polarity?.in ?? polarity?.out ?? null;
+  const sa =
+    (ctxPack0?.sa ??
+      ucExtra?.ctxPack?.sa ??
+      ucExtra?.sa ??
+      null) as any;
+
+  const confidence =
+    (mirrorFlowV1Any?.mirror?.confidence ??
+      mirrorAny?.confidence ??
+      ctxPack0?.confidence ??
+      ucExtra?.ctxPack?.confidence ??
+      ucExtra?.confidence ??
+      null) as any;
+    console.log(
+      '[IROS/rephraseEngine][FLOW_CURRENT_INPUT]',
+      JSON.stringify({
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        pickedDepthStage: pickedDepthStage ?? null,
+        e_turn: e_turn ?? null,
+        polarity: polarity ?? null,
+        sa: sa ?? null,
+        confidence: confidence ?? null,
+        phase: ctxPack0?.phase ?? null,
       })
-      .filter(Boolean)
-      .join('\n')
-      .trim();
+    );
+  const flowResult = buildFlowEngineResult({
+    current: {
+      depthStage: (pickedDepthStage ?? null) as any,
+      e_turn,
+      polarity: polarityNorm,
+      sa,
+      basedOn,
+      confidence,
+      phase: (ctxPack0?.phase ?? null) as any,
+    },
+  });
 
-      console.log(
-        '[IROS/rephraseEngine][FLOW_ENGINE_RESULT]',
-        JSON.stringify({
-          traceId: debug.traceId,
-          conversationId: debug.conversationId,
-          userCode: debug.userCode,
-          currentFlow: flowResult?.currentFlow?.id ?? null,
-          previousFlow: flowResult?.previousFlow?.id ?? null,
-          futureFlowRandom: flowResult?.futureFlowRandom?.id ?? null,
-          delta: flowResult?.delta ?? null,
-        })
-      );
-
-    if (flow180SeedText) {
-      internalPack = [
-        String(internalPack ?? '').trim(),
-        ['FLOW180_SEED (DO NOT OUTPUT):', flow180SeedText].join('\n'),
-      ]
-        .filter(Boolean)
-        .join('\n\n');
-
-      console.log('[IROS/rephraseEngine][FLOW_SEEDIN] appended', {
-        traceId: debug.traceId,
-        conversationId: debug.conversationId,
-        userCode: debug.userCode,
-        len: flow180SeedText.length,
-        count: flow180List.length,
-      });
-    } else {
-      console.warn('[IROS/rephraseEngine][FLOW_SEEDIN] empty_seed', {
-        traceId: debug.traceId,
-        conversationId: debug.conversationId,
-        userCode: debug.userCode,
-      });
-    }
+  // ✅ ctxPack に flow を反映（V2 minimal）
+  if (ctxPack0) {
+    ctxPack0.flow = {
+      current: flowResult?.currentFlow ?? null,
+      previous: flowResult?.previousFlow ?? null,
+      futureRandom: flowResult?.futureFlowRandom ?? null,
+      delta: flowResult?.delta ?? null,
+      at: new Date().toISOString(),
+    };
   }
-}
 
+  const flowSeedText = [
+    'FLOW_V2 (DO NOT OUTPUT):',
+    `current=${flowResult?.currentFlow?.id ?? '(null)'}`,
+    `prev=${flowResult?.previousFlow?.id ?? '(null)'}`,
+    `delta=${flowResult?.delta?.deltaType ?? '(null)'}`,
+    `energy=${flowResult?.currentFlow?.energy ?? '(null)'}`,
+    `futureRandom=${flowResult?.futureFlowRandom?.id ?? '(null)'}`,
+  ].join('\n');
+
+  internalPack = String(internalPack ?? '')
+    .replace(/\n*FLOW180_SEED\s*\(DO NOT OUTPUT\):[\s\S]*$/i, '')
+    .replace(/\n*FLOW\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ ]+\(DO NOT OUTPUT\):|$)/i, '')
+    .replace(/\n*FLOW_V2\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ ]+\(DO NOT OUTPUT\):|$)/i, '')
+    .trim();
+
+  internalPack = [
+    internalPack,
+    flowSeedText,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  console.log(
+    '[IROS/rephraseEngine][FLOW_ENGINE_RESULT]',
+    JSON.stringify({
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      currentFlow: flowResult?.currentFlow?.id ?? null,
+      previousFlow: flowResult?.previousFlow?.id ?? null,
+      futureFlowRandom: flowResult?.futureFlowRandom?.id ?? null,
+      delta: flowResult?.delta ?? null,
+      energy: flowResult?.currentFlow?.energy ?? null,
+    })
+  );
+
+  console.log(
+    '[IROS/rephraseEngine][FLOW_V2_SEEDIN]',
+    JSON.stringify({
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      seed: flowSeedText,
+    })
+  );
+}
 // ✅ upstream 観測（internalPack 時点の事実だけを見る）
 // - ここは messages 注入前なので injected 側は見ない
 // - downstream の injected 実体確認は writerCalls / STATE_CUES 側ログを正とする
@@ -3249,8 +3312,9 @@ const flowSeedNearInternal = __pickBlockNear(
 
 console.log('[IROS/SEED]', flowSeedNearInternal);
 const __patterns = {
-  mirror: /MIRROR_FLOW_SEED_V1\b/i,
+  mirror: /FLOW_SEED_V1\b/i,
   flow: /FLOW180_SEED\s*\(DO NOT OUTPUT\)/i,
+  flowV1: /FLOW:\s*\n/i,
 };
 
 const __traceId = String((opts as any)?.traceId ?? '');
@@ -3755,14 +3819,16 @@ userContext: {
     const flowDeltaNow =
       String(flowDigest ?? '').toLowerCase().includes('return') ? 'RETURN' : null;
 
-    // seed_text（例: '流れ:RETURN / 戻り:2'）から戻り回数を読む。無ければ 0。
+    // flowSeed / flowDigest から戻り回数を読む。無ければ 0。
     const returnStreakNow = (() => {
       const src = String(
-        ((opts as any)?.userContext?.ctxPack?.seed_text ?? '') ||
+        ((opts as any)?.userContext?.ctxPack?.flowSeed ??
+          (opts as any)?.userContext?.extra?.flowSeed ??
+          '') ||
           (flowDigest ?? '')
       );
-      const m = src.match(/戻り:\s*(\d+)/);
-      const n = m ? Number(m[1]) : 0;
+      const m = src.match(/戻り:\s*(\d+)|returnStreak[:=]\s*(\d+)/i);
+      const n = m ? Number(m[1] ?? m[2]) : 0;
       return Number.isFinite(n) ? n : 0;
     })();
 
@@ -4740,7 +4806,7 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
  * [置換] src/lib/iros/language/rephrase/rephraseEngine.full.ts
  * 目的:
  * - internalPack だけでなく、messages に注入されている injectedPack（assistant0 content）も検査する
- * - TEXT_SEED と 新形式 seed（MIRROR_FLOW_SEED_V1 / CARD_PACKET）の「どっちがどこにいるか」を確証ログで固定する
+ * - TEXT_SEED と 新形式 seed（FLOW_SEED_V1 / CARD_PACKET）の「どっちがどこにいるか」を確証ログで固定する
  * ========================================= */
 {
   const pack = String(internalPack ?? '');
@@ -4762,26 +4828,34 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
       ? pack.slice(Math.max(0, textSeedIdx - 140), Math.min(pack.length, textSeedIdx + 260))
       : null;
 
-// ✅ 新形式 seed / flow（internalPack 側）
+  // ✅ 新形式 seed / flow（internalPack 側）
   const seedPatterns = [
-    /MIRROR_FLOW_SEED_V1\b/i,
+    /FLOW_SEED_V1\b/i,
     /FLOW180_SEED\s*\(DO NOT OUTPUT\)\s*:/i,
+    /FLOW:\s*\n/i,
   ];
 
-  const flowSeedIdxInternal = seedPatterns
-    .map((re) => pack.search(re))
-    .find((n) => typeof n === 'number' && n >= 0);
+  const hasMirrorFlowSeed =
+  /MIRROR_FLOW_SEED_V1\b/.test(pack) ||
+  /FLOW_SEED_V1\b/.test(pack) ||
+  /FLOW:\s*\n/.test(pack);
+
+  const flowSeedIdxInternal =
+    seedPatterns
+      .map((re) => pack.search(re))
+      .find((n) => typeof n === 'number' && n >= 0) ?? -1;
 
   const flowSeedNearInternal =
-    typeof flowSeedIdxInternal === 'number' && flowSeedIdxInternal >= 0
+    flowSeedIdxInternal >= 0
       ? pack.slice(
           Math.max(0, flowSeedIdxInternal - 140),
           Math.min(pack.length, flowSeedIdxInternal + 420),
         )
       : null;
-      console.log('[IROS/SEED_NEAR]', flowSeedNearInternal);
+
+  console.log('[IROS/SEED_NEAR]', flowSeedNearInternal);
   // ✅ messages 側（注入された assistant pack）も検査する
-// - 先頭の assistant（通常: COORD + MIRROR_FLOW_SEED_V1 + FLOW180_SEED が入る）を拾う
+// - 先頭の assistant（通常: COORD + FLOW_SEED_V1 + FLOW180_SEED が入る）を拾う
   const assistant0 = (messages as any[])?.find((m) => m?.role === 'assistant') ?? null;
   const injectedPack = String((assistant0 as any)?.content ?? '');
 
@@ -4958,15 +5032,15 @@ raw = await (async () => {
       role === 'assistant' &&
       (
         /COORD\s*\(DO NOT OUTPUT\):/i.test(content) ||
-        /MIRROR_FLOW_SEED_V1\b/i.test(content) ||
+        /FLOW_SEED_V1\b/i.test(content) ||
         /FLOW180_SEED\s*\(DO NOT OUTPUT\):/i.test(content) ||
         /FLOW_CONTEXT\s*\(DO NOT OUTPUT\):/i.test(content) ||
-        /STATE_CUES\s*\(DO NOT OUTPUT\)/i.test(content)
+        /STATE_CUES\s*\(DO NOT OUTPUT\)/i.test(content) ||
+        /FLOW:\s*\n/i.test(content)
       )
     ) {
       return m;
     }
-
     // 通常 assistant 履歴だけ sanitize
     if (role === 'assistant') {
       const nextContent = __sanitizeAssistantContinuity(content);
@@ -5219,12 +5293,12 @@ raw = await (async () => {
       const c = String(m?.content ?? '');
       return (
         /COORD\s*\(DO NOT OUTPUT\):/i.test(c) ||
-        /MIRROR_FLOW_SEED_V1\b/i.test(c) ||
+        /FLOW_SEED_V1\b/i.test(c) ||
         /FLOW180_SEED\s*\(DO NOT OUTPUT\):/i.test(c) ||
-        /FLOW_CONTEXT\s*\(DO NOT OUTPUT\):/i.test(c)
+        /FLOW_CONTEXT\s*\(DO NOT OUTPUT\):/i.test(c) ||
+        /FLOW:\s*\n/i.test(c)
       );
     }) ?? null;
-
   const __writerStateAssistant =
     __writerAssistantCandidates.find((m) => {
       const c = String(m?.content ?? '');
@@ -5246,6 +5320,8 @@ raw = await (async () => {
   const __writerStateHead = __writerStateAssistant
     ? String(__writerStateAssistant.content ?? '').slice(0, 800)
     : '';
+// 👇 これを追加
+const packNorm = (__writerInjectedPack ?? '').toString();
 
   console.log('[IROS/rephraseEngine][STATE_SNAPSHOT_FOR_WRITER]', {
     traceId: debug.traceId ?? null,
@@ -5253,7 +5329,10 @@ raw = await (async () => {
     userCode: debug.userCode ?? null,
     messagesLen: messagesForWriter.length,
     roles: messagesForWriter.map((m) => m?.role),
-    hasMirrorFlowSeed: __patterns.mirror.test(__writerInjectedPack),
+    hasMirrorFlowSeed:
+    /MIRROR_FLOW_SEED_V1\b/.test(__writerInjectedPack) ||
+    /FLOW_SEED_V1\b/.test(__writerInjectedPack) ||
+    /FLOW:\s*\n/.test(__writerInjectedPack),
     injectedPackHead: __writerInjectedPack.slice(0, 800),
     stateAssistantHead: __writerStateHead,
     lastAssistantHead: String(__writerAssistantLast?.content ?? '').slice(0, 300),

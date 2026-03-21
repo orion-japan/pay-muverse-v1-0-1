@@ -1190,10 +1190,26 @@ if (anchorDecision.tEntryOk && patch) {
     // - fallback は「slots が空」or「policy が空」のときだけ
     // =========================================================
 
-    const slotsRaw = (r as any).slotPlan?.slots ?? (r as any).slotPlan ?? null;
+    const goalKindNow =
+      String((r as any)?.meta?.extra?.goalKind ?? '').trim() ||
+      String((r as any)?.ctxPack?.goalKind ?? '').trim() ||
+      String((r as any)?.targetKind ?? '').trim() ||
+      String((r as any)?.target_kind ?? '').trim() ||
+      '';
+
+      const slotsRaw =
+      goalKindNow === 'uncover'
+        ? null
+        : (r as any).slotPlan?.slots ?? (r as any).slotPlan ?? null;
 
     // 1) まず slots は “配列だけ” を採用（それ以外は null）
     let slotsArr: any[] | null = Array.isArray(slotsRaw) ? slotsRaw : null;
+
+    // ✅ uncover の場合は slotPlan を完全に無効化
+    // - 古い narrow / stabilize を絶対に残さない
+    if (goalKindNow === 'uncover') {
+      slotsArr = null;
+    }
 
     // 2) policy 候補
     const slotPlanPolicyRaw =
@@ -1212,7 +1228,6 @@ const ex =
   meta && typeof meta === 'object' && (meta as any).extra && typeof (meta as any).extra === 'object'
     ? (meta as any).extra
     : null;
-
 const speechAct = String(ex?.speechAct ?? (meta as any)?.speechAct ?? '').toUpperCase();
 
 const speechAllowLLM =

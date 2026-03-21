@@ -41,11 +41,12 @@ function pickQuestionType(scores: QuestionTypeScoreMap): QuestionType {
   const top = sorted[0];
   const second = sorted[1];
 
-  // ✅ 未ヒット時は meaning に倒さない
-  // - ここを meaning にすると、短い挨拶 / 入口文 / 雑談まで
-  //   「意味解説ルート」に流れて explain_first が発火しやすくなる
-  // - まずは既存型の中で explain_first 化しにくい structure を安全側 fallback にする
-  if (!top || top[1] <= 0) return 'structure';
+  // ✅ 未ヒット時は安全側 fallback に倒す
+  // - 短い挨拶 / 入口文 / まだ問いになっていない文で
+  //   meaning に寄せると explain_first / confirm 側へ流れやすい
+  // - まずは既存型の中で最も暴れにくい structure を fallback にする
+// ✅ 非質問は null を返す（ここが重要）
+if (!top || top[1] <= 0) return null as any;
 
   // 完全拮抗は structure に寄せる
   if (second && second[1] > 0 && top[1] === second[1]) {
@@ -223,6 +224,7 @@ export function detectQuestionType(input: DetectQuestionTypeInput): QuestionType
       scores.meaning += 3 * contextWeight;
       scores.structure = Math.max(0, scores.structure - 3 * contextWeight);
     }
+
     const eTurn = normalizeText(String(input.eTurn ?? ''));
     const qCode = normalizeText(String(input.qCode ?? ''));
     const signalsObj =
@@ -237,6 +239,11 @@ export function detectQuestionType(input: DetectQuestionTypeInput): QuestionType
       !/[?？]/.test(text) &&
       /不安|こわい|怖い|つらい|苦しい|しんどい|寂しい|孤独|揺れる|迷う|モヤモヤ|落ち込む|苦手/.test(text);
 
+    const looksIntentStatement =
+      !!text &&
+      !/[?？]/.test(text) &&
+      /思っている|考えている|決めた|決めたい|やめたい|進みたい|どうしよう/.test(text);
+
     const hasRuntimeStateHints =
       !!eTurn ||
       !!qCode ||
@@ -244,10 +251,19 @@ export function detectQuestionType(input: DetectQuestionTypeInput): QuestionType
       !!topicHintText ||
       !!situationSummaryText;
 
-    if (looksPersonalStateStatement && hasRuntimeStateHints) {
+    if (looksIntentStatement) {
+      scores.choice += 2 * contextWeight;
       scores.meaning += 2 * contextWeight;
-      scores.structure = Math.max(0, scores.structure - 1 * contextWeight);
+      scores.structure = Math.max(0, scores.structure - 2 * contextWeight);
     }
+
+    if (looksPersonalStateStatement && hasRuntimeStateHints) {
+      scores.meaning += 3 * contextWeight;
+      scores.unresolved_release += 2 * contextWeight;
+      scores.choice += 1 * contextWeight;
+      scores.structure = Math.max(0, scores.structure - 2 * contextWeight);
+    }
+
     applyDomainBias(scores, input.domain, text);
     return scores;
   };

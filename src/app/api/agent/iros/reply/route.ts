@@ -932,7 +932,187 @@ if (isNonForwardButEmpty) {
         };
       }
     }
+    // ✅ final SHIFT / goal を route返却用 meta に再同期
+    // - handleIrosReply.ts で metaForSave を揃えても、
+    //   route.ts は result.meta と metaForSave を合成して返すため、
+    //   ここで response用の SoT を最後に一本化する
+    {
+      const r: any = result && typeof result === 'object' ? result : {};
+      const mfs: any =
+        metaForSave && typeof metaForSave === 'object'
+          ? metaForSave
+          : (metaForSave = {});
 
+      const mfsExtra: any =
+        mfs.extra && typeof mfs.extra === 'object'
+          ? mfs.extra
+          : (mfs.extra = {});
+
+      const resultMeta: any =
+        r.meta && typeof r.meta === 'object'
+          ? r.meta
+          : (r.meta = {});
+
+      const resultExtra: any =
+        resultMeta.extra && typeof resultMeta.extra === 'object'
+          ? resultMeta.extra
+          : (resultMeta.extra = {});
+
+      const slotPlanArr: any[] =
+        (Array.isArray(resultMeta.slotPlan) ? resultMeta.slotPlan : null) ??
+        (Array.isArray(mfs.slotPlan) ? mfs.slotPlan : null) ??
+        (Array.isArray(r.slotPlan) ? r.slotPlan : null) ??
+        [];
+
+      const shiftSlot = slotPlanArr.find(
+        (s: any) => String(s?.key ?? s?.id ?? '').trim().toUpperCase() === 'SHIFT',
+      );
+
+      const shiftText = String((shiftSlot as any)?.text ?? '').trim();
+
+      const shiftPayload: any = (() => {
+        if (!shiftText) return null;
+        const m = shiftText.match(/^@SHIFT\s+(\{[\s\S]*\})$/);
+        if (!m) return null;
+        try {
+          return JSON.parse(m[1]);
+        } catch {
+          return null;
+        }
+      })();
+
+      const shiftKindFromShiftText = (raw: unknown): string | null => {
+        const s = typeof raw === 'string' ? raw.trim() : '';
+        if (!s) return null;
+
+        const m = s.match(/^@SHIFT\s+(\{[\s\S]*\})$/);
+        if (!m) return null;
+
+        try {
+          const j = JSON.parse(m[1]);
+          return typeof j?.kind === 'string' && j.kind.trim()
+            ? j.kind.trim()
+            : null;
+        } catch {
+          return null;
+        }
+      };
+
+      const shiftKindFromSeedBlock = (raw: unknown): string | null => {
+        const s = typeof raw === 'string' ? raw : '';
+        if (!s) return null;
+
+        const line = s
+          .split('\n')
+          .map((v) => v.trim())
+          .find((v) => v.startsWith('@SHIFT '));
+
+        return shiftKindFromShiftText(line ?? null);
+      };
+
+      const goalKindFromShiftKind = (raw: unknown): string | null => {
+        const v = String(raw ?? '').trim().toLowerCase();
+        if (v === 'uncover_shift') return 'uncover';
+        if (v === 'stabilize_shift') return 'stabilize';
+        if (v === 'narrow_shift') return 'narrow';
+        if (v === 'clarify_shift') return 'clarify';
+        if (v === 'decide_shift') return 'decide';
+        if (v === 'cutoff_shift' || v === 'cut_off_shift') return 'cutOff';
+        return null;
+      };
+
+      const shiftKindFromGoalKind = (raw: unknown): string | null => {
+        const v = String(raw ?? '').trim();
+        if (v === 'uncover') return 'uncover_shift';
+        if (v === 'stabilize') return 'stabilize_shift';
+        if (v === 'narrow') return 'narrow_shift';
+        if (v === 'clarify') return 'clarify_shift';
+        if (v === 'decide') return 'decide_shift';
+        if (v === 'cutOff') return 'cutoff_shift';
+        return null;
+      };
+
+      const slotShiftKind =
+        shiftKindFromShiftText(shiftText) ??
+        shiftKindFromShiftText(String((shiftSlot as any)?.text ?? '').trim());
+
+      const seedShiftKind =
+        shiftKindFromSeedBlock(resultExtra?.llmRewriteSeed) ??
+        shiftKindFromSeedBlock(mfsExtra?.llmRewriteSeed);
+
+      const rootGoalKind =
+        String(
+          mfs.targetKind ??
+            mfs.target_kind ??
+            resultMeta.targetKind ??
+            resultMeta.target_kind ??
+            mfsExtra.goalKind ??
+            resultExtra.goalKind ??
+            '',
+        ).trim() || null;
+
+      const finalGoalKind =
+        rootGoalKind ??
+        goalKindFromShiftKind(slotShiftKind) ??
+        goalKindFromShiftKind(seedShiftKind) ??
+        null;
+
+      const finalShiftKind =
+        slotShiftKind ??
+        seedShiftKind ??
+        shiftKindFromGoalKind(finalGoalKind) ??
+        null;
+
+      if (finalGoalKind) {
+        mfs.targetKind = finalGoalKind;
+        mfs.target_kind = finalGoalKind;
+
+        resultMeta.targetKind = finalGoalKind;
+        resultMeta.target_kind = finalGoalKind;
+
+        mfsExtra.targetKind = finalGoalKind;
+        mfsExtra.target_kind = finalGoalKind;
+
+        resultExtra.targetKind = finalGoalKind;
+        resultExtra.target_kind = finalGoalKind;
+      }
+
+      if (finalShiftKind || finalGoalKind) {
+        const nextCtxPack = {
+          ...(resultExtra.ctxPack && typeof resultExtra.ctxPack === 'object'
+            ? resultExtra.ctxPack
+            : {}),
+          ...(mfsExtra.ctxPack && typeof mfsExtra.ctxPack === 'object'
+            ? mfsExtra.ctxPack
+            : {}),
+        };
+
+        if (finalShiftKind) nextCtxPack.shiftKind = finalShiftKind;
+
+        if (finalGoalKind) {
+          nextCtxPack.goalKind = finalGoalKind;
+          nextCtxPack.replyGoal = { kind: finalGoalKind };
+        }
+
+        mfsExtra.ctxPack = nextCtxPack;
+        resultExtra.ctxPack = { ...nextCtxPack };
+      }
+
+      console.info('[IROS/ROUTE_META_SYNC][FINAL_SHIFT_TO_RESPONSE_META]', {
+        traceId: traceId ?? null,
+        conversationId: conversationId ?? null,
+        userCode: userCode ?? null,
+        finalShiftKind,
+        finalGoalKind,
+        root_targetKind: mfs.targetKind ?? null,
+        root_target_kind: mfs.target_kind ?? null,
+        extra_targetKind: mfsExtra.targetKind ?? null,
+        extra_target_kind: mfsExtra.target_kind ?? null,
+        ctxPack_shiftKind: mfsExtra?.ctxPack?.shiftKind ?? null,
+        ctxPack_goalKind: mfsExtra?.ctxPack?.goalKind ?? null,
+        ctxPack_replyGoal: mfsExtra?.ctxPack?.replyGoal ?? null,
+      });
+    }
     // -------------------------------------------------------
     // capture（先にここで行う：エラーでも ref を残す）
     // -------------------------------------------------------

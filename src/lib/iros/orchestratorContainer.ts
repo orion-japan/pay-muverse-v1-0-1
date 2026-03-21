@@ -77,10 +77,17 @@ function normalizeTargetKind(v: unknown): TargetKind {
   if (s === 'pierce') return 'pierce';
   if (s === 'uncover') return 'uncover';
 
+  // intent / direction bridge
+  if (s === 'cutoff') return 'uncover';
+  if (s === 'reconnect') return 'uncover';
+  if (s === 'unknown') return 'stabilize';
+
   // bridge
   if (s === 'enableaction') return 'expand';
   if (s === 'action') return 'expand';
   if (s === 'create') return 'expand';
+  if (s === 'shiftrelation') return 'uncover';
+  if (s === 'reframeintention') return 'uncover';
 
   return 'stabilize';
 }
@@ -131,12 +138,21 @@ export function applyContainerDecision(
 
   // targetKind 正規化（優先：meta → goalKind）
   const rawTargetKind =
-    (meta as any).targetKind ?? (meta as any).target_kind ?? goalKind ?? null;
+    goalKind ??
+    (meta as any)?.intentLine?.direction ??
+    (meta as any)?.intent_line?.direction ??
+    (meta as any).targetKind ??
+    (meta as any).target_kind ??
+    null;
 
-  const targetKindNorm = normalizeTargetKind(rawTargetKind);
+  let targetKindNorm: string | null = null;
 
-  (meta as any).targetKind = targetKindNorm;
-  (meta as any).target_kind = targetKindNorm;
+  if (rawTargetKind) {
+    targetKindNorm = normalizeTargetKind(rawTargetKind);
+
+    (meta as any).targetKind = targetKindNorm;
+    (meta as any).target_kind = targetKindNorm;
+  }
 
 
   // descentGate

@@ -100,11 +100,18 @@ function normalizeTargetKind(v: any): TargetKind {
   if (lowered === 'pierce') return 'pierce';
   if (lowered === 'uncover') return 'uncover';
 
+  // IntentDirection / 意図方向 の橋渡し
+  if (lowered === 'cutoff') return 'uncover';
+  if (lowered === 'reconnect') return 'uncover';
+  if (lowered === 'unknown') return 'stabilize';
+
   // Orchestrator/Will 側の kind からの橋渡し（重要）
   // - enableAction は forward 寄りなので expand に寄せる（stabilize に落とさない）
   if (lowered === 'enableaction') return 'expand';
   if (lowered === 'action') return 'expand';
   if (lowered === 'create') return 'expand';
+  if (lowered === 'shiftrelation') return 'uncover';
+  if (lowered === 'reframeintention') return 'uncover';
 
   // 防御/安全/停止系は stabilize に寄せる
   if (lowered === 'safety') return 'stabilize';

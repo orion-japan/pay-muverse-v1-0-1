@@ -27,11 +27,24 @@ function pickFocus(input: DetectTModeInput): string | null {
   return null;
 }
 
+function isQuestionLike(text: string): boolean {
+  if (!text) return false;
+  if (/[?？]$/.test(text)) return true;
+  if (/^(なぜ|どうして|どうやって|どうすれば|どうしたら|何を|何が|何から|どれ|どちら)/.test(text)) {
+    return true;
+  }
+  if (/(ですか|ますか|でしょうか|なのか|なのかな|だろうか)\s*$/.test(text)) {
+    return true;
+  }
+  return false;
+}
+
 export function detectTMode(input: DetectTModeInput): TState {
   const text = normalizeText(input.userText ?? '');
+  const questionLike = isQuestionLike(text);
 
-  let mode: TMode = 'confirm';
-  let reason = 'default_confirm';
+  let mode: TMode | null = null;
+  let reason = 'no_t_mode';
 
   if (input.pastResolve?.detected) {
     mode = 'reobserve_past';
@@ -45,15 +58,19 @@ export function detectTMode(input: DetectTModeInput): TState {
       input.questionType === 'future_design'
         ? 'question_type_future_design'
         : 'future_keyword';
-  } else if (/比較|違い|どれ|どちら|複数/.test(text)) {
+  } else if (questionLike && /比較|違い|どれ|どちら|複数/.test(text)) {
     mode = 'compare_models';
     reason = 'compare_keyword';
   } else if (
+    questionLike &&
     /設計|構成|方針|プラン|組み立て/.test(text) &&
     input.questionType !== 'truth'
   ) {
     mode = 'design_probe';
     reason = 'design_keyword';
+  } else if (questionLike && input.questionType) {
+    mode = 'confirm';
+    reason = 'question_confirm';
   }
 
   return {
