@@ -1058,15 +1058,8 @@ if (typeof depthInput === 'string' && depthInput.trim()) {
 // 保存先：q_counts.q_scores（UI用）
 // ============================================================
 
-// ---- 1) e_turn（観測）を拾う：meta.extra（=正本）→ 互換キー ----
-const eTurnRaw: any =
-  extra?.e_turn ??
-  extra?.mirror?.e_turn ??
-  core?.e_turn ??
-  core?.mirror?.e_turn ??
-  unified?.e_turn ??
-  unified?.mirror?.e_turn ??
-  null;
+// ---- 1) e_turn（観測）を拾う：meta.extra.mirror（=正本）のみ ----
+const eTurnRaw: any = extra?.mirror?.e_turn ?? null;
 
 const eTurnNow: string | null =
   typeof eTurnRaw === 'string' && /^(e1|e2|e3|e4|e5)$/i.test(eTurnRaw.trim())

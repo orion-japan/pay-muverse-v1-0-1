@@ -255,29 +255,80 @@ export function buildTopicLineV1(digest: HistoryDigestV1 | null | undefined): st
   if (!digest) return null;
 
   const kws = extractKeywordsV1(digest, 2);
-  const head = kws.length > 0 ? kws.join(' / ') : null;
+  const head = kws.length > 0 ? kws.join(' / ') : '';
 
   const summary = clampOneLine(String(digest.topic?.situationSummary ?? ''), 120);
   const topic = clampOneLine(String(digest.topic?.situationTopic ?? ''), 60);
-
-  // last_user_core が短く強い時は優先して載せる（“何の話？”対策）
   const lastUser = clampOneLine(String(digest.continuity?.last_user_core ?? ''), 80);
+  const lastAssistant = clampOneLine(String(digest.continuity?.last_assistant_core ?? ''), 80);
 
-  const tailParts: string[] = [];
-  if (lastUser) tailParts.push(`いま: ${lastUser}`);
-  else if (summary) tailParts.push(summary);
-  else if (topic) tailParts.push(topic);
+  const pickMainTopic = (): string => {
+    if (topic) return topic;
+    if (head) return head;
+    if (summary) return summary;
+    if (lastUser) return lastUser;
+    return '';
+  };
 
-  const tail = tailParts.join(' / ').trim();
+  const topicMain = pickMainTopic();
 
-  if (head && tail) return `${head} — ${tail}`;
-  if (head) return head;
-  if (tail) return tail;
+  const relationHint = (() => {
+    const s = `${summary} ${lastUser}`.trim();
 
-  // 最終fallback：topic/stateから最低限
-  const q = String(digest.state?.q ?? '');
-  const depth = String(digest.state?.depth ?? '');
-  const ph = String(digest.state?.phase ?? '');
-  const fallback = clampOneLine([topic, summary].filter(Boolean).join(' / '), 120);
-  return fallback || clampOneLine(`q=${q} depth=${depth} phase=${ph}`, 120);
+    if (/彼女|彼氏|恋愛|連絡|返信|既読|未読|浮気|別な男|温度差/.test(s)) {
+      return '恋愛・関係';
+    }
+    if (/仕事|職場|上司|同僚|転職|会社/.test(s)) {
+      return '仕事';
+    }
+    if (/家族|夫婦|親|子ども/.test(s)) {
+      return '家族';
+    }
+    return '';
+  })();
+
+  const concernHint = (() => {
+    const s = `${summary} ${lastUser}`.trim();
+
+    if (/不安|心配|怖|疑|浮気|信じられない/.test(s)) {
+      return '不安や疑いが強まっている';
+    }
+    if (/迷|決められない|どうしたら|わからない/.test(s)) {
+      return '判断が揺れている';
+    }
+    if (/しんどい|疲れた|動けない|止まる/.test(s)) {
+      return '停滞や消耗が出ている';
+    }
+    return '';
+  })();
+
+  const progressionHint = (() => {
+    if (summary && lastUser && summary !== lastUser) {
+      return `${summary} → ${lastUser}`;
+    }
+    if (lastUser) return `いま: ${lastUser}`;
+    if (summary) return summary;
+    if (lastAssistant) return `直前: ${lastAssistant}`;
+    return '';
+  })();
+
+  const parts: string[] = [];
+
+  if (relationHint && topicMain && relationHint !== topicMain) {
+    parts.push(`${relationHint}:${topicMain}`);
+  } else if (topicMain) {
+    parts.push(topicMain);
+  }
+
+  if (concernHint) parts.push(concernHint);
+  if (progressionHint) parts.push(progressionHint);
+
+  const line = parts.join(' — ').trim();
+
+  if (line) return clampOneLine(line, 220);
+  if (head) return clampOneLine(head, 220);
+  if (summary) return clampOneLine(summary, 220);
+  if (lastUser) return clampOneLine(`いま: ${lastUser}`, 220);
+
+  return null;
 }

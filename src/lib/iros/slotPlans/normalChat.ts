@@ -1082,107 +1082,173 @@ function buildFlowReply(args: {
       String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
       '';
 
-    const isClarifyLike =
-      isClarify(t) ||
-      resolvedAskType === 'truth_structure' ||
-      resolvedAskType === 'meaning' ||
-      resolvedAskType === 'definition' ||
-      resolvedAskType === 'topic_clarify';
+      const rawTextNow = String(t ?? '').trim();
+      const compactTextNow = rawTextNow.replace(/\s+/g, '');
+      const textLenNow = compactTextNow.length;
 
-    const isReturnFlow = String(delta ?? '').trim().toUpperCase() === 'RETURN';
+      const isClarifyLike =
+        isClarify(t) ||
+        resolvedAskType === 'truth_structure' ||
+        resolvedAskType === 'meaning' ||
+        resolvedAskType === 'definition' ||
+        resolvedAskType === 'topic_clarify';
 
-    // ① 上流確定があれば最優先
-    // ※ blockPlan は明示トリガー専用（explicit trigger）であり、
-    //    通常の会話フローでは発火しないため、
-    //    ここ（normalChat）の分岐が実質的なSHIFT決定の本体になる
-    if (
-      stampedShiftKind === 'clarify_shift' ||
-      stampedShiftKind === 'stabilize_shift' ||
-      stampedShiftKind === 'distance_shift' ||
-      stampedShiftKind === 'repair_shift' ||
-      stampedShiftKind === 'decide_shift' ||
-      stampedShiftKind === 'narrow_shift'
-    ) {
-      return stampedShiftKind as
-        | 'clarify_shift'
-        | 'stabilize_shift'
-        | 'distance_shift'
-        | 'repair_shift'
-        | 'decide_shift'
-        | 'narrow_shift';
-    }
+      const isReturnFlow = String(delta ?? '').trim().toUpperCase() === 'RETURN';
 
-    // ② 明示的な結論要求は decide
-    if (directAnswerRequested2) {
-      return 'decide_shift' as const;
-    }
+      // ✅ continuity確認を出してよいのは「短く曖昧で、接続先が揺れる時」だけに絞る
+      const isShortAmbiguousFollowup =
+        textLenNow <= 18 &&
+        (
+          hasAny(
+            'それ',
+            'これ',
+            'あれ',
+            'そのこと',
+            'でも',
+            'どう',
+            'どっち',
+            '違うかも',
+            'たぶん'
+          ) ||
+          /^(それ|これ|あれ|でも|どう|どっち)/.test(compactTextNow)
+        );
 
-    // ③ 意味/定義/真意/ツッコミ系は clarify を優先
-    //    RETURN 中でもこちらを優先して、stabilize に吸われないようにする
-    if (isClarifyLike) {
-      return 'clarify_shift' as const;
-    }
+      // ✅ 具体的な相談進行中の文は「継続確認不要」とみなす
+      const hasConcreteContinuationSignal =
+        textLenNow >= 24 ||
+        hasAny(
+          '彼女',
+          '彼氏',
+          '連絡',
+          '返信',
+          '返事',
+          '既読',
+          '未読',
+          '不安',
+          '心配',
+          '浮気',
+          '別な男',
+          '夜',
+          '翌日',
+          'しつこい',
+          '距離感'
+        );
 
-    // ④ 関係距離・修復・決定の明示語
-    if (hasAny('距離', '近すぎる', '離れたい', '遠い', '重い')) {
-      return 'distance_shift' as const;
-    }
+      // ✅ clarify_shift をそのまま返すと
+      // 「前の話の続きで進めてよいですか？」系に自然文化されやすいので、
+      // 継続が明確なときは suppress する
+      const suppressClarifyShift =
+        hasConcreteContinuationSignal &&
+        !isShortAmbiguousFollowup &&
+        !directAnswerRequested2;
 
-    if (hasAny('仲直り', '修復', 'やり直したい', '戻りたい')) {
-      return 'repair_shift' as const;
-    }
-
-    if (hasAny('決められない', '迷ってる', '選べない', 'やめるべきか', '行くべきか')) {
-      return 'decide_shift' as const;
-    }
-
-    // ⑤ RETURN は「全部 stabilize」にせず、
-    //    明確な停滞語がある時だけ stabilize にする
-    // ※ blockPlan は明示トリガー専用のため、通常フローではここが実質的な最終決定ポイント
-    // ※ goalKind=uncover の場合は stabilize に吸われないようにする（探索優先）
-
-    const goalKind2 =
-    String((args as any)?.meta?.extra?.goalKind ?? '').trim() ||
-    String((args as any)?.ctxPack?.goalKind ?? '').trim() ||
-    String((args as any)?.targetKind ?? '').trim() ||
-    '';
-
-    const shouldStabilize =
-      hasAny('また同じところ', '戻ってきた', '動けない', '止まる', 'しんどい') ||
-      (isReturnFlow && emotionalTemperature2 === 'high');
-
-    // 🔍 ログ
-    try {
-      console.log('[IROS/SHIFT_DECISION][STABILIZE_CHECK_REAL]', {
-        goalKind2: goalKind2 ?? null,
-        shouldStabilize: shouldStabilize ?? null,
-        isReturnFlow: isReturnFlow ?? null,
-        emotionalTemperature2: emotionalTemperature2 ?? null,
-        text: t ?? null,
-        hasAnyResult: hasAny(
-          'また同じところ',
-          '戻ってきた',
-          '動けない',
-          '止まる',
-          'しんどい'
-        ),
-      });
-    } catch {}
-    if (shouldStabilize) {
-      // uncover の場合は stabilize を回避
-      if (goalKind2 === 'uncover') {
-        try {
-          console.log('[IROS/SHIFT_DECISION][SKIP_STABILIZE_BY_GOALKIND]', {
-            goalKind2,
-            reason: 'uncover_prefer_explore',
-          });
-        } catch {}
-
-        return 'narrow_shift' as const;
+      // ① 上流確定があれば最優先
+      // ※ blockPlan は明示トリガー専用（explicit trigger）であり、
+      //    通常の会話フローでは発火しないため、
+      //    ここ（normalChat）の分岐が実質的なSHIFT決定の本体になる
+      if (
+        stampedShiftKind === 'clarify_shift' ||
+        stampedShiftKind === 'stabilize_shift' ||
+        stampedShiftKind === 'distance_shift' ||
+        stampedShiftKind === 'repair_shift' ||
+        stampedShiftKind === 'decide_shift' ||
+        stampedShiftKind === 'narrow_shift'
+      ) {
+        // ✅ clarify は「継続が明確な具体相談」では飲み込んで再判定へ回す
+        if (stampedShiftKind === 'clarify_shift' && suppressClarifyShift) {
+          try {
+            console.log('[IROS/SHIFT_DECISION][SUPPRESS_STAMPED_CLARIFY]', {
+              stampedShiftKind,
+              text: rawTextNow,
+              textLenNow,
+              isShortAmbiguousFollowup,
+              hasConcreteContinuationSignal,
+            });
+          } catch {}
+        } else {
+          return stampedShiftKind as
+            | 'clarify_shift'
+            | 'stabilize_shift'
+            | 'distance_shift'
+            | 'repair_shift'
+            | 'decide_shift'
+            | 'narrow_shift';
+        }
       }
 
-      return 'stabilize_shift' as const;
-    }
+      // ② 明示的な結論要求は decide
+      if (directAnswerRequested2) {
+        return 'decide_shift' as const;
+      }
+
+      // ③ 意味/定義/真意/ツッコミ系は clarify を優先
+      //    ただし「継続が明確な具体相談」は clarify に吸わない
+      //    RETURN 中でもこちらを優先して、stabilize に吸われないようにする
+      if (isClarifyLike && !suppressClarifyShift) {
+        return 'clarify_shift' as const;
+      }
+
+      // ④ 関係距離・修復・決定の明示語
+      if (hasAny('距離', '近すぎる', '離れたい', '遠い', '重い')) {
+        return 'distance_shift' as const;
+      }
+
+      if (hasAny('仲直り', '修復', 'やり直したい', '戻りたい')) {
+        return 'repair_shift' as const;
+      }
+
+      if (hasAny('決められない', '迷ってる', '選べない', 'やめるべきか', '行くべきか')) {
+        return 'decide_shift' as const;
+      }
+
+      // ⑤ RETURN は「全部 stabilize」にせず、
+      //    明確な停滞語がある時だけ stabilize にする
+      // ※ blockPlan は明示トリガー専用のため、通常フローではここが実質的な最終決定ポイント
+      // ※ goalKind=uncover の場合は stabilize に吸われないようにする（探索優先）
+
+      const goalKind2 =
+        String((args as any)?.meta?.extra?.goalKind ?? '').trim() ||
+        String((args as any)?.ctxPack?.goalKind ?? '').trim() ||
+        String((args as any)?.targetKind ?? '').trim() ||
+        '';
+
+      const shouldStabilize =
+        hasAny('また同じところ', '戻ってきた', '動けない', '止まる', 'しんどい') ||
+        (isReturnFlow && emotionalTemperature2 === 'high');
+
+      // 🔍 ログ
+      try {
+        console.log('[IROS/SHIFT_DECISION][STABILIZE_CHECK_REAL]', {
+          goalKind2: goalKind2 ?? null,
+          shouldStabilize: shouldStabilize ?? null,
+          isReturnFlow: isReturnFlow ?? null,
+          emotionalTemperature2: emotionalTemperature2 ?? null,
+          text: t ?? null,
+          hasAnyResult: hasAny(
+            'また同じところ',
+            '戻ってきた',
+            '動けない',
+            '止まる',
+            'しんどい'
+          ),
+        });
+      } catch {}
+
+      if (shouldStabilize) {
+        // uncover の場合は stabilize を回避
+        if (goalKind2 === 'uncover') {
+          try {
+            console.log('[IROS/SHIFT_DECISION][SKIP_STABILIZE_BY_GOALKIND]', {
+              goalKind2,
+              reason: 'uncover_prefer_explore',
+            });
+          } catch {}
+
+          return 'narrow_shift' as const;
+        }
+
+        return 'stabilize_shift' as const;
+      }
 
     // ⑥ それ以外は narrow
     if (

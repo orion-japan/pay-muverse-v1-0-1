@@ -2929,7 +2929,13 @@ if (true) {
         rawTopic === 'その他・ライフ全般' ||
         rawTopic === 'その他ライフ全般' ||
         rawTopic === 'ライフ全般' ||
-        rawTopic === 'その他';
+        rawTopic === 'その他' ||
+        rawTopic === 'よくわからない' ||
+        rawTopic === '分からない' ||
+        rawTopic === 'わからない' ||
+        rawTopic === '不明' ||
+        rawTopic === '未整理' ||
+        rawTopic === '整理中';
 
       const summaryTopicSeed =
         latestSummary ||
@@ -3321,6 +3327,8 @@ if (prevAtIso) {
   const current = String(text ?? '').trim();
 
   const existing = String((extra2.ctxPack as any).conversationLine ?? '').trim();
+  const existingDigest = String((extra2.ctxPack as any).topicDigest ?? '').trim();
+
   const looksLikeDebugLine =
     !!existing &&
     (/^Q:/.test(existing) ||
@@ -3330,30 +3338,54 @@ if (prevAtIso) {
       existing.includes('流れ:') ||
       existing.includes('戻り:'));
 
-  if (!existing || looksLikeDebugLine) {
-    const topic = summarizeTopicLineV1({
-      userText: current,
-      historyForWriter: hft,
-      historyDigestV1: ((extra2.ctxPack as any)?.historyDigestV1 ?? null) as any,
-      situationSummary:
-        String((extra2.ctxPack as any)?.situationSummary ?? '').trim() || null,
-      situationTopic:
-        String((extra2.ctxPack as any)?.situationTopic ?? '').trim() || null,
-    });
+  const topic = summarizeTopicLineV1({
+    userText: current,
+    historyForWriter: hft,
+    historyDigestV1: ((extra2.ctxPack as any)?.historyDigestV1 ?? null) as any,
+    situationSummary:
+      String((extra2.ctxPack as any)?.situationSummary ?? '').trim() || null,
+    situationTopic:
+      String((extra2.ctxPack as any)?.situationTopic ?? '').trim() || null,
+  });
 
-    const line = topic?.conversationLine ?? null;
-    const digest = topic?.topicDigest ?? line ?? null;
-    const digestV2 =
-      topic?.topicDigestV2 && typeof topic.topicDigestV2 === 'object'
-        ? topic.topicDigestV2
-        : null;
+  const line = topic?.conversationLine ?? null;
+  const digest = topic?.topicDigest ?? line ?? null;
+  const digestV2 =
+    topic?.topicDigestV2 && typeof topic.topicDigestV2 === 'object'
+      ? topic.topicDigestV2
+      : null;
 
+  const currentTextLc = String(current ?? '').trim().toLowerCase();
+  const existingLc = String(existing || existingDigest || '').trim().toLowerCase();
+
+  const looksLikeTopicShift =
+    !!currentTextLc &&
+    !!existingLc &&
+    (
+      (/仕事|職場|転職|会社/.test(currentTextLc) && /彼女|彼氏|恋愛|連絡|浮気|別な男/.test(existingLc)) ||
+      (/彼女|彼氏|恋愛|連絡|浮気|別な男/.test(currentTextLc) && /仕事|職場|転職|会社/.test(existingLc)) ||
+      (/家族|夫婦|親|子ども/.test(currentTextLc) && /仕事|職場|転職|会社|彼女|彼氏|恋愛/.test(existingLc))
+    );
+
+  const shouldRefreshTopicLine =
+    !existing ||
+    looksLikeDebugLine ||
+    looksLikeTopicShift;
+
+  if (shouldRefreshTopicLine) {
     (extra2.ctxPack as any).conversationLine = line;
     (extra2.ctxPack as any).topicDigest = digest;
     (extra2.ctxPack as any).topicDigestV2 = digestV2;
-
-    if (Array.isArray(topic?.keywords) && topic.keywords.length > 0) {
-      (extra2.ctxPack as any).topicKeywords = topic.keywords;
+  } else {
+    // ✅ 明確な話題転換でない限り、既存の芯を保持する
+    if (!(extra2.ctxPack as any).conversationLine && line) {
+      (extra2.ctxPack as any).conversationLine = line;
+    }
+    if (!(extra2.ctxPack as any).topicDigest && digest) {
+      (extra2.ctxPack as any).topicDigest = digest;
+    }
+    if (!(extra2.ctxPack as any).topicDigestV2 && digestV2) {
+      (extra2.ctxPack as any).topicDigestV2 = digestV2;
     }
   }
 }
@@ -5143,6 +5175,8 @@ if (shouldRunWriter) {
     // q/depth/phase を毎回 stamp して「Inner 混入」を止める
     try {
       const qCanon =
+        (out.metaForSave as any)?.qPrimary ??
+        (out.metaForSave as any)?.q_primary ??
         (out.metaForSave as any)?.qCode ??
         (out.metaForSave as any)?.q ??
         ctxPack.qCode ??
@@ -5270,26 +5304,40 @@ if (shouldRunWriter) {
             ? [...prevDepthHistoryLite, depthStageForHistory].slice(-5)
             : prevDepthHistoryLite;
 
-        const depthStageBefore =
-          prevDepthHistoryLite.length > 0 ? prevDepthHistoryLite[prevDepthHistoryLite.length - 1] : null;
+            const depthStageBefore =
+            prevDepthHistoryLite.length > 0
+              ? prevDepthHistoryLite[prevDepthHistoryLite.length - 1]
+              : null;
 
-        ctxPack.qCode = qCanon;
-        ctxPack.depthStage = depthCanon;
-        ctxPack.phase = phaseCanon;
+          // ✅ Qは必ず canonical（= qCanon）で統一
+          ctxPack.qCode = qCanon ?? null;
+          (ctxPack as any).q_code = qCanon ?? null;
 
-        ctxPack.primaryStage = primaryStageCanonFixed;
-        ctxPack.secondaryStage = secondaryStageCanon;
-        ctxPack.observedStage = observedStageCanonFixed;
+          // depth / phase
+          ctxPack.depthStage = depthCanon;
+          ctxPack.phase = phaseCanon;
 
-        ctxPack.primaryBand = primaryBandCanon;
-        ctxPack.secondaryBand = secondaryBandCanon;
+          // stage
+          ctxPack.primaryStage = primaryStageCanonFixed;
+          ctxPack.secondaryStage = secondaryStageCanon;
+          ctxPack.observedStage = observedStageCanonFixed;
 
-        ctxPack.primaryDepth = primaryDepthCanon;
-        ctxPack.secondaryDepth = secondaryDepthCanon;
+          // band
+          ctxPack.primaryBand = primaryBandCanon;
+          ctxPack.secondaryBand = secondaryBandCanon;
 
-        ctxPack.observedBasedOn = observedBasedOnCanon;
-        ctxPack.depthHistoryLite = nextDepthHistoryLite;
-        (ctxPack as any).polarity = polarityCanonFixed;
+          // depth detail
+          ctxPack.primaryDepth = primaryDepthCanon;
+          ctxPack.secondaryDepth = secondaryDepthCanon;
+
+          // observed
+          ctxPack.observedBasedOn = observedBasedOnCanon;
+
+          // history
+          ctxPack.depthHistoryLite = nextDepthHistoryLite;
+
+          // polarity
+          (ctxPack as any).polarity = polarityCanonFixed;
 
         console.log('[IROS][CTXPACK][AFTER_CANON]', {
           traceId: traceId ?? null,
@@ -5995,14 +6043,30 @@ const inputKindCanon: string | null = (() => {
                     ...(((out.metaForSave as any)?.extra?.ctxPack ?? {}) as any),
 
                     qCode:
-                      (out.metaForSave as any)?.q ??
+                      (out.metaForSave as any)?.qPrimary ??
+                      (out.metaForSave as any)?.q_primary ??
                       (out.metaForSave as any)?.qCode ??
+                      (out.metaForSave as any)?.q ??
                       memoryStateSnapshot?.qPrimary ??
                       ((out.metaForSave as any)?.extra?.ctxPack as any)?.qCode ??
+                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.q_code ??
                       (ctxPackPrev as any)?.qCode ??
+                      (ctxPackPrev as any)?.q_code ??
                       null,
 
-                      depthStage:
+                    q_code:
+                      (out.metaForSave as any)?.qPrimary ??
+                      (out.metaForSave as any)?.q_primary ??
+                      (out.metaForSave as any)?.qCode ??
+                      (out.metaForSave as any)?.q ??
+                      memoryStateSnapshot?.qPrimary ??
+                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.qCode ??
+                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.q_code ??
+                      (ctxPackPrev as any)?.qCode ??
+                      (ctxPackPrev as any)?.q_code ??
+                      null,
+
+                    depthStage:
                       (out.metaForSave as any)?.depth_stage ??
                       (out.metaForSave as any)?.depth ??
                       (out.metaForSave as any)?.unified?.depth?.stage ??
@@ -6113,12 +6177,8 @@ const inputKindCanon: string | null = (() => {
                             ]
                           : [],
                           e_turn:
-                          (out.metaForSave as any)?.extra?.e_turn ??
-                          ((out.metaForSave as any)?.extra?.mirror as any)?.e_turn ??
-                          ((out.metaForSave as any)?.extra?.ctxPack as any)?.e_turn ??
-                          ((ctxPackPrev as any)?.mirror as any)?.e_turn ??
-                          (ctxPackPrev as any)?.e_turn ??
-                          null,
+                            ((out.metaForSave as any)?.extra?.mirror as any)?.e_turn ??
+                            null,
 
                         polarity:
                           ((out.metaForSave as any)?.extra?.mirror as any)?.polarity_out ??
@@ -6142,12 +6202,8 @@ const inputKindCanon: string | null = (() => {
                             typeof (out.metaForSave as any).extra.mirror === 'object')
                             ? (out.metaForSave as any).extra.mirror
                             : {}) as any),
-                          e_turn:
-                            (out.metaForSave as any)?.extra?.e_turn ??
+                            e_turn:
                             ((out.metaForSave as any)?.extra?.mirror as any)?.e_turn ??
-                            ((out.metaForSave as any)?.extra?.ctxPack as any)?.e_turn ??
-                            ((ctxPackPrev as any)?.mirror as any)?.e_turn ??
-                            (ctxPackPrev as any)?.e_turn ??
                             null,
                           polarity:
                             ((out.metaForSave as any)?.extra?.mirror as any)?.polarity_out ??
@@ -6275,20 +6331,27 @@ const inputKindCanon: string | null = (() => {
                       ...(((out.metaForSave as any)?.extra?.ctxPack ?? {}) as any),
 
                       qCode:
-                        (out.metaForSave as any)?.q ??
+                        (out.metaForSave as any)?.qPrimary ??
+                        (out.metaForSave as any)?.q_primary ??
                         (out.metaForSave as any)?.qCode ??
+                        (out.metaForSave as any)?.q ??
                         memoryStateSnapshot?.qPrimary ??
                         ((out.metaForSave as any)?.extra?.ctxPack as any)?.qCode ??
+                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.q_code ??
                         (ctxPackPrev as any)?.qCode ??
+                        (ctxPackPrev as any)?.q_code ??
                         null,
 
-                        depthStage:
-                        (out.metaForSave as any)?.depth_stage ??
-                        (out.metaForSave as any)?.depth ??
-                        (out.metaForSave as any)?.unified?.depth?.stage ??
-                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.depthStage ??
-                        (ctxPackPrev as any)?.depthStage ??
-                        memoryStateSnapshot?.depthStage ??
+                      q_code:
+                        (out.metaForSave as any)?.qPrimary ??
+                        (out.metaForSave as any)?.q_primary ??
+                        (out.metaForSave as any)?.qCode ??
+                        (out.metaForSave as any)?.q ??
+                        memoryStateSnapshot?.qPrimary ??
+                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.qCode ??
+                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.q_code ??
+                        (ctxPackPrev as any)?.qCode ??
+                        (ctxPackPrev as any)?.q_code ??
                         null,
 
                       phase:

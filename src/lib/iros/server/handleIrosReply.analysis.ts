@@ -150,49 +150,11 @@ export async function saveUnifiedAnalysisInline(
     agent: string;
   },
 ) {
-  // 0) まず Q フィールドを決定する（既存優先＋fallback）
-  let qCode: string | null = analysis.q_code;
+  // 0) Q フィールドは既存値のみ使う
+  //    新規推定はしない（Q は persist 側の EWMA / dominantQ を正本にする）
+  const qCode: string | null = analysis.q_code ?? null;
 
-  if (!qCode) {
-    const raw = analysis.raw ?? {};
-    const userText: string | null =
-      typeof raw.user_text === 'string' ? raw.user_text : null;
-
-    if (userText && userText.trim().length > 0) {
-      try {
-        const detected = await detectQFromText(userText);
-        if (detected) qCode = detected;
-
-        // ✅ 追加：unified 側にも反映（未設定の時だけ）
-        const u: any = analysis.unified ?? null;
-        if (detected && u) {
-          const cur =
-            u?.q && typeof u.q.current === 'string' ? u.q.current : null;
-          if (!cur) {
-            u.q = { ...(u.q ?? {}), current: detected };
-          }
-        }
-      } catch (e) {
-        console.error(
-          '[UnifiedAnalysis] detectQFromText failed, fallback to simple keyword',
-          e,
-        );
-
-        const fallback = detectQFallbackFromText(userText);
-        if (fallback) qCode = fallback;
-
-        // ✅ 追加：fallback でも unified 側に反映（未設定の時だけ）
-        const u: any = analysis.unified ?? null;
-        if (fallback && u) {
-          const cur =
-            u?.q && typeof u.q.current === 'string' ? u.q.current : null;
-          if (!cur) {
-            u.q = { ...(u.q ?? {}), current: fallback };
-          }
-        }
-      }
-    }
-  }
+  analysis.q_code = qCode ?? null;
 
   analysis.q_code = qCode ?? null;
 

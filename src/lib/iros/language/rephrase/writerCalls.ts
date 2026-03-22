@@ -477,29 +477,16 @@ const currentFlowAny: any = firstNonNull(
       (extra as any)?.qCounts,
     ) ?? null;
 
-  const mirror = firstNonNull<any>(
-    ctxPack?.mirror,
-    extra?.mirror,
-    (extra as any)?.ctxPack?.mirror,
-    null,
-  );
-  const eTurn = pick(
-    args?.e_turn,
-    args?.eTurn,
-    mirror?.e_turn,
-    mirror?.eTurn,
-    mirrorFlowV1ForSeed?.mirror?.e_turn,
-    mirrorFlowV1ForSeed?.mirror?.eTurn,
-    currentFlowAny?.e_turn,
-    qCountsForSeed?.e_turn_now,
-    qCountsForSeed?.eTurnNow,
-    qCountsForSeed?.e_turn,
-    qCountsForSeed?.eTurn,
-    ctxPack?.e_turn,
-    ctxPack?.eTurn,
-    extra?.e_turn,
-    extra?.eTurn,
-  );
+    const mirror = firstNonNull<any>(
+      ctxPack?.mirror,
+      extra?.mirror,
+      (extra as any)?.ctxPack?.mirror,
+      null,
+    );
+    const eTurn = pick(
+      mirror?.e_turn,
+      mirror?.eTurn,
+    );
 
   const exprMeta = (args?.exprMeta ?? ctxPack?.exprMeta ?? extra?.exprMeta ?? null) as any;
   const saRhythm = pick(exprMeta?.rhythm, args?.sa?.rhythm, ctxPack?.sa?.rhythm);

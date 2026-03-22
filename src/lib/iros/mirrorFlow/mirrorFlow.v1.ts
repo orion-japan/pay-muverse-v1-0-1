@@ -524,7 +524,7 @@ export function detectETurnV1(userText: string, micro: boolean): ETurnV1 | null 
     if (/どうしよう|どうしたら|大丈夫かな|不安|心配/.test(t)) return 'e3';
     if (hasExcl) return 'e2';
     if (hasQuest) return 'e3';
-    return micro ? 'e1' : 'e3';
+    return 'e3';
   }
 
   // tie-break: 感情の強いものを優先

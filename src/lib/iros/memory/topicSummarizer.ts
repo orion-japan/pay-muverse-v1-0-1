@@ -288,29 +288,65 @@ function collectHistoryText(
 function buildSourceText(args: TopicSummarizerArgs): string {
   const currentUser = normalizeText(args.userText);
 
+  const historyDigestAny: any = args.historyDigestV1 as any;
+
   const digestParts = [
-    normalizeText((args.historyDigestV1 as any)?.topic),
-    normalizeText((args.historyDigestV1 as any)?.summary),
-    ...(((args.historyDigestV1 as any)?.keywords ?? []) as string[]).map((v) => normalizeText(v)),
+    normalizeText(historyDigestAny?.topic?.situationTopic),
+    normalizeText(historyDigestAny?.topic?.situationSummary),
+    normalizeText(historyDigestAny?.continuity?.last_user_core),
+    normalizeText(historyDigestAny?.continuity?.last_assistant_core),
+    ...(((historyDigestAny?.keywords ?? []) as string[]) || []).map((v) => normalizeText(v)),
   ].filter(Boolean);
 
   const situationParts = [
-    normalizeText(args.situationSummary),
     normalizeText(args.situationTopic),
+    normalizeText(args.situationSummary),
   ].filter(Boolean);
 
   const historyParts = collectHistoryText(args.historyForWriter, 6);
 
-  // ✅ 最新 userText を最優先
-  // - userText がある時は、それだけを主材料にする
-  // - 過去 digest / history / assistant 補助は混ぜない
-  //   （現在トピックの要約が過去テーマに汚染されるのを防ぐ）
+  const stableCoreParts = [
+    ...digestParts.slice(0, 4),
+    ...situationParts.slice(0, 2),
+  ].filter(Boolean);
+
+  const stableCore = stableCoreParts.join(' ').trim();
+
+  const currentLooksLikeTopicShift =
+    currentUser.length > 0 &&
+    stableCore.length > 0 &&
+    (
+      (/仕事|職場|転職|会社/.test(currentUser) && /彼女|彼氏|恋愛|連絡|浮気|別な男/.test(stableCore)) ||
+      (/彼女|彼氏|恋愛|連絡|浮気|別な男/.test(currentUser) && /仕事|職場|転職|会社/.test(stableCore)) ||
+      (/家族|夫婦|親|子ども/.test(currentUser) && /仕事|職場|転職|会社|彼女|彼氏|恋愛/.test(stableCore))
+    );
+
+  // ✅ 根本方針
+  // - 芯（digest / continuity / situation）を先に置く
+  // - currentUser は差分として後ろに足す
+  // - ただし明確な話題転換だけは currentUser を先頭にする
   if (currentUser) {
-    return currentUser;
+    if (currentLooksLikeTopicShift) {
+      return [
+        currentUser,
+        ...stableCoreParts.slice(0, 2),
+      ]
+        .filter(Boolean)
+        .join(' ');
+    }
+
+    return [
+      stableCore,
+      currentUser,
+    ]
+      .filter(Boolean)
+      .join(' ');
   }
 
-  // userText がない時だけ、補助材料で組む
-  return [...digestParts, ...situationParts, ...historyParts]
+  return [
+    stableCore,
+    ...historyParts,
+  ]
     .filter(Boolean)
     .join('\n');
 }
@@ -370,31 +406,41 @@ function extractKeywords(text: string): string[] {
   return uniq(hits).slice(0, 8);
 }
 
-function pickConversationLine(scores: Record<ThemeKey, number>): string | null {
+function pickConversationLine(
+  scores: Record<ThemeKey, number>,
+  keywords: string[],
+  rawText: string,
+): string | null {
   const has = (k: ThemeKey) => scores[k] > 0;
+  const text = normalizeText(rawText);
+  const lead = keywords.slice(0, 2).join('・');
 
-  if (has('rewind') && has('organize')) return '思考の巻き戻り';
-  if (has('rewind') && has('reconfirm')) return '過去テーマの再確認';
-  if (has('rewind') && has('memory')) return '過去感覚への逆戻り';
-  if (has('rewind')) return '前の感じへの逆戻り';
+  if (/彼女|彼氏|恋愛|連絡|返信|既読|未読|浮気|別な男|温度差/.test(text)) {
+    if (/不安|心配|疑|浮気|別な男/.test(text)) {
+      return truncateJa('恋愛の連絡不安と疑い', 24);
+    }
+    return truncateJa('恋愛の連絡と距離感', 24);
+  }
 
-  if (has('work') && has('anxiety')) return '仕事不安の整理';
-  if (has('relationship') && has('anxiety')) return '関係不安の整理';
-  if (has('health') && has('stuck')) return '体調由来の停滞';
-  if (has('forward') && has('anxiety')) return '前進前の迷い';
-  if (has('forward') && has('organize')) return '前進前の整理';
-  if (has('stuck') && has('emotion')) return '感情停滞の整理';
-  if (has('memory') && has('reconfirm')) return '過去感覚の再確認';
-  if (has('work')) return '仕事テーマの揺れ';
-  if (has('relationship')) return '関係テーマの揺れ';
-  if (has('health')) return '体調テーマの整理';
-  if (has('anxiety')) return '不安感の整理';
-  if (has('stuck')) return '停滞感の観測';
-  if (has('forward')) return '前進準備の兆し';
-  if (has('organize')) return '状況の整理段階';
-  if (has('memory')) return '過去テーマの浮上';
+  if (/仕事|職場|転職|会社|上司|同僚/.test(text)) {
+    if (/不安|迷|しんど|疲/.test(text)) {
+      return truncateJa('仕事の不安と迷い', 24);
+    }
+    return truncateJa('仕事の相談', 24);
+  }
 
-  return null;
+  if (/家族|夫婦|親|子ども/.test(text)) {
+    return truncateJa('家族との関係', 24);
+  }
+
+  if (has('relationship') && has('anxiety')) return truncateJa('関係の不安', 24);
+  if (has('work') && has('anxiety')) return truncateJa('仕事の不安', 24);
+  if (has('health') && has('stuck')) return truncateJa('体調由来の停滞', 24);
+
+  if (lead) return truncateJa(lead, 24);
+
+  const fallback = truncateJa(text, 24);
+  return fallback || null;
 }
 
 function pickTopicDigest(
@@ -403,48 +449,47 @@ function pickTopicDigest(
   rawText: string,
 ): string | null {
   const has = (k: ThemeKey) => scores[k] > 0;
+  const text = normalizeText(rawText);
   const lead = keywords.slice(0, 2).join('・');
 
-  if (has('rewind') && has('organize')) {
-    return '前に進む前に、過去感覚へ戻って整理し直している流れ';
+  if (/彼女|彼氏|恋愛|連絡|返信|既読|未読|浮気|別な男|温度差/.test(text)) {
+    if (/浮気|別な男|疑|心配|不安/.test(text)) {
+      return truncateJa('相手との連絡不安から、疑いや心配が強まっている流れ', 60);
+    }
+    return truncateJa('相手との連絡や距離感のズレを気にしている流れ', 60);
   }
-  if (has('rewind') && has('reconfirm')) {
-    return '以前のテーマや感覚をもう一度確かめ直している状態';
+
+  if (/仕事|職場|転職|会社|上司|同僚/.test(text)) {
+    if (/不安|迷|辞め|続け/.test(text)) {
+      return truncateJa('仕事を続けるかどうかの不安や迷いを整理している流れ', 60);
+    }
+    return truncateJa('仕事に関する状況や悩みを整理している流れ', 60);
+  }
+
+  if (/家族|夫婦|親|子ども/.test(text)) {
+    return truncateJa('家族との関係や距離感を整理している流れ', 60);
+  }
+
+  if (has('relationship') && has('anxiety')) {
+    return truncateJa('相手との関係不安や揺れを整理している流れ', 60);
   }
   if (has('work') && has('anxiety')) {
-    return '仕事や働き方にまつわる不安や迷いを整え直している段階';
-  }
-  if (has('relationship') && has('anxiety')) {
-    return '相手との距離感や関係の揺れを見直している途中';
+    return truncateJa('仕事にまつわる不安や迷いを整えている流れ', 60);
   }
   if (has('health') && has('stuck')) {
-    return '体や気力の重さが先に出て、動きづらさにつながっている状態';
-  }
-  if (has('forward') && has('organize')) {
-    return '動き出す前に、順番や気持ちを整えている過程';
-  }
-  if (has('stuck') && has('emotion')) {
-    return '感情の重さや詰まりを言葉にしながらほどこうとしている状態';
-  }
-  if (has('anxiety')) {
-    return '不安や迷いの正体を見極めながら整えようとしている流れ';
-  }
-  if (has('forward')) {
-    return 'まだ小さくても、前へ進むための準備が立ち上がっている段階';
-  }
-  if (has('organize')) {
-    return '散らばった感覚や状況を整え直している途中';
+    return truncateJa('体調や消耗による停滞を見直している流れ', 60);
   }
 
   if (lead) {
-    return truncateJa(`${lead}を中心に今の流れを捉え直している状態`, 40);
+    return truncateJa(`${lead}を中心に今の流れを見直している状態`, 60);
   }
 
-  const fallback = truncateJa(rawText, 32);
-  if (fallback) return truncateJa(`${fallback}に関する流れを観測中`, 40);
+  const fallback = truncateJa(text, 40);
+  if (fallback) return truncateJa(`${fallback}に関する流れ`, 60);
 
   return null;
 }
+
 
 export function summarizeTopicLineV1(
   args: TopicSummarizerArgs,
@@ -463,13 +508,13 @@ export function summarizeTopicLineV1(
   const keywords = extractKeywords(rawText);
 
   const conversationLine = truncateJa(
-    pickConversationLine(scores) ?? '',
-    18,
+    pickConversationLine(scores, keywords, rawText) ?? '',
+    24,
   ) || null;
 
   const topicDigest = truncateJa(
     pickTopicDigest(scores, keywords, rawText) ?? '',
-    40,
+    60,
   ) || null;
 
   const mainTopic =

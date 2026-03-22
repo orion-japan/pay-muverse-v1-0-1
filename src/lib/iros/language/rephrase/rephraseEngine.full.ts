@@ -533,7 +533,7 @@ const obsCard = (() => {
 
     const openingPolicy = modeNorm === 'counsel' ? 'ack_1line' : 'none';
 
-    const e_turn = pickStr(ctx.e_turn, cp?.mirror?.e_turn, cp?.e_turn);
+    const e_turn = pickStr(cp?.mirror?.e_turn);
     const polarity = pickStr(ctx.polarity, cp?.mirror?.polarity, cp?.polarity);
 
     const sa = pickAny(ctx.sa, cp?.sa, cp?.selfAcceptance, cp?.self_acceptance);
@@ -5545,7 +5545,7 @@ userContext: {
       .trim()
       .toLowerCase();
 
-    const askBackAllowedRaw =
+      const askBackAllowedRaw =
       questionAny?.outputPolicy?.askBackAllowed ??
       userContextAny?.question?.outputPolicy?.askBackAllowed ??
       userContextAny?.meta?.extra?.question?.outputPolicy?.askBackAllowed ??
@@ -5567,16 +5567,37 @@ userContext: {
       questionTypeNow === 'meaning' &&
       (questionTModeNow === 'confirm' || isClarifyMeaningHint);
 
-    const noQuestions = forceNoQuestionsByMeaningConfirm ? true : false;
-    const askBackAllowedResolved = forceNoQuestionsByMeaningConfirm
+    const rawTextNow = String(t ?? '').trim();
+    const compactTextNow = rawTextNow.replace(/\s+/g, '');
+    const textLenNow = compactTextNow.length;
+
+    const isShortAmbiguousFollowup =
+      textLenNow <= 18 &&
+      /^(それ|これ|あれ|でも|どう|どっち)/.test(compactTextNow);
+
+    const hasConcreteContinuationSignal =
+      textLenNow >= 24 ||
+      /彼女|彼氏|連絡|返信|返事|既読|未読|不安|心配|浮気|関係|やり取り|距離感/.test(compactTextNow);
+
+    const forceNoQuestionsByContinuity =
+      hasConcreteContinuationSignal &&
+      !isShortAmbiguousFollowup;
+
+    const noQuestions =
+      forceNoQuestionsByMeaningConfirm ||
+      forceNoQuestionsByContinuity;
+
+    const askBackAllowedResolved = noQuestions
       ? false
       : askBackAllowedRaw;
+
     const goalKindNow =
       forceNoQuestionsByMeaningConfirm && goalKindRaw === 'expand'
         ? 'confirm'
         : goalKindRaw;
-    const questionsMaxNow = forceNoQuestionsByMeaningConfirm ? 0 : null;
-    const forceNoQuestionsByContract = forceNoQuestionsByMeaningConfirm;
+
+    const questionsMaxNow = noQuestions ? 0 : null;
+    const forceNoQuestionsByContract = noQuestions;
 
     const beforeLast = String(t.split('\n').filter(Boolean).slice(-1)[0] ?? '');
 
@@ -5608,6 +5629,36 @@ userContext: {
           }
           if (lines.length > 0 && /^\s*---+\s*$/u.test(String(lines[lines.length - 1] ?? ''))) {
             lines.pop();
+          }
+
+          // ✅ 質問本文を消したあとに
+          // 「最後にひとつだけ聞いていいですか。」
+          // 「最後にひとつだけ聞かせてください。」
+          // のような導入句だけ残るのを防ぐ
+          while (lines.length > 0) {
+            const tail = String(lines[lines.length - 1] ?? '').trim();
+            if (!tail) {
+              lines.pop();
+              continue;
+            }
+
+            const isQuestionLeadOnly =
+              /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞いていいですか。?$/u.test(tail) ||
+              /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞かせてください。?$/u.test(tail) ||
+              /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞かせて。?$/u.test(tail) ||
+              /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞いていいですか。?$/u.test(tail) ||
+              /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞かせてください。?$/u.test(tail) ||
+              /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞かせて。?$/u.test(tail) ||
+              /^(?:もしよければ)?最後に確認させてください。?$/u.test(tail) ||
+              /^(?:もしよければ)?最後に(?:一点|1点)だけ。?$/u.test(tail) ||
+              /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ。?$/u.test(tail);
+
+            if (isQuestionLeadOnly) {
+              lines.pop();
+              continue;
+            }
+
+            break;
           }
 
           out = lines.join('\n').replace(/[ \t]+\n/g, '\n').trim();
