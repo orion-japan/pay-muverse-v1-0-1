@@ -23,6 +23,10 @@ import { injectHistoryDigestV1 } from '../../history/historyDigestV1';
 import { decideRecallV1 } from '../../memory/recallGate';
 import { buildFlowMeaningV1 } from '../../memory/buildFlowMeaning';
 import { buildFlowSeedV1, formatFlowSeedV1 } from '../../seed/seedEngine';
+// --- delta engine ---
+import { buildMultiDelta } from '@/lib/iros/delta/buildMultiDelta';
+import { selectPrimaryDelta } from '@/lib/iros/delta/selectPrimaryDelta';
+import { emitDeltaHint } from '@/lib/iros/delta/emitDeltaHint';
 
 export type WriterMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 type TurnMsg = { role: 'user' | 'assistant'; content: string };
@@ -1072,6 +1076,90 @@ const currentFlowAny: any = firstNonNull(
                   return q && typeof q === 'object' ? q : null;
                 })();
 
+                const deltaHint = (() => {
+                  try {
+                    if (!questionMeta) return null;
+
+                    const layerRaw = String((questionMeta as any)?.layer ?? '')
+                      .trim()
+                      .toLowerCase();
+
+                    const policyLayer =
+                      layerRaw === 'fact'
+                        ? 'fact'
+                        : layerRaw === 'intent'
+                        ? 'intent'
+                        : layerRaw === 'interpretation'
+                        ? 'creation'
+                        : 'fact';
+
+                    const extractETurnFromFlow = (flowLike: unknown): string | null => {
+                      const s = String(flowLike ?? '').trim();
+                      if (!s || s === '(null)' || s === 'null') return null;
+                      const m = s.match(/^(e[1-5])(?:-|$)/i);
+                      return m ? m[1].toLowerCase() : null;
+                    };
+
+                    const previousFlowText = String(
+                      firstNonNull(
+                        (flowAny as any)?.previousFlow,
+                        (flowAny as any)?.prev,
+                        typeof internalPackRaw === 'string'
+                          ? (internalPackRaw.match(/prev=([^\n]+)/)?.[1] ?? '')
+                          : '',
+                        '',
+                      ) ?? '',
+                    ).trim();
+
+                    const currentFlowText = String(
+                      firstNonNull(
+                        (flowAny as any)?.currentFlow,
+                        (flowAny as any)?.current,
+                        currentFlowAny,
+                        typeof internalPackRaw === 'string'
+                          ? (internalPackRaw.match(/current=([^\n]+)/)?.[1] ?? '')
+                          : '',
+                        '',
+                      ) ?? '',
+                    ).trim();
+
+                    const deltas = buildMultiDelta({
+                      prev: {
+                        e_turn: extractETurnFromFlow(previousFlowText),
+                        topic: topicDigest || conversationLine || null,
+                        layer: null,
+                        intent: intentDir || intentAnchor || null,
+                      },
+                      now: {
+                        e_turn: extractETurnFromFlow(currentFlowText) || eTurn2 || null,
+                        topic: latestUserText || null,
+                        layer: policyLayer,
+                        intent:
+                          String((questionMeta as any)?.questionType ?? '').trim() || null,
+                      },
+                    });
+
+                    const primary = selectPrimaryDelta(deltas, {
+                      layer: policyLayer,
+                    });
+
+                    return emitDeltaHint(primary);
+                  } catch {
+                    return null;
+                  }
+                })();
+                try {
+                  console.log('[IROS/delta]', {
+                    hasQuestionMeta: !!questionMeta,
+                    userText: String((args as any)?.userText ?? ''),
+                    questionDomain: String((questionMeta as any)?.domain ?? ''),
+                    questionType: String((questionMeta as any)?.questionType ?? ''),
+                    questionFocus: String((questionMeta as any)?.tState?.focus ?? ''),
+                    questionLayer: String((questionMeta as any)?.layer ?? ''),
+                    deltaHint,
+                  });
+                } catch {}
+
                 const questionDomain = String((questionMeta as any)?.domain ?? '').trim();
                 const questionType = String((questionMeta as any)?.questionType ?? '').trim();
                 const questionTMode = String((questionMeta as any)?.tState?.mode ?? '').trim();
@@ -1650,13 +1738,14 @@ const currentFlowAny: any = firstNonNull(
                           return [
                             '- Keep it narrow and grounded.',
                             '- Answer the user’s meaning before expanding.',
+                            '- When FLOW_MEANING.hook exists, start the first paragraph from that hook rather than from a generic restatement of the user text.',
                             '- Avoid generic broadening.',
                             '- When questions_max is 0, do not add a closing question.',
                             '- When questions_max is 1 and askBackAllowed is true, end with exactly one narrow closing question.',
                             '- The closing question must stay on the current topic and must not broaden the scope.',
                             '- The closing question must directly narrow the user’s current statement.',
-'- Do not ask abstract or broad questions.',
-'- Do not introduce new topics.',
+                            '- Do not ask abstract or broad questions.',
+                            '- Do not introduce new topics.',
                           ];
                   }
                 })();
@@ -1872,16 +1961,21 @@ const currentFlowAny: any = firstNonNull(
                           /itx_step=|itx_reason=/.test(packNorm) ||
                           /itOk=/.test(packNorm),
 
-                        hasFuture:
+                          hasFuture:
                           /future=/.test(packNorm) ||
                           /futureRandom=/.test(packNorm),
 
                         hasStateCues: /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/.test(packNorm),
-                        hasFlowMeaning: flowIdx >= 0,
+
+                        hasFlowMeaning:
+                          /(?:^|\n)FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:/.test(packNorm) ||
+                          /hook=/.test(packNorm) ||
+                          /tension=/.test(packNorm) ||
+                          /openLoop=/.test(packNorm),
 
                         hasMirrorFlowSeed:
-                        /FLOW_SEED_V1\b/.test(packNorm) ||
-                        /FLOW:\s*\n/.test(packNorm),
+                          /FLOW_SEED_V1\b/.test(packNorm) ||
+                          /FLOW:\s*\n/.test(packNorm),
                       hasOpenness,
                       hasWriterDirectives,
 
@@ -1923,15 +2017,111 @@ const currentFlowAny: any = firstNonNull(
   const shiftKindRaw = shiftMeta.kind;
   const meaningKindRaw = shiftMeta.meaningKind;
   const shiftIntentRaw = shiftMeta.intent;
+  const internalPackWithDelta =
+  deltaHint && deltaHint.length > 0
+    ? `${deltaHint}\n${internalPackFixed ?? ''}`
+    : internalPackFixed;
 
-  const internalPackForWriter = String(internalPackFixed ?? '')
-    .replace(/^[ \t]*@OBS[^\n]*(?:\n|$)/gm, '')
-    .replace(/^[ \t]*@SHIFT[^\n]*(?:\n|$)/gm, '')
-    .replace(/^[ \t]*@SAFE[^\n]*(?:\n|$)/gm, '')
-    .replace(/^[ \t]*@NEXT_HINT[^\n]*(?:\n|$)/gm, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
 
+    const internalPackForWriter = (() => {
+      let base = String(internalPackFixed ?? '')
+        .replace(/^[ \t]*@OBS[^\n]*(?:\n|$)/gm, '')
+        .replace(/^[ \t]*@SHIFT[^\n]*(?:\n|$)/gm, '')
+        .replace(/^[ \t]*@SAFE[^\n]*(?:\n|$)/gm, '')
+        .replace(/^[ \t]*@NEXT_HINT[^\n]*(?:\n|$)/gm, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+      // ===== FLOW_MEANING 追加 =====
+      const flowMeaningBlock = (() => {
+        const hook = String(flowMeaningV1?.thisTurnHook ?? '').trim();
+        const tension = String(flowMeaningV1?.continuingTension ?? '').trim();
+        const openLoop = String(flowMeaningV1?.openLoop ?? '').trim();
+
+        const lines = [
+          hook && `hook=${hook}`,
+          tension && `tension=${tension}`,
+          openLoop && `openLoop=${openLoop}`,
+        ].filter(Boolean);
+
+        if (lines.length === 0) return '';
+
+        return `FLOW_MEANING:\n${lines.join('\n')}`;
+      })();
+
+      if (flowMeaningBlock) {
+        base = `${flowMeaningBlock}\n\n${base}`;
+      }
+      // ===== ここまで =====
+
+      if (deltaHint && deltaHint.length > 0) {
+        return `${deltaHint}\n${base}`;
+      }
+
+      return base;
+    })();
+    try {
+      const packNormFinal = norm(internalPackForWriter);
+      const hFinal = packNormFinal.slice(0, 900);
+
+      const flowMatchFinal = packNormFinal.match(
+        /FLOW_CONTEXT(?:\s*\(DO NOT OUTPUT\))?:|FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:/
+      );
+      const flowIdxFinal = flowMatchFinal ? flowMatchFinal.index ?? -1 : -1;
+      const flowSnippetFinal =
+        flowIdxFinal >= 0
+          ? packNormFinal.slice(flowIdxFinal, Math.min(packNormFinal.length, flowIdxFinal + 520))
+          : '';
+
+      const hasOpennessFinal =
+        /(?:^|\n)OPENNESS(?:\n|$)/.test(packNormFinal) ||
+        /tLayerHint=|itOk=/.test(packNormFinal);
+
+      const hasWriterDirectivesFinal =
+        /(?:^|\n)WRITER_DIRECTIVES(?:\n|$)/.test(packNormFinal) ||
+        /tone=|maxLines=|slotPolicy=|rotationMention=/.test(packNormFinal);
+
+      console.log('[IROS/writerCalls][INJECTED_PACK_HEAD_FINAL_RAW]', hFinal);
+
+      console.log('[IROS/writerCalls][INJECTED_PACK_HEAD_FINAL]', {
+        traceId: (args as any)?.traceId ?? null,
+        conversationId: (args as any)?.conversationId ?? null,
+        packLen: packNormFinal.length,
+        head: hFinal,
+        hasCOORD: /COORD\s*\(DO NOT OUTPUT\)/.test(packNormFinal),
+        hasPolarity: /polarity=/.test(packNormFinal),
+        hasSA: /sa=/.test(packNormFinal),
+
+        hasITX:
+          /itx_step=|itx_reason=/.test(packNormFinal) ||
+          /itOk=/.test(packNormFinal),
+
+        hasFuture:
+          /future=/.test(packNormFinal) ||
+          /futureRandom=/.test(packNormFinal),
+
+        hasStateCues: /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/.test(packNormFinal),
+
+        hasFlowMeaning:
+          /(?:^|\n)FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:/.test(packNormFinal) ||
+          /hook=/.test(packNormFinal) ||
+          /tension=/.test(packNormFinal) ||
+          /openLoop=/.test(packNormFinal),
+
+        hasMirrorFlowSeed:
+          /FLOW_SEED_V1\b/.test(packNormFinal) ||
+          /FLOW:\s*\n/.test(packNormFinal),
+
+        hasOpenness: hasOpennessFinal,
+        hasWriterDirectives: hasWriterDirectivesFinal,
+        flowSnippet: flowSnippetFinal,
+        saRhythm: saRhythm || null,
+        saTone: saTone || null,
+        saBrevity: saBrevity || null,
+        itxStep: itxStep ?? null,
+        itxReason: itxReason ?? null,
+      });
+    } catch {}
   const isTopicRecallTurn =
     meaningKindRaw === 'topic_recall';
 
@@ -1996,9 +2186,25 @@ const currentFlowAny: any = firstNonNull(
           })()
         : turnsDeduped;
 
-      const packMsg: WriterMessage | null = internalPackForWriter
-      ? { role: 'assistant', content: internalPackForWriter }
-      : null;
+        const packMsg: WriterMessage | null = internalPackForWriter
+        ? { role: 'assistant', content: internalPackForWriter }
+        : null;
+
+        try {
+          const deltaDebug = {
+            hasDeltaHint: !!deltaHint,
+            deltaHint: deltaHint ?? null,
+            internalPackForWriterHasDelta: /(?:^|\n)@DELTA\b/.test(String(internalPackForWriter ?? '')),
+            packMsgHasDelta: /(?:^|\n)@DELTA\b/.test(String(packMsg?.content ?? '')),
+            internalPackForWriterHead: String(internalPackForWriter ?? '').slice(0, 300),
+            packMsgHead: String(packMsg?.content ?? '').slice(0, 300),
+          };
+
+          console.log(
+            '[IROS/writerCalls][PACK_MSG_DELTA_CHECK]',
+            JSON.stringify(deltaDebug),
+          );
+        } catch {}
 
       const topicRecallNoEvidenceMsg: WriterMessage | null =
       isTopicRecallTurn && (!Array.isArray(turns) || turns.length === 0)

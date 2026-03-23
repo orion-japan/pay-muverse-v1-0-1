@@ -5601,6 +5601,501 @@ const inputKindCanon: string | null = (() => {
       ((out.metaForSave as any)?.extra?.ctxPack as any)?.replyGoal ?? null,
   });
 
+  const userContextValue = await (async () => {
+    console.log('[IROS/USER_CONTEXT][ENTER]', {
+      traceId: traceIdCanon,
+      conversationId: _conversationId ?? null,
+      userCode: _userCode ?? null,
+      hasHistoryForWriter: Array.isArray((out.metaForSave as any)?.extra?.historyForWriter),
+    });
+
+    try {
+      console.log('[IROS/Reply][USERCONTEXT_IIFE_ENTER]', {
+        traceId: traceIdCanon,
+        conversationId: _conversationId ?? null,
+        userCode: _userCode ?? null,
+        hasCtxPackPrevRaw:
+          !!(((out.metaForSave as any)?.extra?.ctxPack ?? null)),
+      });
+    } catch {}
+
+    const turns: Array<{ role: 'user' | 'assistant'; content: string }> = Array.isArray(
+      (out.metaForSave as any)?.extra?.historyForWriter,
+    )
+      ? (out.metaForSave as any).extra.historyForWriter
+          .map((m: any) => ({
+            role: m?.role,
+            content: m?.content ?? m?.text ?? '',
+          }))
+          .filter(
+            (m: any) =>
+              (m?.role === 'user' || m?.role === 'assistant') &&
+              String(m?.content ?? '').trim().length > 0,
+          )
+      : [];
+
+    const metaRoot = (out.metaForSave as any)?.meta ?? null;
+    try {
+      console.log('[IROS/Reply][METAROOT_CTXPACK_CHECK]', {
+        traceId: traceIdCanon,
+        conversationId: _conversationId ?? null,
+        userCode: _userCode ?? null,
+
+        metaRoot_hasExtra:
+          !!(metaRoot && typeof metaRoot === 'object' && (metaRoot as any).extra),
+
+        metaRoot_ctxPack:
+          metaRoot &&
+          typeof metaRoot === 'object' &&
+          (metaRoot as any).extra &&
+          typeof (metaRoot as any).extra === 'object'
+            ? ((metaRoot as any).extra as any).ctxPack ?? null
+            : null,
+
+        metaRoot_ctxPack_flow:
+          metaRoot &&
+          typeof metaRoot === 'object' &&
+          (metaRoot as any).extra &&
+          typeof (metaRoot as any).extra === 'object' &&
+          ((metaRoot as any).extra as any).ctxPack &&
+          typeof ((metaRoot as any).extra as any).ctxPack === 'object'
+            ? ((((metaRoot as any).extra as any).ctxPack as any).flow ?? null)
+            : null,
+
+        metaRoot_ctxPack_keys:
+          metaRoot &&
+          typeof metaRoot === 'object' &&
+          (metaRoot as any).extra &&
+          typeof (metaRoot as any).extra === 'object' &&
+          ((metaRoot as any).extra as any).ctxPack &&
+          typeof ((metaRoot as any).extra as any).ctxPack === 'object'
+            ? Object.keys((((metaRoot as any).extra as any).ctxPack as any))
+            : [],
+      });
+    } catch {}
+
+    // ✅ ctxPack の継続値を受けるが、BlockPlan 系は“絶対に継続しない”
+    const ctxPackPrevRaw: any = ((out.metaForSave as any)?.extra?.ctxPack ?? null) as any;
+    try {
+      console.log('[IROS/Reply][CTXPACK_REBUILD_INPUTS]', {
+        traceId: traceIdCanon,
+        conversationId: _conversationId ?? null,
+        userCode: _userCode ?? null,
+
+        out_meta_extra_ctxPack_willRotation:
+          (out.metaForSave as any)?.extra?.ctxPack &&
+          typeof (out.metaForSave as any).extra.ctxPack === 'object'
+            ? ((out.metaForSave as any).extra.ctxPack as any).willRotation ?? null
+            : null,
+
+        ctxPackPrevRaw_willRotation:
+          ctxPackPrevRaw && typeof ctxPackPrevRaw === 'object'
+            ? (ctxPackPrevRaw as any).willRotation ?? null
+            : null,
+      });
+    } catch {}
+
+    const ctxPackPrev: any =
+      ctxPackPrevRaw && typeof ctxPackPrevRaw === 'object' ? { ...ctxPackPrevRaw } : {};
+
+    try {
+      console.log('[IROS/Reply][CTXPACK_PREV_FLOW_CHECK]', {
+        traceId: traceIdCanon,
+        conversationId: _conversationId ?? null,
+        userCode: _userCode ?? null,
+        ctxPackPrevRaw_hasFlow:
+          !!(ctxPackPrevRaw && typeof ctxPackPrevRaw === 'object' && (ctxPackPrevRaw as any).flow),
+        ctxPackPrev_hasFlow:
+          !!(ctxPackPrev && typeof ctxPackPrev === 'object' && (ctxPackPrev as any).flow),
+        ctxPackPrevRaw_flow:
+          ctxPackPrevRaw && typeof ctxPackPrevRaw === 'object'
+            ? (ctxPackPrevRaw as any).flow ?? null
+            : null,
+        ctxPackPrev_flow:
+          ctxPackPrev && typeof ctxPackPrev === 'object'
+            ? (ctxPackPrev as any).flow ?? null
+            : null,
+        ctxPackPrevRaw_keys:
+          ctxPackPrevRaw && typeof ctxPackPrevRaw === 'object'
+            ? Object.keys(ctxPackPrevRaw)
+            : [],
+        ctxPackPrev_flow_keys:
+          ctxPackPrev && typeof (ctxPackPrev as any).flow === 'object'
+            ? Object.keys((ctxPackPrev as any).flow)
+            : [],
+      });
+    } catch {}
+
+    try {
+      delete ctxPackPrev.blockPlan;
+      delete ctxPackPrev.blockPlanText;
+      delete ctxPackPrev.blockPlanEnabled;
+      delete ctxPackPrev.blockPlanMeta;
+      delete ctxPackPrev.blockPlanTrigger;
+      delete ctxPackPrev.blockPlanTriggerText;
+    } catch {}
+
+    console.log('[IROS/LTM][PRE_ENTER]', {
+      traceId: traceIdCanon,
+      conversationId: _conversationId ?? null,
+      userCode: _userCode ?? null,
+      hasText: typeof text === 'string' && text.trim().length > 0,
+      ctxPackKeys:
+        out?.metaForSave?.extra?.ctxPack && typeof out.metaForSave.extra.ctxPack === 'object'
+          ? Object.keys(out.metaForSave.extra.ctxPack)
+          : [],
+      extraKeys:
+        out?.metaForSave?.extra && typeof out.metaForSave.extra === 'object'
+          ? Object.keys(out.metaForSave.extra)
+          : [],
+    });
+
+    const loadedMemoryState =
+      typeof _userCode === 'string' && _userCode.trim().length > 0
+        ? await loadIrosMemoryState(supabase as any, _userCode)
+        : null;
+
+    const memoryStateSnapshot = loadedMemoryState
+      ? {
+          intentAnchor: loadedMemoryState.intentAnchor ?? null,
+          qPrimary: loadedMemoryState.qPrimary ?? null,
+          depthStage: loadedMemoryState.depthStage ?? null,
+          phase: loadedMemoryState.phase ?? null,
+          selfAcceptance: loadedMemoryState.selfAcceptance ?? null,
+          intentLayer: loadedMemoryState.intentLayer ?? null,
+          intentConfidence: loadedMemoryState.intentConfidence ?? null,
+          yLevel: loadedMemoryState.yLevel ?? null,
+          hLevel: loadedMemoryState.hLevel ?? null,
+          spinLoop: loadedMemoryState.spinLoop ?? null,
+          spinStep: loadedMemoryState.spinStep ?? null,
+          descentGate: loadedMemoryState.descentGate ?? null,
+          itxStep: loadedMemoryState.itxStep ?? null,
+          itxAnchorEventType: loadedMemoryState.itxAnchorEventType ?? null,
+          itxReason: loadedMemoryState.itxReason ?? null,
+          itxLastAt: loadedMemoryState.itxLastAt ?? null,
+          summary: loadedMemoryState.summary ?? null,
+          sentimentLevel: loadedMemoryState.sentimentLevel ?? null,
+          situationSummary: loadedMemoryState.situationSummary ?? null,
+          situationTopic: loadedMemoryState.situationTopic ?? null,
+          updatedAt: loadedMemoryState.updatedAt ?? null,
+        }
+      : null;
+
+    const memoryStateNoteText = memoryStateSnapshot
+      ? [
+          'MEMORY_STATE:',
+          memoryStateSnapshot.summary
+            ? `- summary: ${String(memoryStateSnapshot.summary).slice(0, 180)}`
+            : null,
+          memoryStateSnapshot.situationSummary
+            ? `- situation_summary: ${String(memoryStateSnapshot.situationSummary).slice(0, 180)}`
+            : null,
+          memoryStateSnapshot.situationTopic
+            ? `- situation_topic: ${String(memoryStateSnapshot.situationTopic).slice(0, 120)}`
+            : null,
+          memoryStateSnapshot.qPrimary
+            ? `- q_primary: ${memoryStateSnapshot.qPrimary}`
+            : null,
+          memoryStateSnapshot.depthStage
+            ? `- depth_stage: ${memoryStateSnapshot.depthStage}`
+            : null,
+          memoryStateSnapshot.phase
+            ? `- phase: ${memoryStateSnapshot.phase}`
+            : null,
+          memoryStateSnapshot.intentLayer
+            ? `- intent_layer: ${memoryStateSnapshot.intentLayer}`
+            : null,
+          memoryStateSnapshot.sentimentLevel
+            ? `- sentiment_level: ${memoryStateSnapshot.sentimentLevel}`
+            : null,
+        ]
+          .filter((v) => typeof v === 'string' && v.trim().length > 0)
+          .join('\n')
+      : null;
+
+    console.log('[IROS/LTM][LOAD_ENTER]', {
+      traceId: traceIdCanon,
+      userCode: _userCode ?? null,
+      hasText: typeof text === 'string' && text.trim().length > 0,
+    });
+
+    const longTermRows =
+      typeof _userCode === 'string' && _userCode.trim().length > 0
+        ? await loadDurableMemoriesForTurnV1({
+            userCode: _userCode,
+            limit: 12,
+          })
+        : [];
+
+    const selectedLongTermRows = selectLongTermMemoriesV1({
+      rows: longTermRows,
+      userText: typeof text === 'string' ? text : '',
+      maxItems: 4,
+    });
+
+    console.log('[IROS/LTM][BEFORE_BUILD]', {
+      selectedCount: selectedLongTermRows?.length ?? 0,
+      totalCount: longTermRows?.length ?? 0,
+      selectedKeys: (selectedLongTermRows ?? []).map((r) => r.key),
+    });
+
+    const longTermBuilt = buildLongTermMemoryNoteTextV1({
+      rows: selectedLongTermRows,
+      maxItems: 4,
+    });
+
+    console.log('[IROS/LTM][AFTER_BUILD]', {
+      pickedCount: longTermBuilt?.picked?.length ?? 0,
+      pickedIds: (longTermBuilt?.picked ?? []).map((r) => r.id),
+      noteTextLen:
+        typeof longTermBuilt?.noteText === 'string'
+          ? longTermBuilt.noteText.length
+          : 0,
+    });
+
+    console.log('[IROS/LTM][BEFORE_PRIORITY]', {
+      pickedCount: longTermBuilt?.picked?.length ?? 0,
+    });
+
+    await updateMemoryPriorityV1({
+      rows: longTermBuilt.picked,
+    });
+
+    console.log('[IROS/LTM][AFTER_PRIORITY]', {
+      pickedCount: longTermBuilt?.picked?.length ?? 0,
+    });
+
+    console.log('[IROS/LTM][BEFORE_DECAY]', {
+      totalCount: longTermRows?.length ?? 0,
+      usedRowIds: longTermBuilt.picked.map((r) => r.id),
+    });
+
+    await decayUnusedMemoriesV1({
+      allRows: longTermRows,
+      usedRowIds: longTermBuilt.picked.map((r) => r.id),
+    });
+
+    console.log('[IROS/LTM][AFTER_DECAY]', {
+      totalCount: longTermRows?.length ?? 0,
+      usedRowIds: longTermBuilt.picked.map((r) => r.id),
+    });
+
+    const longTermMemoryNoteText =
+      typeof longTermBuilt.noteText === 'string' && longTermBuilt.noteText.trim().length > 0
+        ? longTermBuilt.noteText
+        : null;
+
+    console.log('[IROS/LTM][SELECTED]', {
+      count: selectedLongTermRows?.length ?? 0,
+      keys: (selectedLongTermRows ?? []).map((r) => r.key),
+      clusters: (selectedLongTermRows ?? []).map((r) => r.cluster_key),
+      types: (selectedLongTermRows ?? []).map((r) => r.memory_type),
+    });
+
+    // ✅ LTM / MemoryState を route 側へ渡す正本
+    out.metaForSave = out.metaForSave ?? {};
+    (out.metaForSave as any).extra = (out.metaForSave as any).extra ?? {};
+
+    const exAny: any = (out.metaForSave as any).extra;
+
+    exAny.longTermMemoryNoteText = longTermMemoryNoteText;
+    exAny.memoryStateNoteText = memoryStateNoteText;
+    exAny.memoryStateSnapshot = memoryStateSnapshot;
+
+    exAny.ctxPack = exAny.ctxPack && typeof exAny.ctxPack === 'object' ? exAny.ctxPack : {};
+    exAny.ctxPack.longTermMemoryNoteText = longTermMemoryNoteText;
+    exAny.ctxPack.memoryStateNoteText = memoryStateNoteText;
+    exAny.ctxPack.memoryStateSnapshot = memoryStateSnapshot;
+
+    console.log('[IROS/LTM][STAMPED_FOR_ROUTE]', {
+      traceId: traceIdCanon,
+      conversationId: _conversationId ?? null,
+      userCode: _userCode ?? null,
+      longTermMemoryNoteTextLen:
+        typeof longTermMemoryNoteText === 'string' ? longTermMemoryNoteText.length : 0,
+      memoryStateNoteTextLen:
+        typeof memoryStateNoteText === 'string' ? memoryStateNoteText.length : 0,
+      hasMemoryStateSnapshot: Boolean(memoryStateSnapshot),
+      ctxPackKeys: Object.keys(exAny.ctxPack ?? {}),
+    });
+
+    console.log('[IROS/STATE][CTX_ATTACHED]', {
+      userCode: _userCode ?? null,
+      hasMemoryState: Boolean(memoryStateSnapshot),
+      qPrimary: memoryStateSnapshot?.qPrimary ?? null,
+      depthStage: memoryStateSnapshot?.depthStage ?? null,
+      phase: memoryStateSnapshot?.phase ?? null,
+      summaryHead:
+        typeof memoryStateSnapshot?.summary === 'string'
+          ? String(memoryStateSnapshot.summary).slice(0, 80)
+          : null,
+      selfAcceptance: memoryStateSnapshot?.selfAcceptance ?? null,
+      intentLayer: memoryStateSnapshot?.intentLayer ?? null,
+      sentimentLevel: memoryStateSnapshot?.sentimentLevel ?? null,
+      situationSummaryHead:
+        typeof memoryStateSnapshot?.situationSummary === 'string'
+          ? String(memoryStateSnapshot.situationSummary).slice(0, 80)
+          : null,
+      situationTopic: memoryStateSnapshot?.situationTopic ?? null,
+      hasMemoryStateNoteText: Boolean(memoryStateNoteText),
+    });
+
+    const shiftKindNow =
+      String((out.metaForSave as any)?.extra?.ctxPack?.shiftKind ?? '').trim() || null;
+
+    const pastStateTriggerKindNow =
+      typeof (out.metaForSave as any)?.extra?.pastStateTriggerKind === 'string'
+        ? String((out.metaForSave as any).extra.pastStateTriggerKind).trim()
+        : null;
+
+    const shouldHideHistoryForResponse =
+      shiftKindNow === 'narrow_shift' ||
+      shiftKindNow === 'stabilize_shift' ||
+      pastStateTriggerKindNow === 'none';
+
+    // UI表示用と、次ターン内部保持用を分離する
+    const historyForWriterInternal =
+      Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
+        ? (out.metaForSave as any).extra.historyForWriter
+        : Array.isArray((out.metaForSave as any)?.extra?.ctxPack?.historyForWriter)
+          ? (out.metaForSave as any).extra.ctxPack.historyForWriter
+          : Array.isArray(turns)
+            ? turns
+            : [];
+
+    const historyForWriterForResponse = shouldHideHistoryForResponse
+      ? []
+      : historyForWriterInternal;
+
+    const historyForWriterAtInternal =
+      (out.metaForSave as any)?.extra?.historyForWriterAt ??
+      ((out.metaForSave as any)?.extra?.ctxPack as any)?.historyForWriterAt ??
+      (ctxPackPrev as any)?.historyForWriterAt ??
+      null;
+
+    console.log('[IROS/USER_CONTEXT][EXIT_READY]', {
+      traceId: traceIdCanon,
+      conversationId: _conversationId ?? null,
+      userCode: _userCode ?? null,
+      hasMemoryStateNoteText: Boolean(memoryStateNoteText),
+      hasLongTermMemoryNoteText: Boolean(longTermMemoryNoteText),
+      selectedLongTermCount: selectedLongTermRows?.length ?? 0,
+    });
+
+    const historyDigestV1Internal =
+      (out.metaForSave as any)?.extra?.historyDigestV1 ??
+      ((out.metaForSave as any)?.extra?.ctxPack as any)?.historyDigestV1 ??
+      (ctxPackPrev as any)?.historyDigestV1 ??
+      null;
+
+    try {
+      console.log('[IROS/Reply][USERCONTEXT_FLOW_BEFORE_RETURN]', {
+        traceId: traceIdCanon,
+        conversationId: _conversationId ?? null,
+        userCode: _userCode ?? null,
+
+        ctxPackPrev_flow:
+          ctxPackPrev && typeof ctxPackPrev === 'object'
+            ? (ctxPackPrev as any).flow ?? null
+            : null,
+
+        out_ctxPack_flow:
+          (out.metaForSave as any)?.extra?.ctxPack &&
+          typeof (out.metaForSave as any).extra.ctxPack === 'object'
+            ? ((out.metaForSave as any).extra.ctxPack as any).flow ?? null
+            : null,
+
+        merged_ctxPack_flow_preview: {
+          current:
+            ((out.metaForSave as any)?.extra?.ctxPack as any)?.flow?.current ??
+            (ctxPackPrev as any)?.flow?.current ??
+            null,
+          currentFlow:
+            ((out.metaForSave as any)?.extra?.ctxPack as any)?.flow?.currentFlow ??
+            (ctxPackPrev as any)?.flow?.currentFlow ??
+            null,
+          previous:
+            ((out.metaForSave as any)?.extra?.ctxPack as any)?.flow?.previous ??
+            (ctxPackPrev as any)?.flow?.previous ??
+            null,
+          previousFlow:
+            ((out.metaForSave as any)?.extra?.ctxPack as any)?.flow?.previousFlow ??
+            (ctxPackPrev as any)?.flow?.previousFlow ??
+            null,
+        },
+      });
+    } catch {}
+    try {
+      console.log('[IROS/RETURN_CTXPACK_FLOW_CHECK]', {
+        traceId: traceIdCanon,
+        conversationId: _conversationId ?? null,
+        userCode: _userCode ?? null,
+
+        out_ctxPack_flow: ((out.metaForSave as any)?.extra?.ctxPack as any)?.flow ?? null,
+        prev_ctxPack_flow: (ctxPackPrev as any)?.flow ?? null,
+      });
+    } catch {}
+    return {
+      conversationId: _conversationId ?? null,
+      userCode: _userCode ?? null,
+      traceId: traceIdCanon,
+      inputKind: inputKindCanon,
+
+      exprMeta: exprMetaCanon,
+
+      pastStateNoteText:
+        typeof (out.metaForSave as any)?.extra?.pastStateNoteText === 'string'
+          ? (out.metaForSave as any).extra.pastStateNoteText
+          : null,
+
+      pastStateTriggerKind:
+        typeof (out.metaForSave as any)?.extra?.pastStateTriggerKind === 'string'
+          ? (out.metaForSave as any).extra.pastStateTriggerKind
+          : null,
+
+      pastStateKeyword:
+        typeof (out.metaForSave as any)?.extra?.pastStateKeyword === 'string'
+          ? (out.metaForSave as any).extra.pastStateKeyword
+          : null,
+
+      longTermMemoryNoteText,
+      memoryStateSnapshot,
+      memoryStateNoteText,
+
+      // ここは UI 向けだけ隠す
+      historyForWriter: historyForWriterForResponse,
+      historyForWriterAt: historyForWriterAtInternal,
+      historyDigestV1: historyDigestV1Internal,
+
+      ctxPack: {
+        ...(ctxPackPrev as any),
+        ...(((out.metaForSave as any)?.extra?.ctxPack ?? {}) as any),
+
+        flow:
+          (((out.metaForSave as any)?.extra?.ctxPack as any)?.flow &&
+          typeof ((out.metaForSave as any)?.extra?.ctxPack as any).flow === 'object')
+            ? ((out.metaForSave as any).extra.ctxPack as any).flow
+            : (((ctxPackPrev as any)?.flow &&
+                typeof (ctxPackPrev as any).flow === 'object')
+                ? (ctxPackPrev as any).flow
+                : null),
+
+        traceId: traceIdCanon,
+        inputKind: inputKindCanon,
+
+        // UIでは隠しても、次ターン内部用は保持する
+        historyForWriter: historyForWriterInternal,
+        historyForWriterAt: historyForWriterAtInternal,
+        historyDigestV1: historyDigestV1Internal,
+
+        exprMeta: exprMetaCanon,
+        longTermMemoryNoteText,
+        memoryStateNoteText,
+        memoryStateSnapshot,
+      },
+    };
+      })();
+
   const rr = await rephraseSlotsFinal(
     extracted,
     {
@@ -5673,6 +6168,10 @@ const inputKindCanon: string | null = (() => {
 
       extra: {
         ...(((out.metaForSave as any)?.extra ?? {}) as any),
+
+        // ❌ extra内のctxPackは削除（top-levelで渡すため）
+        // ctxPack: ((out.metaForSave as any)?.extra?.ctxPack ?? null),
+
         llmGate:
           (((out.metaForSave as any)?.extra?.llmGate &&
             typeof (out.metaForSave as any).extra.llmGate === 'object')
@@ -5685,14 +6184,22 @@ const inputKindCanon: string | null = (() => {
                 ? ((out.metaForSave as any).extra.llmGate as any).contractObj
                 : null,
           },
+
         llmRewriteSeed:
           typeof (out.metaForSave as any)?.extra?.llmRewriteSeed === 'string'
             ? (out.metaForSave as any).extra.llmRewriteSeed
             : null,
+
         llmRewriteSeedRaw:
           typeof (out.metaForSave as any)?.extra?.llmRewriteSeedRaw === 'string'
             ? (out.metaForSave as any).extra.llmRewriteSeedRaw
             : null,
+      },
+      ctxPack: {
+        ...((((out.metaForSave as any)?.extra?.ctxPack ?? null) as any) ?? {}),
+        hasFlowMeaningForAllow:
+          typeof (out.metaForSave as any)?.extra?.flowMeaning === 'string' &&
+          !!String((out.metaForSave as any).extra.flowMeaning).trim(),
       },
 
       debug: {
@@ -5704,751 +6211,8 @@ const inputKindCanon: string | null = (() => {
         inputKind: inputKindCanon,
       } as any,
 
-      userContext: await (async () => {
-        console.log('[IROS/USER_CONTEXT][ENTER]', {
-          traceId: traceIdCanon,
-          conversationId: _conversationId ?? null,
-          userCode: _userCode ?? null,
-          hasHistoryForWriter: Array.isArray((out.metaForSave as any)?.extra?.historyForWriter),
-        });
+      userContext: userContextValue,
 
-        const turns: Array<{ role: 'user' | 'assistant'; content: string }> = Array.isArray(
-          (out.metaForSave as any)?.extra?.historyForWriter,
-        )
-          ? (out.metaForSave as any).extra.historyForWriter
-              .map((m: any) => ({
-                role: m?.role,
-                content: m?.content ?? m?.text ?? '',
-              }))
-              .filter(
-                (m: any) =>
-                  (m?.role === 'user' || m?.role === 'assistant') &&
-                  String(m?.content ?? '').trim().length > 0,
-              )
-          : [];
-
-        const metaRoot = (out.metaForSave as any)?.meta ?? null;
-
-        // ✅ ctxPack の継続値を受けるが、BlockPlan 系は“絶対に継続しない”
-        const ctxPackPrevRaw: any = ((out.metaForSave as any)?.extra?.ctxPack ?? null) as any;
-        try {
-          console.log('[IROS/Reply][CTXPACK_REBUILD_INPUTS]', {
-            traceId: traceIdCanon,
-            conversationId: _conversationId ?? null,
-            userCode: _userCode ?? null,
-
-            out_meta_extra_ctxPack_willRotation:
-              (out.metaForSave as any)?.extra?.ctxPack &&
-              typeof (out.metaForSave as any).extra.ctxPack === 'object'
-                ? ((out.metaForSave as any).extra.ctxPack as any).willRotation ?? null
-                : null,
-
-            ctxPackPrevRaw_willRotation:
-              ctxPackPrevRaw && typeof ctxPackPrevRaw === 'object'
-                ? (ctxPackPrevRaw as any).willRotation ?? null
-                : null,
-          });
-        } catch {}
-        const ctxPackPrev: any =
-          ctxPackPrevRaw && typeof ctxPackPrevRaw === 'object' ? { ...ctxPackPrevRaw } : {};
-
-        try {
-          delete ctxPackPrev.blockPlan;
-          delete ctxPackPrev.blockPlanText;
-          delete ctxPackPrev.blockPlanEnabled;
-          delete ctxPackPrev.blockPlanMeta;
-          delete ctxPackPrev.blockPlanTrigger;
-          delete ctxPackPrev.blockPlanTriggerText;
-        } catch {}
-
-        console.log('[IROS/LTM][PRE_ENTER]', {
-          traceId: traceIdCanon,
-          conversationId: _conversationId ?? null,
-          userCode: _userCode ?? null,
-          hasText: typeof text === 'string' && text.trim().length > 0,
-          ctxPackKeys:
-            out?.metaForSave?.extra?.ctxPack && typeof out.metaForSave.extra.ctxPack === 'object'
-              ? Object.keys(out.metaForSave.extra.ctxPack)
-              : [],
-          extraKeys:
-            out?.metaForSave?.extra && typeof out.metaForSave.extra === 'object'
-              ? Object.keys(out.metaForSave.extra)
-              : [],
-        });
-
-        const loadedMemoryState =
-          typeof _userCode === 'string' && _userCode.trim().length > 0
-            ? await loadIrosMemoryState(supabase as any, _userCode)
-            : null;
-
-        const memoryStateSnapshot = loadedMemoryState
-          ? {
-              intentAnchor: loadedMemoryState.intentAnchor ?? null,
-              qPrimary: loadedMemoryState.qPrimary ?? null,
-              depthStage: loadedMemoryState.depthStage ?? null,
-              phase: loadedMemoryState.phase ?? null,
-              selfAcceptance: loadedMemoryState.selfAcceptance ?? null,
-              intentLayer: loadedMemoryState.intentLayer ?? null,
-              intentConfidence: loadedMemoryState.intentConfidence ?? null,
-              yLevel: loadedMemoryState.yLevel ?? null,
-              hLevel: loadedMemoryState.hLevel ?? null,
-              spinLoop: loadedMemoryState.spinLoop ?? null,
-              spinStep: loadedMemoryState.spinStep ?? null,
-              descentGate: loadedMemoryState.descentGate ?? null,
-              itxStep: loadedMemoryState.itxStep ?? null,
-              itxAnchorEventType: loadedMemoryState.itxAnchorEventType ?? null,
-              itxReason: loadedMemoryState.itxReason ?? null,
-              itxLastAt: loadedMemoryState.itxLastAt ?? null,
-              summary: loadedMemoryState.summary ?? null,
-              sentimentLevel: loadedMemoryState.sentimentLevel ?? null,
-              situationSummary: loadedMemoryState.situationSummary ?? null,
-              situationTopic: loadedMemoryState.situationTopic ?? null,
-              updatedAt: loadedMemoryState.updatedAt ?? null,
-            }
-          : null;
-
-        const memoryStateNoteText = memoryStateSnapshot
-          ? [
-              'MEMORY_STATE:',
-              memoryStateSnapshot.summary
-                ? `- summary: ${String(memoryStateSnapshot.summary).slice(0, 180)}`
-                : null,
-              memoryStateSnapshot.situationSummary
-                ? `- situation_summary: ${String(memoryStateSnapshot.situationSummary).slice(0, 180)}`
-                : null,
-              memoryStateSnapshot.situationTopic
-                ? `- situation_topic: ${String(memoryStateSnapshot.situationTopic).slice(0, 120)}`
-                : null,
-              memoryStateSnapshot.qPrimary
-                ? `- q_primary: ${memoryStateSnapshot.qPrimary}`
-                : null,
-              memoryStateSnapshot.depthStage
-                ? `- depth_stage: ${memoryStateSnapshot.depthStage}`
-                : null,
-              memoryStateSnapshot.phase
-                ? `- phase: ${memoryStateSnapshot.phase}`
-                : null,
-              memoryStateSnapshot.intentLayer
-                ? `- intent_layer: ${memoryStateSnapshot.intentLayer}`
-                : null,
-              memoryStateSnapshot.sentimentLevel
-                ? `- sentiment_level: ${memoryStateSnapshot.sentimentLevel}`
-                : null,
-            ]
-              .filter((v) => typeof v === 'string' && v.trim().length > 0)
-              .join('\n')
-          : null;
-            console.log('[IROS/LTM][LOAD_ENTER]', {
-              traceId: traceIdCanon,
-              userCode: _userCode ?? null,
-              hasText: typeof text === 'string' && text.trim().length > 0,
-            });
-        const longTermRows =
-          typeof _userCode === 'string' && _userCode.trim().length > 0
-            ? await loadDurableMemoriesForTurnV1({
-                userCode: _userCode,
-                limit: 12,
-              })
-            : [];
-
-        const selectedLongTermRows = selectLongTermMemoriesV1({
-          rows: longTermRows,
-          userText: typeof text === 'string' ? text : '',
-          maxItems: 4,
-        });
-
-        console.log('[IROS/LTM][BEFORE_BUILD]', {
-          selectedCount: selectedLongTermRows?.length ?? 0,
-          totalCount: longTermRows?.length ?? 0,
-          selectedKeys: (selectedLongTermRows ?? []).map((r) => r.key),
-        });
-
-        const longTermBuilt = buildLongTermMemoryNoteTextV1({
-          rows: selectedLongTermRows,
-          maxItems: 4,
-        });
-
-        console.log('[IROS/LTM][AFTER_BUILD]', {
-          pickedCount: longTermBuilt?.picked?.length ?? 0,
-          pickedIds: (longTermBuilt?.picked ?? []).map((r) => r.id),
-          noteTextLen:
-            typeof longTermBuilt?.noteText === 'string'
-              ? longTermBuilt.noteText.length
-              : 0,
-        });
-
-        console.log('[IROS/LTM][BEFORE_PRIORITY]', {
-          pickedCount: longTermBuilt?.picked?.length ?? 0,
-        });
-
-        await updateMemoryPriorityV1({
-          rows: longTermBuilt.picked,
-        });
-
-        console.log('[IROS/LTM][AFTER_PRIORITY]', {
-          pickedCount: longTermBuilt?.picked?.length ?? 0,
-        });
-
-        console.log('[IROS/LTM][BEFORE_DECAY]', {
-          totalCount: longTermRows?.length ?? 0,
-          usedRowIds: longTermBuilt.picked.map((r) => r.id),
-        });
-
-        await decayUnusedMemoriesV1({
-          allRows: longTermRows,
-          usedRowIds: longTermBuilt.picked.map((r) => r.id),
-        });
-
-        console.log('[IROS/LTM][AFTER_DECAY]', {
-          totalCount: longTermRows?.length ?? 0,
-          usedRowIds: longTermBuilt.picked.map((r) => r.id),
-        });
-
-        const longTermMemoryNoteText =
-          typeof longTermBuilt.noteText === 'string' && longTermBuilt.noteText.trim().length > 0
-            ? longTermBuilt.noteText
-            : null;
-
-        console.log('[IROS/LTM][SELECTED]', {
-          count: selectedLongTermRows?.length ?? 0,
-          keys: (selectedLongTermRows ?? []).map((r) => r.key),
-          clusters: (selectedLongTermRows ?? []).map((r) => r.cluster_key),
-          types: (selectedLongTermRows ?? []).map((r) => r.memory_type),
-        });
-        // ✅ LTM / MemoryState を route 側へ渡す正本
-        out.metaForSave = out.metaForSave ?? {};
-        (out.metaForSave as any).extra = (out.metaForSave as any).extra ?? {};
-
-        const exAny: any = (out.metaForSave as any).extra;
-
-        exAny.longTermMemoryNoteText = longTermMemoryNoteText;
-        exAny.memoryStateNoteText = memoryStateNoteText;
-        exAny.memoryStateSnapshot = memoryStateSnapshot;
-
-        exAny.ctxPack = exAny.ctxPack && typeof exAny.ctxPack === 'object' ? exAny.ctxPack : {};
-        exAny.ctxPack.longTermMemoryNoteText = longTermMemoryNoteText;
-        exAny.ctxPack.memoryStateNoteText = memoryStateNoteText;
-        exAny.ctxPack.memoryStateSnapshot = memoryStateSnapshot;
-
-        console.log('[IROS/LTM][STAMPED_FOR_ROUTE]', {
-          traceId: traceIdCanon,
-          conversationId: _conversationId ?? null,
-          userCode: _userCode ?? null,
-          longTermMemoryNoteTextLen:
-            typeof longTermMemoryNoteText === 'string' ? longTermMemoryNoteText.length : 0,
-          memoryStateNoteTextLen:
-            typeof memoryStateNoteText === 'string' ? memoryStateNoteText.length : 0,
-          hasMemoryStateSnapshot: Boolean(memoryStateSnapshot),
-          ctxPackKeys: Object.keys(exAny.ctxPack ?? {}),
-        });
-        console.log('[IROS/STATE][CTX_ATTACHED]', {
-          userCode: _userCode ?? null,
-          hasMemoryState: Boolean(memoryStateSnapshot),
-          qPrimary: memoryStateSnapshot?.qPrimary ?? null,
-          depthStage: memoryStateSnapshot?.depthStage ?? null,
-          phase: memoryStateSnapshot?.phase ?? null,
-          summaryHead:
-            typeof memoryStateSnapshot?.summary === 'string'
-              ? String(memoryStateSnapshot.summary).slice(0, 80)
-              : null,
-          selfAcceptance: memoryStateSnapshot?.selfAcceptance ?? null,
-          intentLayer: memoryStateSnapshot?.intentLayer ?? null,
-          sentimentLevel: memoryStateSnapshot?.sentimentLevel ?? null,
-          situationSummaryHead:
-            typeof memoryStateSnapshot?.situationSummary === 'string'
-              ? String(memoryStateSnapshot.situationSummary).slice(0, 80)
-              : null,
-          situationTopic: memoryStateSnapshot?.situationTopic ?? null,
-          hasMemoryStateNoteText: Boolean(memoryStateNoteText),
-        });
-
-        const shiftKindNow =
-          String((out.metaForSave as any)?.extra?.ctxPack?.shiftKind ?? '').trim() || null;
-
-        const pastStateTriggerKindNow =
-          typeof (out.metaForSave as any)?.extra?.pastStateTriggerKind === 'string'
-            ? String((out.metaForSave as any).extra.pastStateTriggerKind).trim()
-            : null;
-
-            const shouldHideHistoryForResponse =
-            shiftKindNow === 'narrow_shift' ||
-            shiftKindNow === 'stabilize_shift' ||
-            pastStateTriggerKindNow === 'none';
-
-          // UI表示用と、次ターン内部保持用を分離する
-          const historyForWriterInternal =
-            Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
-              ? (out.metaForSave as any).extra.historyForWriter
-              : Array.isArray((out.metaForSave as any)?.extra?.ctxPack?.historyForWriter)
-                ? (out.metaForSave as any).extra.ctxPack.historyForWriter
-                : Array.isArray(turns)
-                  ? turns
-                  : [];
-
-                  const historyForWriterForResponse = shouldHideHistoryForResponse
-                  ? []
-                  : historyForWriterInternal;
-
-                const historyForWriterAtInternal =
-                  (out.metaForSave as any)?.extra?.historyForWriterAt ??
-                  ((out.metaForSave as any)?.extra?.ctxPack as any)?.historyForWriterAt ??
-                  (ctxPackPrev as any)?.historyForWriterAt ??
-                  null;
-                console.log('[IROS/USER_CONTEXT][EXIT_READY]', {
-                  traceId: traceIdCanon,
-                  conversationId: _conversationId ?? null,
-                  userCode: _userCode ?? null,
-                  hasMemoryStateNoteText: Boolean(memoryStateNoteText),
-                  hasLongTermMemoryNoteText: Boolean(longTermMemoryNoteText),
-                  selectedLongTermCount: selectedLongTermRows?.length ?? 0,
-                });
-                const historyDigestV1Internal =
-                  (out.metaForSave as any)?.extra?.historyDigestV1 ??
-                  ((out.metaForSave as any)?.extra?.ctxPack as any)?.historyDigestV1 ??
-                  (ctxPackPrev as any)?.historyDigestV1 ??
-                  null;
-
-                return {
-                  conversationId: _conversationId ?? null,
-                  userCode: _userCode ?? null,
-                  traceId: traceIdCanon,
-                  inputKind: inputKindCanon,
-
-                  exprMeta: exprMetaCanon,
-
-                  pastStateNoteText:
-                    typeof (out.metaForSave as any)?.extra?.pastStateNoteText === 'string'
-                      ? (out.metaForSave as any).extra.pastStateNoteText
-                      : null,
-
-                  pastStateTriggerKind:
-                    typeof (out.metaForSave as any)?.extra?.pastStateTriggerKind === 'string'
-                      ? (out.metaForSave as any).extra.pastStateTriggerKind
-                      : null,
-
-                  pastStateKeyword:
-                    typeof (out.metaForSave as any)?.extra?.pastStateKeyword === 'string'
-                      ? (out.metaForSave as any).extra.pastStateKeyword
-                      : null,
-
-                  longTermMemoryNoteText,
-                  memoryStateSnapshot,
-                  memoryStateNoteText,
-
-                  // ここは UI 向けだけ隠す
-                  historyForWriter: historyForWriterForResponse,
-
-                  ctxPack: {
-                    ...(ctxPackPrev as any),
-                    ...(((out.metaForSave as any)?.extra?.ctxPack ?? {}) as any),
-
-                    qCode:
-                      (out.metaForSave as any)?.qPrimary ??
-                      (out.metaForSave as any)?.q_primary ??
-                      (out.metaForSave as any)?.qCode ??
-                      (out.metaForSave as any)?.q ??
-                      memoryStateSnapshot?.qPrimary ??
-                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.qCode ??
-                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.q_code ??
-                      (ctxPackPrev as any)?.qCode ??
-                      (ctxPackPrev as any)?.q_code ??
-                      null,
-
-                    q_code:
-                      (out.metaForSave as any)?.qPrimary ??
-                      (out.metaForSave as any)?.q_primary ??
-                      (out.metaForSave as any)?.qCode ??
-                      (out.metaForSave as any)?.q ??
-                      memoryStateSnapshot?.qPrimary ??
-                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.qCode ??
-                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.q_code ??
-                      (ctxPackPrev as any)?.qCode ??
-                      (ctxPackPrev as any)?.q_code ??
-                      null,
-
-                    depthStage:
-                      (out.metaForSave as any)?.depth_stage ??
-                      (out.metaForSave as any)?.depth ??
-                      (out.metaForSave as any)?.unified?.depth?.stage ??
-                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.depthStage ??
-                      (ctxPackPrev as any)?.depthStage ??
-                      memoryStateSnapshot?.depthStage ??
-                      null,
-                    phase:
-                      (out.metaForSave as any)?.phase ??
-                      memoryStateSnapshot?.phase ??
-                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.phase ??
-                      (ctxPackPrev as any)?.phase ??
-                      null,
-
-                    primaryStage:
-                      (out.metaForSave as any)?.primaryStage ??
-                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.primaryStage ??
-                      (ctxPackPrev as any)?.primaryStage ??
-                      null,
-
-                    secondaryStage:
-                      (out.metaForSave as any)?.secondaryStage ??
-                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.secondaryStage ??
-                      (ctxPackPrev as any)?.secondaryStage ??
-                      null,
-
-                      observedStage:
-                      (out.metaForSave as any)?.observedStage ??
-                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.observedStage ??
-                      (((out.metaForSave as any)?.extra?.ctxPack as any)?.flow?.currentFlow as any)?.observedStage ??
-                      (((out.metaForSave as any)?.extra?.ctxPack as any)?.flow?.currentFlow as any)?.stage ??
-                      ((ctxPackPrev as any)?.flow?.currentFlow as any)?.observedStage ??
-                      ((ctxPackPrev as any)?.flow?.currentFlow as any)?.stage ??
-                      (ctxPackPrev as any)?.observedStage ??
-                      null,
-
-                    primaryBand:
-                      (out.metaForSave as any)?.primaryBand ??
-                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.primaryBand ??
-                      (ctxPackPrev as any)?.primaryBand ??
-                      null,
-
-                    secondaryBand:
-                      (out.metaForSave as any)?.secondaryBand ??
-                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.secondaryBand ??
-                      (ctxPackPrev as any)?.secondaryBand ??
-                      null,
-
-                      goalKind:
-                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.goalKind ??
-                      (out.metaForSave as any)?.targetKind ??
-                      (out.metaForSave as any)?.target_kind ??
-                      (ctxPackPrev as any)?.goalKind ??
-                      null,
-
-                    primaryDepth:
-                      (out.metaForSave as any)?.primaryDepth ??
-                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.primaryDepth ??
-                      (ctxPackPrev as any)?.primaryDepth ??
-                      null,
-
-                    secondaryDepth:
-                      (out.metaForSave as any)?.secondaryDepth ??
-                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.secondaryDepth ??
-                      (ctxPackPrev as any)?.secondaryDepth ??
-                      null,
-
-                    observedBasedOn:
-                      (out.metaForSave as any)?.observedBasedOn ??
-                      ((out.metaForSave as any)?.extra?.ctxPack as any)?.observedBasedOn ??
-                      (ctxPackPrev as any)?.observedBasedOn ??
-                      null,
-
-                      depthHistoryLite:
-                      Array.isArray(((out.metaForSave as any)?.extra?.ctxPack as any)?.depthHistoryLite)
-                        ? ((out.metaForSave as any).extra.ctxPack as any).depthHistoryLite
-                        : Array.isArray((ctxPackPrev as any)?.depthHistoryLite)
-                          ? (ctxPackPrev as any).depthHistoryLite
-                          : ((
-                              (out.metaForSave as any)?.depth_stage ??
-                              (out.metaForSave as any)?.depth ??
-                              (out.metaForSave as any)?.unified?.depth?.stage ??
-                              ((out.metaForSave as any)?.extra?.ctxPack as any)?.depthStage ??
-                              (ctxPackPrev as any)?.depthStage ??
-                              memoryStateSnapshot?.depthStage ??
-                              null
-                            ) &&
-                            /^[SFRCIT][123]$/.test(
-                              String(
-                                (out.metaForSave as any)?.depth_stage ??
-                                (out.metaForSave as any)?.depth ??
-                                (out.metaForSave as any)?.unified?.depth?.stage ??
-                                ((out.metaForSave as any)?.extra?.ctxPack as any)?.depthStage ??
-                                (ctxPackPrev as any)?.depthStage ??
-                                memoryStateSnapshot?.depthStage ??
-                                ''
-                              ).trim()
-                            ))
-                          ? [
-                              String(
-                                (out.metaForSave as any)?.depth_stage ??
-                                (out.metaForSave as any)?.depth ??
-                                (out.metaForSave as any)?.unified?.depth?.stage ??
-                                ((out.metaForSave as any)?.extra?.ctxPack as any)?.depthStage ??
-                                (ctxPackPrev as any)?.depthStage ??
-                                memoryStateSnapshot?.depthStage
-                              ).trim(),
-                            ]
-                          : [],
-                          e_turn:
-                            ((out.metaForSave as any)?.extra?.mirror as any)?.e_turn ??
-                            null,
-
-                        polarity:
-                          ((out.metaForSave as any)?.extra?.mirror as any)?.polarity_out ??
-                          ((out.metaForSave as any)?.extra?.mirror as any)?.polarity ??
-                          ((out.metaForSave as any)?.mirror as any)?.polarity_out ??
-                          ((out.metaForSave as any)?.mirror as any)?.polarity ??
-                          ((out.metaForSave as any)?.extra?.polarity as any) ??
-                          ((out.metaForSave as any)?.extra?.ctxPack as any)?.polarity ??
-                          (((out.metaForSave as any)?.extra?.ctxPack as any)?.flow?.currentFlow as any)?.polarity ??
-                          ((ctxPackPrev as any)?.flow?.currentFlow as any)?.polarity ??
-                          ((ctxPackPrev as any)?.mirror as any)?.polarity ??
-                          (ctxPackPrev as any)?.polarity ??
-                          null,
-
-                        mirror: {
-                          ...((((ctxPackPrev as any)?.mirror &&
-                            typeof (ctxPackPrev as any).mirror === 'object')
-                            ? (ctxPackPrev as any).mirror
-                            : {}) as any),
-                          ...((((out.metaForSave as any)?.extra?.mirror &&
-                            typeof (out.metaForSave as any).extra.mirror === 'object')
-                            ? (out.metaForSave as any).extra.mirror
-                            : {}) as any),
-                            e_turn:
-                            ((out.metaForSave as any)?.extra?.mirror as any)?.e_turn ??
-                            null,
-                          polarity:
-                            ((out.metaForSave as any)?.extra?.mirror as any)?.polarity_out ??
-                            ((out.metaForSave as any)?.extra?.mirror as any)?.polarity ??
-                            ((out.metaForSave as any)?.mirror as any)?.polarity_out ??
-                            ((out.metaForSave as any)?.mirror as any)?.polarity ??
-                            ((out.metaForSave as any)?.extra?.polarity as any) ??
-                            ((out.metaForSave as any)?.extra?.ctxPack as any)?.polarity ??
-                            ((ctxPackPrev as any)?.mirror as any)?.polarity ??
-                            (ctxPackPrev as any)?.polarity ??
-                            null,
-                        },
-
-                    willRotation:
-                      (((out.metaForSave as any)?.extra?.ctxPack as any)?.willRotation &&
-                      typeof ((out.metaForSave as any)?.extra?.ctxPack as any).willRotation === 'object')
-                        ? ((out.metaForSave as any).extra.ctxPack as any).willRotation
-                        : ((ctxPackPrev as any)?.willRotation &&
-                            typeof (ctxPackPrev as any).willRotation === 'object')
-                          ? (ctxPackPrev as any).willRotation
-                          : null,
-
-                          traceId: traceIdCanon,
-                          inputKind: inputKindCanon,
-
-                          // UIでは隠しても、次ターン内部用は保持する
-                          historyForWriter: historyForWriterInternal,
-                          historyForWriterAt: historyForWriterAtInternal,
-                          historyDigestV1: historyDigestV1Internal,
-
-                          slotPlanPolicy,
-                          exprMeta: exprMetaCanon,
-                          longTermMemoryNoteText,
-                          memoryStateNoteText,
-
-                          memoryStateSnapshot,
-                          memoryStateSummary: memoryStateSnapshot?.summary ?? null,
-                          memoryStateSituationSummary: memoryStateSnapshot?.situationSummary ?? null,
-                          memoryStateSituationTopic: memoryStateSnapshot?.situationTopic ?? null,
-
-                          // ✅ LLM_GATE / rewriteSeed を rephrase 側へ橋渡しする正本
-                          llmGate:
-                            ((out.metaForSave as any)?.extra?.llmGate &&
-                            typeof (out.metaForSave as any).extra.llmGate === 'object')
-                              ? ((out.metaForSave as any).extra.llmGate as any)
-                              : ((ctxPackPrev as any)?.llmGate &&
-                                  typeof (ctxPackPrev as any).llmGate === 'object')
-                                ? ((ctxPackPrev as any).llmGate as any)
-                                : null,
-
-                          llmRewriteSeedRaw:
-                            typeof (out.metaForSave as any)?.extra?.llmRewriteSeedRaw === 'string'
-                              ? (out.metaForSave as any).extra.llmRewriteSeedRaw
-                              : typeof ((out.metaForSave as any)?.extra?.ctxPack as any)?.llmRewriteSeedRaw === 'string'
-                                ? ((out.metaForSave as any).extra.ctxPack as any).llmRewriteSeedRaw
-                                : typeof (ctxPackPrev as any)?.llmRewriteSeedRaw === 'string'
-                                  ? (ctxPackPrev as any).llmRewriteSeedRaw
-                                  : null,
-
-                          llmRewriteSeed:
-                            typeof (out.metaForSave as any)?.extra?.llmRewriteSeed === 'string'
-                              ? (out.metaForSave as any).extra.llmRewriteSeed
-                              : typeof ((out.metaForSave as any)?.extra?.ctxPack as any)?.llmRewriteSeed === 'string'
-                                ? ((out.metaForSave as any).extra.ctxPack as any).llmRewriteSeed
-                                : typeof (ctxPackPrev as any)?.llmRewriteSeed === 'string'
-                                  ? (ctxPackPrev as any).llmRewriteSeed
-                                  : null,
-                        },
-                  slotPlanPolicy,
-
-                  flowDigest: (out.metaForSave as any)?.extra?.flowDigest ?? null,
-                  flowTape: (out.metaForSave as any)?.extra?.flowTape ?? null,
-
-                  meta: {
-                    q: (out.metaForSave as any)?.q ?? metaRoot?.q ?? null,
-                    depth: (out.metaForSave as any)?.depth ?? metaRoot?.depth ?? null,
-                    phase: (out.metaForSave as any)?.phase ?? metaRoot?.phase ?? null,
-                    layer: (out.metaForSave as any)?.intentLayer ?? metaRoot?.intentLayer ?? null,
-                    renderMode: (out.metaForSave as any)?.renderMode ?? metaRoot?.renderMode ?? null,
-                    slotPlanPolicy,
-                    extra: {
-                      ...((((out.metaForSave as any)?.extra &&
-                        typeof (out.metaForSave as any).extra === 'object')
-                        ? (out.metaForSave as any).extra
-                        : {})),
-                      llmGate:
-                        ((out.metaForSave as any)?.extra?.llmGate &&
-                        typeof (out.metaForSave as any).extra.llmGate === 'object')
-                          ? ((out.metaForSave as any).extra.llmGate as any)
-                          : ((ctxPackPrev as any)?.llmGate &&
-                              typeof (ctxPackPrev as any).llmGate === 'object')
-                            ? ((ctxPackPrev as any).llmGate as any)
-                            : null,
-                      llmRewriteSeed:
-                        typeof (out.metaForSave as any)?.extra?.llmRewriteSeed === 'string'
-                          ? (out.metaForSave as any).extra.llmRewriteSeed
-                          : typeof ((out.metaForSave as any)?.extra?.ctxPack as any)?.llmRewriteSeed === 'string'
-                            ? ((out.metaForSave as any).extra.ctxPack as any).llmRewriteSeed
-                            : typeof (ctxPackPrev as any)?.llmRewriteSeed === 'string'
-                              ? (ctxPackPrev as any).llmRewriteSeed
-                              : null,
-                      llmRewriteSeedRaw:
-                        typeof (out.metaForSave as any)?.extra?.llmRewriteSeedRaw === 'string'
-                          ? (out.metaForSave as any).extra.llmRewriteSeedRaw
-                          : typeof ((out.metaForSave as any)?.extra?.ctxPack as any)?.llmRewriteSeedRaw === 'string'
-                            ? ((out.metaForSave as any).extra.ctxPack as any).llmRewriteSeedRaw
-                            : typeof (ctxPackPrev as any)?.llmRewriteSeedRaw === 'string'
-                              ? (ctxPackPrev as any).llmRewriteSeedRaw
-                              : null,
-                      slotPlanSeed:
-                        typeof (out.metaForSave as any)?.extra?.slotPlanSeed === 'string'
-                          ? (out.metaForSave as any).extra.slotPlanSeed
-                          : typeof ((out.metaForSave as any)?.extra?.ctxPack as any)?.slotPlanSeed === 'string'
-                            ? ((out.metaForSave as any).extra.ctxPack as any).slotPlanSeed
-                            : typeof (ctxPackPrev as any)?.slotPlanSeed === 'string'
-                              ? (ctxPackPrev as any).slotPlanSeed
-                              : null,
-                      finalTextPolicy:
-                        typeof (out.metaForSave as any)?.extra?.finalTextPolicy === 'string'
-                          ? (out.metaForSave as any).extra.finalTextPolicy
-                          : null,
-                    },
-                    ctxPack: {
-                      ...(ctxPackPrev as any),
-                      ...(((out.metaForSave as any)?.extra?.ctxPack ?? {}) as any),
-
-                      qCode:
-                        (out.metaForSave as any)?.qPrimary ??
-                        (out.metaForSave as any)?.q_primary ??
-                        (out.metaForSave as any)?.qCode ??
-                        (out.metaForSave as any)?.q ??
-                        memoryStateSnapshot?.qPrimary ??
-                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.qCode ??
-                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.q_code ??
-                        (ctxPackPrev as any)?.qCode ??
-                        (ctxPackPrev as any)?.q_code ??
-                        null,
-
-                      q_code:
-                        (out.metaForSave as any)?.qPrimary ??
-                        (out.metaForSave as any)?.q_primary ??
-                        (out.metaForSave as any)?.qCode ??
-                        (out.metaForSave as any)?.q ??
-                        memoryStateSnapshot?.qPrimary ??
-                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.qCode ??
-                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.q_code ??
-                        (ctxPackPrev as any)?.qCode ??
-                        (ctxPackPrev as any)?.q_code ??
-                        null,
-
-                      phase:
-                        (out.metaForSave as any)?.phase ??
-                        memoryStateSnapshot?.phase ??
-                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.phase ??
-                        (ctxPackPrev as any)?.phase ??
-                        null,
-
-                      primaryStage:
-                        (out.metaForSave as any)?.primaryStage ??
-                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.primaryStage ??
-                        (ctxPackPrev as any)?.primaryStage ??
-                        null,
-
-                      secondaryStage:
-                        (out.metaForSave as any)?.secondaryStage ??
-                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.secondaryStage ??
-                        (ctxPackPrev as any)?.secondaryStage ??
-                        null,
-
-                      observedStage:
-                        (out.metaForSave as any)?.observedStage ??
-                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.observedStage ??
-                        (ctxPackPrev as any)?.observedStage ??
-                        null,
-
-                      primaryBand:
-                        (out.metaForSave as any)?.primaryBand ??
-                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.primaryBand ??
-                        (ctxPackPrev as any)?.primaryBand ??
-                        null,
-
-                      secondaryBand:
-                        (out.metaForSave as any)?.secondaryBand ??
-                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.secondaryBand ??
-                        (ctxPackPrev as any)?.secondaryBand ??
-                        null,
-
-                        goalKind:
-                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.goalKind ??
-                        (out.metaForSave as any)?.targetKind ??
-                        (out.metaForSave as any)?.target_kind ??
-                        (ctxPackPrev as any)?.goalKind ??
-                        null,
-
-                      primaryDepth:
-                        (out.metaForSave as any)?.primaryDepth ??
-                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.primaryDepth ??
-                        (ctxPackPrev as any)?.primaryDepth ??
-                        null,
-
-                      secondaryDepth:
-                        (out.metaForSave as any)?.secondaryDepth ??
-                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.secondaryDepth ??
-                        (ctxPackPrev as any)?.secondaryDepth ??
-                        null,
-
-                      observedBasedOn:
-                        (out.metaForSave as any)?.observedBasedOn ??
-                        ((out.metaForSave as any)?.extra?.ctxPack as any)?.observedBasedOn ??
-                        (ctxPackPrev as any)?.observedBasedOn ??
-                        null,
-
-                      depthHistoryLite:
-                        Array.isArray(((out.metaForSave as any)?.extra?.ctxPack as any)?.depthHistoryLite)
-                          ? ((out.metaForSave as any).extra.ctxPack as any).depthHistoryLite
-                          : Array.isArray((ctxPackPrev as any)?.depthHistoryLite)
-                            ? (ctxPackPrev as any).depthHistoryLite
-                            : [],
-
-                      willRotation:
-                        (((out.metaForSave as any)?.extra?.ctxPack as any)?.willRotation &&
-                        typeof ((out.metaForSave as any)?.extra?.ctxPack as any).willRotation === 'object')
-                          ? ((out.metaForSave as any).extra.ctxPack as any).willRotation
-                          : ((ctxPackPrev as any)?.willRotation &&
-                              typeof (ctxPackPrev as any).willRotation === 'object')
-                            ? (ctxPackPrev as any).willRotation
-                            : null,
-
-                      traceId: traceIdCanon,
-                      inputKind: inputKindCanon,
-                      historyForWriter: historyForWriterInternal,
-                      historyForWriterAt: historyForWriterAtInternal,
-                      historyDigestV1: historyDigestV1Internal,
-                      slotPlanPolicy,
-                      exprMeta: exprMetaCanon,
-                      longTermMemoryNoteText,
-                      memoryStateNoteText,
-                      memoryStateSnapshot,
-                      memoryStateSummary: memoryStateSnapshot?.summary ?? null,
-                      memoryStateSituationSummary: memoryStateSnapshot?.situationSummary ?? null,
-                      memoryStateSituationTopic: memoryStateSnapshot?.situationTopic ?? null,
-                    },
-                  },
-                };
-              })(),
           } as any,
         );
           if (rr && rr.ok) {

@@ -356,6 +356,23 @@ if (ex.ctxPack && typeof ex.ctxPack === 'object') {
           ageSec: typeof f.ageSec === 'number' ? f.ageSec : null,
           sessionBreak: typeof f.sessionBreak === 'boolean' ? f.sessionBreak : false,
           fresh: typeof f.fresh === 'boolean' ? f.fresh : true,
+
+          current:
+            typeof f.current === 'string' && f.current.trim()
+              ? f.current.trim()
+              : null,
+          currentFlow:
+            typeof f.currentFlow === 'string' && f.currentFlow.trim()
+              ? f.currentFlow.trim()
+              : null,
+          previous:
+            typeof f.previous === 'string' && f.previous.trim()
+              ? f.previous.trim()
+              : null,
+          previousFlow:
+            typeof f.previousFlow === 'string' && f.previousFlow.trim()
+              ? f.previousFlow.trim()
+              : null,
         }
       : null;
 

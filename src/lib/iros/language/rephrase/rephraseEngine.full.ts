@@ -3215,17 +3215,96 @@ if (!disableFlowSeedin) {
         phase: ctxPack0?.phase ?? null,
       })
     );
-  const flowResult = buildFlowEngineResult({
-    current: {
-      depthStage: (pickedDepthStage ?? null) as any,
-      e_turn,
-      polarity: polarityNorm,
-      sa,
-      basedOn,
-      confidence,
-      phase: (ctxPack0?.phase ?? null) as any,
-    },
-  });
+    const parseFlowNowFromAny = (flowLike: unknown) => {
+      if (flowLike && typeof flowLike === 'object') {
+        const anyFlow = flowLike as any;
+
+        const eTurnObj = String(
+          anyFlow.e_turn ?? anyFlow.eTurn ?? anyFlow.energy ?? ''
+        ).trim();
+        const depthStageObj = String(
+          anyFlow.depthStage ?? anyFlow.stage ?? ''
+        ).trim();
+        const polarityObj = String(
+          anyFlow.polarity ?? anyFlow.polarityBand ?? ''
+        ).trim().toLowerCase();
+
+        if (eTurnObj && depthStageObj && polarityObj) {
+          const pol =
+            polarityObj === 'yang' || polarityObj === 'positive' || polarityObj === 'pos'
+              ? 'pos'
+              : polarityObj === 'yin' || polarityObj === 'negative' || polarityObj === 'neg'
+                ? 'neg'
+                : null;
+
+          if (pol) {
+            return {
+              e_turn: eTurnObj as any,
+              depthStage: depthStageObj as any,
+              polarity: pol as any,
+            };
+          }
+        }
+      }
+
+      const s = String(flowLike ?? '').trim();
+      if (!s || s === '(null)' || s === 'null') return null;
+
+      const m = s.match(/^(e[1-5])-([A-Za-z]\d+)-(pos|neg)$/i);
+      if (!m) return null;
+
+      return {
+        e_turn: m[1].toLowerCase() as any,
+        depthStage: m[2].toUpperCase() as any,
+        polarity: m[3].toLowerCase() as any,
+      };
+    };
+
+    const ctxPackFlow =
+      (ctxPack0 as any)?.flow ??
+      (ucExtra as any)?.ctxPack?.flow ??
+      (ucExtra as any)?.flow ??
+      null;
+
+    const previousNow =
+      parseFlowNowFromAny(ctxPackFlow?.current) ??
+      parseFlowNowFromAny(ctxPackFlow?.currentFlow) ??
+      parseFlowNowFromAny(ctxPackFlow?.previous) ??
+      parseFlowNowFromAny(ctxPackFlow?.previousFlow) ??
+      null;
+      console.log(
+        '[IROS/rephraseEngine][FLOW_PREV_CANDIDATES]',
+        JSON.stringify({
+          traceId: debug.traceId,
+          conversationId: debug.conversationId,
+          userCode: debug.userCode,
+          ctx_flow_current: ctxPack0?.flow?.current ?? null,
+          ctx_flow_currentFlow: ctxPack0?.flow?.currentFlow ?? null,
+          ctx_flow_previous: ctxPack0?.flow?.previous ?? null,
+          ctx_flow_previousFlow: ctxPack0?.flow?.previousFlow ?? null,
+          uc_ctx_flow_current: ucExtra?.ctxPack?.flow?.current ?? null,
+          uc_ctx_flow_currentFlow: ucExtra?.ctxPack?.flow?.currentFlow ?? null,
+          uc_ctx_flow_previous: ucExtra?.ctxPack?.flow?.previous ?? null,
+          uc_ctx_flow_previousFlow: ucExtra?.ctxPack?.flow?.previousFlow ?? null,
+          extra_flow_current: ucExtra?.flow?.current ?? null,
+          extra_flow_currentFlow: ucExtra?.flow?.currentFlow ?? null,
+          extra_flow_previous: ucExtra?.flow?.previous ?? null,
+          extra_flow_previousFlow: ucExtra?.flow?.previousFlow ?? null,
+          previousNow,
+        })
+      );
+    const flowResult = buildFlowEngineResult({
+      current: {
+        depthStage: (pickedDepthStage ?? null) as any,
+        e_turn,
+        polarity: polarityNorm,
+        sa,
+        basedOn,
+        confidence,
+        phase: (ctxPack0?.phase ?? null) as any,
+      },
+      previousNow,
+    });
 
   // ✅ ctxPack に flow を反映（V2 minimal）
   if (ctxPack0) {
@@ -3843,6 +3922,13 @@ userContext: {
 
     if (allowObj && typeof allowObj === 'object') {
       let boost = 0;
+
+      const hasHookForAllow =
+        (opts as any)?.userContext?.ctxPack?.hasFlowMeaningForAllow === true;
+
+      if (hasHookForAllow) {
+        (allowObj as any).assert = true;
+      }
 
       if (flowDeltaNow === 'RETURN' && returnStreakNow >= 2) {
         boost += 1;

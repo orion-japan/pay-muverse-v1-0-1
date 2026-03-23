@@ -1255,31 +1255,56 @@ const hasFlow = !!(metaForSave as any)?.extra?.ctxPack?.flow;
 
     if (cardStageNow && polKey) {
       try {
+        const parseFlowNowFromString = (flowLike: unknown) => {
+          const s = String(flowLike ?? '').trim();
+          if (!s || s === '(null)' || s === 'null') return null;
+
+          const m = s.match(/^(e[1-5])-([A-Za-z]\d+)-(pos|neg)$/i);
+          if (!m) return null;
+
+          return {
+            e_turn: m[1].toLowerCase() as any,
+            depthStage: m[2].toUpperCase() as any,
+            polarity: m[3].toLowerCase() as any,
+          };
+        };
+
+        const exLocal: any = (metaForSave as any)?.extra ?? {};
+        const ctxLocal: any =
+          exLocal?.ctxPack && typeof exLocal.ctxPack === 'object'
+            ? exLocal.ctxPack
+            : {};
+
+        const existingFlowCurrentText = String(
+          ctxLocal?.flow?.currentFlow ??
+            ctxLocal?.flow?.current ??
+            exLocal?.flow?.currentFlow ??
+            exLocal?.flow?.current ??
+            '',
+        ).trim();
+
+        const previousNow = parseFlowNowFromString(existingFlowCurrentText);
+
         const flowResult = buildFlowEngineResult({
           current: {
             e_turn: eKey as any,
             depthStage: cardStageNow as any,
             polarity: polKey as any,
-            phase: (metaForSave as any)?.phase ?? (metaForSave as any)?.extra?.ctxPack?.phase ?? null,
+            phase:
+              (metaForSave as any)?.phase ??
+              (metaForSave as any)?.extra?.ctxPack?.phase ??
+              null,
             sa: (metaForSave as any)?.sa ?? null,
             basedOn: String(userText ?? '').trim().slice(0, 80) || null,
-            confidence: (mirrorObjAny?.confidence ?? (metaForSave as any)?.confidence ?? null) as any,
+            confidence:
+              (mirrorObjAny?.confidence ??
+                (metaForSave as any)?.confidence ??
+                null) as any,
           },
+          previousNow,
         });
 
         const seedText = String(flowResult.seedText ?? '').trim();
-
-        (metaForSave as any).extra.ctxPack.flow = {
-          ...(typeof (metaForSave as any)?.extra?.ctxPack?.flow === 'object'
-            ? (metaForSave as any).extra.ctxPack.flow
-            : {}),
-          currentFlow: flowResult.currentFlow,
-          previousFlow: flowResult.previousFlow,
-          futureFlowRandom: flowResult.futureFlowRandom,
-          delta: flowResult.delta,
-          seedText,
-          ...flowResult.pack,
-        };
 
         delete (metaForSave as any).extra.ctxPack.cards;
 
@@ -1832,40 +1857,109 @@ const polarityMetaBand: string | null =
 
       if (cardStageNow && polKey) {
         try {
-          const flowResult = buildFlowEngineResult({
-            current: {
-              e_turn: eKey as any,
-              depthStage: cardStageNow as any,
-              polarity: polKey as any,
-              phase:
-                (metaForSave as any)?.phase ??
-                (metaForSave as any)?.extra?.ctxPack?.phase ??
-                null,
-              sa: (metaForSave as any)?.sa ?? null,
-              basedOn: String(userText ?? '').trim().slice(0, 80) || null,
-              confidence:
-                (mirrorObjAny?.confidence ??
-                  (metaForSave as any)?.confidence ??
-                  null) as any,
-            },
-          });
+          const parseFlowNowFromString = (flowLike: unknown) => {
+            const s = String(flowLike ?? '').trim();
+            if (!s || s === '(null)' || s === 'null') return null;
 
-          const seedText = String(flowResult.seedText ?? '').trim();
+            const m = s.match(/^(e[1-5])-([A-Za-z]\d+)-(pos|neg)$/i);
+            if (!m) return null;
 
-          (metaForSave as any).extra.ctxPack.flow = {
-            ...(typeof (metaForSave as any)?.extra?.ctxPack?.flow === 'object'
-              ? (metaForSave as any).extra.ctxPack.flow
-              : {}),
-            currentFlow: flowResult.currentFlow,
-            previousFlow: flowResult.previousFlow,
-            futureFlowRandom: flowResult.futureFlowRandom,
-            delta: flowResult.delta,
-            seedText,
-            ...flowResult.pack,
+            return {
+              e_turn: m[1].toLowerCase() as any,
+              depthStage: m[2].toUpperCase() as any,
+              polarity: m[3].toLowerCase() as any,
+            };
           };
 
-          delete (metaForSave as any).extra.ctxPack.cards;
+          const exLocal: any = (metaForSave as any)?.extra ?? {};
+          const ctxLocal: any =
+            exLocal?.ctxPack && typeof exLocal.ctxPack === 'object'
+              ? exLocal.ctxPack
+              : {};
 
+              const existingFlowCurrentText = String(
+                ctxLocal?.flow?.previous ??
+                  ctxLocal?.flow?.previousFlow ??
+                  exLocal?.flow?.previous ??
+                  exLocal?.flow?.previousFlow ??
+                  ctxLocal?.flow?.current ??
+                  ctxLocal?.flow?.currentFlow ??
+                  exLocal?.flow?.current ??
+                  exLocal?.flow?.currentFlow ??
+                  '',
+              ).trim();
+
+              const previousNow = parseFlowNowFromString(existingFlowCurrentText);
+
+              const flowResult = buildFlowEngineResult({
+                current: {
+                  e_turn: eKey as any,
+                  depthStage: cardStageNow as any,
+                  polarity: polKey as any,
+                  phase:
+                    (metaForSave as any)?.phase ??
+                    (metaForSave as any)?.extra?.ctxPack?.phase ??
+                    null,
+                  sa: (metaForSave as any)?.sa ?? null,
+                  basedOn: String(userText ?? '').trim().slice(0, 80) || null,
+                  confidence:
+                    (mirrorObjAny?.confidence ??
+                      (metaForSave as any)?.confidence ??
+                      null) as any,
+                },
+                previousNow,
+              });
+              const seedText = String(flowResult.seedText ?? '').trim();
+
+              const flowCurrentRaw =
+                typeof flowResult.currentFlow === 'string'
+                  ? flowResult.currentFlow
+                  : typeof (flowResult as any)?.pack?.current === 'string'
+                    ? String((flowResult as any).pack.current)
+                    : null;
+
+              const flowCurrent =
+                typeof flowCurrentRaw === 'string' && flowCurrentRaw.trim().length > 0
+                  ? flowCurrentRaw.trim()
+                  : null;
+
+              const flowPreviousRaw =
+                typeof flowResult.previousFlow === 'string'
+                  ? flowResult.previousFlow
+                  : typeof (flowResult as any)?.pack?.previous === 'string'
+                    ? String((flowResult as any).pack.previous)
+                    : null;
+
+              const flowPrevious =
+                typeof flowPreviousRaw === 'string' && flowPreviousRaw.trim().length > 0
+                  ? flowPreviousRaw.trim()
+                  : null;
+
+              (metaForSave as any).extra.ctxPack.flow = {
+                ...(typeof (metaForSave as any)?.extra?.ctxPack?.flow === 'object'
+                  ? (metaForSave as any).extra.ctxPack.flow
+                  : {}),
+
+                current: flowCurrent,
+                previous: flowPrevious,
+
+                currentFlow: flowCurrent,
+                previousFlow: flowPrevious,
+
+                futureFlowRandom:
+                  typeof flowResult.futureFlowRandom === 'string'
+                    ? flowResult.futureFlowRandom
+                    : null,
+                delta: flowResult.delta ?? null,
+                seedText,
+              };
+          delete (metaForSave as any).extra.ctxPack.cards;
+          console.log('[IROS/POSTPROCESS_CTXPACK_FLOW_AFTER_SET]', {
+            current: (metaForSave as any)?.extra?.ctxPack?.flow?.current ?? null,
+            currentFlow: (metaForSave as any)?.extra?.ctxPack?.flow?.currentFlow ?? null,
+            previous: (metaForSave as any)?.extra?.ctxPack?.flow?.previous ?? null,
+            previousFlow: (metaForSave as any)?.extra?.ctxPack?.flow?.previousFlow ?? null,
+          });
           if (seedText) {
             console.log('[IROS/FLOW][SEED_FROM_FLOW180][OK]', {
               traceId:
