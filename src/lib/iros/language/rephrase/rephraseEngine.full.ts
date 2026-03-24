@@ -2753,12 +2753,98 @@ const mustIncludeRuleText = buildMustIncludeRuleText(
 
 const seedDraftSanitized = sanitizeSeedDraftForLLM(seedDraft0);
 
+// ✅ canonical one-line seed を FLOW_V2 から直接作る
+const canonicalOneLineSeed = (() => {
+  try {
+    const source = [String(seedDraftRaw ?? ''), String(slotsTextRawAll ?? '')]
+      .find((s) => /FLOW_V2\s*\(DO NOT OUTPUT\):/i.test(String(s ?? ''))) ?? '';
+
+    if (!source) return '';
+
+    const current =
+      (source.match(/(?:^|\n)current=([^\n]+)/)?.[1] ?? '').trim();
+    const prev =
+      (source.match(/(?:^|\n)prev=([^\n]+)/)?.[1] ?? '').trim();
+    const delta =
+      (source.match(/(?:^|\n)delta=([^\n]+)/)?.[1] ?? '').trim();
+
+    if (!current) return '';
+
+    const [e_prev, layer_prev, polarity_prev] =
+      prev && prev !== '(null)' ? prev.split('-') : [null, null, null];
+
+    const [e_now, layer_now, polarity_now] =
+      current && current !== '(null)' ? current.split('-') : [null, null, null];
+
+    const sevenPattern = (() => {
+      if (!prev || prev === '(null)') return 'start_anchor';
+      if (
+        layer_prev === layer_now &&
+        polarity_prev === polarity_now &&
+        (delta === 'same' || delta.length === 0)
+      ) {
+        return e_prev !== e_now ? 'energy_shift' : 'hold';
+      }
+      if (layer_prev !== layer_now && polarity_prev === polarity_now) {
+        return 'layer_shift';
+      }
+      if (layer_prev === layer_now && polarity_prev !== polarity_now) {
+        return 'polarity_shift';
+      }
+      if (layer_prev !== layer_now && polarity_prev !== polarity_now) {
+        return 'turn_shift';
+      }
+      return 'structure_shift';
+    })();
+
+    const oneLineText = (() => {
+      switch (sevenPattern) {
+        case 'start_anchor':
+          return 'いま新しい論点に重心が置かれた';
+        case 'hold':
+          return 'いま同じ論点に留まっている';
+        case 'energy_shift':
+          return '同じ論点のまま温度が変わっている';
+        case 'layer_shift':
+          return '見ている層が切り替わっている';
+        case 'polarity_shift':
+          return '受け取り方の向きが反転している';
+        case 'turn_shift':
+          return '視点と向きが同時に切り替わっている';
+        default:
+          return '関心の重心が別の論点へ移っている';
+      }
+    })();
+
+    if (!oneLineText) return '';
+
+    return [
+      `最初の1行は「${oneLineText}」とそのまま出力してください。`,
+      '今回はその1行だけで終了してください。',
+      '補足・言い換え・箇条書き・質問は禁止。',
+    ].join('\n');
+  } catch {
+    return '';
+  }
+})();
+
+console.log('[IROS/CANONICAL_ONE_LINE_SEED]', {
+  traceId: debug.traceId,
+  conversationId: debug.conversationId,
+  userCode: debug.userCode,
+  hasCanonicalOneLineSeed: canonicalOneLineSeed.length > 0,
+  canonicalOneLineSeedHead: safeHead(canonicalOneLineSeed, 160),
+});
+
 // ✅ 方針：writer へ userText を絶対に渡さない
 // - chooseSeedForLLM の userText 経路を遮断
 // - seed が空になる場合は「落ちても意味が通る」安全seedにフォールバック
 const FALLBACK_SEED = 'ユーザーの最後の発話に、結論を先にして短く直接答えてください。必要なら要点→補足の順で。';
 
-const seedFinal = chooseSeedForLLM(seedDraftSanitized, '') || FALLBACK_SEED;
+const seedFinal =
+  canonicalOneLineSeed ||
+  chooseSeedForLLM(seedDraftSanitized, '') ||
+  FALLBACK_SEED;
 
 // ✅ seedDraft は seedFinal を正本とする（userText遮断の一貫性）
 const seedDraft = seedFinal;
@@ -3366,7 +3452,97 @@ if (!disableFlowSeedin) {
 // ✅ upstream 観測（internalPack 時点の事実だけを見る）
 // - ここは messages 注入前なので injected 側は見ない
 // - downstream の injected 実体確認は writerCalls / STATE_CUES 側ログを正とする
+const canonicalOneLineSeedBlock = (() => {
+  try {
+    const flowV2Block =
+      String(internalPack ?? '').match(
+        /FLOW_V2\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ ]+\(DO NOT OUTPUT\):|$)/i
+      )?.[0] ?? '';
+
+    const current =
+      (flowV2Block.match(/(?:^|\n)current=([^\n]+)/)?.[1] ?? '').trim();
+    const prev =
+      (flowV2Block.match(/(?:^|\n)prev=([^\n]+)/)?.[1] ?? '').trim();
+    const delta =
+      (flowV2Block.match(/(?:^|\n)delta=([^\n]+)/)?.[1] ?? '').trim();
+
+    if (!current) return '';
+    const [e_prev, layer_prev, polarity_prev] =
+      prev && prev !== '(null)' ? prev.split('-') : [null, null, null];
+
+    const [e_now, layer_now, polarity_now] =
+      current && current !== '(null)' ? current.split('-') : [null, null, null];
+
+    const sevenPattern = (() => {
+      if (!prev || prev === '(null)') return 'start_anchor';
+      if (
+        layer_prev === layer_now &&
+        polarity_prev === polarity_now &&
+        (delta === 'same' || delta.length === 0)
+      ) {
+        return e_prev !== e_now ? 'energy_shift' : 'hold';
+      }
+      if (layer_prev !== layer_now && polarity_prev === polarity_now) {
+        return 'layer_shift';
+      }
+      if (layer_prev === layer_now && polarity_prev !== polarity_now) {
+        return 'polarity_shift';
+      }
+      if (layer_prev !== layer_now && polarity_prev !== polarity_now) {
+        return 'turn_shift';
+      }
+      return 'structure_shift';
+    })();
+
+    const oneLineText = (() => {
+      switch (sevenPattern) {
+        case 'start_anchor':
+          return 'いま新しい論点に重心が置かれた';
+        case 'hold':
+          return 'いま同じ論点に留まっている';
+        case 'energy_shift':
+          return '同じ論点のまま温度が変わっている';
+        case 'layer_shift':
+          return '見ている層が切り替わっている';
+        case 'polarity_shift':
+          return '受け取り方の向きが反転している';
+        case 'turn_shift':
+          return '視点と向きが同時に切り替わっている';
+        default:
+          return '関心の重心が別の論点へ移っている';
+      }
+    })();
+
+    if (!oneLineText) return '';
+
+    return [
+      'SEED (DO NOT OUTPUT):',
+      oneLineText,
+    ].join('\n');
+  } catch {
+    return '';
+  }
+})();
+
+console.log('[IROS/CANONICAL_ONE_LINE_SEED_BLOCK]', {
+  traceId: debug.traceId,
+  conversationId: debug.conversationId,
+  userCode: debug.userCode,
+  hasBlock: canonicalOneLineSeedBlock.length > 0,
+  head: safeHead(canonicalOneLineSeedBlock, 160),
+});
+
+if (canonicalOneLineSeedBlock) {
+  internalPack = [
+    canonicalOneLineSeedBlock,
+    String(internalPack ?? ''),
+  ]
+    .filter((v) => String(v ?? '').trim().length > 0)
+    .join('\n\n');
+}
+
 const __ip = String(internalPack ?? '');
+
 const __tailN = 260;
 
 const __pickBlockNear = (src: string, pattern: RegExp, span = 520) => {
@@ -3377,17 +3553,17 @@ const __pickBlockNear = (src: string, pattern: RegExp, span = 520) => {
   const end = nextBlank >= 0 ? nextBlank : Math.min(src.length, start + span);
   return src.slice(start, end);
 };
+
 const flow180SeedRaw =
   __ip.match(/FLOW180_SEED\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ ]+\(DO NOT OUTPUT\):|$)/i)?.[0] ??
   null;
 
 console.log('[IROS/FLOW180]', flow180SeedRaw);
 
-const flowSeedNearInternal = __pickBlockNear(
-  __ip,
-  /FLOW\s*\(DO NOT OUTPUT\)\s*:/i,
-  520,
-);
+const flowSeedNearInternal =
+  __pickBlockNear(__ip, /SEED\s*\(DO NOT OUTPUT\)\s*:/i, 520) ||
+  __pickBlockNear(__ip, /FLOW_V2\s*\(DO NOT OUTPUT\)\s*:/i, 520) ||
+  __pickBlockNear(__ip, /FLOW:\s*/i, 520);
 
 console.log('[IROS/SEED]', flowSeedNearInternal);
 const __patterns = {
@@ -3624,8 +3800,29 @@ try {
   });
 } catch {}
 
-let messages = buildFirstPassMessages({
+const continuityKindForWriter =
+  String(
+    (opts as any)?.continuityKind ??
+      (opts as any)?.userContext?.continuityKind ??
+      (opts as any)?.userContext?.ctxPack?.continuityKind ??
+      '',
+  ).trim() || null;
+
+const suppressContinuationConfirm =
+  continuityKindForWriter === 'continuation' ||
+  continuityKindForWriter === 'same_line';
+
+const systemPromptForWriter = [
   systemPrompt,
+  suppressContinuationConfirm
+    ? 'CONTINUITY_RULE (DO NOT OUTPUT): continuation / same_line のとき、「前の話の続きで進めてよいですか？」「前の続きで進めますか？」などの確認文を出さない。継続前提でそのまま本題に入る。'
+    : '',
+]
+  .filter(Boolean)
+  .join('\n\n');
+
+let messages = buildFirstPassMessages({
+  systemPrompt: systemPromptForWriter,
   internalPack,
   turns: turnsForWriter,
   seedDraft,
@@ -3633,130 +3830,47 @@ let messages = buildFirstPassMessages({
   topicDigestV2: topicDigestV2ForWriter,
   conversationLine: conversationLineForWriter,
   outputPolicy:
-    (primaryQuestionForWriter?.outputPolicy &&
-    typeof primaryQuestionForWriter.outputPolicy === 'object')
+    primaryQuestionForWriter?.outputPolicy &&
+    typeof primaryQuestionForWriter.outputPolicy === 'object'
       ? primaryQuestionForWriter.outputPolicy
       : null,
 
-    // ✅ writerCalls.ts が最優先で拾う正本
-    qCode: pickedQCode ?? null,
-    depthStage: pickedDepthStage ?? null,
-    phase: pickedPhase ?? null,
-    e_turn: pickedETurn ?? null,
+  qCode: pickedQCode ?? null,
+  depthStage: pickedDepthStage ?? null,
+  phase: pickedPhase ?? null,
+  e_turn: pickedETurn ?? null,
 
-    // ✅ NEW: 末尾 user の正本
-    userText: String((opts as any)?.userText ?? ''),
+  userText: String((opts as any)?.userText ?? ''),
 
-    // ✅ NEW: buildFirstPassMessages / writerCalls.ts が直接拾える経路
-    extra: {
-      question:
-    ((opts as any)?.extra?.question) ??
-    ((opts as any)?.userContext?.question) ??
-    ((opts as any)?.userContext?.meta?.extra?.question) ??
-    null,
-  pastStateNoteText:
-    ((opts as any)?.extra?.pastStateNoteText) ??
-    ((opts as any)?.userContext?.pastStateNoteText) ??
-    ((opts as any)?.userContext?.meta?.extra?.pastStateNoteText) ??
-    null,
-  pastStateTriggerKind:
-    ((opts as any)?.extra?.pastStateTriggerKind) ??
-    ((opts as any)?.userContext?.pastStateTriggerKind) ??
-    ((opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind) ??
-    null,
-  pastStateKeyword:
-    ((opts as any)?.extra?.pastStateKeyword) ??
-    ((opts as any)?.userContext?.pastStateKeyword) ??
-    ((opts as any)?.userContext?.meta?.extra?.pastStateKeyword) ??
-    null,
-  goalKind: // ✅ top-level goalKind も extra に保持
-    (opts as any)?.goalKind ??
-    (opts as any)?.userContext?.goalKind ??
-    (opts as any)?.userContext?.ctxPack?.goalKind ??
-    (opts as any)?.userContext?.ctxPack?.replyGoal?.kind ??
-    null,
-},
-
-userContext: {
-  ...(((opts as any)?.userContext && typeof (opts as any).userContext === 'object')
-    ? (opts as any).userContext
-    : {}),
-  question:
-    ((opts as any)?.extra?.question) ??
-    ((opts as any)?.userContext?.question) ??
-    ((opts as any)?.userContext?.meta?.extra?.question) ??
-    null,
-  meta: {
-    ...((((opts as any)?.userContext?.meta && typeof (opts as any).userContext.meta === 'object')
-      ? (opts as any).userContext.meta
-      : {})),
-    extra: {
-      ...(((((opts as any)?.userContext?.meta?.extra) && typeof (opts as any).userContext.meta.extra === 'object')
-        ? (opts as any).userContext.meta.extra
-        : {})),
-      question:
-        ((opts as any)?.extra?.question) ??
-        ((opts as any)?.userContext?.question) ??
-        ((opts as any)?.userContext?.meta?.extra?.question) ??
-        null,
-      pastStateNoteText:
-        ((opts as any)?.extra?.pastStateNoteText) ??
-        ((opts as any)?.userContext?.pastStateNoteText) ??
-        ((opts as any)?.userContext?.meta?.extra?.pastStateNoteText) ??
-        null,
-      pastStateTriggerKind:
-        ((opts as any)?.extra?.pastStateTriggerKind) ??
-        ((opts as any)?.userContext?.pastStateTriggerKind) ??
-        ((opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind) ??
-        null,
-      pastStateKeyword:
-        ((opts as any)?.extra?.pastStateKeyword) ??
-        ((opts as any)?.userContext?.pastStateKeyword) ??
-        ((opts as any)?.userContext?.meta?.extra?.pastStateKeyword) ??
-        null,
-      ctxPack: {
-        ...ctxPackForWriter,
-        goalKind: // ✅ ctxPack 内にも goalKind を確実に反映
-          (opts as any)?.goalKind ??
-          (opts as any)?.userContext?.goalKind ??
-          (ctxPackForWriter?.goalKind ?? null),
-      },
-    },
+  extra: {
+    question:
+      (opts as any)?.extra?.question ??
+      (opts as any)?.userContext?.question ??
+      (opts as any)?.userContext?.meta?.extra?.question ??
+      null,
+    pastStateNoteText:
+      (opts as any)?.extra?.pastStateNoteText ??
+      (opts as any)?.userContext?.pastStateNoteText ??
+      (opts as any)?.userContext?.meta?.extra?.pastStateNoteText ??
+      null,
+    pastStateTriggerKind:
+      (opts as any)?.extra?.pastStateTriggerKind ??
+      (opts as any)?.userContext?.pastStateTriggerKind ??
+      (opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind ??
+      null,
+    pastStateKeyword:
+      (opts as any)?.extra?.pastStateKeyword ??
+      (opts as any)?.userContext?.pastStateKeyword ??
+      (opts as any)?.userContext?.meta?.extra?.pastStateKeyword ??
+      null,
+    goalKind:
+      (opts as any)?.goalKind ??
+      (opts as any)?.userContext?.goalKind ??
+      (opts as any)?.userContext?.ctxPack?.goalKind ??
+      (opts as any)?.userContext?.ctxPack?.replyGoal?.kind ??
+      null,
   },
-},
-
-    // ✅ 既存の経路も残す
-    ctxPack: ctxPackForWriter,
-    meta: {
-      extra: {
-        ctxPack: ctxPackForWriter,
-        question:
-          ((opts as any)?.extra?.question) ??
-          ((opts as any)?.userContext?.question) ??
-          ((opts as any)?.userContext?.meta?.extra?.question) ??
-          null,
-        pastStateNoteText:
-          ((opts as any)?.extra?.pastStateNoteText) ??
-          ((opts as any)?.userContext?.pastStateNoteText) ??
-          ((opts as any)?.userContext?.meta?.extra?.pastStateNoteText) ??
-          null,
-        pastStateTriggerKind:
-          ((opts as any)?.extra?.pastStateTriggerKind) ??
-          ((opts as any)?.userContext?.pastStateTriggerKind) ??
-          ((opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind) ??
-          null,
-        pastStateKeyword:
-          ((opts as any)?.extra?.pastStateKeyword) ??
-          ((opts as any)?.userContext?.pastStateKeyword) ??
-          ((opts as any)?.userContext?.meta?.extra?.pastStateKeyword) ??
-          null,
-      },
-    },
-
-    traceId: debug.traceId ?? null,
-    conversationId: debug.conversationId ?? null,
-    userCode: debug.userCode ?? null,
-  });
+});
 
   // ✅ HistoryDigest v1（外から渡された場合のみ注入）
   // - 生成はここではしない（生成元は本線側に固定）
@@ -4926,10 +5040,16 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
   /FLOW_SEED_V1\b/.test(pack) ||
   /FLOW:\s*\n/.test(pack);
 
-  const flowSeedIdxInternal =
-    seedPatterns
-      .map((re) => pack.search(re))
-      .find((n) => typeof n === 'number' && n >= 0) ?? -1;
+  const flowSeedIdxInternal = (() => {
+    const seedIdx = pack.search(/SEED\s*\(DO NOT OUTPUT\)\s*:/i);
+    if (seedIdx >= 0) return seedIdx;
+
+    return (
+      seedPatterns
+        .map((re) => pack.search(re))
+        .find((n) => typeof n === 'number' && n >= 0) ?? -1
+    );
+  })();
 
   const flowSeedNearInternal =
     flowSeedIdxInternal >= 0
@@ -5122,7 +5242,10 @@ raw = await (async () => {
         /FLOW180_SEED\s*\(DO NOT OUTPUT\):/i.test(content) ||
         /FLOW_CONTEXT\s*\(DO NOT OUTPUT\):/i.test(content) ||
         /STATE_CUES\s*\(DO NOT OUTPUT\)/i.test(content) ||
-        /FLOW:\s*\n/i.test(content)
+        /FLOW:\s*\n/i.test(content) ||
+        /SEED\s*\(DO NOT OUTPUT\):/i.test(content) ||
+        /FIRST_LINE_FORCE:/i.test(content) ||
+        /TRANSITION_STRUCT:/i.test(content)
       )
     ) {
       return m;
@@ -5406,8 +5529,109 @@ raw = await (async () => {
   const __writerStateHead = __writerStateAssistant
     ? String(__writerStateAssistant.content ?? '').slice(0, 800)
     : '';
-// 👇 これを追加
+
 const packNorm = (__writerInjectedPack ?? '').toString();
+
+// ===== TRANSITION MEANING OBSERVE + SKELETON (段階B観測) =====
+try {
+  const { pickTransitionMeaning } = await import(
+    '@/lib/iros/delta/transitionMeaning'
+  );
+  const { buildTransitionSkeleton } = await import(
+    '@/lib/iros/delta/buildTransitionSkeleton'
+  );
+
+  const sourcePack =
+  typeof packNorm === 'string' && packNorm.length > 0
+    ? packNorm
+    : '';
+
+const flowV2Match = sourcePack.match(
+  /FLOW_V2\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n\n|$)/
+);
+const flowBlock = flowV2Match?.[0] ?? '';
+
+  const get = (key: string) => {
+    const m = flowBlock.match(new RegExp(`${key}=([^\\n]+)`));
+    return m ? m[1].trim() : null;
+  };
+
+  const current = get('current');
+  const prev = get('prev');
+  const delta = get('delta');
+  const energy = get('energy');
+
+  const [e_prev, layer_prev, polarity_prev] =
+    prev && prev !== '(null)' ? prev.split('-') : [null, null, null];
+
+  const [e_now, layer_now, polarity_now] =
+    current && current !== '(null)' ? current.split('-') : [null, null, null];
+
+    const focusFromSeed = (() => {
+      const m = sourcePack.match(/FOCUS:\n([^\n]+)/);
+      return m?.[1]?.trim() || null;
+    })();
+
+    let transitionMeaning: string | null = null;
+
+    if (flowBlock) {
+      transitionMeaning = pickTransitionMeaning({
+        prevFlow: prev,
+        nowFlow: current,
+        delta,
+        e_turn_prev: e_prev,
+        e_turn_now: e_now,
+        layer_prev,
+        layer_now,
+        polarity_prev,
+        polarity_now,
+        intentShift: null,
+        returnStreak: (opts as any)?.userContext?.ctxPack?.flow?.returnStreak ?? 0,
+        stingLevel: null,
+      });
+    } else if (focusFromSeed) {
+      transitionMeaning = focusFromSeed;
+    }
+
+    const transitionStruct = {
+      meaning: transitionMeaning,
+      focus: String((opts as any)?.extra?.question?.focus ?? '').trim() || null,
+      relationContext:
+        String((opts as any)?.extra?.pastStateNoteText ?? '').trim() || null,
+      oneLineConstraint: '1行・補足禁止・疑問文禁止',
+    };
+  console.log(
+    '[IROS/TRANSITION_MEANING][OBSERVE_JSON]',
+    JSON.stringify(
+      {
+        traceId: debug.traceId ?? null,
+        sourcePackHasFlowV2: /FLOW_V2\s*\(DO NOT OUTPUT\):/.test(sourcePack),
+        flowBlock,
+        raw: {
+          current,
+          prev,
+          delta,
+          energy,
+        },
+        parsed: {
+          e_prev,
+          e_now,
+          layer_prev,
+          layer_now,
+          polarity_prev,
+          polarity_now,
+        },
+        picked: transitionMeaning,
+        transitionStruct,
+      },
+      null,
+      2
+    )
+  );
+} catch (e) {
+  console.warn('[IROS/TRANSITION_MEANING][ERROR]', e);
+}
+// ===== END =====
 
   console.log('[IROS/rephraseEngine][STATE_SNAPSHOT_FOR_WRITER]', {
     traceId: debug.traceId ?? null,

@@ -21,12 +21,13 @@ import { chatComplete } from '../../../llm/chatComplete';
 import type { HistoryDigestV1 } from '../../history/historyDigestV1';
 import { injectHistoryDigestV1 } from '../../history/historyDigestV1';
 import { decideRecallV1 } from '../../memory/recallGate';
-import { buildFlowMeaningV1 } from '../../memory/buildFlowMeaning';
 import { buildFlowSeedV1, formatFlowSeedV1 } from '../../seed/seedEngine';
 // --- delta engine ---
 import { buildMultiDelta } from '@/lib/iros/delta/buildMultiDelta';
 import { selectPrimaryDelta } from '@/lib/iros/delta/selectPrimaryDelta';
 import { emitDeltaHint } from '@/lib/iros/delta/emitDeltaHint';
+import { pickTransitionMeaning } from '@/lib/iros/delta/transitionMeaning';
+import { buildTransitionSkeleton } from '@/lib/iros/delta/buildTransitionSkeleton';
 
 export type WriterMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 type TurnMsg = { role: 'user' | 'assistant'; content: string };
@@ -825,50 +826,6 @@ const currentFlowAny: any = firstNonNull(
                 whyItMatchesBits.length > 0 ? whyItMatchesBits.join(' / ') : '(match_unknown)'
               ).slice(0, 220);
 
-              const shiftMeaning = (() => {
-                if (flowCurrentMeaning !== '(none)' && flowNextMeaning !== '(none)') {
-                  return `${flowCurrentMeaning} → ${flowNextMeaning}`;
-                }
-                if (flowCurrentMeaning !== '(none)') return flowCurrentMeaning;
-                if (flowBridge !== '(bridge_unknown)') return flowBridge;
-                return '(none)';
-              })();
-
-              const safeMeaning = (() => {
-                if (qCode === 'Q3') return '今の安定を崩さずに整え直せば十分';
-                if (qCode === 'Q2') return '引っかかりを一気に壊さず、ほどけるところから触れれば十分';
-                if (qCode === 'Q1') return '秩序を崩さず、無理のない形で進めれば十分';
-                if (qCode === 'Q4') return '怖さを無視せず、軽くできるところから進めれば十分';
-                if (qCode === 'Q5') return '火を消さず、小さく戻すだけでも十分';
-                if (flowBridge !== '(bridge_unknown)') return flowBridge;
-                return '(none)';
-              })();
-
-              const relationFocusForSeed = (() => {
-                const rf = (ctxPack as any)?.relationFocus ?? null;
-                if (!rf || typeof rf !== 'object') return null;
-
-                const selfPosition = String((rf as any)?.selfPosition ?? '').trim() || 'unknown';
-                const otherPosition = String((rf as any)?.otherPosition ?? '').trim() || 'unknown';
-                const powerBalance = String((rf as any)?.powerBalance ?? '').trim() || 'unknown';
-                const distanceLevel = String((rf as any)?.distanceLevel ?? '').trim() || 'unknown';
-                const certaintyLevel = String((rf as any)?.certaintyLevel ?? '').trim() || 'unknown';
-
-                return {
-                  selfPosition,
-                  otherPosition,
-                  powerBalance,
-                  distanceLevel,
-                  certaintyLevel,
-                };
-              })();
-
-              const emotionalTemperatureForSeed = (() => {
-                const raw = String((ctxPack as any)?.emotionalTemperature ?? '').trim().toLowerCase();
-                if (raw === 'low' || raw === 'mid' || raw === 'high' || raw === 'volatile') return raw;
-                return 'mid';
-              })();
-
               const shiftKindForSeed = (() => {
                 const raw = String((ctxPack as any)?.shiftKind ?? '').trim();
                 if (raw) return raw;
@@ -921,6 +878,114 @@ const currentFlowAny: any = firstNonNull(
                   guardLine,
                   rules,
                 };
+              })();
+
+              const shiftMeaning = (() => {
+                const continuityKind = String((ctxPack as any)?.continuityKind ?? '').trim();
+                const sk = String(shiftKindForSeed ?? '').trim();
+
+                if (topicCorrectionGuard.active) {
+                  return topicCorrectionGuard.guardLine;
+                }
+
+                if (continuityKind === 'same_line') {
+                  if (sk === 'clarify_shift') {
+                    return '同じ話の線を保ったまま、このテーマのどこを知りたいのかを狭く確かめる';
+                  }
+                  if (sk === 'stabilize_shift') {
+                    return '同じ話の線を保ったまま、揺れている一点を戻って整える';
+                  }
+                  if (sk === 'distance_shift') {
+                    return '同じ話の線を保ったまま、いま苦しさを作っている距離の一点を見る';
+                  }
+                  if (sk === 'repair_shift') {
+                    return '同じ話の線を保ったまま、修復を急がず入口だけを見つける';
+                  }
+                  if (sk === 'decide_shift') {
+                    return '同じ話の線を保ったまま、結論より先に選ぶ基準を定める';
+                  }
+                  if (sk === 'uncover_shift') {
+                    return '同じ話の線を保ったまま、表面の下にある意味をひらく';
+                  }
+                  return '同じ話の線を保ったまま、いま触る一点だけを狭く定める';
+                }
+
+                if (continuityKind === 'continuation') {
+                  if (sk === 'clarify_shift') {
+                    return '前の流れを引き継ぎ、このテーマのどこを知りたいのかを狭く確かめる';
+                  }
+                  if (sk === 'stabilize_shift') {
+                    return '前の流れを引き継ぎ、揺れている基準を戻って整える';
+                  }
+                  if (sk === 'distance_shift') {
+                    return '前の流れを引き継ぎ、いま苦しさを作っている距離の一点を見る';
+                  }
+                  if (sk === 'repair_shift') {
+                    return '前の流れを引き継ぎ、修復を急がず入口だけを見つける';
+                  }
+                  if (sk === 'decide_shift') {
+                    return '前の流れを引き継ぎ、結論より先に選ぶ基準を定める';
+                  }
+                  if (sk === 'uncover_shift') {
+                    return '前の流れを引き継ぎ、表面の下にある意味をひらく';
+                  }
+                  return '前の流れを引き継ぎ、いま触る一点だけを狭く定める';
+                }
+
+                if (sk === 'clarify_shift') {
+                  return '話題を広げず、このテーマのどこを知りたいのかを狭く確かめる';
+                }
+                if (sk === 'stabilize_shift') {
+                  return '進めるより先に、揺れている基準を戻って整える';
+                }
+                if (sk === 'distance_shift') {
+                  return '近づく/離れるの前に、いま苦しさを作っている距離の一点を見る';
+                }
+                if (sk === 'repair_shift') {
+                  return '修復を急がず、安全な入口を1つだけ見つける';
+                }
+                if (sk === 'decide_shift') {
+                  return '結論を急がず、先に選ぶ基準を定める';
+                }
+                if (sk === 'uncover_shift') {
+                  return '表面の説明より先に、奥で引っかかっている意味をひらく';
+                }
+
+                return '抽象化せず、いま触る一点だけを狭く定める';
+              })();
+
+              const safeMeaning = (() => {
+                if (qCode === 'Q3') return '今の安定を崩さずに整え直せば十分';
+                if (qCode === 'Q2') return '引っかかりを一気に壊さず、ほどけるところから触れれば十分';
+                if (qCode === 'Q1') return '秩序を崩さず、無理のない形で進めれば十分';
+                if (qCode === 'Q4') return '怖さを無視せず、軽くできるところから進めれば十分';
+                if (qCode === 'Q5') return '火を消さず、小さく戻すだけでも十分';
+                return '(none)';
+              })();
+
+              const relationFocusForSeed = (() => {
+                const rf = (ctxPack as any)?.relationFocus ?? null;
+                if (!rf || typeof rf !== 'object') return null;
+
+                const selfPosition = String((rf as any)?.selfPosition ?? '').trim() || 'unknown';
+                const otherPosition = String((rf as any)?.otherPosition ?? '').trim() || 'unknown';
+                const powerBalance = String((rf as any)?.powerBalance ?? '').trim() || 'unknown';
+                const distanceLevel = String((rf as any)?.distanceLevel ?? '').trim() || 'unknown';
+                const certaintyLevel = String((rf as any)?.certaintyLevel ?? '').trim() || 'unknown';
+
+                return {
+                  selfPosition,
+                  otherPosition,
+                  powerBalance,
+                  distanceLevel,
+                  certaintyLevel,
+                };
+              })();
+
+              const emotionalTemperatureForSeed = (() => {
+                const raw = String((ctxPack as any)?.emotionalTemperature ?? '').trim().toLowerCase();
+                if (raw === 'low' || raw === 'mid' || raw === 'high' || raw === 'volatile') return raw;
+                return 'mid';
               })();
 
               const relationMeaning = (() => {
@@ -1542,109 +1607,6 @@ const currentFlowAny: any = firstNonNull(
                   `DISALLOW_REASON: ${recallDecision.disallowReason || '(none)'}`,
                 ];
 
-                const flowMeaningV1 = buildFlowMeaningV1({
-                  userText: String(
-                    (args as any)?.userText ??
-                      (args as any)?.text ??
-                      (args as any)?.userContext?.userText ??
-                      '',
-                  ).trim(),
-                  depthStage: depthStage || null,
-                  qCode: qCode || null,
-                  phase: phase || null,
-                  goalKind: pick((extra as any)?.goalKind, (args as any)?.extra?.goalKind, null),
-                  observedStage: pick(
-                    (ctxPack as any)?.observedStage,
-                    (extra as any)?.observedStage,
-                    currentFlowAny?.observedStage,
-                    null,
-                  ),
-                  primaryStage: pick(
-                    (ctxPack as any)?.primaryStage,
-                    (extra as any)?.primaryStage,
-                    currentFlowAny?.primaryStage,
-                    currentFlowAny?.observedStage,
-                    null,
-                  ),
-                  secondaryStage: pick(
-                    (ctxPack as any)?.secondaryStage,
-                    (extra as any)?.secondaryStage,
-                    currentFlowAny?.secondaryStage,
-                    null,
-                  ),
-                  flowDelta: String(
-                    ((args as any)?.extra?.flowDelta ??
-                      (args as any)?.userContext?.ctxPack?.flowDelta ??
-                      (args as any)?.extra?.flow?.delta ??
-                      (args as any)?.userContext?.ctxPack?.flow?.flowDelta ??
-                      '') || '',
-                  ).trim() || null,
-                  returnStreak: (() => {
-                    const raw =
-                      (args as any)?.extra?.returnStreak ??
-                      (args as any)?.userContext?.ctxPack?.returnStreak ??
-                      (args as any)?.extra?.flow?.returnStreak ??
-                      (args as any)?.userContext?.ctxPack?.flow?.returnStreak ??
-                      null;
-                    return typeof raw === 'number'
-                      ? raw
-                      : Number.isFinite(Number(raw))
-                        ? Number(raw)
-                        : null;
-                  })(),
-                  stingLevel: stingLevelForSeed || null,
-                  flowDigest: String(
-                    ((args as any)?.extra?.flowDigest ??
-                      (args as any)?.userContext?.ctxPack?.flowDigest ??
-                      '') || '',
-                  ).trim() || null,
-                  questionType: questionType || null,
-                  questionDomain: questionDomain || null,
-                  questionFocus: questionFocus || null,
-                  questionTMode: questionTMode || null,
-                  writerStyleKey: (() => {
-                    const focus = String(questionFocus || '').trim();
-                    const qType = String(questionType || '').trim();
-                    const flow = String(flowDelta2 || '').trim();
-                    const rs = Number.isFinite(Number(returnStreak2)) ? Number(returnStreak2) : 0;
-
-                    if (qType !== 'choice') return null;
-                    if (!/自分の意思と場の圧力|同調圧力|決定の急かし|空気圧/.test(focus)) return null;
-
-                    if (rs >= 2) return 'choice_pressure_map';
-                    if (flow === 'RETURN') return 'choice_pressure_insight';
-                    if (flow === 'FORWARD') return 'choice_pressure_reclaim';
-
-                    return 'choice_pressure_insight';
-                  })(),
-                  recallEligible: recallDecision.recallEligible,
-                  recallScope: recallDecision.recallScope,
-                  recallReason: recallDecision.recallReason,
-                  topicDigest: String(
-                    ((args as any)?.topicDigest ??
-                      (args as any)?.userContext?.topicDigest ??
-                      (args as any)?.userContext?.ctxPack?.topicDigest ??
-                      '') || '',
-                  ).trim() || null,
-                  historyForWriterLen: (() => {
-                    const uc: any = (args as any)?.userContext ?? {};
-                    const cp: any = uc?.ctxPack ?? {};
-                    const src =
-                      Array.isArray(uc?.historyForWriter) && uc.historyForWriter.length > 0
-                        ? uc.historyForWriter
-                        : Array.isArray(cp?.historyForWriter) && cp.historyForWriter.length > 0
-                          ? cp.historyForWriter
-                          : Array.isArray(uc?.turnsForWriter) && uc.turnsForWriter.length > 0
-                            ? uc.turnsForWriter
-                            : Array.isArray(cp?.turnsForWriter) && cp.turnsForWriter.length > 0
-                              ? cp.turnsForWriter
-                              : Array.isArray(uc?.turns) && uc.turns.length > 0
-                                ? uc.turns
-                                : [];
-                    return Array.isArray(src) ? src.length : 0;
-                  })(),
-                });
-
                 const questionIframeKeys = (() => {
                   const hs = Array.isArray((questionMeta as any)?.iframe?.hypothesisSpace)
                     ? (questionMeta as any).iframe.hypothesisSpace
@@ -1681,16 +1643,12 @@ const currentFlowAny: any = firstNonNull(
 
                 const writerStyleKey = (() => {
                   const focus = String(questionFocus || '').trim();
-                  const openLoop = String(flowMeaningV1?.openLoop ?? '').trim();
                   const qType = String(questionType || '').trim();
                   const flow = String(flowDelta2 || '').trim();
 
                   if (
                     qType === 'choice' &&
-                    (
-                      /自分の意思と場の圧力|同調圧力|決定の急かし|空気圧/.test(focus) ||
-                      /自分の意思と場の圧力|YESのあとに残るズレ|NOを言えなくなる圧/.test(openLoop)
-                    )
+                    /自分の意思と場の圧力|同調圧力|決定の急かし|空気圧/.test(focus)
                   ) {
                     return 'choice_self_vs_pressure';
                   }
@@ -1738,7 +1696,6 @@ const currentFlowAny: any = firstNonNull(
                           return [
                             '- Keep it narrow and grounded.',
                             '- Answer the user’s meaning before expanding.',
-                            '- When FLOW_MEANING.hook exists, start the first paragraph from that hook rather than from a generic restatement of the user text.',
                             '- Avoid generic broadening.',
                             '- When questions_max is 0, do not add a closing question.',
                             '- When questions_max is 1 and askBackAllowed is true, end with exactly one narrow closing question.',
@@ -1751,24 +1708,9 @@ const currentFlowAny: any = firstNonNull(
                 })();
 
                 const coreAssertionLine = (() => {
-                  const hook0 = String(flowMeaningV1?.thisTurnHook ?? '').trim();
-                  const tension0 = String(flowMeaningV1?.continuingTension ?? '').trim();
-                  const shift0 = String(cueLabels?.shiftMeaning ?? '').trim();
                   const core0 = String(stateCore ?? '').trim();
 
-                  const candidates = [
-                    hook0,
-                    tension0,
-                    shift0,
-                    core0,
-                  ].filter((v) => v.length > 0);
-
-                  const picked =
-                    candidates.find((v) => v.length >= 12) ??
-                    candidates[0] ??
-                    '';
-
-                  return picked.replace(/\s+/g, ' ').trim();
+                  return core0 || '';
                 })();
 
                 const futureHintLine = (() => {
@@ -1861,63 +1803,17 @@ const currentFlowAny: any = firstNonNull(
                 });
 
                 const flowSeedText = (() => {
-                  const base = formatFlowSeedV1(flowSeedV1).trim();
-
-                  const currentFromSeed =
-                    typeof flowFromSeed?.currentFlow === 'string'
-                      ? flowFromSeed.currentFlow.trim()
-                      : '';
-
-                  const prevFromSeed =
-                    typeof internalPackRaw === 'string'
-                      ? (internalPackRaw.match(/prev=([^\n]+)/)?.[1] ?? '').trim()
-                      : '';
-
-                  const deltaFromSeed =
-                    typeof internalPackRaw === 'string'
-                      ? (internalPackRaw.match(/delta=([^\n]+)/)?.[1] ?? '').trim()
-                      : '';
-
-                  const energyFromSeed =
-                    typeof internalPackRaw === 'string'
-                      ? (internalPackRaw.match(/energy=([^\n]+)/)?.[1] ?? '').trim()
-                      : '';
-
-                  const futureFromSeed =
-                    typeof internalPackRaw === 'string'
-                      ? (internalPackRaw.match(/futureRandom=([^\n]+)/)?.[1] ?? '').trim()
-                      : '';
-
-                  let out = base;
-
-                  if (currentFromSeed) {
-                    out = out.replace(/current=[^\n]*/g, `current=${currentFromSeed}`);
-                  }
-                  if (prevFromSeed) {
-                    out = out.replace(/prev=[^\n]*/g, `prev=${prevFromSeed}`);
-                  }
-                  if (deltaFromSeed) {
-                    out = out.replace(/delta=[^\n]*/g, `delta=${deltaFromSeed}`);
-                  }
-                  if (energyFromSeed) {
-                    out = out.replace(/energy=[^\n]*/g, `energy=${energyFromSeed}`);
-                  }
-                  if (futureFromSeed) {
-                    out = out.replace(/futureRandom=[^\n]*/g, `futureRandom=${futureFromSeed}`);
-                  }
-
-                  return out.trim();
+                  return formatFlowSeedV1(flowSeedV1).trim();
                 })();
 
                 const seedBlocksForWriter = [flowSeedText].filter((x) => norm(x));
                 const seedBlockForWriter = seedBlocksForWriter.join('\n\n');
 
                 const injectedHead = [seedBlockForWriter]
-                  .filter((x) => norm(x))
-                  .join('\n\n');
+                .filter((x) => norm(x))
+                .join('\n\n');
 
-                  const internalPackFixed = injectedHead.trim();
-
+              const internalPackFixed = injectedHead.trim();
                   let injectedPack = internalPackFixed;
 
                   if (futureFlowAny) {
@@ -1968,7 +1864,7 @@ const currentFlowAny: any = firstNonNull(
                         hasStateCues: /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/.test(packNorm),
 
                         hasFlowMeaning:
-                          /(?:^|\n)FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:/.test(packNorm) ||
+                        /(?:^|\n)(?:FLOW_MEANING|FLOW_V2)(?:\s*\(DO NOT OUTPUT\))?:/.test(packNorm) ||
                           /hook=/.test(packNorm) ||
                           /tension=/.test(packNorm) ||
                           /openLoop=/.test(packNorm),
@@ -2034,19 +1930,7 @@ const currentFlowAny: any = firstNonNull(
 
       // ===== FLOW_MEANING 追加 =====
       const flowMeaningBlock = (() => {
-        const hook = String(flowMeaningV1?.thisTurnHook ?? '').trim();
-        const tension = String(flowMeaningV1?.continuingTension ?? '').trim();
-        const openLoop = String(flowMeaningV1?.openLoop ?? '').trim();
-
-        const lines = [
-          hook && `hook=${hook}`,
-          tension && `tension=${tension}`,
-          openLoop && `openLoop=${openLoop}`,
-        ].filter(Boolean);
-
-        if (lines.length === 0) return '';
-
-        return `FLOW_MEANING:\n${lines.join('\n')}`;
+        return '';
       })();
 
       if (flowMeaningBlock) {
@@ -2054,18 +1938,191 @@ const currentFlowAny: any = firstNonNull(
       }
       // ===== ここまで =====
 
-      if (deltaHint && deltaHint.length > 0) {
-        return `${deltaHint}\n${base}`;
+      const writerDirectiveBlock = (() => {
+        const hasFlowV2 = /(?:^|\n)FLOW_V2(?:\s*\(DO NOT OUTPUT\))?:/.test(base);
+        if (!hasFlowV2) return '';
+
+        return [
+          'WRITER_DIRECTIVES:',
+          'priority=FLOW_V2',
+          'slotPolicy=single_line',
+          'maxLines=1',
+          'noExtraExplanation=true',
+          'noList=true',
+          'noQuestion=true',
+        ].join('\n');
+      })();
+
+      // ここでは base に入れない
+      // FIRST_LINE_FORCE 側を最終優先にする
+
+      const transitionStructBlock = (() => {
+        const hasFlowV2 = /(?:^|\n)FLOW_V2(?:\s*\(DO NOT OUTPUT\))?:/.test(base);
+        if (!hasFlowV2) return '';
+
+        const current =
+          (base.match(/(?:^|\n)current=([^\n]+)/)?.[1] ?? '').trim();
+        const prev =
+          (base.match(/(?:^|\n)prev=([^\n]+)/)?.[1] ?? '').trim();
+        const delta =
+          (base.match(/(?:^|\n)delta=([^\n]+)/)?.[1] ?? '').trim();
+        const energy =
+          (base.match(/(?:^|\n)energy=([^\n]+)/)?.[1] ?? '').trim();
+
+        const focus =
+          (base.match(/(?:^|\n)FOCUS:\n([^\n]+)/)?.[1] ?? '').trim() || null;
+
+        const [e_prev, layer_prev, polarity_prev] =
+          prev && prev !== '(null)' ? prev.split('-') : [null, null, null];
+
+        const [e_now, layer_now, polarity_now] =
+          current && current !== '(null)' ? current.split('-') : [null, null, null];
+
+        const legacyPicked = pickTransitionMeaning({
+          prevFlow: prev || null,
+          nowFlow: current || null,
+          delta: delta || null,
+          e_turn_prev: e_prev,
+          e_turn_now: e_now,
+          layer_prev,
+          layer_now,
+          polarity_prev,
+          polarity_now,
+          intentShift: null,
+          returnStreak: 0,
+          stingLevel: null,
+        });
+
+        const sevenPattern = (() => {
+          if (!prev || prev === '(null)') return 'start_anchor';
+          if (
+            layer_prev === layer_now &&
+            polarity_prev === polarity_now &&
+            (delta === 'same' || delta.length === 0)
+          ) {
+            return e_prev !== e_now ? 'energy_shift' : 'hold';
+          }
+          if (layer_prev !== layer_now && polarity_prev === polarity_now) {
+            return 'layer_shift';
+          }
+          if (layer_prev === layer_now && polarity_prev !== polarity_now) {
+            return 'polarity_shift';
+          }
+          if (layer_prev !== layer_now && polarity_prev !== polarity_now) {
+            return 'turn_shift';
+          }
+          return 'structure_shift';
+        })();
+
+        const oneLineText = (() => {
+          switch (sevenPattern) {
+            case 'start_anchor':
+              return 'いま新しい論点に重心が置かれた';
+            case 'hold':
+              return 'いま同じ論点に留まっている';
+            case 'energy_shift':
+              return '同じ論点のまま温度が変わっている';
+            case 'layer_shift':
+              return '見ている層が切り替わっている';
+            case 'polarity_shift':
+              return '受け取り方の向きが反転している';
+            case 'turn_shift':
+              return '視点と向きが同時に切り替わっている';
+            default:
+              return '関心の重心が別の論点へ移っている';
+          }
+        })();
+
+        const transitionStruct = {
+          pattern: sevenPattern,
+          meaning: legacyPicked,
+          focus,
+          relationContext: null,
+          oneLineConstraint: '1行・補足禁止・疑問文禁止',
+          oneLineText,
+        };
+
+        console.log('[IROS/TRANSITION_OBSERVE]', {
+          pickedTransitionMeaning: legacyPicked,
+          sevenPattern,
+          transitionStruct,
+        });
+
+        return [
+          'TRANSITION_STRUCT:',
+          `pattern=${transitionStruct.pattern}`,
+          `meaning=${transitionStruct.meaning}`,
+          `focus=${transitionStruct.focus ?? '(null)'}`,
+          `relationContext=${transitionStruct.relationContext ?? '(null)'}`,
+          `oneLineConstraint=${transitionStruct.oneLineConstraint}`,
+          `oneLineText=${transitionStruct.oneLineText}`,
+        ].join('\n');
+      })();
+
+      const writerOneLineBlock = (() => {
+        const m = transitionStructBlock.match(/(?:^|\n)oneLineText=([^\n]+)/);
+        return (m?.[1] ?? '').trim();
+      })();
+
+      if (transitionStructBlock) {
+        base = `${transitionStructBlock}\n\n${base}`;
       }
 
-      return base;
+      const deltaHintText = String(deltaHint ?? '').trim();
+
+      // ===== SEED構築 =====
+      const seedBlock = (() => {
+        if (!writerOneLineBlock) return '';
+
+        return [
+          'SEED (DO NOT OUTPUT):',
+          writerOneLineBlock,
+        ].join('\n');
+      })();
+
+      // ===== FIRST_LINE_FORCE =====
+      const firstLineForce = (() => {
+        if (!writerOneLineBlock) return '';
+
+        return [
+          'WRITER_DIRECTIVES:',
+          'priority=FIRST_LINE_FORCE',
+          'force_first_line=true',
+          'override_slot_policy=true',
+          'slotPolicy=force_single_line',
+          'maxLines=1',
+          'noExtraExplanation=true',
+          'noList=true',
+          'noQuestion=true',
+          'first_line_exact:',
+          writerOneLineBlock,
+        ].join('\n');
+      })();
+
+      // ===== 最終pack構築 =====
+      let finalPack = base;
+
+      if (seedBlock) {
+        finalPack = `${seedBlock}\n\n${finalPack}`;
+      }
+
+      if (firstLineForce) {
+        finalPack = `${firstLineForce}\n\n${finalPack}`;
+      }
+
+      // deltaHintは最後に乗せる
+      if (deltaHintText.length > 0) {
+        finalPack = `${deltaHintText}\n${finalPack}`;
+      }
+
+      return finalPack;
     })();
     try {
       const packNormFinal = norm(internalPackForWriter);
       const hFinal = packNormFinal.slice(0, 900);
 
       const flowMatchFinal = packNormFinal.match(
-        /FLOW_CONTEXT(?:\s*\(DO NOT OUTPUT\))?:|FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:/
+/FLOW_CONTEXT(?:\s*\(DO NOT OUTPUT\))?:|FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:|FLOW_V2(?:\s*\(DO NOT OUTPUT\))?:/
       );
       const flowIdxFinal = flowMatchFinal ? flowMatchFinal.index ?? -1 : -1;
       const flowSnippetFinal =
@@ -2103,7 +2160,7 @@ const currentFlowAny: any = firstNonNull(
         hasStateCues: /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/.test(packNormFinal),
 
         hasFlowMeaning:
-          /(?:^|\n)FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:/.test(packNormFinal) ||
+        /(?:^|\n)(?:FLOW_MEANING|FLOW_V2)(?:\s*\(DO NOT OUTPUT\))?:/.test(packNormFinal) ||
           /hook=/.test(packNormFinal) ||
           /tension=/.test(packNormFinal) ||
           /openLoop=/.test(packNormFinal),

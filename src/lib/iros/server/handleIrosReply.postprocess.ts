@@ -26,6 +26,7 @@ import { buildMirrorFlowV1, type PolarityV1 } from '@/lib/iros/mirrorFlow/mirror
 import { buildExprDirectiveV1 } from '@/lib/iros/expression/exprDirectiveV1';
 import { normalizeIrosStyleFinal } from '../language/normalizeIrosStyleFinal';
 import { getShortFixedPhrase } from '../language/shortFixedPhrase';
+import { buildContinuityObserve } from '@/lib/iros/delta/continuityKind';
 
 import {
   buildUnifiedAnalysis,
@@ -1052,8 +1053,65 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
           depth: depthNow,
           e_turn: e_turn ?? null,
           sessionBreak: sessionBreakNow ?? null,
+          continuityKind:
+            (metaForSave as any)?.extra?.ctxPack?.continuityKind ??
+            (metaForSave as any)?.extra?.continuityKind ??
+            null,
           prev: prevSnap && typeof prevSnap === 'object' ? prevSnap : null,
         } as any);
+
+        try {
+          const observe = buildContinuityObserve({
+            currentText: String(userText ?? ''),
+            previousText: prevSnap?.userText ?? null,
+
+            currentTopic:
+              (metaForSave as any)?.extra?.ctxPack?.topicDigest ??
+              (metaForSave as any)?.extra?.topicDigest ??
+              null,
+
+            previousTopic:
+              prevSnap?.topicDigest ??
+              prevSnap?.conversationLine ??
+              null,
+
+            currentOpenLoop:
+              (metaForSave as any)?.extra?.ctxPack?.flowMeaning?.openLoop ??
+              null,
+
+            previousOpenLoop:
+              prevSnap?.openLoop ??
+              null,
+
+            currentCore: String(userText ?? ''),
+            previousCore: prevSnap?.userText ?? null,
+
+            currentDepthStage: depthNow ?? null,
+            previousDepthStage: prevSnap?.depth ?? null,
+
+            currentETurn: e_turn ?? null,
+            previousETurn: prevSnap?.e_turn ?? null,
+
+            sessionBreak: sessionBreakNow ?? null,
+            elapsedSec:
+              (metaForSave as any)?.extra?.ctxPack?.flow?.ageSec ?? null,
+          });
+          (metaForSave as any).extra = {
+            ...(metaForSave as any).extra,
+            ctxPack: {
+              ...((metaForSave as any).extra?.ctxPack ?? {}),
+              continuityKind: observe.kind,
+            },
+          };
+          console.log('[IROS/CONTINUITY_KIND]', {
+            kind: observe.kind,
+            markers: observe.markers,
+            overlap: observe.overlap,
+            flags: observe.flags,
+          });
+        } catch (e) {
+          console.warn('[IROS/CONTINUITY_KIND][ERR]', e);
+        }
 
         (metaForSave as any).extra.ctxPack.viewShift = vs;
 
@@ -1626,6 +1684,10 @@ const polarityMetaBand: string | null =
       depth: depthNow,
       e_turn: e_turn ?? null,
       sessionBreak: sessionBreakNow ?? null,
+      continuityKind:
+        (metaForSave as any)?.extra?.ctxPack?.continuityKind ??
+        (metaForSave as any)?.extra?.continuityKind ??
+        null,
       prev: prevSnap && typeof prevSnap === 'object' ? prevSnap : null,
     } as any);
 
@@ -2393,11 +2455,30 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
       (metaForSave as any)?.extra?.viewShift?.confirmLine ??
       null;
 
-    if (typeof vsConfirm === 'string' && vsConfirm.trim().length > 0) {
+    const continuityKind: string | null =
+      (metaForSave as any)?.extra?.ctxPack?.continuityKind ??
+      (metaForSave as any)?.extra?.continuityKind ??
+      null;
+
+    // ✅ continuation / same_line は suppress
+    if (
+      vsConfirm &&
+      !['continuation', 'same_line'].includes(String(continuityKind))
+    ) {
       prefaceLine = vsConfirm.trim();
     }
   }
-
+  console.log('[IROS/PREFACE_SUPPRESS_CHECK]', {
+    continuityKind:
+      (metaForSave as any)?.extra?.ctxPack?.continuityKind ??
+      (metaForSave as any)?.extra?.continuityKind ??
+      null,
+    vsConfirm:
+      (metaForSave as any)?.extra?.ctxPack?.viewShift?.confirmLine ??
+      (metaForSave as any)?.extra?.viewShift?.confirmLine ??
+      null,
+    prefaceLine,
+  });
   // ✅ null に正規化（空文字は持たない）
   const prefaceLineOrNull = prefaceLine ? prefaceLine : null;
 

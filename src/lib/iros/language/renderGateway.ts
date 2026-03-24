@@ -1312,8 +1312,33 @@ if (isIR && !allowRephraseBlocksInIR) {
 
   const exprPreface = pickPreface();
 
+  const pickContinuityKind = () => {
+    const a: any = extraAny ?? {};
+    const m: any = (args as any)?.meta?.extra ?? {};
+    const x: any = (args as any)?.extra ?? {};
+
+    const cands = [
+      a?.ctxPack?.continuityKind,
+      m?.ctxPack?.continuityKind,
+      x?.ctxPack?.continuityKind,
+      a?.continuityKind,
+      m?.continuityKind,
+      x?.continuityKind,
+    ];
+
+    const s = cands.find(
+      (v: any) => typeof v === 'string' && String(v).trim().length > 0,
+    );
+
+    return s ? clampOneLineLocal(String(s)) : '';
+  };
+
+  const continuityKind = pickContinuityKind();
+
   // ✅ raw texts
-  const rbTexts = rephraseBlocks.map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim());
+  const rbTexts = rephraseBlocks.map((b: any) =>
+    String(b?.text ?? b?.content ?? b ?? '').trim(),
+  );
 
   const rbTotal = rbTexts.length;
   const rbEmpty = rbTexts.filter((t) => !t).length;
@@ -1340,12 +1365,20 @@ if (isIR && !allowRephraseBlocksInIR) {
     .map((t: string) => normalizeRenderableBlockText(t))
     .filter(Boolean);
 
-  // ✅ preface を 1行だけ先頭付与（重複は避ける）
+  // ✅ preface は continuityKind が same_line / continuation のとき付けない
   if (exprPreface) {
-    const head = String(cleanedBlocksText?.[0] ?? '').trim();
-    const shouldPrepend = !head || (head !== exprPreface && !head.startsWith(exprPreface));
+    const shouldSuppressPreface =
+      continuityKind === 'same_line' || continuityKind === 'continuation';
 
-    if (shouldPrepend) {
+    const head = String(cleanedBlocksText?.[0] ?? '').trim();
+    const shouldPrepend =
+      !shouldSuppressPreface &&
+      (!head || (head !== exprPreface && !head.startsWith(exprPreface)));
+
+    if (shouldSuppressPreface) {
+      (extraAny as any).exprPrefaceApplied = false;
+      (extraAny as any).exprPrefaceSkippedByContinuity = continuityKind;
+    } else if (shouldPrepend) {
       (extraAny as any).exprPrefaceApplied = true;
       cleanedBlocksText = [exprPreface, ...cleanedBlocksText];
     } else {

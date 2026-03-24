@@ -58,10 +58,29 @@ function hasArrowLike(delta: string | null): boolean {
 }
 
 function deriveFocus(ctx: FlowSeedV21['context']): string {
-  if (ctx.userCore) return ctx.userCore;
-  if (ctx.historyLine) return ctx.historyLine;
-  if (ctx.memoryLine) return ctx.memoryLine;
-  return '次の一手';
+  const base =
+    pickString(ctx.userCore) ||
+    pickString(ctx.historyLine) ||
+    pickString(ctx.memoryLine) ||
+    '';
+
+  if (!base) return '次の一手';
+
+  // 🔥 一点化ロジック（カテゴリ → 状態）
+  if (base.includes('人間関係')) {
+    return '誰かとのやり取りの違和感が残っている';
+  }
+
+  if (base.includes('仕事')) {
+    return '進め方ではなく、引っかかりが残っている部分がある';
+  }
+
+  // 長すぎる場合はカット
+  if (base.length > 40) {
+    return base.slice(0, 40);
+  }
+
+  return base;
 }
 
 function deriveTone(

@@ -49,6 +49,14 @@ export type ViewShiftInput = {
   depth: string | null; // 'R3' など
   e_turn: ETurnV1 | null;
   sessionBreak: boolean | null;
+  continuityKind?:
+    | 'same_line'
+    | 'continuation'
+    | 'branch'
+    | 'return'
+    | 'topic_switch'
+    | 'session_break'
+    | null;
 
   // 前回ターン（保存しておくスナップショット）
   prev: {
@@ -58,7 +66,6 @@ export type ViewShiftInput = {
     abstractRate: number | null;
   } | null;
 };
-
 const E_NUM: Record<ETurnV1, number> = { e1: 1, e2: 2, e3: 3, e4: 4, e5: 5 };
 
 function depthHead(depth: string | null): string | null {
@@ -238,6 +245,17 @@ export function computeViewShiftV1(input: ViewShiftInput): ViewShiftDecision {
   }
 
   const confirmLine = (() => {
+    const continuityKind = String(input.continuityKind ?? '').trim();
+
+    // ✅ 差分エンジン側が「同一線上 / 継続」と見たときは、
+    // ViewShift は確認文を生成しない
+    if (
+      continuityKind === 'same_line' ||
+      continuityKind === 'continuation'
+    ) {
+      return null;
+    }
+
     if (!ok || !variant) return null;
     if (variant === 'tempo') return '前の続きで進めますか？';
     if (variant === 'basic') return '前の話の続きで進めてよいですか？';
@@ -246,7 +264,6 @@ export function computeViewShiftV1(input: ViewShiftInput): ViewShiftDecision {
     // branch
     return '前の話の続きで進めてよいですか？ 別の話に切り替える場合は教えてください。';
   })();
-
   return {
     ok,
     score,
