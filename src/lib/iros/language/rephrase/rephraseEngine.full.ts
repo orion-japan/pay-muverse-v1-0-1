@@ -219,7 +219,7 @@ export type RephraseResult =
 function buildInternalPackText(args: {
   metaText?: string | null;
   historyText?: string | null;
-  seedDraftHint?: string | null;
+  seedInstruction?: string | null;
   lastTurnsCount?: number | null;
   directTask?: boolean | null;
   inputKind?: string | null;
@@ -227,7 +227,9 @@ function buildInternalPackText(args: {
   intentBand?: string | null;
   tLayerHint?: string | null;
 
-  // ✅ 観測ソース（ただし生文は渡さない方針のため、ここでは参照しない）
+  // ✅ 観測ソース
+  // userText は生文のまま渡す。
+  // ただし、意味決定の正本は seed 側に置き、ここでは観測入力として扱う。
   userText?: string | null;
 
   onePointText?: string | null;
@@ -303,7 +305,12 @@ function buildInternalPackText(args: {
   const head = (s: string, n = 80) => safeHead(s, n);
 
   const ctxPack: any = (args as any)?.ctxPack ?? null;
+// ✅ SEEDを最上位に固定
+const seedBlock = String(args.seedInstruction ?? '').trim();
 
+const seedHead = seedBlock
+  ? `SEED_INSTRUCTION (DO NOT OUTPUT):\n${seedBlock}`
+  : '';
   // --- OBS sources (NO userText) ---
   const obsOnePoint = asNorm(args.onePointText ?? '');
   const obsSummary = asNorm(args.situationSummary ?? '');
@@ -648,7 +655,12 @@ const obsCard = (() => {
     parts.push('', row.join(' / '));
   }
 
-  return parts.join('\n');
+  return [
+    seedHead,
+    ...parts
+  ]
+  .filter((v) => String(v ?? '').trim().length > 0)
+  .join('\n\n');
 }
 // ✅ FLOW_DIGEST を pack 用にサニタイズ（生文/オブジェクト事故を落とす + 1行固定）
 function sanitizeFlowDigest(v: unknown): string {
@@ -2818,16 +2830,12 @@ const canonicalOneLineSeed = (() => {
 
     if (!oneLineText) return '';
 
-    return [
-      `最初の1行は「${oneLineText}」とそのまま出力してください。`,
-      '今回はその1行だけで終了してください。',
-      '補足・言い換え・箇条書き・質問は禁止。',
-    ].join('\n');
-  } catch {
-    return '';
-  }
-})();
+    return oneLineText;
 
+    } catch {
+      return '';
+    }
+    })();
 console.log('[IROS/CANONICAL_ONE_LINE_SEED]', {
   traceId: debug.traceId,
   conversationId: debug.conversationId,
@@ -2850,7 +2858,24 @@ const seedFinal =
 const seedDraft = seedFinal;
 
 // writer向けの軽いヒント（※ここも userText を足さない前提）
-const seedDraftHint = adaptSeedDraftHintForWriter(seedDraft, isDirectTask);
+const seedInstruction = (() => {
+  const s = String(seedDraft ?? '')
+    .replace(/^[ \t]*@OBS[^\n]*(?:\n|$)/gm, '')
+    .replace(/^[ \t]*@SHIFT[^\n]*(?:\n|$)/gm, '')
+    .replace(/^[ \t]*@SAFE[^\n]*(?:\n|$)/gm, '')
+    .replace(/^[ \t]*@NEXT_HINT[^\n]*(?:\n|$)/gm, '')
+    .replace(/^[ \t]*@DELTA[^\n]*(?:\n|$)/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  if (!s) return '';
+
+  return `【最重要指示】
+以下の意味に従って応答を生成してください。
+この意味を優先し、それ以外の文脈は補助として扱ってください。
+
+${s}`;
+})();
 const itOk = readItOkFromContext(opts?.userContext ?? null);
 const band = extractIntentBandFromContext(opts?.userContext ?? null);
 
@@ -2940,7 +2965,7 @@ const lastTurnsSafe = (() => {
   const laneHintText = [
     String(shiftTextForMode ?? ''),
     String(metaText ?? ''),
-    String(seedDraftHint ?? ''),
+    String(seedInstruction ?? ''),
     String(userText ?? ''),
   ]
     .filter(Boolean)
@@ -3171,7 +3196,7 @@ const shiftKindForLane =
       // ✅ internalPack に history を二重投入しない（messages 側で lastTurns を渡している）
       historyText: '',
 
-      seedDraftHint,
+      seedInstruction,
       lastTurnsCount: lastTurnsSafe.length,
       itOk,
       directTask: directTaskForPrompt,
@@ -3465,56 +3490,55 @@ const canonicalOneLineSeedBlock = (() => {
       (flowV2Block.match(/(?:^|\n)prev=([^\n]+)/)?.[1] ?? '').trim();
     const delta =
       (flowV2Block.match(/(?:^|\n)delta=([^\n]+)/)?.[1] ?? '').trim();
+      if (!current) return '';
 
-    if (!current) return '';
-    const [e_prev, layer_prev, polarity_prev] =
-      prev && prev !== '(null)' ? prev.split('-') : [null, null, null];
+      const [e_prev, layer_prev, polarity_prev] =
+        prev && prev !== '(null)' ? prev.split('-') : [null, null, null];
 
-    const [e_now, layer_now, polarity_now] =
-      current && current !== '(null)' ? current.split('-') : [null, null, null];
+      const [e_now, layer_now, polarity_now] =
+        current && current !== '(null)' ? current.split('-') : [null, null, null];
 
-    const sevenPattern = (() => {
-      if (!prev || prev === '(null)') return 'start_anchor';
-      if (
-        layer_prev === layer_now &&
-        polarity_prev === polarity_now &&
-        (delta === 'same' || delta.length === 0)
-      ) {
-        return e_prev !== e_now ? 'energy_shift' : 'hold';
-      }
-      if (layer_prev !== layer_now && polarity_prev === polarity_now) {
-        return 'layer_shift';
-      }
-      if (layer_prev === layer_now && polarity_prev !== polarity_now) {
-        return 'polarity_shift';
-      }
-      if (layer_prev !== layer_now && polarity_prev !== polarity_now) {
-        return 'turn_shift';
-      }
-      return 'structure_shift';
-    })();
+      const sevenPattern = (() => {
+        if (!prev || prev === '(null)') return 'start_anchor';
+        if (
+          layer_prev === layer_now &&
+          polarity_prev === polarity_now &&
+          (delta === 'same' || delta.length === 0)
+        ) {
+          return e_prev !== e_now ? 'energy_shift' : 'hold';
+        }
+        if (layer_prev !== layer_now && polarity_prev === polarity_now) {
+          return 'layer_shift';
+        }
+        if (layer_prev === layer_now && polarity_prev !== polarity_now) {
+          return 'polarity_shift';
+        }
+        if (layer_prev !== layer_now && polarity_prev !== polarity_now) {
+          return 'turn_shift';
+        }
+        return 'structure_shift';
+      })();
 
-    const oneLineText = (() => {
-      switch (sevenPattern) {
-        case 'start_anchor':
-          return 'いま新しい論点に重心が置かれた';
-        case 'hold':
-          return 'いま同じ論点に留まっている';
-        case 'energy_shift':
-          return '同じ論点のまま温度が変わっている';
-        case 'layer_shift':
-          return '見ている層が切り替わっている';
-        case 'polarity_shift':
-          return '受け取り方の向きが反転している';
-        case 'turn_shift':
-          return '視点と向きが同時に切り替わっている';
-        default:
-          return '関心の重心が別の論点へ移っている';
-      }
-    })();
+      const oneLineText = (() => {
+        switch (sevenPattern) {
+          case 'start_anchor':
+            return 'いま新しい論点に重心が置かれた';
+          case 'hold':
+            return 'いま同じ論点に留まっている';
+          case 'energy_shift':
+            return '同じ論点のまま温度が変わっている';
+          case 'layer_shift':
+            return '見ている層が切り替わっている';
+          case 'polarity_shift':
+            return '受け取り方の向きが反転している';
+          case 'turn_shift':
+            return '視点と向きが同時に切り替わっている';
+          default:
+            return '関心の重心が別の論点へ移っている';
+        }
+      })();
 
-    if (!oneLineText) return '';
-
+      if (!oneLineText) return '';
     return [
       'SEED (DO NOT OUTPUT):',
       oneLineText,
@@ -5534,12 +5558,6 @@ const packNorm = (__writerInjectedPack ?? '').toString();
 
 // ===== TRANSITION MEANING OBSERVE + SKELETON (段階B観測) =====
 try {
-  const { pickTransitionMeaning } = await import(
-    '@/lib/iros/delta/transitionMeaning'
-  );
-  const { buildTransitionSkeleton } = await import(
-    '@/lib/iros/delta/buildTransitionSkeleton'
-  );
 
   const sourcePack =
   typeof packNorm === 'string' && packNorm.length > 0
@@ -5561,11 +5579,13 @@ const flowBlock = flowV2Match?.[0] ?? '';
   const delta = get('delta');
   const energy = get('energy');
 
-  const [e_prev, layer_prev, polarity_prev] =
-    prev && prev !== '(null)' ? prev.split('-') : [null, null, null];
+  const e_prev = null;
+  const layer_prev = null;
+  const polarity_prev = null;
 
-  const [e_now, layer_now, polarity_now] =
-    current && current !== '(null)' ? current.split('-') : [null, null, null];
+  const e_now = null;
+  const layer_now = null;
+  const polarity_now = null;
 
     const focusFromSeed = (() => {
       const m = sourcePack.match(/FOCUS:\n([^\n]+)/);
@@ -5574,32 +5594,11 @@ const flowBlock = flowV2Match?.[0] ?? '';
 
     let transitionMeaning: string | null = null;
 
-    if (flowBlock) {
-      transitionMeaning = pickTransitionMeaning({
-        prevFlow: prev,
-        nowFlow: current,
-        delta,
-        e_turn_prev: e_prev,
-        e_turn_now: e_now,
-        layer_prev,
-        layer_now,
-        polarity_prev,
-        polarity_now,
-        intentShift: null,
-        returnStreak: (opts as any)?.userContext?.ctxPack?.flow?.returnStreak ?? 0,
-        stingLevel: null,
-      });
-    } else if (focusFromSeed) {
+    if (focusFromSeed) {
       transitionMeaning = focusFromSeed;
     }
 
-    const transitionStruct = {
-      meaning: transitionMeaning,
-      focus: String((opts as any)?.extra?.question?.focus ?? '').trim() || null,
-      relationContext:
-        String((opts as any)?.extra?.pastStateNoteText ?? '').trim() || null,
-      oneLineConstraint: '1行・補足禁止・疑問文禁止',
-    };
+// transitionStruct は削除（writerに渡さないため）
   console.log(
     '[IROS/TRANSITION_MEANING][OBSERVE_JSON]',
     JSON.stringify(
@@ -5622,7 +5621,7 @@ const flowBlock = flowV2Match?.[0] ?? '';
           polarity_now,
         },
         picked: transitionMeaning,
-        transitionStruct,
+        // transitionStruct removed
       },
       null,
       2

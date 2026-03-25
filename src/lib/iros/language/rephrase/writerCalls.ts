@@ -25,9 +25,10 @@ import { buildFlowSeedV1, formatFlowSeedV1 } from '../../seed/seedEngine';
 // --- delta engine ---
 import { buildMultiDelta } from '@/lib/iros/delta/buildMultiDelta';
 import { selectPrimaryDelta } from '@/lib/iros/delta/selectPrimaryDelta';
-import { emitDeltaHint } from '@/lib/iros/delta/emitDeltaHint';
-import { pickTransitionMeaning } from '@/lib/iros/delta/transitionMeaning';
 import { buildTransitionSkeleton } from '@/lib/iros/delta/buildTransitionSkeleton';
+import { buildTransition180Candidates } from '@/lib/iros/delta/buildTransition180';
+import { selectTransition180 } from '@/lib/iros/delta/selectTransition180';
+import { pickTransitionMeaning } from '@/lib/iros/delta/transitionMeaning';
 
 export type WriterMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 type TurnMsg = { role: 'user' | 'assistant'; content: string };
@@ -416,54 +417,62 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
 
     null,
   );
-  // 🔥 internalPackRaw の FLOW_V2 から currentFlow を復元
-  let flowFromSeed: any = null;
-
-  if (internalPackRaw.includes('FLOW_V2')) {
-    const m = internalPackRaw.match(/current=([^\n]+)/);
-    if (m) {
-      flowFromSeed = {
-        currentFlow: m[1].trim(),
-      };
-    }
-  }
+// 🔥 internalPackRaw の FLOW_V2 から current / prev / delta / energy / futureRandom を復元
+let flowFromSeed: any = null;
 
 const currentFlowAny: any = firstNonNull(
   flowAny?.currentFlow,
   flowAny?.current,
-  flowFromSeed?.currentFlow, // 🔥 追加
+  flowFromSeed?.currentFlow,
   null,
 );
 
-  const futureFlowRaw: any = firstNonNull(
-    flowAny?.futureRandom,
-    flowAny?.future_flow,
-    flowAny?.future,
-    flowAny?.futureFlowRandom,
-    null,
-  );
+const previousFlowAny: any = firstNonNull(
+  flowAny?.previousFlow,
+  flowAny?.previous,
+  flowAny?.prev,
+  flowFromSeed?.previousFlow,
+  null,
+);
 
-  let futureFlowAny: any = null;
+const futureFlowRaw: any = firstNonNull(
+  flowAny?.futureRandom,
+  flowAny?.future_flow,
+  flowAny?.future,
+  flowAny?.futureFlowRandom,
+  flowFromSeed?.futureFlowRandom,
+  null,
+);
 
-  if (typeof futureFlowRaw === 'string') {
-    // 例: e3-S1-neg
-    const m = futureFlowRaw.match(/(e\d)-([A-Z]\d)-(pos|neg)/);
-    if (m) {
-      futureFlowAny = {
-        energy: m[1],
-        stage: m[2],
-        polarity: m[3],
-      };
-    }
-  } else if (futureFlowRaw && typeof futureFlowRaw === 'object') {
+let futureFlowAny: any = null;
+
+if (typeof futureFlowRaw === 'string') {
+  // 例: e3-S1-neg
+  const m = futureFlowRaw.match(/(e\d)-([A-Z]\d)-(pos|neg)/);
+  if (m) {
     futureFlowAny = {
-      energy: futureFlowRaw?.energy ?? null,
-      stage: futureFlowRaw?.stage ?? null,
-      polarity: futureFlowRaw?.polarity ?? null,
+      energy: m[1],
+      stage: m[2],
+      polarity: m[3],
     };
-  } else {
-    futureFlowAny = null;
   }
+} else if (futureFlowRaw && typeof futureFlowRaw === 'object') {
+  futureFlowAny = {
+    energy: futureFlowRaw?.energy ?? null,
+    stage: futureFlowRaw?.stage ?? null,
+    polarity: futureFlowRaw?.polarity ?? null,
+  };
+} else {
+  futureFlowAny = null;
+}
+
+console.log('[IROS/FLOW_V2_RECOVERY]', {
+  currentFlowAny,
+  previousFlowAny,
+  deltaFromSeed: flowFromSeed?.delta ?? null,
+  energyFromSeed: flowFromSeed?.energy ?? null,
+  futureFlowRaw,
+});
 
   const mirrorFlowV1ForSeed: any =
     pick(
@@ -1204,11 +1213,102 @@ const currentFlowAny: any = firstNonNull(
                       },
                     });
 
-                    const primary = selectPrimaryDelta(deltas, {
-                      layer: policyLayer,
+                    const flowIdRe =
+                      /^(e[1-5])-(S[1-3]|F[1-3]|R[1-3]|C[1-3]|I[1-3]|T[1-3])-(pos|neg)$/;
+
+                    const currentStateId = (() => {
+                      const raw = firstNonNull(
+                        currentFlowText,
+                        currentFlowAny,
+                        typeof internalPackRaw === 'string'
+                          ? (internalPackRaw.match(/current=([^\n]+)/)?.[1] ?? '')
+                          : '',
+                        '',
+                      );
+                      const s = String(raw ?? '').trim();
+                      return flowIdRe.test(s) ? (s as any) : null;
+                    })();
+
+                    const previousStateId = (() => {
+                      const raw = firstNonNull(
+                        previousFlowText,
+                        typeof internalPackRaw === 'string'
+                          ? (internalPackRaw.match(/prev=([^\n]+)/)?.[1] ?? '')
+                          : '',
+                        '',
+                      );
+                      const s = String(raw ?? '').trim();
+                      return flowIdRe.test(s) ? (s as any) : null;
+                    })();
+
+                    const futureStateId = (() => {
+                      const fromObject = (() => {
+                        const stage = String(futureFlowAny?.stage ?? '').trim();
+                        const energy = String(futureFlowAny?.energy ?? '').trim();
+                        const polarity = String(futureFlowAny?.polarity ?? '').trim();
+                        const id = `${energy}-${stage}-${polarity}`;
+                        return flowIdRe.test(id) ? id : '';
+                      })();
+
+                      const fromPack =
+                        typeof internalPackRaw === 'string'
+                          ? String(
+                              internalPackRaw.match(/futureRandom=([^\n]+)/)?.[1] ?? '',
+                            ).trim()
+                          : '';
+
+                      const s = firstNonNull(fromObject, fromPack, '');
+                      return flowIdRe.test(String(s).trim()) ? (String(s).trim() as any) : null;
+                    })();
+
+                    console.log('[IROS/TRANSITION180_INPUT]', {
+                      currentFlowText,
+                      previousFlowText,
+                      currentStateId,
+                      previousStateId,
+                      futureFlowAny,
+                      futureStateId,
                     });
 
-                    return emitDeltaHint(primary);
+                    const transition180Observed = (() => {
+                      if (!currentStateId) {
+                        return {
+                          currentStateId: null,
+                          previousStateId,
+                          futureStateId,
+                          primary: null,
+                          secondary: [],
+                        };
+                      }
+
+                      const candidates = buildTransition180Candidates(currentStateId);
+                      const picked180 = selectTransition180(candidates, futureStateId);
+
+                      return {
+                        currentStateId,
+                        previousStateId,
+                        futureStateId,
+                        primary: picked180.primary,
+                        secondary: picked180.secondary,
+                      };
+                    })();
+
+                    console.log('[IROS/TRANSITION180_OBSERVE]', transition180Observed);
+
+                    const primary180 = transition180Observed?.primary;
+
+                    if (!primary180) {
+                      return null;
+                    }
+
+                    return [
+                      'FLOW180 (DO NOT OUTPUT):',
+                      `primary=${primary180.short}`,
+                      `from=${primary180.prev ?? '(null)'}`,
+                      `to=${primary180.now}`,
+                      `deltaType=${primary180.deltaType}`,
+                      `sentence=${primary180.sentence}`,
+                    ].join('\n');
                   } catch {
                     return null;
                   }
@@ -1806,7 +1906,12 @@ const currentFlowAny: any = firstNonNull(
                   return formatFlowSeedV1(flowSeedV1).trim();
                 })();
 
-                const seedBlocksForWriter = [flowSeedText].filter((x) => norm(x));
+                const flowV2Text =
+                typeof internalPackRaw === 'string'
+                  ? (internalPackRaw.match(/FLOW_V2[\s\S]*?(?=\n\n|$)/)?.[0] ?? '')
+                  : '';
+
+                const seedBlocksForWriter = [flowV2Text, flowSeedText, deltaHint].filter((x) => norm(x));
                 const seedBlockForWriter = seedBlocksForWriter.join('\n\n');
 
                 const injectedHead = [seedBlockForWriter]
@@ -1814,6 +1919,31 @@ const currentFlowAny: any = firstNonNull(
                 .join('\n\n');
 
               const internalPackFixed = injectedHead.trim();
+              if (internalPackFixed.includes('FLOW_V2')) {
+                const mCurrent = internalPackFixed.match(/current=([^\n]+)/);
+                const mPrev = internalPackFixed.match(/prev=([^\n]+)/);
+                const mDelta = internalPackFixed.match(/delta=([^\n]+)/);
+                const mEnergy = internalPackFixed.match(/energy=([^\n]+)/);
+                const mFuture = internalPackFixed.match(/futureRandom=([^\n]+)/);
+
+                flowFromSeed = {
+                  currentFlow: mCurrent?.[1]?.trim() || null,
+                  previousFlow: mPrev?.[1]?.trim() || null,
+                  delta: mDelta?.[1]?.trim() || null,
+                  energy: mEnergy?.[1]?.trim() || null,
+                  futureFlowRandom: mFuture?.[1]?.trim() || null,
+                };
+              }
+
+              console.log('[IROS/FLOW_V2_RECOVERY_SRC]', {
+                source: 'internalPackFixed',
+                hasFlowV2: internalPackFixed.includes('FLOW_V2'),
+                currentFlow: flowFromSeed?.currentFlow ?? null,
+                previousFlow: flowFromSeed?.previousFlow ?? null,
+                delta: flowFromSeed?.delta ?? null,
+                energy: flowFromSeed?.energy ?? null,
+                futureFlowRandom: flowFromSeed?.futureFlowRandom ?? null,
+              });
                   let injectedPack = internalPackFixed;
 
                   if (futureFlowAny) {
@@ -1828,7 +1958,9 @@ const currentFlowAny: any = firstNonNull(
                     const packNorm = norm(injectedPack);
                     const h = packNorm.slice(0, 900);
 
-                      const flowMatch = packNorm.match(/FLOW_CONTEXT(?:\s*\(DO NOT OUTPUT\))?:|FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:/);
+                    const flowMatch = packNorm.match(
+                      /FLOW_V2(?:\s*\(DO NOT OUTPUT\))?:|FLOW_CONTEXT(?:\s*\(DO NOT OUTPUT\))?:|FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:/
+                    );
                       const flowIdx = flowMatch ? flowMatch.index ?? -1 : -1;
                       const flowSnippet =
                         flowIdx >= 0 ? packNorm.slice(flowIdx, Math.min(packNorm.length, flowIdx + 520)) : '';
@@ -1913,210 +2045,50 @@ const currentFlowAny: any = firstNonNull(
   const shiftKindRaw = shiftMeta.kind;
   const meaningKindRaw = shiftMeta.meaningKind;
   const shiftIntentRaw = shiftMeta.intent;
-  const internalPackWithDelta =
-  deltaHint && deltaHint.length > 0
-    ? `${deltaHint}\n${internalPackFixed ?? ''}`
-    : internalPackFixed;
 
+  // writer には delta を混ぜない。
+  // delta はここでは補助観測にとどめ、pack 正本は internalPackFixed に固定する。
+  const internalPackForWriterSource = internalPackFixed;
 
-    const internalPackForWriter = (() => {
-      let base = String(internalPackFixed ?? '')
-        .replace(/^[ \t]*@OBS[^\n]*(?:\n|$)/gm, '')
-        .replace(/^[ \t]*@SHIFT[^\n]*(?:\n|$)/gm, '')
-        .replace(/^[ \t]*@SAFE[^\n]*(?:\n|$)/gm, '')
-        .replace(/^[ \t]*@NEXT_HINT[^\n]*(?:\n|$)/gm, '')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
+  const internalPackForWriter = (() => {
+    let base = String(internalPackForWriterSource ?? '')
+      .replace(/^[ \t]*@OBS[^\n]*(?:\n|$)/gm, '')
+      .replace(/^[ \t]*@SHIFT[^\n]*(?:\n|$)/gm, '')
+      .replace(/^[ \t]*@SAFE[^\n]*(?:\n|$)/gm, '')
+      .replace(/^[ \t]*@NEXT_HINT[^\n]*(?:\n|$)/gm, '')
+      .replace(/(?:^|\n)@DELTA[^\n]*/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
 
-      // ===== FLOW_MEANING 追加 =====
-      const flowMeaningBlock = (() => {
-        return '';
-      })();
+    // ===== ここから追加（まだ出力には使わない） =====
 
-      if (flowMeaningBlock) {
-        base = `${flowMeaningBlock}\n\n${base}`;
-      }
-      // ===== ここまで =====
+    try {
+      // 仮input（後で180×180に差し替える）
+      const transitionInput = {
+        current: null,
+        previous: null,
+        delta: null,
+        energy: null,
+      } as any;
 
-      const writerDirectiveBlock = (() => {
-        const hasFlowV2 = /(?:^|\n)FLOW_V2(?:\s*\(DO NOT OUTPUT\))?:/.test(base);
-        if (!hasFlowV2) return '';
+      const pickedMeaning = pickTransitionMeaning(transitionInput);
+      const skeleton = buildTransitionSkeleton({
+        transitionMeaning: pickedMeaning,
+      } as any);
 
-        return [
-          'WRITER_DIRECTIVES:',
-          'priority=FLOW_V2',
-          'slotPolicy=single_line',
-          'maxLines=1',
-          'noExtraExplanation=true',
-          'noList=true',
-          'noQuestion=true',
-        ].join('\n');
-      })();
+      console.log('[IROS/DELTA_LAYER_TEST]', {
+        pickedMeaning,
+        skeleton,
+      });
 
-      // ここでは base に入れない
-      // FIRST_LINE_FORCE 側を最終優先にする
+    } catch (e) {
+      console.warn('[IROS/DELTA_LAYER_TEST][ERROR]', e);
+    }
 
-      const transitionStructBlock = (() => {
-        const hasFlowV2 = /(?:^|\n)FLOW_V2(?:\s*\(DO NOT OUTPUT\))?:/.test(base);
-        if (!hasFlowV2) return '';
+    // ===== ここまで =====
 
-        const current =
-          (base.match(/(?:^|\n)current=([^\n]+)/)?.[1] ?? '').trim();
-        const prev =
-          (base.match(/(?:^|\n)prev=([^\n]+)/)?.[1] ?? '').trim();
-        const delta =
-          (base.match(/(?:^|\n)delta=([^\n]+)/)?.[1] ?? '').trim();
-        const energy =
-          (base.match(/(?:^|\n)energy=([^\n]+)/)?.[1] ?? '').trim();
-
-        const focus =
-          (base.match(/(?:^|\n)FOCUS:\n([^\n]+)/)?.[1] ?? '').trim() || null;
-
-        const [e_prev, layer_prev, polarity_prev] =
-          prev && prev !== '(null)' ? prev.split('-') : [null, null, null];
-
-        const [e_now, layer_now, polarity_now] =
-          current && current !== '(null)' ? current.split('-') : [null, null, null];
-
-        const legacyPicked = pickTransitionMeaning({
-          prevFlow: prev || null,
-          nowFlow: current || null,
-          delta: delta || null,
-          e_turn_prev: e_prev,
-          e_turn_now: e_now,
-          layer_prev,
-          layer_now,
-          polarity_prev,
-          polarity_now,
-          intentShift: null,
-          returnStreak: 0,
-          stingLevel: null,
-        });
-
-        const sevenPattern = (() => {
-          if (!prev || prev === '(null)') return 'start_anchor';
-          if (
-            layer_prev === layer_now &&
-            polarity_prev === polarity_now &&
-            (delta === 'same' || delta.length === 0)
-          ) {
-            return e_prev !== e_now ? 'energy_shift' : 'hold';
-          }
-          if (layer_prev !== layer_now && polarity_prev === polarity_now) {
-            return 'layer_shift';
-          }
-          if (layer_prev === layer_now && polarity_prev !== polarity_now) {
-            return 'polarity_shift';
-          }
-          if (layer_prev !== layer_now && polarity_prev !== polarity_now) {
-            return 'turn_shift';
-          }
-          return 'structure_shift';
-        })();
-
-        const oneLineText = (() => {
-          switch (sevenPattern) {
-            case 'start_anchor':
-              return 'いま新しい論点に重心が置かれた';
-            case 'hold':
-              return 'いま同じ論点に留まっている';
-            case 'energy_shift':
-              return '同じ論点のまま温度が変わっている';
-            case 'layer_shift':
-              return '見ている層が切り替わっている';
-            case 'polarity_shift':
-              return '受け取り方の向きが反転している';
-            case 'turn_shift':
-              return '視点と向きが同時に切り替わっている';
-            default:
-              return '関心の重心が別の論点へ移っている';
-          }
-        })();
-
-        const transitionStruct = {
-          pattern: sevenPattern,
-          meaning: legacyPicked,
-          focus,
-          relationContext: null,
-          oneLineConstraint: '1行・補足禁止・疑問文禁止',
-          oneLineText,
-        };
-
-        console.log('[IROS/TRANSITION_OBSERVE]', {
-          pickedTransitionMeaning: legacyPicked,
-          sevenPattern,
-          transitionStruct,
-        });
-
-        return [
-          'TRANSITION_STRUCT:',
-          `pattern=${transitionStruct.pattern}`,
-          `meaning=${transitionStruct.meaning}`,
-          `focus=${transitionStruct.focus ?? '(null)'}`,
-          `relationContext=${transitionStruct.relationContext ?? '(null)'}`,
-          `oneLineConstraint=${transitionStruct.oneLineConstraint}`,
-          `oneLineText=${transitionStruct.oneLineText}`,
-        ].join('\n');
-      })();
-
-      const writerOneLineBlock = (() => {
-        const m = transitionStructBlock.match(/(?:^|\n)oneLineText=([^\n]+)/);
-        return (m?.[1] ?? '').trim();
-      })();
-
-      if (transitionStructBlock) {
-        base = `${transitionStructBlock}\n\n${base}`;
-      }
-
-      const deltaHintText = String(deltaHint ?? '').trim();
-
-      // ===== SEED構築 =====
-      const seedBlock = (() => {
-        if (!writerOneLineBlock) return '';
-
-        return [
-          'SEED (DO NOT OUTPUT):',
-          writerOneLineBlock,
-        ].join('\n');
-      })();
-
-      // ===== FIRST_LINE_FORCE =====
-      const firstLineForce = (() => {
-        if (!writerOneLineBlock) return '';
-
-        return [
-          'WRITER_DIRECTIVES:',
-          'priority=FIRST_LINE_FORCE',
-          'force_first_line=true',
-          'override_slot_policy=true',
-          'slotPolicy=force_single_line',
-          'maxLines=1',
-          'noExtraExplanation=true',
-          'noList=true',
-          'noQuestion=true',
-          'first_line_exact:',
-          writerOneLineBlock,
-        ].join('\n');
-      })();
-
-      // ===== 最終pack構築 =====
-      let finalPack = base;
-
-      if (seedBlock) {
-        finalPack = `${seedBlock}\n\n${finalPack}`;
-      }
-
-      if (firstLineForce) {
-        finalPack = `${firstLineForce}\n\n${finalPack}`;
-      }
-
-      // deltaHintは最後に乗せる
-      if (deltaHintText.length > 0) {
-        finalPack = `${deltaHintText}\n${finalPack}`;
-      }
-
-      return finalPack;
-    })();
+    return base;
+  })();
     try {
       const packNormFinal = norm(internalPackForWriter);
       const hFinal = packNormFinal.slice(0, 900);
@@ -2251,8 +2223,14 @@ const currentFlowAny: any = firstNonNull(
           const deltaDebug = {
             hasDeltaHint: !!deltaHint,
             deltaHint: deltaHint ?? null,
-            internalPackForWriterHasDelta: /(?:^|\n)@DELTA\b/.test(String(internalPackForWriter ?? '')),
-            packMsgHasDelta: /(?:^|\n)@DELTA\b/.test(String(packMsg?.content ?? '')),
+            internalPackForWriterHasDelta:
+              /(?:^|\n)(?:@DELTA\b|FLOW180(?:\s*\(DO NOT OUTPUT\))?:)/.test(
+                String(internalPackForWriter ?? '')
+              ),
+            packMsgHasDelta:
+              /(?:^|\n)(?:@DELTA\b|FLOW180(?:\s*\(DO NOT OUTPUT\))?:)/.test(
+                String(packMsg?.content ?? '')
+              ),
             internalPackForWriterHead: String(internalPackForWriter ?? '').slice(0, 300),
             packMsgHead: String(packMsg?.content ?? '').slice(0, 300),
           };
