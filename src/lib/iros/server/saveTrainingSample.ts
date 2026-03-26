@@ -121,7 +121,26 @@ function normalizeTargetKind(v: any): TargetKind {
 
   return 'stabilize';
 }
+function normalizeTargetKindOrNull(v: unknown): TargetKind | null {
+  const s = String(v ?? '').trim().toLowerCase();
 
+  if (!s) return null;
+
+  // 既存4分類はそのまま
+  if (s === 'stabilize') return 'stabilize';
+  if (s === 'expand') return 'expand';
+  if (s === 'pierce') return 'pierce';
+  if (s === 'uncover') return 'uncover';
+
+  // IROS側の詳細kindを training 4分類へ寄せる
+  if (s === 'clarify') return 'stabilize';
+  if (s === 'narrow') return 'stabilize';
+  if (s === 'decide') return 'expand';
+
+  if (s === 'cutoff' || s === 'cut_off' || s === 'cutoff_shift') return 'uncover';
+
+  return null;
+}
 /**
  * Training 用 targetKind の決定（ここが“唯一の真実”）
  * 優先順位：
@@ -355,8 +374,14 @@ export async function saveIrosTrainingSample(params: SaveIrosTrainingSampleParam
   const hLevel = clampInt03(hLevelRaw);
 
   // target_kind（★ goal.kind を最優先にする）
-  const targetKind = resolveTrainingTargetKind(meta);
-
+  // target_kind（★ ctxPack / goal / top-level を最優先し、最後だけ resolver に落とす）
+  const targetKind =
+  normalizeTargetKindOrNull(pickString(meta?.extra?.ctxPack?.targetKind)) ??
+  normalizeTargetKindOrNull(pickString(meta?.extra?.ctxPack?.goalKind)) ??
+  normalizeTargetKindOrNull(pickString(meta?.extra?.ctxPack?.replyGoal?.kind)) ??
+  normalizeTargetKindOrNull(pickString(meta?.targetKind)) ??
+  normalizeTargetKindOrNull(pickString(meta?.target_kind)) ??
+  resolveTrainingTargetKind(meta);
   const targetLabel = pickString(meta?.targetLabel) ?? pickString(meta?.target_label) ?? null;
 
   /**

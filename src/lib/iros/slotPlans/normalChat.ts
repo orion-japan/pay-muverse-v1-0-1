@@ -30,6 +30,7 @@
 
 import type { SlotPlanPolicy } from '../server/llmGate';
 import { observeFlow } from '../input/flowObserver';
+import { resolveReplyMode } from '../conversation/resolveReplyMode';
 
 // ✅ 追加：HowTo/方法質問を「立ち位置」へ変換する slots
 import { shouldUseQuestionSlots, buildQuestionSlots } from './QuestionSlots';
@@ -132,9 +133,14 @@ function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey | null; f
   const laneKey = safeLaneKey(args.laneKey);
   const delta = args.flowDelta ? String(args.flowDelta) : null;
 
+  const mode =
+    laneKey === 'T_CONCRETIZE'
+      ? 'concretize_hint'
+      : 'observe_hint';
+
   const hint =
     laneKey === 'T_CONCRETIZE'
-      ? 'いま表に出ている一点をそのまま保つ'
+      ? '比較で止まらず、結論を1本に決める'
       : laneKey === 'IDEA_BAND'
         ? '候補を増やさず、いま出ている差だけを見やすくする'
         : 'いま出ている流れを崩さず、そのまま整えて返す';
@@ -144,7 +150,7 @@ function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey | null; f
     role: 'assistant',
     style: 'neutral',
     content: `@NEXT_HINT ${JSON.stringify({
-      mode: 'observe_hint',
+      mode,
       laneKey: laneKey ?? null,
       delta,
       hint: clamp(hint, 80),
@@ -995,15 +1001,63 @@ function buildFlowReply(args: {
   const laneKeyKnown: LaneKey | null =
     laneKeyRaw === 'T_CONCRETIZE' || laneKeyRaw === 'IDEA_BAND' ? laneKeyRaw : null;
 
-  const hasAtDecl = /[@＠]/.test(t);
-  const useIdeaBand = laneKeyKnown === 'IDEA_BAND' && hasAtDecl;
-  const useTConcretize = laneKeyKnown === 'T_CONCRETIZE';
+    const hasAtDecl = /[@＠]/.test(t);
+    const useIdeaBand = laneKeyKnown === 'IDEA_BAND' && hasAtDecl;
+    const useTConcretize = laneKeyKnown === 'T_CONCRETIZE';
 
-  const laneKeyForObs: LaneKey | null = useTConcretize
-    ? 'T_CONCRETIZE'
-    : useIdeaBand
-      ? 'IDEA_BAND'
-      : null;
+    const replyDecisionBase = resolveReplyMode({
+      userText: args.userText,
+      resolvedAskType:
+        String((args as any)?.resolvedAskType ?? '').trim() ||
+        String((args as any)?.ctxPack?.resolvedAskType ?? '').trim() ||
+        String((args as any)?.meta?.extra?.ctxPack?.resolvedAskType ?? '').trim() ||
+        '',
+      shiftKind:
+        String((args as any)?.ctxPack?.shiftKind ?? '').trim() ||
+        String((args as any)?.meta?.extra?.ctxPack?.shiftKind ?? '').trim() ||
+        '',
+      stampedShiftKind:
+        String((args as any)?.ctxPack?.stampedShiftKind ?? '').trim() ||
+        String((args as any)?.meta?.extra?.ctxPack?.stampedShiftKind ?? '').trim() ||
+        '',
+      goalKind:
+        String((args as any)?.ctxPack?.goalKind ?? '').trim() ||
+        String((args as any)?.meta?.extra?.ctxPack?.goalKind ?? '').trim() ||
+        '',
+      replyGoal:
+        String((args as any)?.ctxPack?.replyGoal ?? '').trim() ||
+        String((args as any)?.meta?.extra?.ctxPack?.replyGoal ?? '').trim() ||
+        '',
+      laneKey:
+        String((args as any)?.ctxPack?.laneKey ?? '').trim() ||
+        String((args as any)?.meta?.extra?.ctxPack?.laneKey ?? '').trim() ||
+        '',
+      targetKind:
+        String((args as any)?.ctxPack?.targetKind ?? '').trim() ||
+        String((args as any)?.meta?.extra?.ctxPack?.targetKind ?? '').trim() ||
+        '',
+      topicDigest:
+        (args as any)?.ctxPack?.topicDigest ??
+        (args as any)?.meta?.extra?.ctxPack?.topicDigest ??
+        null,
+      topicDigestV2:
+        (args as any)?.ctxPack?.topicDigestV2 ??
+        (args as any)?.meta?.extra?.ctxPack?.topicDigestV2 ??
+        null,
+      conversationLine:
+        (args as any)?.ctxPack?.conversationLine ??
+        (args as any)?.meta?.extra?.ctxPack?.conversationLine ??
+        null,
+    });
+
+    const laneKeyForObs: LaneKey | null =
+      replyDecisionBase?.laneKey === 'T_CONCRETIZE' || replyDecisionBase?.laneKey === 'IDEA_BAND'
+        ? replyDecisionBase.laneKey
+        : useTConcretize
+          ? 'T_CONCRETIZE'
+          : useIdeaBand
+            ? 'IDEA_BAND'
+            : null;
 
   const shiftMeaning = buildShiftMeaningV1({
     userText: t,
@@ -1035,6 +1089,7 @@ function buildFlowReply(args: {
 
     return 'low' as const;
   })();
+
   console.log('[IROS/NORMAL_CHAT][SHIFT_INPUTS_REAL]', {
     stampedShiftKind:
       String((args as any)?.ctxPack?.shiftKind ?? '').trim() ||
@@ -1060,6 +1115,75 @@ function buildFlowReply(args: {
   });
 
   const shiftKind2 = (() => {
+
+// 🔥 収束（迷い）を強制的に decide に昇格
+const userTextNow2 = String(args.userText ?? '').trim();
+
+const hasConvergeSignal2 =
+  /半々|揺れて|揺れる|どっち|決めきれない|決められない|迷って|迷う|一つに絞|絞れ|決めたい/.test(
+    userTextNow2
+  );
+
+if (hasConvergeSignal2) {
+  try {
+    if ((args as any)?.ctxPack) {
+      (args as any).ctxPack.goalKind = 'decide';
+      (args as any).ctxPack.targetKind = 'decide';
+      (args as any).ctxPack.laneKey = 'T_CONCRETIZE';
+      (args as any).ctxPack.replyGoal = { kind: 'decide' };
+    }
+    if ((args as any)?.meta?.extra?.ctxPack) {
+      (args as any).meta.extra.ctxPack.goalKind = 'decide';
+      (args as any).meta.extra.ctxPack.targetKind = 'decide';
+      (args as any).meta.extra.ctxPack.laneKey = 'T_CONCRETIZE';
+      (args as any).meta.extra.ctxPack.replyGoal = { kind: 'decide' };
+    }
+  } catch {}
+}    // ===============================
+    // ✅ 司令塔: replyMode を最優先で確定
+    // ===============================
+    const replyDecision = replyDecisionBase;
+
+    if (replyDecision?.replyMode === 'decide') {
+      try {
+        if ((args as any)?.ctxPack) {
+          (args as any).ctxPack.goalKind = 'decide';
+          (args as any).ctxPack.targetKind = 'decide';
+          (args as any).ctxPack.laneKey = 'T_CONCRETIZE';
+          (args as any).ctxPack.replyGoal = { kind: 'decide' };
+        }
+        if ((args as any)?.meta?.extra?.ctxPack) {
+          (args as any).meta.extra.ctxPack.goalKind = 'decide';
+          (args as any).meta.extra.ctxPack.targetKind = 'decide';
+          (args as any).meta.extra.ctxPack.laneKey = 'T_CONCRETIZE';
+          (args as any).meta.extra.ctxPack.replyGoal = { kind: 'decide' };
+        }
+      } catch {}
+    }
+
+    if (replyDecision?.shiftKind) {
+      try {
+        if ((args as any)?.ctxPack) {
+          (args as any).ctxPack.shiftKind = replyDecision.shiftKind;
+        }
+        if ((args as any)?.meta?.extra?.ctxPack) {
+          (args as any).meta.extra.ctxPack.shiftKind = replyDecision.shiftKind;
+        }
+      } catch {}
+      return replyDecision.shiftKind;
+    }
+
+    // 🔥 fallback: T_CONCRETIZE は決断寄りに収束
+    if (laneKeyKnown === 'T_CONCRETIZE') {
+      try {
+        console.log('[IROS/SHIFT_DECISION][T_CONCRETIZE→DECIDE]', {
+          laneKeyKnown,
+          userText: String(args.userText ?? '').slice(0, 80),
+        });
+      } catch {}
+      return 'decide_shift' as const;
+    }
+
     const stampedShiftKind =
       String((args as any)?.ctxPack?.shiftKind ?? '').trim() ||
       String((args as any)?.meta?.extra?.ctxPack?.shiftKind ?? '').trim() ||
@@ -1076,7 +1200,6 @@ function buildFlowReply(args: {
       '今の未来',
       '未来だよ',
     );
-
     const resolvedAskType =
       String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
       String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
@@ -1495,28 +1618,39 @@ function buildFlowReply(args: {
         : useIdeaBand
           ? buildShiftIdeaBand(seedText)
           : m('SHIFT', {
-              kind: shiftKind2,
-              intent: shiftIntent2,
-              hint: shiftHint2,
-              line: shiftLine2,
-              source: 'phase2_shift',
-              rules: {
-                answer_user_meaning: shiftKind2 !== 'decide_shift',
-                answer_in_one_shot: shiftKind2 === 'decide_shift',
-                first_line_is_core_answer: shiftKind2 === 'decide_shift',
-                no_question_back: shiftKind2 === 'decide_shift',
-                no_question_end: shiftKind2 === 'decide_shift',
-                keep_it_simple: true,
-                no_flow_lecture: true,
-                no_meta_explain: true,
-                questions_max: questionsMax2,
-              },
-              allow: {
-                concrete_reply: true,
-                short_reply_ok: true,
-              },
-              seed_text: seedText,
-            });
+            kind: shiftKind2,
+            intent: shiftIntent2,
+            decision_target: shiftIntent2,
+            hint: shiftHint2,
+            line:
+              shiftKind2 === 'decide_shift'
+                ? '最初の1文で結論を出す / 比較で終わらない / 質問しない / 最後に行動を1つ置く'
+                : shiftLine2,
+            source: 'phase2_shift',
+            rules: {
+              answer_user_meaning: shiftKind2 !== 'decide_shift',
+              answer_in_one_shot: shiftKind2 === 'decide_shift',
+              first_line_is_core_answer: shiftKind2 === 'decide_shift',
+              must_start_with_conclusion: shiftKind2 === 'decide_shift',
+              force_assertive: shiftKind2 === 'decide_shift',
+              no_question_back: shiftKind2 === 'decide_shift',
+              no_question_end: shiftKind2 === 'decide_shift',
+              no_compare_list: shiftKind2 === 'decide_shift',
+              no_option_enumeration: shiftKind2 === 'decide_shift',
+              one_conclusion_only: shiftKind2 === 'decide_shift',
+              choose_one_direction: shiftKind2 === 'decide_shift',
+              end_with_action: shiftKind2 === 'decide_shift',
+              keep_it_simple: true,
+              no_flow_lecture: true,
+              no_meta_explain: true,
+              questions_max: questionsMax2,
+            },
+            allow: {
+              concrete_reply: true,
+              short_reply_ok: true,
+            },
+            seed_text: seedText,
+          });
 
   return [
     {

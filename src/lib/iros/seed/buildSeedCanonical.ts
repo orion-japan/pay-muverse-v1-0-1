@@ -298,7 +298,10 @@ export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
   const focus = buildFocus(input);
   const tone = mapTone(clean(input.tone), clean(input.goalKind));
   const depth = mapDepth(clean(input.depthStage));
-  const pressure = clean(input.pressure) ?? 'observe';
+  const pressure =
+  clean(input.goalKind) === 'decide'
+    ? 'concretize'
+    : clean(input.pressure) ?? 'observe';
   const relationContext = buildRelationContext(input);
   const oneLineConstraint = buildOneLineConstraint(input);
   const rules = buildRules(input);

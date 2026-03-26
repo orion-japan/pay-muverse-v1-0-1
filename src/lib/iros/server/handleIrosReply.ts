@@ -853,8 +853,49 @@ try {
     }
 
     const replyGoalRaw = cp?.replyGoal ?? ex?.replyGoal ?? metaAny.replyGoal ?? null;
-    const replyGoalKind = typeof replyGoalRaw === 'string' ? replyGoalRaw.trim() : String(replyGoalRaw?.kind ?? '').trim();
-    const goalKind = String(cp?.goalKind ?? metaAny.goalKind ?? (replyGoalKind === 'permit_density' ? 'forward' : '')).trim() || null;
+    const replyGoalKind =
+      typeof replyGoalRaw === 'string'
+        ? replyGoalRaw.trim()
+        : String(replyGoalRaw?.kind ?? '').trim();
+
+        const userTextNow = String(metaForCandidate?.lastUserText ?? '').trim();
+
+    const hasConvergeSignal =
+      /半々|揺れて|揺れる|どっち|決めきれない|決められない|迷って|迷う|一つに絞|絞れ|決めたい/.test(
+        userTextNow,
+      );
+
+    const goalKind = (() => {
+      // 今ターン最優先
+      if (hasConvergeSignal) return 'narrow';
+
+      // 今ターンの司令
+      const currentGoal = String(
+        cp?.goalKind ??
+          metaAny.goalKind ??
+          ex?.goalKind ??
+          '',
+      )
+        .trim()
+        .toLowerCase();
+
+      if (currentGoal) return currentGoal;
+
+      // 過去は最後
+      const restoredGoal = String(
+        metaAny?.extra?.ctxPack?.goalKind ??
+          metaAny?.ctxPack?.goalKind ??
+          '',
+      )
+        .trim()
+        .toLowerCase();
+
+      if (restoredGoal) return restoredGoal;
+
+      // fallback
+      if (replyGoalKind === 'decide') return 'decide';
+      return replyGoalKind === 'permit_density' ? 'forward' : null;
+    })();
 
     const depthStage =
       typeof (cp?.depthStage ?? metaAny.depthStage) === 'string'
@@ -2749,37 +2790,86 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
         ? shiftPayload.kind.trim()
         : null;
 
-    const finalGoalKind = (() => {
-      const v = String(finalShiftKind ?? '').trim().toLowerCase();
+        const finalGoalKind = (() => {
+          // ① まず「すでに現在ターンで決まっている司令」を最優先で採用する
+          const existingGoalKind = String(
+            cpAny?.goalKind ??
+              cpAny?.replyGoal?.kind ??
+              metaAny?.goalKind ??
+              exAny?.goalKind ??
+              ''
+          )
+            .trim()
+            .toLowerCase();
 
-      if (v === 'uncover_shift') return 'uncover';
-      if (v === 'stabilize_shift') return 'stabilize';
-      if (v === 'narrow_shift') return 'narrow';
-      if (v === 'clarify_shift') return 'clarify';
-      if (v === 'decide_shift') return 'decide';
-      if (v === 'cutoff_shift' || v === 'cut_off_shift') return 'cutOff';
+          if (existingGoalKind === 'decide') return 'decide';
+          if (existingGoalKind === 'clarify') return 'clarify';
+          if (existingGoalKind === 'expand') return 'expand';
+          if (existingGoalKind === 'uncover') return 'uncover';
+          if (existingGoalKind === 'stabilize') return 'stabilize';
+          if (existingGoalKind === 'narrow') return 'narrow';
+          if (
+            existingGoalKind === 'cutoff' ||
+            existingGoalKind === 'cut_off' ||
+            existingGoalKind === 'cutoff_shift'
+          ) {
+            return 'cutOff';
+          }
 
-      return null;
-    })();
+          // ② 現在ターンで未確定のときだけ targetKind 系を参照する
+          const explicitTargetKind = String(
+            cpAny?.targetKind ?? metaAny?.targetKind ?? metaAny?.target_kind ?? ''
+          )
+            .trim()
+            .toLowerCase();
 
-    if (finalShiftKind) {
-      cpAny.shiftKind = finalShiftKind;
-    }
+          if (explicitTargetKind === 'decide') return 'decide';
+          if (explicitTargetKind === 'clarify') return 'clarify';
+          if (explicitTargetKind === 'expand') return 'expand';
+          if (explicitTargetKind === 'uncover') return 'uncover';
+          if (explicitTargetKind === 'stabilize') return 'stabilize';
+          if (explicitTargetKind === 'narrow') return 'narrow';
+          if (
+            explicitTargetKind === 'cutoff' ||
+            explicitTargetKind === 'cut_off' ||
+            explicitTargetKind === 'cutoff_shift'
+          ) {
+            return 'cutOff';
+          }
 
-    if (finalGoalKind) {
-      cpAny.goalKind = finalGoalKind;
+          // ③ それでも未確定なら shiftKind を補助的に使う
+          const v = String(finalShiftKind ?? '').trim().toLowerCase();
 
-      metaAny.targetKind = finalGoalKind;
-      metaAny.target_kind = finalGoalKind;
+          if (v === 'uncover_shift') return 'uncover';
+          if (v === 'stabilize_shift') return 'stabilize';
+          if (v === 'narrow_shift') return 'narrow';
+          if (v === 'clarify_shift') return 'clarify';
+          if (v === 'decide_shift') return 'decide';
+          if (v === 'cutoff_shift' || v === 'cut_off_shift') return 'cutOff';
 
-      exAny.goalKind = exAny.goalKind ?? finalGoalKind;
-      exAny.targetKind = exAny.targetKind ?? finalGoalKind;
-      exAny.target_kind = exAny.target_kind ?? finalGoalKind;
+          return null;
+        })();
 
-      if (cpAny.replyGoal == null) {
-        cpAny.replyGoal = { kind: finalGoalKind };
-      }
-    }
+        if (finalGoalKind) {
+          if (!cpAny.goalKind) {
+            cpAny.goalKind = finalGoalKind;
+          }
+
+          if (!metaAny.targetKind) {
+            metaAny.targetKind = finalGoalKind;
+          }
+          if (!metaAny.target_kind) {
+            metaAny.target_kind = finalGoalKind;
+          }
+
+          exAny.goalKind = exAny.goalKind ?? finalGoalKind;
+          exAny.targetKind = exAny.targetKind ?? finalGoalKind;
+          exAny.target_kind = exAny.target_kind ?? finalGoalKind;
+
+          if (cpAny.replyGoal == null) {
+            cpAny.replyGoal = { kind: finalGoalKind };
+          }
+        }
 
     try {
       console.log('[IROS/SHIFT_SYNC][FINAL_SLOTPLAN_TO_META]', {
@@ -3618,12 +3708,12 @@ if (digestV1Raw) {
     .trim()
     .toUpperCase();
 
-  const shift2_goalKind = String(
-    cp?.goalKind ??
-      (out.metaForSave as any)?.targetKind ??
-      (out.metaForSave as any)?.target_kind ??
-      ''
-  ).trim();
+    const shift2_goalKind = String(
+      cp?.goalKind ??
+        (out.metaForSave as any)?.extra?.ctxPack?.goalKind ??
+        (out.metaForSave as any)?.ctxPack?.goalKind ??
+        ''
+    ).trim();
 
   const shift2_repeatSignal = String(cp?.repeatSignal ?? '').trim();
 

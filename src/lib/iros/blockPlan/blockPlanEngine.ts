@@ -248,9 +248,26 @@ export function buildBlockPlanWithDiag(
   const goalKindNorm = String(params.goalKind ?? '').trim().toLowerCase();
   const goalKind = goalKindNorm ? goalKindNorm : null;
 
+  // ✅ 「迷い・半々・どっち・決めきれない」は
+  // stabilize ではなく “収束/再配置” 側として扱う
+  const hasConvergeSignal =
+    userText
+      ? /半々|揺れて|揺れる|どっち|決めきれない|決められない|迷って|迷う|一つに絞|絞れ|決めたい/.test(
+          userText,
+        )
+      : false;
+
+  // ✅ stabilize の過剰発火を抑える
+  const effectiveGoalKind =
+    goalKind === 'stabilize' && hasConvergeSignal
+      ? 'narrow'
+      : goalKind;
+
   // autoCrack（相談ゴール + 裂け目）に使うので先に確定
   const consultishGoal =
-    goalKind === 'stabilize' || goalKind === 'repair' || goalKind === 'counsel';
+    effectiveGoalKind === 'stabilize' ||
+    effectiveGoalKind === 'repair' ||
+    effectiveGoalKind === 'counsel';
 
   // explicit（外部指定があればそれを優先）
   const explicit =
@@ -274,12 +291,15 @@ export function buildBlockPlanWithDiag(
       Boolean(itTriggered) &&
       (consultishGoal || (userText ? detectWantsDeeper(userText) : false)));
 
-// autoCrack（相談ゴール + 裂け目）
-const autoCrack = consultishGoal && userText ? detectCrackWords(userText) : false;
+  // autoCrack（相談ゴール + 裂け目）
+  const autoCrack = consultishGoal && userText ? detectCrackWords(userText) : false;
 
-// ✅ autoMini（相談ゴール + 迷い/不安/決められなさ）→ mini3
-// - multi6 の “裂け目” ほど強くないが、相談の節目で再配置したいときに出す
-const autoMini = consultishGoal && userText ? detectMiniReframeTrigger(userText) : false;
+  // ✅ autoMini（相談ゴール + 迷い/不安/決められなさ）→ mini3
+  // - ただし、収束信号があるターンでは stabilize 系 mini を出さない
+  const autoMini =
+    !hasConvergeSignal && consultishGoal && userText
+      ? detectMiniReframeTrigger(userText)
+      : false;
 
 // =========================================================
 // gate decision
@@ -301,9 +321,35 @@ const autoMini = consultishGoal && userText ? detectMiniReframeTrigger(userText)
         itTriggered,
         autoDeepen: false,
 
-        goalKind,
+        goalKind: effectiveGoalKind,
         consultishGoal,
         autoCrack: false,
+
+        mode: null,
+        blocksLen: 0,
+      },
+    };
+  }
+
+  // 2) hardDirectTask は常に禁止（explicit でも止める）
+  if (hardDirectTask) {
+    return {
+      plan: null,
+      diag: {
+        enabled: false,
+        why: 'DIRECT_HARD',
+        explicit,
+        hardDirectTask: true,
+        softDirectTask,
+        wantsDeeper,
+
+        depthStage,
+        itTriggered,
+        autoDeepen,
+
+        goalKind: effectiveGoalKind,
+        consultishGoal,
+        autoCrack,
 
         mode: null,
         blocksLen: 0,

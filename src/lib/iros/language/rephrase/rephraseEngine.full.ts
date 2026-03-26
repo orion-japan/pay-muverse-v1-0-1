@@ -3920,15 +3920,49 @@ let messages = buildFirstPassMessages({
   // - lane を上書きしない（lane=何をするか / allow=どれくらい強くやるか）
   // - まだ配線が無い前提なので、この場で決めて system で渡す（pure）
   // ---------------------------------------------
-  const laneKeyForAllow =
+  const shiftKindForAllow = String(
+    (opts as any)?.shiftKind ??
+      (opts as any)?.shiftKindNow ??
+      (opts as any)?.userContext?.shiftKind ??
+      (opts as any)?.userContext?.ctxPack?.shiftKind ??
+      '',
+  ).trim();
+
+  const laneKeyRecoveredFromSeed: 'IDEA_BAND' | 'T_CONCRETIZE' | null = (() => {
+    const raw = String(
+      (opts as any)?.seedDraftRawAll ??
+        (opts as any)?.seedDraft ??
+        (opts as any)?.slotPlanSeed ??
+        '',
+    );
+
+    const laneMatch = raw.match(/"laneKey"\s*:\s*"(IDEA_BAND|T_CONCRETIZE)"/);
+    if (laneMatch?.[1] === 'IDEA_BAND' || laneMatch?.[1] === 'T_CONCRETIZE') {
+      return laneMatch[1];
+    }
+
+    const shiftMatch = raw.match(/"kind"\s*:\s*"(decide_shift|narrow_shift)"/);
+    if (shiftMatch?.[1] === 'decide_shift' || shiftMatch?.[1] === 'narrow_shift') {
+      return 'T_CONCRETIZE';
+    }
+
+    return null;
+  })();
+
+  const laneKeyForAllow: 'IDEA_BAND' | 'T_CONCRETIZE' | null =
     (opts as any)?.laneKey ??
     (opts as any)?.userContext?.laneKey ??
     (opts as any)?.userContext?.ctxPack?.laneKey ??
-    // wants* がこのスコープに居れば拾う
+    laneKeyRecoveredFromSeed ??
+    (shiftKindForAllow === 'decide_shift' || shiftKindForAllow === 'narrow_shift'
+      ? 'T_CONCRETIZE'
+      : null) ??
     ((typeof wantsTConcretize !== 'undefined' && wantsTConcretize) ? 'T_CONCRETIZE' : null) ??
     ((typeof wantsIdeaBand !== 'undefined' && wantsIdeaBand) ? 'IDEA_BAND' : null) ??
     null;
-
+    ((typeof wantsTConcretize !== 'undefined' && wantsTConcretize) ? 'T_CONCRETIZE' : null) ??
+    ((typeof wantsIdeaBand !== 'undefined' && wantsIdeaBand) ? 'IDEA_BAND' : null) ??
+    null;
   let allowText: string | null = null;
   let allowObj: any = null;
 
@@ -6033,71 +6067,85 @@ userContext: {
     let removedTailQuestion = false;
 
     if (noQuestions) {
-      const lines = out.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+      let lines = out.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
 
-      let lastNonEmptyIdx = -1;
-      for (let i = lines.length - 1; i >= 0; i -= 1) {
-        if (String(lines[i] ?? '').trim()) {
-          lastNonEmptyIdx = i;
-          break;
+      // ✅ 行単位で質問文を削除
+      const beforeLinesLen = lines.length;
+      lines = lines.filter((line) => {
+        const s = String(line ?? '').trim();
+
+        // 空行は一旦残す
+        if (!s) return true;
+
+        // 明確な疑問符終わり
+        if (/[？?]\s*$/u.test(s)) return false;
+
+        // 質問っぽい終端
+        if (
+          /ですか[。．.!！？?]*$/u.test(s) ||
+          /でしょうか[。．.!！？?]*$/u.test(s) ||
+          /ませんか[。．.!！？?]*$/u.test(s) ||
+          /ないですか[。．.!！？?]*$/u.test(s) ||
+          /どう思う[？?]?$/u.test(s) ||
+          /どっち[？?]?$/u.test(s) ||
+          /どちら[？?]?$/u.test(s)
+        ) {
+          return false;
         }
+
+        return true;
+      });
+
+      removedTailQuestion = lines.length !== beforeLinesLen;
+
+      // ✅ 末尾の空行を除去
+      while (lines.length > 0 && !String(lines[lines.length - 1] ?? '').trim()) {
+        lines.pop();
       }
 
-      if (lastNonEmptyIdx >= 0) {
-        const lastLine = String(lines[lastNonEmptyIdx] ?? '').trim();
-        const tailIsQuestion = /[？?]\s*$/u.test(lastLine);
-
-        if (tailIsQuestion) {
-          lines.splice(lastNonEmptyIdx, 1);
-          removedTailQuestion = true;
-
-          // 質問だけ消したあとに末尾に区切り線だけ残るのを防ぐ
-          while (lines.length > 0 && !String(lines[lines.length - 1] ?? '').trim()) {
-            lines.pop();
-          }
-          if (lines.length > 0 && /^\s*---+\s*$/u.test(String(lines[lines.length - 1] ?? ''))) {
-            lines.pop();
-          }
-
-          // ✅ 質問本文を消したあとに
-          // 「最後にひとつだけ聞いていいですか。」
-          // 「最後にひとつだけ聞かせてください。」
-          // のような導入句だけ残るのを防ぐ
-          while (lines.length > 0) {
-            const tail = String(lines[lines.length - 1] ?? '').trim();
-            if (!tail) {
-              lines.pop();
-              continue;
-            }
-
-            const isQuestionLeadOnly =
-              /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞いていいですか。?$/u.test(tail) ||
-              /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞いていい？$/u.test(tail) ||
-              /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞いてもいいですか。?$/u.test(tail) ||
-              /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞いてもいい？$/u.test(tail) ||
-              /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞かせてください。?$/u.test(tail) ||
-              /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞かせて。?$/u.test(tail) ||
-              /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞いていいですか。?$/u.test(tail) ||
-              /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞いていい？$/u.test(tail) ||
-              /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞いてもいいですか。?$/u.test(tail) ||
-              /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞いてもいい？$/u.test(tail) ||
-              /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞かせてください。?$/u.test(tail) ||
-              /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞かせて。?$/u.test(tail) ||
-              /^(?:もしよければ)?最後に確認させてください。?$/u.test(tail) ||
-              /^(?:もしよければ)?最後に(?:一点|1点)だけ。?$/u.test(tail) ||
-              /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ。?$/u.test(tail);
-
-            if (isQuestionLeadOnly) {
-              lines.pop();
-              continue;
-            }
-
-            break;
-          }
-
-          out = lines.join('\n').replace(/[ \t]+\n/g, '\n').trim();
-        }
+      // ✅ 末尾の区切り線だけ残るのを防ぐ
+      if (lines.length > 0 && /^\s*---+\s*$/u.test(String(lines[lines.length - 1] ?? ''))) {
+        lines.pop();
       }
+
+      // ✅ 質問導入句だけ残るのを防ぐ
+      while (lines.length > 0) {
+        const tail = String(lines[lines.length - 1] ?? '').trim();
+        if (!tail) {
+          lines.pop();
+          continue;
+        }
+
+        if (
+          /最後に[一ひと]つだけ聞いていい[？?]?$/u.test(tail) ||
+          /最後に[一ひと]つだけ聞いていいですか[。．.!！？?]*$/u.test(tail) ||
+          /最後に[一ひと]つだけ聞かせてください[。．.!！？?]*$/u.test(tail) ||
+          /最後に少しだけ聞いていい[？?]?$/u.test(tail) ||
+          /最後に少しだけ聞いていいですか[。．.!！？?]*$/u.test(tail) ||
+          /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞いていいですか。?$/u.test(tail) ||
+          /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞いていい？$/u.test(tail) ||
+          /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞いてもいいですか。?$/u.test(tail) ||
+          /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞いてもいい？$/u.test(tail) ||
+          /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞かせてください。?$/u.test(tail) ||
+          /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞かせて。?$/u.test(tail) ||
+          /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞いていいですか。?$/u.test(tail) ||
+          /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞いていい？$/u.test(tail) ||
+          /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞いてもいいですか。?$/u.test(tail) ||
+          /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞いてもいい？$/u.test(tail) ||
+          /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞かせてください。?$/u.test(tail) ||
+          /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞かせて。?$/u.test(tail) ||
+          /^(?:もしよければ)?最後に確認させてください。?$/u.test(tail) ||
+          /^(?:もしよければ)?最後に(?:一点|1点)だけ。?$/u.test(tail) ||
+          /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ。?$/u.test(tail)
+        ) {
+          lines.pop();
+          continue;
+        }
+
+        break;
+      }
+
+      out = lines.join('\n').replace(/[ \t]+\n/g, '\n').trim();
     }
 
     const afterLast = String(out.split('\n').filter(Boolean).slice(-1)[0] ?? '');
