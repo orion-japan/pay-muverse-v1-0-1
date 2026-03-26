@@ -4553,48 +4553,65 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
   });
 
   // ログ確認
-console.log('[IROS/rephraseEngine][MSG_PACK]', {
-  traceId: debug.traceId,
-  conversationId: debug.conversationId,
-  userCode: debug.userCode,
+  console.log('[IROS/rephraseEngine][MSG_PACK]', {
+    traceId: debug.traceId,
+    conversationId: debug.conversationId,
+    userCode: debug.userCode,
 
-  lastTurns: lastTurnsSafe.length,
-  hasHistoryText: Boolean(historyText),
-  historyTextLen: String(historyText ?? '').length,
-  historyTextIsEmpty: !String(historyText ?? '').trim(),
-  historyTextHead: safeHead(String(historyText ?? ''), 180),
+    lastTurns: lastTurnsSafe.length,
+    hasHistoryText: Boolean(historyText),
+    historyTextLen: String(historyText ?? '').length,
+    historyTextIsEmpty: !String(historyText ?? '').trim(),
+    historyTextHead: safeHead(String(historyText ?? ''), 180),
 
-  msgCount: messages.length,
-  roles: messages.map((m: any) => m.role),
+    msgCount: messages.length,
+    roles: messages.map((m: any) => m.role),
 
-  // ✅ 実際に LLM に送る「結合後 system」の長さ（systemポートの太さの確証）
-  systemLen:
-    Array.isArray(messages) && messages[0]?.role === 'system'
-      ? String((messages[0] as any)?.content ?? '').length
-      : 0,
+    // ✅ 実際に LLM に送る「結合後 system」の長さ（systemポートの太さの確証）
+    systemLen:
+      Array.isArray(messages) && messages[0]?.role === 'system'
+        ? String((messages[0] as any)?.content ?? '').length
+        : 0,
 
-  // ✅ 各メッセージのサイズ内訳（誰がprompt_tokensを太らせているか確定）
-  msgLens: (Array.isArray(messages) ? messages : []).map((m: any, idx: number) => ({
-    i: idx,
-    role: String(m?.role ?? ''),
-    len: String(m?.content ?? '').length,
-    head: safeHead(String(m?.content ?? ''), 120),
-  })),
+    // ✅ 各メッセージのサイズ内訳（誰がprompt_tokensを太らせているか確定）
+    msgLens: (Array.isArray(messages) ? messages : []).map((m: any, idx: number) => ({
+      i: idx,
+      role: String(m?.role ?? ''),
+      len: String(m?.content ?? '').length,
+      head: safeHead(String(m?.content ?? ''), 120),
+    })),
 
-  internalPackLen: String(internalPack ?? '').length,
-  internalPackHasHistoryHint: /HISTORY_HINT\s*\(DO NOT OUTPUT\)/i.test(String(internalPack ?? '')),
+    internalPackLen: String(internalPack ?? '').length,
+    internalPackHasHistoryHint: /HISTORY_HINT\s*\(DO NOT OUTPUT\)/i.test(String(internalPack ?? '')),
 
-  // ✅ merged system の内訳（このスコープで参照できる範囲だけ）
-  mergedSystemPartsLen: {
-    systemPrompt: String(systemPrompt ?? '').length,
-    exprMetaText: String(exprMetaText ?? '').length,
-    blockPlanText: String(blockPlanText ?? '').length,
-  },
+    // ✅ MeaningSkeleton の確認（system本文から検出）
+    meaningSkeletonInSystem:
+      Array.isArray(messages) && messages[0]?.role === 'system'
+        ? /MEANING_SKELETON \(DO NOT OUTPUT\):/i.test(String((messages[0] as any)?.content ?? ''))
+        : false,
+    meaningSkeletonHead:
+      Array.isArray(messages) && messages[0]?.role === 'system'
+        ? safeHead(
+            (
+              String((messages[0] as any)?.content ?? '').match(
+                /MEANING_SKELETON \(DO NOT OUTPUT\):[\s\S]{0,200}/i,
+              )?.[0] ?? ''
+            ),
+            160,
+          )
+        : '',
 
-  // ✅ seedDraft 実体の監査（発生源特定用）
-  seedDraftLen: seedDraft.length,
-  seedDraftHead: safeHead(seedDraft, 120),
-  seedDraftRawAllHead: safeHead(slotsTextRawAll, 200),
+    // ✅ merged system の内訳（このスコープで参照できる範囲だけ）
+    mergedSystemPartsLen: {
+      systemPrompt: String(systemPrompt ?? '').length,
+      exprMetaText: String(exprMetaText ?? '').length,
+      blockPlanText: String(blockPlanText ?? '').length,
+    },
+
+    // ✅ seedDraft 実体の監査（発生源特定用）
+    seedDraftLen: seedDraft.length,
+    seedDraftHead: safeHead(seedDraft, 120),
+    seedDraftRawAllHead: safeHead(slotsTextRawAll, 200),
 
     // ✅ slots の中身を “頭だけ” 監査（自然文混入の犯人探し）
     slotsHead: (extracted?.slots ?? []).map((s: any, i: number) => ({
@@ -4615,6 +4632,33 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
 
     lockedILines: lockedILines.length,
   });
+
+  console.log(
+    '[IROS/rephraseEngine][MSG_PACK_JSON]',
+    JSON.stringify({
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      msgCount: messages.length,
+      roles: messages.map((m: any) => m.role),
+      meaningSkeletonInSystem:
+        Array.isArray(messages) && messages[0]?.role === 'system'
+          ? /MEANING_SKELETON \(DO NOT OUTPUT\):/i.test(String((messages[0] as any)?.content ?? ''))
+          : false,
+      meaningSkeletonHead:
+        Array.isArray(messages) && messages[0]?.role === 'system'
+          ? safeHead(
+              (
+                String((messages[0] as any)?.content ?? '').match(
+                  /MEANING_SKELETON \(DO NOT OUTPUT\):[\s\S]{0,200}/i,
+                )?.[0] ?? ''
+              ),
+              160,
+            )
+          : '',
+    }),
+  );
+
   console.log('[IROS/BLOCK_PLAN][inject]', {
     enabled: Boolean(blockPlanText && String(blockPlanText).trim().length > 0),
     mode: blockPlan?.mode ?? null,
@@ -5263,6 +5307,7 @@ raw = await (async () => {
       (
         /COORD\s*\(DO NOT OUTPUT\):/i.test(content) ||
         /FLOW_SEED_V1\b/i.test(content) ||
+        /FLOW180\s*\(DO NOT OUTPUT\):/i.test(content) ||
         /FLOW180_SEED\s*\(DO NOT OUTPUT\):/i.test(content) ||
         /FLOW_CONTEXT\s*\(DO NOT OUTPUT\):/i.test(content) ||
         /STATE_CUES\s*\(DO NOT OUTPUT\)/i.test(content) ||
@@ -5522,16 +5567,18 @@ raw = await (async () => {
   );
 
   const __writerInjectedPackAssistant =
-    __writerAssistantCandidates.find((m) => {
-      const c = String(m?.content ?? '');
-      return (
-        /COORD\s*\(DO NOT OUTPUT\):/i.test(c) ||
-        /FLOW_SEED_V1\b/i.test(c) ||
-        /FLOW180_SEED\s*\(DO NOT OUTPUT\):/i.test(c) ||
-        /FLOW_CONTEXT\s*\(DO NOT OUTPUT\):/i.test(c) ||
-        /FLOW:\s*\n/i.test(c)
-      );
-    }) ?? null;
+  __writerAssistantCandidates.find((m) => {
+    const c = String(m?.content ?? '');
+    return (
+      /SEED\s*\(DO NOT OUTPUT\):/i.test(c) ||
+      /COORD\s*\(DO NOT OUTPUT\):/i.test(c) ||
+      /FLOW_V2\s*\(DO NOT OUTPUT\):/i.test(c) ||
+      /FLOW_SEED_V1\b/i.test(c) ||
+      /FLOW180_SEED\s*\(DO NOT OUTPUT\):/i.test(c) ||
+      /FLOW_CONTEXT\s*\(DO NOT OUTPUT\):/i.test(c) ||
+      /FLOW:\s*\n/i.test(c)
+    );
+  }) ?? null;
   const __writerStateAssistant =
     __writerAssistantCandidates.find((m) => {
       const c = String(m?.content ?? '');
@@ -5564,40 +5611,112 @@ try {
     ? packNorm
     : '';
 
-const flowV2Match = sourcePack.match(
-  /FLOW_V2\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n\n|$)/
-);
-const flowBlock = flowV2Match?.[0] ?? '';
+const flowBlock =
+  sourcePack.match(/FLOW_V2\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ \-]+(?:\s*\(DO NOT OUTPUT\))?:|$)/)?.[0] ?? '';
 
-  const get = (key: string) => {
-    const m = flowBlock.match(new RegExp(`${key}=([^\\n]+)`));
-    return m ? m[1].trim() : null;
+const stateBlock =
+  sourcePack.match(/STATE:\n[\s\S]*?(?=\n[A-Z_]+:|$)/)?.[0] ?? '';
+
+const getFromBlock = (block: string, key: string) => {
+  const m = block.match(new RegExp(`${key}=([^\\n]+)`));
+  return m ? m[1].trim() : null;
+};
+
+const current =
+  getFromBlock(flowBlock, 'current') ??
+  getFromBlock(stateBlock, 'to') ??
+  getFromBlock(stateBlock, 'from');
+
+const prev =
+  getFromBlock(flowBlock, 'prev') ??
+  getFromBlock(stateBlock, 'from');
+
+const delta =
+  getFromBlock(flowBlock, 'delta') ??
+  getFromBlock(stateBlock, 'deltaType');
+
+const energy =
+  getFromBlock(flowBlock, 'energy') ??
+  (() => {
+    const c = current ?? '';
+    const m = c.match(/^(e[1-5])-/i);
+    return m ? m[1].toLowerCase() : null;
+  })();
+
+const parseFlowId = (value: string | null) => {
+  const raw = String(value ?? '').trim();
+  if (!raw || raw === '(null)') {
+    return {
+      raw: raw || null,
+      e: null as string | null,
+      layer: null as string | null,
+      polarity: null as string | null,
+    };
+  }
+
+  const m = raw.match(/^(e[1-5])-([SFRCTI]\d+)-(pos|neg)$/i);
+  if (m) {
+    return {
+      raw,
+      e: m[1].toLowerCase(),
+      layer: m[2].toUpperCase(),
+      polarity: m[3].toLowerCase(),
+    };
+  }
+
+  const parts = raw.split('-').map((s) => s.trim()).filter(Boolean);
+  return {
+    raw,
+    e: /^e[1-5]$/i.test(parts[0] ?? '') ? String(parts[0]).toLowerCase() : null,
+    layer: /^[SFRCTI]\d+$/i.test(parts[1] ?? '') ? String(parts[1]).toUpperCase() : null,
+    polarity: /^(pos|neg)$/i.test(parts[2] ?? '') ? String(parts[2]).toLowerCase() : null,
   };
+};
 
-  const current = get('current');
-  const prev = get('prev');
-  const delta = get('delta');
-  const energy = get('energy');
+const prevParsed = parseFlowId(prev);
+const currentParsed = parseFlowId(current);
 
-  const e_prev = null;
-  const layer_prev = null;
-  const polarity_prev = null;
+const e_prev = prevParsed.e;
+const layer_prev = prevParsed.layer;
+const polarity_prev = prevParsed.polarity;
 
-  const e_now = null;
-  const layer_now = null;
-  const polarity_now = null;
+const e_now = currentParsed.e;
+const layer_now = currentParsed.layer;
+const polarity_now = currentParsed.polarity;
 
-    const focusFromSeed = (() => {
-      const m = sourcePack.match(/FOCUS:\n([^\n]+)/);
-      return m?.[1]?.trim() || null;
-    })();
+const focusFromSeed = (() => {
+  const m = sourcePack.match(/FOCUS:\n([^\n]+)/);
+  return m?.[1]?.trim() || null;
+})();
 
-    let transitionMeaning: string | null = null;
+const stageLabel = (layer: string | null) => {
+  if (!layer) return null;
+  const head = layer.charAt(0).toUpperCase();
 
-    if (focusFromSeed) {
-      transitionMeaning = focusFromSeed;
-    }
+  switch (head) {
+    case 'S':
+      return '自己の足場';
+    case 'F':
+      return '形になり始める';
+    case 'R':
+      return '関係の響き';
+    case 'C':
+      return '創造の動き';
+    case 'T':
+      return '統合の開き';
+    case 'I':
+      return '意図の向き';
+    default:
+      return layer;
+  }
+};
 
+const transitionMeaningFromSeed = (() => {
+  if (focusFromSeed) return focusFromSeed;
+  return null;
+})();
+
+let transitionMeaning: string | null = transitionMeaningFromSeed || null;
 // transitionStruct は削除（writerに渡さないため）
   console.log(
     '[IROS/TRANSITION_MEANING][OBSERVE_JSON]',
@@ -5953,9 +6072,15 @@ userContext: {
 
             const isQuestionLeadOnly =
               /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞いていいですか。?$/u.test(tail) ||
+              /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞いていい？$/u.test(tail) ||
+              /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞いてもいいですか。?$/u.test(tail) ||
+              /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞いてもいい？$/u.test(tail) ||
               /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞かせてください。?$/u.test(tail) ||
               /^(?:もしよければ)?最後に(?:ひとつ|1つ)だけ聞かせて。?$/u.test(tail) ||
               /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞いていいですか。?$/u.test(tail) ||
+              /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞いていい？$/u.test(tail) ||
+              /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞いてもいいですか。?$/u.test(tail) ||
+              /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞いてもいい？$/u.test(tail) ||
               /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞かせてください。?$/u.test(tail) ||
               /^(?:もしよければ)?(?:ひとつ|1つ)だけ聞かせて。?$/u.test(tail) ||
               /^(?:もしよければ)?最後に確認させてください。?$/u.test(tail) ||

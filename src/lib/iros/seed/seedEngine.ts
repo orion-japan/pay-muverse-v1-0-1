@@ -1,10 +1,19 @@
 // =============================================
 // file: src/lib/iros/seed/seedEngine.ts
-// SEED ENGINE v2.1改
+// SEED ENGINE v2.3
 // - flowEngine = 状態（点）
-// - seedEngine = 文脈理解＋圧縮（線）
+// - meaning = flow直結（1本）
+// - seedEngine = writer正本（線）
 // - LLM = 表現（音）
 // =============================================
+
+import {
+  buildSeedCanonical,
+  type Flow180Like,
+  type MeaningSkeletonV2,
+  type SeedCanonical,
+  type WriterDirectivesLike,
+} from './buildSeedCanonical';
 
 export type FlowSeedV21 = {
   flow: {
@@ -27,9 +36,13 @@ export type FlowSeedV21 = {
     pressure: string;
   };
 
-  goalKind?: string | null;
-};
+  /** 🔥 追加：意味（flow直結） */
+  meaning?: string | null;
 
+  goalKind?: string | null;
+
+  canonical?: SeedCanonical | null;
+};
 
 export type FlowSeedV21Input = {
   flow?: {
@@ -44,12 +57,30 @@ export type FlowSeedV21Input = {
   historyLine?: string | null;
   memoryLine?: string | null;
   goalKind?: string | null;
+
+  meaningSkeleton?: MeaningSkeletonV2 | null;
+  flow180?: Flow180Like | null;
+  writerDirectives?: WriterDirectivesLike | null;
+
+  focus?: string | null;
+  tone?: string | null;
+  pressure?: string | null;
+
+  askBackAllowed?: boolean | null;
+  questionsMax?: number | null;
+
+  depthStage?: string | null;
+  phase?: string | null;
+  qCode?: string | null;
+  eTurn?: string | null;
 };
 
 function pickString(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const s = v.trim();
-  return s.length > 0 ? s : null;
+  if (!s) return null;
+  if (s === '(null)' || s === 'null' || s === 'undefined') return null;
+  return s;
 }
 
 function hasArrowLike(delta: string | null): boolean {
@@ -66,7 +97,6 @@ function deriveFocus(ctx: FlowSeedV21['context']): string {
 
   if (!base) return '次の一手';
 
-  // 🔥 一点化ロジック（カテゴリ → 状態）
   if (base.includes('人間関係')) {
     return '誰かとのやり取りの違和感が残っている';
   }
@@ -75,7 +105,6 @@ function deriveFocus(ctx: FlowSeedV21['context']): string {
     return '進め方ではなく、引っかかりが残っている部分がある';
   }
 
-  // 長すぎる場合はカット
   if (base.length > 40) {
     return base.slice(0, 40);
   }
@@ -151,16 +180,51 @@ export function buildFlowSeedV1(input: FlowSeedV21Input): FlowSeedV21 {
   };
 
   const compression: FlowSeedV21['compression'] = {
-    focus: deriveFocus(context),
-    tone: deriveTone(flow, context),
-    pressure: derivePressure(flow, context),
+    focus: pickString(input.focus) ?? deriveFocus(context),
+    tone: pickString(input.tone) ?? deriveTone(flow, context),
+    pressure: pickString(input.pressure) ?? derivePressure(flow, context),
   };
+
+  // 🔥 ここが核心（意味を1本にする）
+  const meaning =
+    input.meaningSkeleton?.transitionMeaning ??
+    input.meaningSkeleton?.structuralMeaning ??
+    null;
+
+  const canonical = buildSeedCanonical({
+    meaningSkeleton: input.meaningSkeleton ?? null,
+    flow180: input.flow180 ?? null,
+
+    focus: compression.focus,
+    tone: compression.tone,
+    pressure:
+      pickString(input.goalKind) === 'uncover' && compression.pressure === 'observe'
+        ? 'uncover'
+        : compression.pressure,
+
+    userCore: context.userCore,
+    historyLine: context.historyLine,
+
+    writerDirectives: input.writerDirectives ?? null,
+
+    askBackAllowed: input.askBackAllowed ?? null,
+    questionsMax:
+      typeof input.questionsMax === 'number' ? input.questionsMax : null,
+
+    goalKind: pickString(input.goalKind),
+    depthStage: pickString(input.depthStage),
+    phase: pickString(input.phase),
+    qCode: pickString(input.qCode),
+    eTurn: pickString(input.eTurn) ?? flow.energy,
+  });
 
   return {
     flow,
     context,
     compression,
+    meaning, // 🔥 追加
     goalKind: pickString(input.goalKind),
+    canonical,
   };
 }
 
@@ -180,6 +244,13 @@ export function formatFlowSeedV1(seed: FlowSeedV21): string {
   lines.push(`historyLine=${seed.context.historyLine ?? '(null)'}`);
   lines.push(`memoryLine=${seed.context.memoryLine ?? '(null)'}`);
 
+  // 🔥 MEANING（最重要）
+  if (seed.meaning) {
+    lines.push('');
+    lines.push('MEANING:');
+    lines.push(seed.meaning);
+  }
+
   lines.push('');
   lines.push('FOCUS:');
   lines.push(seed.compression.focus);
@@ -195,5 +266,11 @@ export function formatFlowSeedV1(seed: FlowSeedV21): string {
       ? 'uncover'
       : seed.compression.pressure
   );
+
+  if (seed.canonical?.text) {
+    lines.push('');
+    lines.push(seed.canonical.text);
+  }
+
   return lines.join('\n').trim();
 }

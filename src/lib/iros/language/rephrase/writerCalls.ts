@@ -29,6 +29,7 @@ import { buildTransitionSkeleton } from '@/lib/iros/delta/buildTransitionSkeleto
 import { buildTransition180Candidates } from '@/lib/iros/delta/buildTransition180';
 import { selectTransition180 } from '@/lib/iros/delta/selectTransition180';
 import { pickTransitionMeaning } from '@/lib/iros/delta/transitionMeaning';
+import { buildSeedCanonical } from '@/lib/iros/seed/buildSeedCanonical';
 
 export type WriterMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 type TurnMsg = { role: 'user' | 'assistant'; content: string };
@@ -182,6 +183,7 @@ function foldLeadingSystemToOne(messages: WriterMessage[]): WriterMessage[] {
  * - 「最後は user で終わる」要件は turns の整形 + ensureEndsWithUser で満たす
  */
 export function buildFirstPassMessages(args: any): WriterMessage[] {
+  console.log('[IROS/FIRST_PASS_ENTRY]');
   const systemPrompt = norm(args.systemPrompt ?? '');
 
   // ✅ 会話の線（topicDigest / conversationLine）を拾う（短く system 側に固定）
@@ -810,6 +812,59 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
             : flowNextMeaning !== '(none)'
               ? `この先は「${flowNextMeaning}」が開きやすい`
               : '(bridge_unknown)';
+              console.log('[IROS/TRANSITION_SKELETON_FORCE_CHECK]', true);
+              // =============================================
+              // 🧠 MeaningSkeleton 生成（seed正本）
+              // =============================================
+              const canonicalSeed = buildSeedCanonical({
+                meaningSkeleton: {
+                  transitionMeaning:
+                    cleanMeaningLine(
+                      pick(
+                        (ctxPack as any)?.seed?.meaning,
+                        (ctxPack as any)?.seed?.transitionMeaning,
+                        '',
+                      ),
+                    ) || null,
+                  focus:
+                    cleanMeaningLine(
+                      pick(
+                        (ctxPack as any)?.seed?.focus,
+                        stateCore !== '(no_state_core)' ? stateCore : '',
+                        '',
+                      ),
+                    ) || null,
+                  oneLineConstraint:
+                    cleanMeaningLine(
+                      pick(
+                        (ctxPack as any)?.seed?.oneLineConstraint,
+                        '1行・説明禁止・質問禁止',
+                      ),
+                    ) || '1行・説明禁止・質問禁止',
+                },
+              });
+
+              const transitionSkeleton = buildTransitionSkeleton({
+                // 👇 型合わせ（ここ重要）
+                transitionMeaning: 'stabilize',
+                focus:
+                  cleanMeaningLine(canonicalSeed.focus) ||
+                  (stateCore !== '(no_state_core)' ? stateCore : null),
+                relationContext: flowBridge !== '(bridge_unknown)' ? flowBridge : null,
+                oneLineConstraint:
+                  cleanMeaningLine(canonicalSeed.oneLineConstraint) ||
+                  '1行・説明禁止・質問禁止',
+              });
+
+              console.log(
+                '[IROS/TRANSITION_SKELETON]',
+                JSON.stringify({
+                  seedMeaning: canonicalSeed.meaning,
+                  seedFocus: canonicalSeed.focus,
+                  seedConstraint: canonicalSeed.oneLineConstraint,
+                  skeleton: transitionSkeleton.skeleton,
+                }),
+              );
 
               const whyItMatchesBits: string[] = [];
               if (latestUserText) whyItMatchesBits.push(`user="${latestUserText.slice(0, 90)}"`);
@@ -1149,7 +1204,108 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                     null;
                   return q && typeof q === 'object' ? q : null;
                 })();
+                const flow180Block = (() => {
+                  try {
+                    const flowIdRe =
+                      /^(e[1-5])-(S[1-3]|F[1-3]|R[1-3]|C[1-3]|I[1-3]|T[1-3])-(pos|neg)$/;
 
+                    const currentFlowText = String(
+                      firstNonNull(
+                        (flowAny as any)?.currentFlow,
+                        (flowAny as any)?.current,
+                        currentFlowAny,
+                        typeof internalPackRaw === 'string'
+                          ? (internalPackRaw.match(/current=([^\n]+)/)?.[1] ?? '')
+                          : '',
+                        '',
+                      ) ?? '',
+                    ).trim();
+
+                    const previousFlowText = String(
+                      firstNonNull(
+                        (flowAny as any)?.previousFlow,
+                        (flowAny as any)?.prev,
+                        typeof internalPackRaw === 'string'
+                          ? (internalPackRaw.match(/prev=([^\n]+)/)?.[1] ?? '')
+                          : '',
+                        '',
+                      ) ?? '',
+                    ).trim();
+
+                    const currentStateId = (() => {
+                      const raw = firstNonNull(
+                        currentFlowText,
+                        currentFlowAny,
+                        typeof internalPackRaw === 'string'
+                          ? (internalPackRaw.match(/current=([^\n]+)/)?.[1] ?? '')
+                          : '',
+                        '',
+                      );
+                      const s = String(raw ?? '').trim();
+                      return flowIdRe.test(s) ? (String(s).trim() as any) : null;
+                    })();
+
+                    const previousStateId = (() => {
+                      const raw = firstNonNull(
+                        previousFlowText,
+                        typeof internalPackRaw === 'string'
+                          ? (internalPackRaw.match(/prev=([^\n]+)/)?.[1] ?? '')
+                          : '',
+                        '',
+                      );
+                      const s = String(raw ?? '').trim();
+                      return flowIdRe.test(s) ? (String(s).trim() as any) : null;
+                    })();
+
+                    const futureStateId = (() => {
+                      const fromObject = (() => {
+                        const stage = String(futureFlowAny?.stage ?? '').trim();
+                        const energy = String(futureFlowAny?.energy ?? '').trim();
+                        const polarity = String(futureFlowAny?.polarity ?? '').trim();
+                        const id = `${energy}-${stage}-${polarity}`;
+                        return flowIdRe.test(id) ? id : '';
+                      })();
+
+                      const fromPack =
+                        typeof internalPackRaw === 'string'
+                          ? String(
+                              internalPackRaw.match(/futureRandom=([^\n]+)/)?.[1] ?? '',
+                            ).trim()
+                          : '';
+
+                      const s = firstNonNull(fromObject, fromPack, '');
+                      return flowIdRe.test(String(s).trim()) ? (String(s).trim() as any) : null;
+                    })();
+
+                    console.log('[IROS/TRANSITION180][BUILD]', {
+                      currentFlowText,
+                      previousFlowText,
+                      currentStateId,
+                      previousStateId,
+                      futureStateId,
+                    });
+
+                    if (!currentStateId) return null;
+
+                    const candidates = buildTransition180Candidates(currentStateId);
+                    const picked180 = selectTransition180(candidates, futureStateId);
+                    const primary180 = picked180?.primary ?? null;
+
+                    if (!primary180) return null;
+
+                    return [
+                      'FLOW180 (DO NOT OUTPUT):',
+                      `primary=${primary180.short}`,
+                      `from=${primary180.prev ?? '(null)'}`,
+                      `to=${primary180.now}`,
+                      `deltaType=${primary180.deltaType}`,
+                      `sentence=${primary180.sentence}`,
+                    ].join('\n');
+                  } catch (e) {
+                    console.warn('[IROS/TRANSITION180][BUILD][ERROR]', e);
+                    return null;
+                  }
+                })();
                 const deltaHint = (() => {
                   try {
                     if (!questionMeta) return null;
@@ -1302,7 +1458,7 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                     }
 
                     return [
-                      'FLOW180 (DO NOT OUTPUT):',
+                      'DELTA_HINT (DO NOT OUTPUT):',
                       `primary=${primary180.short}`,
                       `from=${primary180.prev ?? '(null)'}`,
                       `to=${primary180.now}`,
@@ -1690,6 +1846,8 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                   });
                 })();
 
+
+
                 const memoryDecisionLines = [
                   'MEMORY_DECISION_V1:',
                   `RECALL_ELIGIBLE: ${recallDecision.recallEligible ? 'true' : 'false'}`,
@@ -1826,6 +1984,42 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                   return `future:${parts.join('/')}`;
                 })();
 
+              (args as any).flow180 = (() => {
+                if (!flow180Block) return null;
+
+                const pickLine = (key: string) =>
+                  String(flow180Block.match(new RegExp(`${key}=([^\\n]+)`))?.[1] ?? '').trim() || null;
+
+                return {
+                  primary: pickLine('primary'),
+                  from: pickLine('from'),
+                  to: pickLine('to'),
+                  deltaType: pickLine('deltaType'),
+                  sentence: pickLine('sentence'),
+                };
+              })();
+
+              (args as any).writerDirectives = (() => {
+                const flowLine =
+                  String((args as any)?.flow180?.sentence ?? '').trim() || null;
+
+                return {
+                  flowLine,
+                  deltaLine: bestShiftDirection || null,
+                  flowFrom: String((args as any)?.flow180?.from ?? '').trim() || null,
+                  flowTo: String((args as any)?.flow180?.to ?? '').trim() || null,
+                  writeConstraints: [
+                    '共感だけで終わらない',
+                    'いまの焦点を一つに絞る',
+                    '最後は行動可能な一歩か判断軸で閉じる',
+
+                    '新しい論点を増やさない',
+                    'ユーザーが聞いていない一般論へ広げない',
+                    'MEANINGを言い換えて完結させる（追加説明しない）',
+                  ],
+                };
+              })();
+
                 const flowSeedV1 = buildFlowSeedV1({
                   flow: flow,
 
@@ -1868,7 +2062,6 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                     const base = latest || core || null;
                     if (!base) return null;
 
-                    // uncover でも future の方向だけは薄く残す
                     if (futureHintLine) {
                       return `${base}\n${futureHintLine}`;
                     }
@@ -1895,24 +2088,99 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
 
                     if (!rawHistory) return futureHintLine ?? null;
 
-                    // uncover時は履歴を完全遮断。ただし futureHint だけは残す
                     if (isHeavyInput) return futureHintLine ?? null;
 
                     return [rawHistory, futureHintLine].filter(Boolean).join('\n');
                   })(),
+
+                  meaningSkeleton: (args as any).meaningSkeleton ?? null,
+                  flow180: (args as any).flow180 ?? null,
+                  writerDirectives: (args as any).writerDirectives ?? null,
+
+                  depthStage: depthStage || null,
+                  phase: phase || null,
+                  qCode: qCode || null,
+                  eTurn: eTurn || null,
+
+                  askBackAllowed: (args as any)?.askBackAllowed ?? null,
+                  questionsMax: (args as any)?.questionsMax ?? null,
                 });
 
-                const flowSeedText = (() => {
+                const flowSeedTextRaw = (() => {
                   return formatFlowSeedV1(flowSeedV1).trim();
                 })();
 
-                const flowV2Text =
-                typeof internalPackRaw === 'string'
-                  ? (internalPackRaw.match(/FLOW_V2[\s\S]*?(?=\n\n|$)/)?.[0] ?? '')
-                  : '';
+                const flowSeedTextLegacy = (() => {
+                  const legacy = flowSeedTextRaw
+                    .replace(/\n*SEED\s*\(DO NOT OUTPUT\):[\s\S]*$/i, '')
+                    .trim();
 
-                const seedBlocksForWriter = [flowV2Text, flowSeedText, deltaHint].filter((x) => norm(x));
-                const seedBlockForWriter = seedBlocksForWriter.join('\n\n');
+                  const flowOnly =
+                    legacy.match(/FLOW:\n[\s\S]*?(?=\n\nCONTEXT:|$)/)?.[0] ?? '';
+
+                  return flowOnly.trim();
+                })();
+
+                const cleanSeed = (text: string) =>
+                  text
+                    .replace(/\nCONTEXT:\n[\s\S]*?(?=\n[A-Z0-9_ ]+\(DO NOT OUTPUT\):|$)/g, '')
+                    .replace(/\nFLOW:\n[\s\S]*?(?=\n[A-Z0-9_ ]+\(DO NOT OUTPUT\):|$)/g, '')
+                    .replace(/historyLine=.*\n?/g, '')
+                    .replace(/memoryLine=.*\n?/g, '')
+                    .replace(/\n{3,}/g, '\n\n')
+                    .trim();
+// 🔥 旧FLOWブロック削除（DO NOT OUTPUTノイズ排除）
+const internalPackRawCleaned =
+  typeof internalPackRaw === 'string'
+    ? internalPackRaw.replace(/\nFLOW:\n[\s\S]*?(?=\n[A-Z_]+:|$)/g, '')
+    : internalPackRaw;
+
+                const flowV2Text =
+                  typeof internalPackRaw === 'string'
+                    ? cleanSeed(
+                      internalPackRawCleaned.match(/FLOW_V2[\s\S]*?(?=\n\n|$)/)?.[0] ?? ''
+                      )
+                    : '';
+
+                    const canonicalSeedText = (() => {
+                      const raw =
+                        flowSeedV1?.canonical?.text
+                          ? cleanSeed(String(flowSeedV1.canonical.text))
+                          : '';
+
+                      if (!raw) return '';
+
+                      const deltaType =
+                        String(flow180Block?.match(/deltaType=([^\n]+)/)?.[1] ?? '').trim() || null;
+
+                      const deltaReason =
+                        deltaType === 'stage_energy'
+                          ? '状態が動いているため、次の方向を一つに絞る必要がある'
+                          : deltaType === 'energy_shift'
+                            ? '感情の揺れがあるため、進み方を整理する必要がある'
+                            : deltaType === 'stage_shift'
+                              ? '段階が変わっているため、次の一歩を明確にする必要がある'
+                              : null;
+
+                      if (!deltaReason) return raw;
+                      if (/\nDELTA:\n/.test(raw)) return raw;
+
+                      return raw.replace(
+                        /(MEANING:\n[^\n]+)/,
+                        `$1\n\nDELTA:\n${deltaReason}`
+                      );
+                    })();
+                    const seedBlocksForWriter = [
+                      canonicalSeedText,
+                      flowV2Text,
+                      flow180Block,
+                    ]
+                      .filter((x) => norm(x))
+                      .map((x) =>
+                        String(x).replace(/\nFLOW:\n[\s\S]*?(?=\n[A-Z_]+:|$)/g, '')
+                      );
+
+                    const seedBlockForWriter = seedBlocksForWriter.join('\n\n');
 
                 const injectedHead = [seedBlockForWriter]
                 .filter((x) => norm(x))
@@ -2057,38 +2325,25 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
       .replace(/^[ \t]*@SAFE[^\n]*(?:\n|$)/gm, '')
       .replace(/^[ \t]*@NEXT_HINT[^\n]*(?:\n|$)/gm, '')
       .replace(/(?:^|\n)@DELTA[^\n]*/g, '')
+
+      // 旧 FLOW / FLOW_V2 は writer には渡さない
+      .replace(/\nFLOW:\n[\s\S]*?(?=\n[A-Z_]+:|$)/g, '')
+      .replace(
+        /\nFLOW_V2\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ \-]+(?:\s*\(DO NOT OUTPUT\))?:|$)/g,
+        '',
+      )
+
+      // directive 系
+      .replace(
+        /\nWRITER_DIRECTIVES\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ \-]+(?:\s*\(DO NOT OUTPUT\))?:|$)/g,
+        '',
+      )
       .replace(/\n{3,}/g, '\n\n')
       .trim();
 
-    // ===== ここから追加（まだ出力には使わない） =====
-
-    try {
-      // 仮input（後で180×180に差し替える）
-      const transitionInput = {
-        current: null,
-        previous: null,
-        delta: null,
-        energy: null,
-      } as any;
-
-      const pickedMeaning = pickTransitionMeaning(transitionInput);
-      const skeleton = buildTransitionSkeleton({
-        transitionMeaning: pickedMeaning,
-      } as any);
-
-      console.log('[IROS/DELTA_LAYER_TEST]', {
-        pickedMeaning,
-        skeleton,
-      });
-
-    } catch (e) {
-      console.warn('[IROS/DELTA_LAYER_TEST][ERROR]', e);
-    }
-
-    // ===== ここまで =====
-
     return base;
   })();
+
     try {
       const packNormFinal = norm(internalPackForWriter);
       const hFinal = packNormFinal.slice(0, 900);
@@ -2256,12 +2511,15 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
           }
         : null;
 
-    let messages: WriterMessage[] = [
-      { role: 'system', content: systemOne },
-      ...(packMsg ? [packMsg] : []),
-      ...(topicRecallNoEvidenceMsg ? [topicRecallNoEvidenceMsg] : []),
-      ...turns,
-    ];
+        // ❌ MEANING_SKELETON は完全停止（SEED主導に統一）
+        const systemOneWithMeaning = String(systemOne ?? '').trim();
+
+      let messages: WriterMessage[] = [
+        { role: 'system', content: systemOneWithMeaning },
+        ...(packMsg ? [packMsg] : []),
+        ...(topicRecallNoEvidenceMsg ? [topicRecallNoEvidenceMsg] : []),
+        ...turns,
+      ];
 
   messages = mergeConsecutiveSameRole(messages);
   messages = ensureEndsWithUser(messages, String(args.userText ?? ''));
@@ -2422,7 +2680,12 @@ export async function callWriterLLM(args: {
         const isInternalPack =
           /^INTERNAL PACK \(DO NOT OUTPUT\):/i.test(a1) ||
           /^COORD \(DO NOT OUTPUT\):/i.test(a1) ||
-          /^TOPIC_RECALL_NO_EVIDENCE \(DO NOT OUTPUT\):/i.test(a1);
+          /^TOPIC_RECALL_NO_EVIDENCE \(DO NOT OUTPUT\):/i.test(a1) ||
+          /^FLOW_V2 \(DO NOT OUTPUT\):/i.test(a1) ||
+          /^FLOW180(?:_SEED)? \(DO NOT OUTPUT\):/i.test(a1) ||
+          /^DELTA_HINT \(DO NOT OUTPUT\):/i.test(a1) ||
+          /^SEED \(DO NOT OUTPUT\):/i.test(a1) ||
+          /(?:^|\n)WRITER_DIRECTIVES(?:\n|$)/i.test(a1);
 
         return isInternalPack
           ? ({ role: 'assistant', content: a1 } as WriterMessage)
