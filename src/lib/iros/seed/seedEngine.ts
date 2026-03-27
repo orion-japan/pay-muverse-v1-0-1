@@ -260,12 +260,31 @@ export function formatFlowSeedV1(seed: FlowSeedV21): string {
   lines.push(seed.compression.tone);
 
   lines.push('');
+  lines.push('');
   lines.push('PRESSURE:');
-  lines.push(
-    seed.goalKind === 'uncover' && seed.compression.pressure === 'observe'
-      ? 'uncover'
-      : seed.compression.pressure
-  );
+
+  const goalKindNorm =
+    typeof seed.goalKind === 'string' && seed.goalKind.trim()
+      ? seed.goalKind.trim().toLowerCase()
+      : null;
+
+  const pressure =
+    goalKindNorm === 'clarify'
+      ? 'clarify'
+      : goalKindNorm === 'decide'
+        ? 'push'
+        : goalKindNorm === 'commit'
+          ? 'force'
+          : goalKindNorm === 'resonate'
+            ? 'resonate'
+            : goalKindNorm === 'stabilize'
+              ? 'hold'
+              : goalKindNorm === 'uncover' &&
+                  seed.compression.pressure === 'observe'
+                ? 'uncover'
+                : seed.compression.pressure;
+
+  lines.push(pressure);
 
   if (seed.canonical?.text) {
     lines.push('');

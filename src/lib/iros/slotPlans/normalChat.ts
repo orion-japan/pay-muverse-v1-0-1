@@ -1115,74 +1115,22 @@ function buildFlowReply(args: {
   });
 
   const shiftKind2 = (() => {
+    const userTextNow2 = String(args.userText ?? '').trim();
 
-// 🔥 収束（迷い）を強制的に decide に昇格
-const userTextNow2 = String(args.userText ?? '').trim();
-
-const hasConvergeSignal2 =
-  /半々|揺れて|揺れる|どっち|決めきれない|決められない|迷って|迷う|一つに絞|絞れ|決めたい/.test(
-    userTextNow2
-  );
-
-if (hasConvergeSignal2) {
-  try {
-    if ((args as any)?.ctxPack) {
-      (args as any).ctxPack.goalKind = 'decide';
-      (args as any).ctxPack.targetKind = 'decide';
-      (args as any).ctxPack.laneKey = 'T_CONCRETIZE';
-      (args as any).ctxPack.replyGoal = { kind: 'decide' };
-    }
-    if ((args as any)?.meta?.extra?.ctxPack) {
-      (args as any).meta.extra.ctxPack.goalKind = 'decide';
-      (args as any).meta.extra.ctxPack.targetKind = 'decide';
-      (args as any).meta.extra.ctxPack.laneKey = 'T_CONCRETIZE';
-      (args as any).meta.extra.ctxPack.replyGoal = { kind: 'decide' };
-    }
-  } catch {}
-}    // ===============================
-    // ✅ 司令塔: replyMode を最優先で確定
-    // ===============================
-    const replyDecision = replyDecisionBase;
-
-    if (replyDecision?.replyMode === 'decide') {
-      try {
-        if ((args as any)?.ctxPack) {
-          (args as any).ctxPack.goalKind = 'decide';
-          (args as any).ctxPack.targetKind = 'decide';
-          (args as any).ctxPack.laneKey = 'T_CONCRETIZE';
-          (args as any).ctxPack.replyGoal = { kind: 'decide' };
-        }
-        if ((args as any)?.meta?.extra?.ctxPack) {
-          (args as any).meta.extra.ctxPack.goalKind = 'decide';
-          (args as any).meta.extra.ctxPack.targetKind = 'decide';
-          (args as any).meta.extra.ctxPack.laneKey = 'T_CONCRETIZE';
-          (args as any).meta.extra.ctxPack.replyGoal = { kind: 'decide' };
-        }
-      } catch {}
-    }
-
-    if (replyDecision?.shiftKind) {
-      try {
-        if ((args as any)?.ctxPack) {
-          (args as any).ctxPack.shiftKind = replyDecision.shiftKind;
-        }
-        if ((args as any)?.meta?.extra?.ctxPack) {
-          (args as any).meta.extra.ctxPack.shiftKind = replyDecision.shiftKind;
-        }
-      } catch {}
-      return replyDecision.shiftKind;
-    }
-
-    // 🔥 fallback: T_CONCRETIZE は決断寄りに収束
-    if (laneKeyKnown === 'T_CONCRETIZE') {
-      try {
-        console.log('[IROS/SHIFT_DECISION][T_CONCRETIZE→DECIDE]', {
-          laneKeyKnown,
-          userText: String(args.userText ?? '').slice(0, 80),
-        });
-      } catch {}
-      return 'decide_shift' as const;
-    }
+    const hasConvergeSignal2 =
+      hasAny(
+        '決めたい',
+        '決めます',
+        '決めた',
+        '結論を出したい',
+        '結論を出す',
+        '結論が欲しい',
+        '一つに絞りたい',
+        'そろそろ決めたい',
+        '決断したい',
+        'もう決める',
+      ) ||
+      /(やめるべきか|行くべきか|どちらにするか|どっちにするか)/.test(userTextNow2);
 
     const stampedShiftKind =
       String((args as any)?.ctxPack?.shiftKind ?? '').trim() ||
@@ -1200,197 +1148,586 @@ if (hasConvergeSignal2) {
       '今の未来',
       '未来だよ',
     );
+
     const resolvedAskType =
       String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
       String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
       '';
 
-      const rawTextNow = String(t ?? '').trim();
-      const compactTextNow = rawTextNow.replace(/\s+/g, '');
-      const textLenNow = compactTextNow.length;
+    const rawTextNow = String(t ?? '').trim();
+    const compactTextNow = rawTextNow.replace(/\s+/g, '');
+    const textLenNow = compactTextNow.length;
 
-      const isClarifyLike =
-        isClarify(t) ||
-        resolvedAskType === 'truth_structure' ||
-        resolvedAskType === 'meaning' ||
-        resolvedAskType === 'definition' ||
-        resolvedAskType === 'topic_clarify';
+    const isClarifyLike =
+      isClarify(t) ||
+      resolvedAskType === 'truth_structure' ||
+      resolvedAskType === 'meaning' ||
+      resolvedAskType === 'definition' ||
+      resolvedAskType === 'topic_clarify';
 
-      const isReturnFlow = String(delta ?? '').trim().toUpperCase() === 'RETURN';
+    const isReturnFlow = String(delta ?? '').trim().toUpperCase() === 'RETURN';
 
-      // ✅ continuity確認を出してよいのは「短く曖昧で、接続先が揺れる時」だけに絞る
-      const isShortAmbiguousFollowup =
-        textLenNow <= 18 &&
-        (
-          hasAny(
-            'それ',
-            'これ',
-            'あれ',
-            'そのこと',
-            'でも',
-            'どう',
-            'どっち',
-            '違うかも',
-            'たぶん'
-          ) ||
-          /^(それ|これ|あれ|でも|どう|どっち)/.test(compactTextNow)
-        );
-
-      // ✅ 具体的な相談進行中の文は「継続確認不要」とみなす
-      const hasConcreteContinuationSignal =
-        textLenNow >= 24 ||
+    const isShortAmbiguousFollowup =
+      textLenNow <= 18 &&
+      (
         hasAny(
-          '彼女',
-          '彼氏',
-          '連絡',
-          '返信',
-          '返事',
-          '既読',
-          '未読',
-          '不安',
-          '心配',
-          '浮気',
-          '別な男',
-          '夜',
-          '翌日',
-          'しつこい',
-          '距離感'
-        );
+          'それ',
+          'これ',
+          'あれ',
+          'そのこと',
+          'でも',
+          'どう',
+          'どっち',
+          '違うかも',
+          'たぶん'
+        ) ||
+        /^(それ|これ|あれ|でも|どう|どっち)/.test(compactTextNow)
+      );
 
-      // ✅ clarify_shift をそのまま返すと
-      // 「前の話の続きで進めてよいですか？」系に自然文化されやすいので、
-      // 継続が明確なときは suppress する
-      const suppressClarifyShift =
-        hasConcreteContinuationSignal &&
-        !isShortAmbiguousFollowup &&
-        !directAnswerRequested2;
+    const hasConcreteContinuationSignal =
+      hasAny(
+        '仕事',
+        '人間関係',
+        '恋愛',
+        '結婚',
+        '相手',
+        '会社',
+        '転職',
+        '辞める',
+        '続ける',
+        '未来',
+        'お金',
+        '不安',
+        '揺れてる',
+        '迷ってる',
+        '変えたい',
+        'このままでいい'
+      ) ||
+      textLenNow >= 19;
 
-      // ① 上流確定があれば最優先
-      // ※ blockPlan は明示トリガー専用（explicit trigger）であり、
-      //    通常の会話フローでは発火しないため、
-      //    ここ（normalChat）の分岐が実質的なSHIFT決定の本体になる
-      if (
-        stampedShiftKind === 'clarify_shift' ||
-        stampedShiftKind === 'stabilize_shift' ||
-        stampedShiftKind === 'distance_shift' ||
-        stampedShiftKind === 'repair_shift' ||
-        stampedShiftKind === 'decide_shift' ||
-        stampedShiftKind === 'narrow_shift'
-      ) {
-        // ✅ clarify は「継続が明確な具体相談」では飲み込んで再判定へ回す
-        if (stampedShiftKind === 'clarify_shift' && suppressClarifyShift) {
-          try {
-            console.log('[IROS/SHIFT_DECISION][SUPPRESS_STAMPED_CLARIFY]', {
-              stampedShiftKind,
-              text: rawTextNow,
-              textLenNow,
-              isShortAmbiguousFollowup,
-              hasConcreteContinuationSignal,
-            });
-          } catch {}
-        } else {
-          return stampedShiftKind as
+    const suppressClarifyShift =
+      isReturnFlow &&
+      !isShortAmbiguousFollowup &&
+      hasConcreteContinuationSignal;
+
+      const goalKind2Raw =
+      String(replyDecisionBase?.goalKind ?? '').trim() ||
+      String((args as any)?.ctxPack?.goalKind ?? '').trim() ||
+      String((args as any)?.meta?.extra?.ctxPack?.goalKind ?? '').trim() ||
+      '';
+
+    const goalKind2 =
+      goalKind2Raw === 'clarify' ||
+      goalKind2Raw === 'stabilize' ||
+      goalKind2Raw === 'decide' ||
+      goalKind2Raw === 'resonate' ||
+      goalKind2Raw === 'uncover'
+        ? goalKind2Raw
+        : 'uncover';
+
+        const stampShiftMeta = (
+          shiftKind:
             | 'clarify_shift'
             | 'stabilize_shift'
             | 'distance_shift'
             | 'repair_shift'
             | 'decide_shift'
-            | 'narrow_shift';
-        }
-      }
+            | 'narrow_shift',
+          extras?: {
+            goalKind?:
+              | 'clarify'
+              | 'stabilize'
+              | 'decide'
+              | 'resonate'
+              | 'uncover'
+              | 'narrow'
+              | null;
+            targetKind?:
+              | 'clarify'
+              | 'stabilize'
+              | 'decide'
+              | 'resonate'
+              | 'uncover'
+              | 'narrow'
+              | null;
+            laneKey?: 'T_CONCRETIZE' | 'IDEA_BAND' | null;
+            replyGoalKind?:
+              | 'clarify'
+              | 'stabilize'
+              | 'decide'
+              | 'resonate'
+              | 'uncover'
+              | 'narrow'
+              | null;
+          },
+    ) => {
+      const shiftHint =
+        shiftKind === 'clarify_shift'
+          ? (resolvedAskType === 'truth_structure' ? 'clarify_truth_structure_v1' : 'clarify_meaning_v2')
+          : shiftKind === 'stabilize_shift'
+            ? 'stabilize_shift_v1'
+            : shiftKind === 'distance_shift'
+              ? 'distance_shift_v1'
+              : shiftKind === 'repair_shift'
+                ? 'repair_shift_v1'
+                : shiftKind === 'decide_shift'
+                  ? 'decide_shift_v1'
+                  : 'narrow_shift_v1';
 
-      // ② 明示的な結論要求は decide
-      if (directAnswerRequested2) {
-        return 'decide_shift' as const;
-      }
+      const shiftIntent =
+        shiftKind === 'clarify_shift'
+          ? (resolvedAskType === 'truth_structure' ? 'answer_truth_structure' : 'meaning_reframe')
+          : shiftKind === 'stabilize_shift'
+            ? 'stabilize_direction'
+            : shiftKind === 'distance_shift'
+              ? 'distance_tuning'
+              : shiftKind === 'repair_shift'
+                ? 'repair_entry'
+                : shiftKind === 'decide_shift'
+                  ? 'answer_in_one_shot'
+                  : 'narrow_focus';
 
-      // ③ 意味/定義/真意/ツッコミ系は clarify を優先
-      //    ただし「継続が明確な具体相談」は clarify に吸わない
-      //    RETURN 中でもこちらを優先して、stabilize に吸われないようにする
-      if (isClarifyLike && !suppressClarifyShift) {
-        return 'clarify_shift' as const;
-      }
-
-      // ④ 関係距離・修復・決定の明示語
-      if (hasAny('距離', '近すぎる', '離れたい', '遠い', '重い')) {
-        return 'distance_shift' as const;
-      }
-
-      if (hasAny('仲直り', '修復', 'やり直したい', '戻りたい')) {
-        return 'repair_shift' as const;
-      }
-
-      if (hasAny('決められない', '迷ってる', '選べない', 'やめるべきか', '行くべきか')) {
-        return 'decide_shift' as const;
-      }
-
-      // ⑤ RETURN は「全部 stabilize」にせず、
-      //    明確な停滞語がある時だけ stabilize にする
-      // ※ blockPlan は明示トリガー専用のため、通常フローではここが実質的な最終決定ポイント
-      // ※ goalKind=uncover の場合は stabilize に吸われないようにする（探索優先）
-
-      const goalKind2 =
-        String((args as any)?.meta?.extra?.goalKind ?? '').trim() ||
-        String((args as any)?.ctxPack?.goalKind ?? '').trim() ||
-        String((args as any)?.targetKind ?? '').trim() ||
-        '';
-
-      const shouldStabilize =
-        hasAny('また同じところ', '戻ってきた', '動けない', '止まる', 'しんどい') ||
-        (isReturnFlow && emotionalTemperature2 === 'high');
-
-      // 🔍 ログ
       try {
-        console.log('[IROS/SHIFT_DECISION][STABILIZE_CHECK_REAL]', {
-          goalKind2: goalKind2 ?? null,
-          shouldStabilize: shouldStabilize ?? null,
-          isReturnFlow: isReturnFlow ?? null,
-          emotionalTemperature2: emotionalTemperature2 ?? null,
-          text: t ?? null,
-          hasAnyResult: hasAny(
-            'また同じところ',
-            '戻ってきた',
-            '動けない',
-            '止まる',
-            'しんどい'
-          ),
+        if ((args as any)?.ctxPack) {
+          (args as any).ctxPack.shiftKind = shiftKind;
+          (args as any).ctxPack.shiftHint = shiftHint;
+          (args as any).ctxPack.shiftIntent = shiftIntent;
+
+          if (extras?.goalKind) (args as any).ctxPack.goalKind = extras.goalKind;
+          if (extras?.targetKind) (args as any).ctxPack.targetKind = extras.targetKind;
+          if (extras?.laneKey !== undefined) (args as any).ctxPack.laneKey = extras.laneKey;
+          if (extras?.replyGoalKind) (args as any).ctxPack.replyGoal = { kind: extras.replyGoalKind };
+        }
+
+        if ((args as any)?.meta?.extra?.ctxPack) {
+          (args as any).meta.extra.ctxPack.shiftKind = shiftKind;
+          (args as any).meta.extra.ctxPack.shiftHint = shiftHint;
+          (args as any).meta.extra.ctxPack.shiftIntent = shiftIntent;
+
+          if (extras?.goalKind) (args as any).meta.extra.ctxPack.goalKind = extras.goalKind;
+          if (extras?.targetKind) (args as any).meta.extra.ctxPack.targetKind = extras.targetKind;
+          if (extras?.laneKey !== undefined) (args as any).meta.extra.ctxPack.laneKey = extras.laneKey;
+          if (extras?.replyGoalKind) (args as any).meta.extra.ctxPack.replyGoal = { kind: extras.replyGoalKind };
+        }
+
+        console.log('[IROS/SHIFT_DECISION][STAMP_FINAL_SHIFT]', {
+          shiftKind,
+          shiftHint,
+          shiftIntent,
+          goalKind: extras?.goalKind ?? null,
+          targetKind: extras?.targetKind ?? null,
+          laneKey: extras?.laneKey ?? null,
+          replyGoalKind: extras?.replyGoalKind ?? null,
         });
       } catch {}
 
-      if (shouldStabilize) {
-        // uncover の場合は stabilize を回避
-        if (goalKind2 === 'uncover') {
-          try {
-            console.log('[IROS/SHIFT_DECISION][SKIP_STABILIZE_BY_GOALKIND]', {
-              goalKind2,
-              reason: 'uncover_prefer_explore',
-            });
-          } catch {}
+      return shiftKind;
+    };
 
-          return 'narrow_shift' as const;
-        }
+    try {
+      console.log('[IROS/SHIFT_DECISION][GOALKIND_FIRST]', {
+        goalKind2: goalKind2 || null,
+        stampedShiftKind: stampedShiftKind || null,
+        isClarifyLike,
+        suppressClarifyShift,
+        hasConvergeSignal2,
+        directAnswerRequested2,
+        isReturnFlow,
+        emotionalTemperature2: emotionalTemperature2 ?? null,
+        replyDecisionMode: String(replyDecisionBase?.replyMode ?? '') || null,
+        replyDecisionShift: String(replyDecisionBase?.shiftKind ?? '') || null,
+        text: t ?? null,
+      });
+    } catch {}
 
-        return 'stabilize_shift' as const;
+    // ① 収束・結論要求は最優先で decide
+    if (hasConvergeSignal2 || directAnswerRequested2) {
+      const targetKindNowRaw = String((args as any)?.targetKind ?? '').trim();
+
+      const targetKindNow:
+        | 'clarify'
+        | 'stabilize'
+        | 'decide'
+        | 'uncover'
+        | 'narrow'
+        | null =
+        targetKindNowRaw === 'clarify' ||
+        targetKindNowRaw === 'stabilize' ||
+        targetKindNowRaw === 'decide' ||
+        targetKindNowRaw === 'uncover' ||
+        targetKindNowRaw === 'narrow'
+          ? targetKindNowRaw
+          : null;
+
+      return stampShiftMeta('decide_shift', {
+        goalKind: 'decide',
+        targetKind: targetKindNow ?? 'decide',
+        laneKey: 'T_CONCRETIZE',
+        replyGoalKind: 'decide',
+      });
+    }
+
+    // ② 司令塔 goalKind を最優先
+    if (goalKind2 === 'decide') {
+      const targetKindNowRaw = String((args as any)?.targetKind ?? '').trim();
+
+      const targetKindNow:
+        | 'clarify'
+        | 'stabilize'
+        | 'decide'
+        | 'uncover'
+        | 'narrow'
+        | null =
+        targetKindNowRaw === 'clarify' ||
+        targetKindNowRaw === 'stabilize' ||
+        targetKindNowRaw === 'decide' ||
+        targetKindNowRaw === 'uncover' ||
+        targetKindNowRaw === 'narrow'
+          ? targetKindNowRaw
+          : null;
+
+      return stampShiftMeta('decide_shift', {
+        goalKind: 'decide',
+        targetKind: targetKindNow ?? 'decide',
+        laneKey: 'T_CONCRETIZE',
+        replyGoalKind: 'decide',
+      });
+    }
+
+    if (goalKind2 === 'resonate') {
+      return stampShiftMeta('narrow_shift', {
+        goalKind: 'resonate' as any,
+        targetKind: 'resonate' as any,
+        laneKey: null,
+        replyGoalKind: 'resonate' as any,
+      });
+    }
+
+    if (goalKind2 === 'stabilize') {
+      const replyGoalKindNow = String(replyDecisionBase?.goalKind ?? '').trim();
+      const targetKindNowRaw = String((args as any)?.targetKind ?? '').trim();
+
+      const targetKindNow:
+        | 'clarify'
+        | 'stabilize'
+        | 'decide'
+        | 'uncover'
+        | 'narrow'
+        | null =
+        targetKindNowRaw === 'clarify' ||
+        targetKindNowRaw === 'stabilize' ||
+        targetKindNowRaw === 'decide' ||
+        targetKindNowRaw === 'uncover' ||
+        targetKindNowRaw === 'narrow'
+          ? targetKindNowRaw
+          : null;
+
+      console.log('[IROS][SHIFT_INPUT]', {
+        goalKind2,
+        replyGoalKindNow,
+        targetKindNow: targetKindNowRaw,
+      });
+
+      if (
+        replyGoalKindNow === 'resonate' ||
+        targetKindNowRaw === 'resonate'
+      ) {
+        return stampShiftMeta('narrow_shift', {
+          goalKind: 'resonate' as any,
+          targetKind: 'resonate' as any,
+          laneKey: null,
+          replyGoalKind: 'resonate' as any,
+        });
       }
 
-    // ⑥ それ以外は narrow
+      return stampShiftMeta('stabilize_shift', {
+        goalKind: 'stabilize',
+        targetKind: targetKindNow ?? 'stabilize',
+        laneKey: null,
+        replyGoalKind: 'stabilize',
+      });
+    }
+
+
+    if (goalKind2 === 'clarify') {
+      const replyGoalKindNow = String(replyDecisionBase?.goalKind ?? '').trim();
+      const targetKindNow = String((args as any)?.targetKind ?? '').trim();
+
+      if (
+        replyGoalKindNow === 'resonate' ||
+        targetKindNow === 'resonate'
+      ) {
+        return stampShiftMeta('narrow_shift', {
+          goalKind: 'resonate' as any,
+          targetKind: 'resonate' as any,
+          laneKey: null,
+          replyGoalKind: 'resonate' as any,
+        });
+      }
+
+      if (!suppressClarifyShift) {
+        const targetKindNowRaw = String((args as any)?.targetKind ?? '').trim();
+
+        const targetKindNow:
+          | 'clarify'
+          | 'stabilize'
+          | 'decide'
+          | 'uncover'
+          | 'narrow'
+          | null =
+          targetKindNowRaw === 'clarify' ||
+          targetKindNowRaw === 'stabilize' ||
+          targetKindNowRaw === 'decide' ||
+          targetKindNowRaw === 'uncover' ||
+          targetKindNowRaw === 'narrow'
+            ? targetKindNowRaw
+            : null;
+
+        return stampShiftMeta('clarify_shift', {
+          goalKind: 'clarify',
+          targetKind: targetKindNow ?? 'clarify',
+          laneKey: null,
+          replyGoalKind: 'clarify',
+        });
+      }
+    }
+
+    if (goalKind2 === 'uncover') {
+      const targetKindNowRaw = String((args as any)?.targetKind ?? '').trim();
+
+      const targetKindNow:
+        | 'clarify'
+        | 'stabilize'
+        | 'decide'
+        | 'uncover'
+        | 'narrow'
+        | null =
+        targetKindNowRaw === 'clarify' ||
+        targetKindNowRaw === 'stabilize' ||
+        targetKindNowRaw === 'decide' ||
+        targetKindNowRaw === 'uncover' ||
+        targetKindNowRaw === 'narrow'
+          ? targetKindNowRaw
+          : null;
+
+          return stampShiftMeta('narrow_shift', {
+            goalKind: targetKindNow === 'uncover' ? 'uncover' : 'clarify',
+            targetKind: targetKindNow ?? 'uncover',
+            laneKey: null,
+            replyGoalKind: targetKindNow === 'uncover' ? 'uncover' : 'clarify',
+          });
+    }
+
+    // ③ replyDecision は候補として使うが、そのまま早期 return しない
+    const replyDecisionShift = String(replyDecisionBase?.shiftKind ?? '').trim();
+    if (
+      replyDecisionShift === 'clarify_shift' ||
+      replyDecisionShift === 'stabilize_shift' ||
+      replyDecisionShift === 'distance_shift' ||
+      replyDecisionShift === 'repair_shift' ||
+      replyDecisionShift === 'decide_shift' ||
+      replyDecisionShift === 'narrow_shift'
+    ) {
+      if (replyDecisionShift === 'clarify_shift' && suppressClarifyShift) {
+        try {
+          console.log('[IROS/SHIFT_DECISION][SUPPRESS_REPLY_DECISION_CLARIFY]', {
+            replyDecisionShift,
+            text: rawTextNow,
+            textLenNow,
+            isShortAmbiguousFollowup,
+            hasConcreteContinuationSignal,
+          });
+        } catch {}
+      } else if (replyDecisionShift === 'decide_shift') {
+        return stampShiftMeta('decide_shift', {
+          goalKind: 'decide',
+          targetKind: 'decide',
+          laneKey: 'T_CONCRETIZE',
+          replyGoalKind: 'decide',
+        });
+      } else if (replyDecisionShift === 'stabilize_shift') {
+        return stampShiftMeta('stabilize_shift', {
+          goalKind: 'stabilize',
+          targetKind: 'stabilize',
+          laneKey: null,
+          replyGoalKind: 'stabilize',
+        });
+      } else if (replyDecisionShift === 'clarify_shift') {
+        return stampShiftMeta('clarify_shift', {
+          goalKind: 'clarify',
+          targetKind: 'clarify',
+          laneKey: null,
+          replyGoalKind: 'clarify',
+        });
+      } else {
+        return stampShiftMeta(
+          replyDecisionShift as
+            | 'distance_shift'
+            | 'repair_shift'
+            | 'narrow_shift'
+        );
+      }
+    }
+
+    // ④ stampedShiftKind は fallback
+    if (
+      stampedShiftKind === 'clarify_shift' ||
+      stampedShiftKind === 'stabilize_shift' ||
+      stampedShiftKind === 'distance_shift' ||
+      stampedShiftKind === 'repair_shift' ||
+      stampedShiftKind === 'decide_shift' ||
+      stampedShiftKind === 'narrow_shift'
+    ) {
+      if (stampedShiftKind === 'clarify_shift' && suppressClarifyShift) {
+        try {
+          console.log('[IROS/SHIFT_DECISION][SUPPRESS_STAMPED_CLARIFY]', {
+            stampedShiftKind,
+            text: rawTextNow,
+            textLenNow,
+            isShortAmbiguousFollowup,
+            hasConcreteContinuationSignal,
+          });
+        } catch {}
+      } else if (stampedShiftKind === 'decide_shift') {
+        return stampShiftMeta('decide_shift', {
+          goalKind: 'decide',
+          targetKind: 'decide',
+          laneKey: 'T_CONCRETIZE',
+          replyGoalKind: 'decide',
+        });
+      } else if (stampedShiftKind === 'stabilize_shift') {
+        return stampShiftMeta('stabilize_shift', {
+          goalKind: 'stabilize',
+          targetKind: 'stabilize',
+          laneKey: null,
+          replyGoalKind: 'stabilize',
+        });
+      } else if (stampedShiftKind === 'clarify_shift') {
+        return stampShiftMeta('clarify_shift', {
+          goalKind: 'clarify',
+          targetKind: 'clarify',
+          laneKey: null,
+          replyGoalKind: 'clarify',
+        });
+      } else {
+        return stampShiftMeta(
+          stampedShiftKind as
+            | 'distance_shift'
+            | 'repair_shift'
+            | 'narrow_shift'
+        );
+      }
+    }
+
+    // ⑤ 明示的な意味/定義/真意/ツッコミ系
+    if (isClarifyLike && !suppressClarifyShift) {
+      const replyGoalKindNow = String(replyDecisionBase?.goalKind ?? '').trim();
+      const targetKindNow = String((args as any)?.targetKind ?? '').trim();
+
+      if (replyGoalKindNow === 'resonate' || targetKindNow === 'resonate') {
+        return stampShiftMeta('narrow_shift', {
+          goalKind: 'resonate' as any,
+          targetKind: 'resonate' as any,
+          laneKey: null,
+          replyGoalKind: 'resonate' as any,
+        });
+      }
+
+      return stampShiftMeta('clarify_shift', {
+        goalKind: 'clarify',
+        targetKind: 'clarify',
+        laneKey: null,
+        replyGoalKind: 'clarify',
+      });
+    }
+
+    // ⑥ 関係距離・修復・決定の明示語
+    if (hasAny('距離', '近すぎる', '離れたい', '遠い', '重い')) {
+      return stampShiftMeta('distance_shift');
+    }
+
+    if (hasAny('仲直り', '修復', 'やり直したい', '戻りたい')) {
+      return stampShiftMeta('repair_shift');
+    }
+
+    if (hasAny('決められない', '迷ってる', '選べない', 'やめるべきか', '行くべきか')) {
+      return stampShiftMeta('decide_shift', {
+        goalKind: 'decide',
+        targetKind: 'decide',
+        laneKey: 'T_CONCRETIZE',
+        replyGoalKind: 'decide',
+      });
+    }
+
+    // ⑦ RETURN の停滞語だけ stabilize
+    const shouldStabilize =
+      hasAny('また同じところ', '戻ってきた', '動けない', '止まる', 'しんどい') ||
+      (isReturnFlow && emotionalTemperature2 === 'high');
+
+    try {
+      console.log('[IROS/SHIFT_DECISION][STABILIZE_CHECK_REAL]', {
+        goalKind2: goalKind2 || null,
+        shouldStabilize,
+        isReturnFlow,
+        emotionalTemperature2: emotionalTemperature2 ?? null,
+        text: t ?? null,
+        hasAnyResult: hasAny(
+          'また同じところ',
+          '戻ってきた',
+          '動けない',
+          '止まる',
+          'しんどい'
+        ),
+      });
+    } catch {}
+
+    if (shouldStabilize) {
+      return stampShiftMeta('stabilize_shift', {
+        goalKind: 'stabilize',
+        targetKind: 'stabilize',
+        laneKey: null,
+        replyGoalKind: 'stabilize',
+      });
+    }
+
+    // ⑧ あいさつは stabilize
     if (
       /^(?:こんにちは|こんちわ|こんばんは|おはよう|やあ|どうも|もしもし|おつかれ|おつかれさま|ただいま)$/u.test(
         String(t ?? '').trim(),
       )
     ) {
-      return 'stabilize_shift' as const;
+      return stampShiftMeta('stabilize_shift', {
+        goalKind: 'stabilize',
+        targetKind: 'stabilize',
+        laneKey: null,
+        replyGoalKind: 'stabilize',
+      });
     }
 
-    return 'narrow_shift' as const;
+    // ⑨ デフォルト narrow
+    return stampShiftMeta('narrow_shift');
   })();
-
   const resolvedAskType2 =
     String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
     String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
     '';
 
+  const goalKindForShiftMeta2 =
+    String((args as any)?.meta?.extra?.goalKind ?? '').trim() ||
+    String((args as any)?.ctxPack?.goalKind ?? '').trim() ||
+    String((args as any)?.targetKind ?? '').trim() ||
+    '';
+
   const shiftHint2 = (() => {
+    if (goalKindForShiftMeta2 === 'clarify') {
+      if (resolvedAskType2 === 'truth_structure') return 'clarify_truth_structure_v1';
+      return 'clarify_meaning_v2';
+    }
+
+    if (goalKindForShiftMeta2 === 'stabilize') return 'stabilize_shift_v1';
+    if (goalKindForShiftMeta2 === 'decide') return 'decide_shift_v1';
+    if (goalKindForShiftMeta2 === 'uncover') return 'narrow_shift_v1';
+
     if (shiftKind2 === 'clarify_shift') {
       if (resolvedAskType2 === 'truth_structure') return 'clarify_truth_structure_v1';
       return 'clarify_meaning_v2';
@@ -1404,6 +1741,15 @@ if (hasConvergeSignal2) {
   })();
 
   const shiftIntent2 = (() => {
+    if (goalKindForShiftMeta2 === 'clarify') {
+      if (resolvedAskType2 === 'truth_structure') return 'answer_truth_structure';
+      return 'meaning_reframe';
+    }
+
+    if (goalKindForShiftMeta2 === 'stabilize') return 'stabilize_direction';
+    if (goalKindForShiftMeta2 === 'decide') return 'answer_in_one_shot';
+    if (goalKindForShiftMeta2 === 'uncover') return 'narrow_focus';
+
     if (shiftKind2 === 'clarify_shift') {
       if (resolvedAskType2 === 'truth_structure') return 'answer_truth_structure';
       return 'meaning_reframe';
@@ -1415,7 +1761,6 @@ if (hasConvergeSignal2) {
     if (shiftKind2 === 'decide_shift') return 'answer_in_one_shot';
     return 'narrow_focus';
   })();
-
   const shiftLine2 = (() => {
     const observedStage2 =
       String((args as any)?.ctxPack?.observedStage ?? '').trim() ||

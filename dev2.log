@@ -2588,7 +2588,7 @@
   }
 }
 [IROS/WILL priority] {
-  goalKind: 'uncover',
+  ,
   depth: 'C3',
   phase: 'Outer',
   targetDepth: 'C3',

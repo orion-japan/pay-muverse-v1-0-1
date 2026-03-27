@@ -66,13 +66,15 @@ export type ApplyContainerResult = {
   slotPlan: { slots: SlotKey[] };
 };
 
-type TargetKind = 'stabilize' | 'expand' | 'pierce' | 'uncover';
+type TargetKind = 'stabilize' | 'resonate' | 'expand' | 'pierce' | 'uncover';
 
 function normalizeTargetKind(v: unknown): TargetKind {
-  if (typeof v !== 'string') return 'stabilize';
+  if (typeof v !== 'string') return 'resonate';
+
   const s = v.trim().toLowerCase();
 
   if (s === 'stabilize') return 'stabilize';
+  if (s === 'resonate') return 'resonate';
   if (s === 'expand') return 'expand';
   if (s === 'pierce') return 'pierce';
   if (s === 'uncover') return 'uncover';
@@ -80,7 +82,7 @@ function normalizeTargetKind(v: unknown): TargetKind {
   // intent / direction bridge
   if (s === 'cutoff') return 'uncover';
   if (s === 'reconnect') return 'uncover';
-  if (s === 'unknown') return 'stabilize';
+  if (s === 'unknown') return 'resonate';
 
   // bridge
   if (s === 'enableaction') return 'expand';
@@ -88,8 +90,10 @@ function normalizeTargetKind(v: unknown): TargetKind {
   if (s === 'create') return 'expand';
   if (s === 'shiftrelation') return 'uncover';
   if (s === 'reframeintention') return 'uncover';
+  if (s === 'forward') return 'resonate';
+  if (s === 'flow') return 'resonate';
 
-  return 'stabilize';
+  return 'resonate';
 }
 
 function toSlotKeys(
@@ -137,14 +141,124 @@ export function applyContainerDecision(
   (meta as any).inputKind = inputKind;
 
   // targetKind 正規化（優先：meta → goalKind）
-  const rawTargetKind =
-    goalKind ??
-    (meta as any)?.intentLine?.direction ??
-    (meta as any)?.intent_line?.direction ??
-    (meta as any).targetKind ??
-    (meta as any).target_kind ??
+  const awaken =
+    (meta as any)?.ctxPack?.awaken ??
+    (meta as any)?.extra?.ctxPack?.awaken ??
     null;
 
+  const awakenLevel =
+    typeof awaken?.level === 'string'
+      ? String(awaken.level).trim().toLowerCase()
+      : null;
+
+  const awakenCollapse =
+    awaken?.detail?.collapseHint === true;
+
+  const triggerText = [
+    typeof (meta as any)?.inputText === 'string' ? (meta as any).inputText : '',
+    typeof (meta as any)?.userText === 'string' ? (meta as any).userText : '',
+    typeof (meta as any)?.situationSummary === 'string'
+      ? (meta as any).situationSummary
+      : '',
+    typeof (meta as any)?.situation_summary === 'string'
+      ? (meta as any).situation_summary
+      : '',
+    typeof (meta as any)?.topicDigest === 'string' ? (meta as any).topicDigest : '',
+    typeof (meta as any)?.ctxPack?.topicDigest === 'string'
+      ? (meta as any).ctxPack.topicDigest
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+    .toLowerCase();
+
+    const wantsResonanceSummary =
+    /まとめて|まとめると|整理して|つまり|結局|要するに|一言で|ひとことで|どう受け取ればいい|どう動けばいい|結論/.test(
+      triggerText
+    );
+
+    const awakenOverride =
+    wantsResonanceSummary
+      ? 'resonate'
+      : awakenLevel === 'rise' || awakenLevel === 'stable'
+        ? 'uncover'
+        : awakenCollapse
+          ? 'clarify'
+          : null;
+
+  const prevMeta =
+    (meta as any)?.prevMeta ??
+    (meta as any)?.previousMeta ??
+    (meta as any)?.lastMeta ??
+    null;
+
+  const currentCtxPack =
+    (meta as any)?.extra?.ctxPack ?? {};
+
+  const previousCtxPack =
+    (prevMeta as any)?.extra?.ctxPack ??
+    (meta as any)?.prevCtxPack ??
+    (meta as any)?.previousCtxPack ??
+    (meta as any)?.restoredCtxPack ??
+    (meta as any)?.restored?.ctxPack ??
+    (meta as any)?.previousMeta?.extra?.ctxPack ??
+    (meta as any)?.prevMeta?.extra?.ctxPack ??
+    null;
+
+  const continuitySource =
+    previousCtxPack ?? currentCtxPack;
+
+  const prevGoalKind = String(
+    continuitySource?.goalKind ?? ''
+  )
+    .trim()
+    .toLowerCase();
+
+  const prevRemakeDetected =
+    continuitySource?.remake?.detected === true;
+
+  const continuityKind = String(
+    currentCtxPack?.continuityKind ??
+    continuitySource?.continuityKind ??
+    ''
+  ).trim();
+
+  const continuityOverride =
+    (continuityKind === 'same_line' || continuityKind === 'continuation') &&
+    (prevGoalKind === 'resonate' || prevRemakeDetected)
+      ? 'resonate'
+      : null;
+
+  console.log('[IROS/PREV_META_CHECK]', {
+    hasPrevMeta: !!prevMeta,
+    prevGoalKind: previousCtxPack?.goalKind ?? null,
+    prevContinuityKind: previousCtxPack?.continuityKind ?? null,
+    prevRemakeDetected: previousCtxPack?.remake?.detected ?? null,
+  });
+
+  console.log('[IROS/ORCH_CONTINUITY_OVERRIDE_CHECK]', {
+    continuityKind,
+    prevGoalKind,
+    prevRemakeDetected,
+    hasPreviousCtxPack: !!previousCtxPack,
+    currentGoalKind: currentCtxPack?.goalKind ?? null,
+    currentRemakeDetected: currentCtxPack?.remake?.detected === true,
+    continuityOverride,
+    awakenOverride,
+    goalKind,
+  });
+
+  const rawTargetKind =
+    continuityOverride ??
+    (
+      ((meta as any)?.extra?.ctxPack?.goalKind === 'resonate')
+        ? 'resonate'
+        : awakenOverride ??
+          (goalKind === 'clarify' || goalKind === 'decide' || goalKind === 'commit'
+            ? goalKind
+            : null) ??
+          'uncover'
+    );
   let targetKindNorm: string | null = null;
 
   if (rawTargetKind) {
@@ -153,7 +267,6 @@ export function applyContainerDecision(
     (meta as any).targetKind = targetKindNorm;
     (meta as any).target_kind = targetKindNorm;
   }
-
 
   // descentGate
   const dg = decideDescentGate({

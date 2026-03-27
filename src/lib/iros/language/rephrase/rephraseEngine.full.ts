@@ -4333,16 +4333,32 @@ let messages = buildFirstPassMessages({
         ? String((replyGoalRaw as any).kind ?? '').trim() || null
         : null;
 
-  const structuralGoalKind =
-    (opts as any)?.goalKind ??
-    (opts as any)?.userContext?.goalKind ??
-    ctxPack?.goalKind ??
-    null;
+        const awakenLevel =
+        typeof ctxPack?.awaken?.level === 'string'
+          ? String(ctxPack.awaken.level).trim().toLowerCase()
+          : null;
 
-  const goalKind =
-    structuralGoalKind ??
-    replyGoalKindNormalized ??
-    null;
+      const awakenCollapse =
+        ctxPack?.awaken?.detail?.collapseHint === true;
+
+      const awakenGoalKind =
+        awakenLevel === 'rise' || awakenLevel === 'stable'
+          ? 'resonate'
+          : awakenCollapse
+            ? 'clarify'
+            : null;
+
+      const structuralGoalKind =
+        awakenGoalKind ??
+        (opts as any)?.goalKind ??
+        (opts as any)?.userContext?.goalKind ??
+        ctxPack?.goalKind ??
+        null;
+
+      const goalKind =
+        replyGoalKindNormalized ??
+        structuralGoalKind ??
+        null;
 
   // ✅ depth / IT は “構造メタ” から拾う（BlockPlan 自動条件に必要）
   const depthStage =
@@ -5875,10 +5891,32 @@ userContext: {
         ((opts as any)?.userContext?.pastStateKeyword) ??
         ((opts as any)?.userContext?.meta?.extra?.pastStateKeyword) ??
         null,
-      ctxPack: {
-        ...ctxPackForWriter,
-        goalKind: (opts as any)?.goalKind ?? (opts as any)?.userContext?.goalKind ?? (ctxPackForWriter?.goalKind ?? null),
-      },
+        ctxPack: {
+          ...ctxPackForWriter,
+
+          goalKind:
+            (opts as any)?.goalKind ??
+            (opts as any)?.userContext?.goalKind ??
+            (ctxPackForWriter?.goalKind ?? null),
+
+          shiftKind:
+            (opts as any)?.ctxPack?.shiftKind ??
+            (opts as any)?.userContext?.ctxPack?.shiftKind ??
+            (opts as any)?.userContext?.meta?.extra?.ctxPack?.shiftKind ??
+            (ctxPackForWriter?.shiftKind ?? null),
+
+          shiftHint:
+            (opts as any)?.ctxPack?.shiftHint ??
+            (opts as any)?.userContext?.ctxPack?.shiftHint ??
+            (opts as any)?.userContext?.meta?.extra?.ctxPack?.shiftHint ??
+            (ctxPackForWriter?.shiftHint ?? null),
+
+          shiftIntent:
+            (opts as any)?.ctxPack?.shiftIntent ??
+            (opts as any)?.userContext?.ctxPack?.shiftIntent ??
+            (opts as any)?.userContext?.meta?.extra?.ctxPack?.shiftIntent ??
+            (ctxPackForWriter?.shiftIntent ?? null),
+        },
     },
   },
 },

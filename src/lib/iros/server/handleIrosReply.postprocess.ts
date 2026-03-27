@@ -1103,12 +1103,28 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
               continuityKind: observe.kind,
             },
           };
-          console.log('[IROS/CONTINUITY_KIND]', {
-            kind: observe.kind,
-            markers: observe.markers,
-            overlap: observe.overlap,
-            flags: observe.flags,
-          });
+
+          console.log(
+            '[IROS/CONTINUITY_KIND]',
+            JSON.stringify({
+              kind: observe.kind,
+              markers: observe.markers,
+              overlap: observe.overlap,
+              flags: observe.flags,
+              inputs: {
+                currentTopic: observe.inputs?.currentTopic ?? null,
+                previousTopic: observe.inputs?.previousTopic ?? null,
+                currentCore: observe.inputs?.currentCore ?? null,
+                previousCore: observe.inputs?.previousCore ?? null,
+                currentOpenLoop: observe.inputs?.currentOpenLoop ?? null,
+                previousOpenLoop: observe.inputs?.previousOpenLoop ?? null,
+                currentDepthStage: observe.inputs?.currentDepthStage ?? null,
+                previousDepthStage: observe.inputs?.previousDepthStage ?? null,
+                elapsedSec: observe.inputs?.elapsedSec ?? null,
+              },
+            })
+          );
+
         } catch (e) {
           console.warn('[IROS/CONTINUITY_KIND][ERR]', e);
         }
