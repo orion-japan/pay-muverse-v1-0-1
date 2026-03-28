@@ -669,3 +669,30 @@
       padding: 8px 10px;
     }
   }
+  .msgBody,
+  .msgBody .iros-p,
+  .msgBody .iros-ptext {
+    font-size: 17px;
+    line-height: 1.85;
+    letter-spacing: 0.02em;
+  }
+  .msgBody {
+    padding: 14px 16px;
+  }
+
+  .msgBody p {
+    margin: 0 0 16px 0;
+  }
+
+  .msgBody h2,
+  .msgBody .iros-heading-line {
+    margin: 20px 0 12px 0;
+  }
+
+  .msgBody ul {
+    margin: 12px 0 16px 20px;
+  }
+
+  .msgBody li {
+    margin-bottom: 8px;
+  }

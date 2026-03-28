@@ -80,7 +80,21 @@ function stripLeadingEllipsisLines(text: string): string {
   }
   return lines.join('\n');
 }
+function fixMarkdown(text: string): string {
+  let t = (text ?? '').toString();
 
+  const boldCount = (t.match(/\*\*/g) || []).length;
+  if (boldCount % 2 !== 0) {
+    t = t.replace(/\*\*(?![\s\S]*\*\*)/, '');
+  }
+
+  const codeCount = (t.match(/```/g) || []).length;
+  if (codeCount % 2 !== 0) {
+    t = t.replace(/```[\s\S]*$/, '');
+  }
+
+  return t;
+}
 // 先頭から「stringとして使える最初の値」を拾う
 function pickFirstString(...vals: any[]): string | null {
   for (const v of vals) {
@@ -257,13 +271,30 @@ export function renderReply(
     highDef: Boolean(input.highDefensiveness),
   });
 
-  const finalText = stripLeadingEllipsisLines(
-    clampLines(built.trim(), Math.min(maxLines, 8)).trim(),
+  function fixMarkdown(text: string): string {
+    let t = text;
+
+    const boldCount = (t.match(/\*\*/g) || []).length;
+    if (boldCount % 2 !== 0) {
+      t = t.replace(/\*\*(?![\s\S]*\*\*)/, '');
+    }
+
+    const codeCount = (t.match(/```/g) || []).length;
+    if (codeCount % 2 !== 0) {
+      t = t.replace(/```[\s\S]*$/, '');
+    }
+
+    return t;
+  }
+
+  const finalText = fixMarkdown(
+    stripLeadingEllipsisLines(
+      clampLines(built.trim(), Math.min(maxLines, 8)).trim(),
+    ),
   );
 
   // ✅ 非ITでも空は返さない（SILENCEは route.ts が空にする）
-  return ensureNonEmpty(finalText, Boolean(opts.minimalEmoji));
-}
+  return ensureNonEmpty(finalText, Boolean(opts.minimalEmoji));}
 
 /* =========================================================
    Non-IT Sofia builder  (labels OFF / breathable)
