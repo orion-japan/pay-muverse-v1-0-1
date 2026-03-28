@@ -1396,10 +1396,10 @@ function buildFlowReply(args: {
 
     if (goalKind2 === 'resonate') {
       return stampShiftMeta('narrow_shift', {
-        goalKind: 'resonate' as any,
-        targetKind: 'resonate' as any,
+        goalKind: 'uncover',
+        targetKind: 'resonate',
         laneKey: null,
-        replyGoalKind: 'resonate' as any,
+        replyGoalKind: 'uncover',
       });
     }
 
@@ -1433,10 +1433,10 @@ function buildFlowReply(args: {
         targetKindNowRaw === 'resonate'
       ) {
         return stampShiftMeta('narrow_shift', {
-          goalKind: 'resonate' as any,
+          goalKind: 'uncover' as any,
           targetKind: 'resonate' as any,
           laneKey: null,
-          replyGoalKind: 'resonate' as any,
+          replyGoalKind: 'uncover' as any,
         });
       }
 
@@ -1458,10 +1458,10 @@ function buildFlowReply(args: {
         targetKindNow === 'resonate'
       ) {
         return stampShiftMeta('narrow_shift', {
-          goalKind: 'resonate' as any,
+          goalKind: 'uncover'as any,
           targetKind: 'resonate' as any,
           laneKey: null,
-          replyGoalKind: 'resonate' as any,
+          replyGoalKind: 'uncover' as any,
         });
       }
 
@@ -1501,21 +1501,34 @@ function buildFlowReply(args: {
         | 'decide'
         | 'uncover'
         | 'narrow'
+        | 'resonate'
         | null =
         targetKindNowRaw === 'clarify' ||
         targetKindNowRaw === 'stabilize' ||
         targetKindNowRaw === 'decide' ||
         targetKindNowRaw === 'uncover' ||
-        targetKindNowRaw === 'narrow'
+        targetKindNowRaw === 'narrow' ||
+        targetKindNowRaw === 'resonate'
           ? targetKindNowRaw
           : null;
 
-          return stampShiftMeta('narrow_shift', {
-            goalKind: targetKindNow === 'uncover' ? 'uncover' : 'clarify',
-            targetKind: targetKindNow ?? 'uncover',
-            laneKey: null,
-            replyGoalKind: targetKindNow === 'uncover' ? 'uncover' : 'clarify',
-          });
+      // 🔥 uncover固定をやめる
+      if (targetKindNow === 'resonate') {
+        return stampShiftMeta('narrow_shift', {
+          goalKind: 'uncover',
+          targetKind: 'resonate',
+          laneKey: null,
+          replyGoalKind: 'uncover',
+        });
+      }
+
+      // fallbackだけ残す
+      return stampShiftMeta('narrow_shift', {
+        goalKind: 'uncover',
+        targetKind: targetKindNow ?? 'uncover',
+        laneKey: null,
+        replyGoalKind: 'uncover',
+      });
     }
 
     // ③ replyDecision は候補として使うが、そのまま早期 return しない
@@ -1626,10 +1639,10 @@ function buildFlowReply(args: {
 
       if (replyGoalKindNow === 'resonate' || targetKindNow === 'resonate') {
         return stampShiftMeta('narrow_shift', {
-          goalKind: 'resonate' as any,
+          goalKind: 'uncover' as any,
           targetKind: 'resonate' as any,
           laneKey: null,
-          replyGoalKind: 'resonate' as any,
+          replyGoalKind: 'uncover' as any,
         });
       }
 

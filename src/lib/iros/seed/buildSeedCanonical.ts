@@ -34,6 +34,7 @@ export type SeedCanonicalInput = {
   focus?: string | null;
   tone?: string | null;
   pressure?: string | null;
+  meaning?: string | null;
 
   userCore?: string | null;
   historyLine?: string | null;
@@ -133,10 +134,10 @@ function mapDepth(depthStage: string | null): SeedDepth {
 }
 
 function buildMeaning(input: SeedCanonicalInput): string {
+  const explicitMeaning = clean(input.meaning);
   const structuralMeaning = clean(input.meaningSkeleton?.structuralMeaning);
   const transitionMeaning = clean(input.meaningSkeleton?.transitionMeaning);
 
-  // ❗ command系は完全排除
   const isCommand = (v: string | null) =>
     v != null &&
     /^(stabilize|forward|backward|return|expand|clarify|observe)$/i.test(v);
@@ -159,6 +160,7 @@ function buildMeaning(input: SeedCanonicalInput): string {
       : null;
 
   return (
+    explicitMeaning ??
     structuralMeaning ??
     cleanTransition ??
     fromFlow180 ??
@@ -198,7 +200,8 @@ function buildOneLineConstraint(input: SeedCanonicalInput): string {
   ];
 
   const askBackAllowed = input.askBackAllowed === true;
-  const questionsMax = typeof input.questionsMax === 'number' ? input.questionsMax : null;
+  const questionsMax =
+    typeof input.questionsMax === 'number' ? input.questionsMax : null;
 
   if (!askBackAllowed || questionsMax === 0) {
     pieces.push('質問しない');
@@ -214,7 +217,8 @@ function buildRules(input: SeedCanonicalInput): string[] {
   const hasNoQuestion = out.some((v) => /質問しない/.test(v));
 
   const askBackAllowed = input.askBackAllowed === true;
-  const questionsMax = typeof input.questionsMax === 'number' ? input.questionsMax : null;
+  const questionsMax =
+    typeof input.questionsMax === 'number' ? input.questionsMax : null;
 
   if ((!askBackAllowed || questionsMax === 0) && !hasNoQuestion) {
     out.push('質問しない');
@@ -294,17 +298,89 @@ function buildSeedText(seed: Omit<SeedCanonical, 'text'>): string {
 }
 
 export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
-  const meaning = buildMeaning(input);
+  const baseMeaning = buildMeaning(input);
   const focus = buildFocus(input);
   const tone = mapTone(clean(input.tone), clean(input.goalKind));
   const depth = mapDepth(clean(input.depthStage));
+
+  const goalKind = clean(input.goalKind);
+  const rawPressure = clean(input.pressure);
+
   const pressure =
-  clean(input.goalKind) === 'decide'
-    ? 'concretize'
-    : clean(input.pressure) ?? 'observe';
+    goalKind === 'decide'
+      ? 'concretize'
+      : goalKind === 'stabilize' && rawPressure === 'narrow'
+        ? 'narrow'
+        : rawPressure ?? 'observe';
+
   const relationContext = buildRelationContext(input);
   const oneLineConstraint = buildOneLineConstraint(input);
   const rules = buildRules(input);
+
+  const structuralMeaning = clean(input.meaningSkeleton?.structuralMeaning);
+  const transitionMeaning = clean(input.meaningSkeleton?.transitionMeaning);
+  const flowSentence = clean(input.flow180?.sentence);
+  const deltaLine = clean(input.writerDirectives?.deltaLine);
+  const userCore = clean(input.userCore);
+  const historyLine = clean(input.historyLine);
+
+  const joinedSignals = [
+    structuralMeaning,
+    transitionMeaning,
+    flowSentence,
+    deltaLine,
+    userCore,
+    historyLine,
+    baseMeaning,
+  ]
+    .filter((v): v is string => Boolean(v))
+    .join('\n');
+
+  const hasContrastStructure =
+    /(?:一方|でも|けど|しかし|なのに|反面|一つは|もう一つは|AかB|どちら|比較|揺れ)/.test(
+      joinedSignals,
+    ) ||
+    ((joinedSignals.match(/(?:たい|したい|気になる|惹かれる)/g) ?? []).length >= 1 &&
+      (joinedSignals.match(/(?:現実|実際|手が動く|進む|進める|続ける|残す|伸ばす)/g) ?? []).length >= 1);
+
+  const biasToReality =
+    /(?:実際|現実|手が動く|進む|進める|続ける|残す|伸ばす|もう分かっている|本当は)/.test(
+      joinedSignals,
+    );
+
+  const hasImplicitDecision =
+    /(?:もう分かっている|本当は|実際は|手が動くのは|進めばいい|向いている)/.test(
+      joinedSignals,
+    ) || biasToReality;
+
+  const hasDirectionBias = biasToReality;
+
+  const hasDeepCStructure =
+    hasContrastStructure && hasImplicitDecision && hasDirectionBias;
+
+    const pickA =
+    structuralMeaning ||
+    transitionMeaning ||
+    flowSentence ||
+    deltaLine ||
+    userCore ||
+    '';
+
+  const pickB =
+    userCore && /でも|けど|しかし/.test(userCore)
+      ? userCore.split(/でも|けど|しかし/).pop()?.trim() ?? ''
+      : '';
+
+  const meaning = hasDeepCStructure
+    ? (() => {
+        const b =
+          pickB ||
+          (pickA.match(/現実.*?(?:やる|続ける|伸ばす|進める)/)?.[0] ?? '') ||
+          '現実側に寄る方向';
+
+        return `本当は「${b}」ほうに寄っていると、もう分かっている`;
+      })()
+    : baseMeaning;
 
   const seedWithoutText: Omit<SeedCanonical, 'text'> = {
     focus,
@@ -317,15 +393,9 @@ export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
     meaning,
 
     state: {
-      from:
-        clean(input.flow180?.from) ??
-        clean(input.writerDirectives?.flowFrom),
-      to:
-        clean(input.flow180?.to) ??
-        clean(input.writerDirectives?.flowTo),
-      flow:
-        clean(input.flow180?.primary) ??
-        clean(input.flow180?.sentence),
+      from: clean(input.flow180?.from) ?? clean(input.writerDirectives?.flowFrom),
+      to: clean(input.flow180?.to) ?? clean(input.writerDirectives?.flowTo),
+      flow: clean(input.flow180?.primary) ?? clean(input.flow180?.sentence),
       deltaType: clean(input.flow180?.deltaType),
     },
 
@@ -335,7 +405,7 @@ export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
     },
 
     meta: {
-      goalKind: clean(input.goalKind),
+      goalKind,
       depthStage: clean(input.depthStage),
       phase: clean(input.phase),
       qCode: clean(input.qCode),

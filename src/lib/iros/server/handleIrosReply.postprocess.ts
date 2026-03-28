@@ -2905,27 +2905,58 @@ try {
         baseVisible = '';
       }
 
-        // ✅ 重要：ここで本文に入れない（seed-only）
-        finalAssistantText = '';
+      const extraAny = (metaForSave.extra ?? {}) as Record<string, unknown>;
+      const ctxPackAny = (extraAny.ctxPack ?? {}) as Record<string, unknown>;
 
-        metaForSave.extra = {
-          ...(metaForSave.extra ?? {}),
-          // FINAL だが “本文はwriterが作る” ので commit ではなく defer にする
-          finalTextPolicy: 'FINAL__LLM_DEFER',
-          slotPlanCommitted: false,
+      const goalKindNow = String(
+        ctxPackAny.goalKind ??
+          extraAny.goalKind ??
+          metaForSave.goalKind ??
+          '',
+      )
+        .trim()
+        .toLowerCase();
 
-          // ✅ seed-only: writer に渡す seed を meta に載せる（UI本文にはしない）
-          slotPlanSeed: baseVisible, // ← runLlmGate の seedFallback が拾う
-          slotPlanSeedLen: baseVisible.length,
-          slotPlanSeedHead: baseVisible.slice(0, 64),
+      const targetKindNow = String(
+        ctxPackAny.targetKind ??
+          extraAny.targetKind ??
+          (metaForSave as any)?.targetKind ??
+          '',
+      )
+        .trim()
+        .toLowerCase();
 
-          // 観測用：seed は meta に残す（UI本文にはしない）
-          baseVisibleLen: baseVisible.length,
-          baseVisibleHead: baseVisible.slice(0, 64),
-          baseVisibleSource: String(seedForWriterSanitized ?? '').trim()
-            ? 'seedForWriterSanitized'
-            : 'coreLine(lastResort)',
-        };
+      const seedTextNow = String(baseVisible ?? '');
+      const isDecideLike =
+        goalKindNow === 'decide' ||
+        targetKindNow === 'decide' ||
+        /(?:\n|^)PRESSURE:\n(?:narrow|push)(?:\n|$)/i.test(seedTextNow) ||
+        /(?:\n|^)MEANING:\n本当は「.*」ほうに寄っていると、もう分かっている(?:\n|$)/i.test(
+          seedTextNow,
+        );
+
+      // ✅ 重要：decide/narrow は seed-only defer にしない
+      finalAssistantText = isDecideLike ? baseVisible : '';
+
+      metaForSave.extra = {
+        ...(metaForSave.extra ?? {}),
+        finalTextPolicy: isDecideLike
+          ? 'FINAL__DIRECT_COMMIT'
+          : 'FINAL__LLM_DEFER',
+        slotPlanCommitted: isDecideLike,
+
+        // ✅ seed-only: writer に渡す seed を meta に載せる（UI本文にはしない）
+        slotPlanSeed: baseVisible, // ← runLlmGate の seedFallback が拾う
+        slotPlanSeedLen: baseVisible.length,
+        slotPlanSeedHead: baseVisible.slice(0, 64),
+
+        // 観測用：seed は meta に残す（UI本文にはしない）
+        baseVisibleLen: baseVisible.length,
+        baseVisibleHead: baseVisible.slice(0, 64),
+        baseVisibleSource: String(seedForWriterSanitized ?? '').trim()
+          ? 'seedForWriterSanitized'
+          : 'coreLine(lastResort)',
+      };
 
         console.log('[IROS/PostProcess] SLOTPLAN_SEED_TO_WRITER (seed only; no commit)', {
           conversationId,

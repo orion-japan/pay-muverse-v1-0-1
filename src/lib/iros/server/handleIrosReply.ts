@@ -2821,8 +2821,8 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
         .trim()
         .toLowerCase();
 
-      const goalKindBeforeAwaken =
-        existingGoalKind || explicitTargetKind || shiftKindNow || 'resonate';
+        const goalKindBeforeAwaken =
+        existingGoalKind || explicitTargetKind || shiftKindNow || null;
 
       const awaken = resolveAwakenState({
         flowDelta:
@@ -2875,8 +2875,6 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
       cpAny.awaken = awaken;
 
       const awakenedGoalKind = (() => {
-        if (awaken.level === 'stable') return 'resonate';
-        if (awaken.level === 'rise') return 'resonate';
         if (awaken.detail.collapseHint) return 'clarify';
         return null;
       })();
@@ -2945,32 +2943,101 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
           : null;
       };
 
-      const existingStrongKind =
+      const normalizeTargetKind = (v: unknown): string | null => {
+        const s = String(v ?? '').trim();
+
+        if (!s) return null;
+        if (s === 'narrow') return 'clarify';
+        if (s === 'cutOff' || s === 'cutoff' || s === 'cut_off') return 'uncover';
+
+        return (
+          s === 'clarify' ||
+          s === 'stabilize' ||
+          s === 'decide' ||
+          s === 'commit' ||
+          s === 'resonate' ||
+          s === 'uncover'
+        )
+          ? s
+          : null;
+      };
+
+      const existingStrongGoalKind =
         normalizeGoalKind(cpAny?.replyGoal?.kind) ??
-        normalizeGoalKind(cpAny?.targetKind) ??
         normalizeGoalKind(cpAny?.goalKind) ??
-        normalizeGoalKind(exAny?.targetKind) ??
         normalizeGoalKind(exAny?.goalKind) ??
-        normalizeGoalKind(metaAny?.targetKind) ??
-        normalizeGoalKind(metaAny?.target_kind);
+        normalizeGoalKind(metaAny?.goalKind);
+
+      const existingStrongTargetKind =
+        normalizeTargetKind(cpAny?.targetKind) ??
+        normalizeTargetKind(exAny?.targetKind) ??
+        normalizeTargetKind(metaAny?.targetKind) ??
+        normalizeTargetKind(metaAny?.target_kind);
 
       const normalizedFinalGoalKind = normalizeGoalKind(finalGoalKind);
-      const chosenGoalKind =
-        existingStrongKind ??
+
+      const chosenGoalKindRaw =
+        existingStrongGoalKind ??
         normalizedFinalGoalKind ??
         'uncover';
 
+      const chosenTargetKind =
+        existingStrongTargetKind ??
+        (chosenGoalKindRaw === 'commit' ? 'decide' : chosenGoalKindRaw);
+
+        const seedTextForGoal = String(
+          exAny?.slotPlanSeed ??
+            exAny?.llmRewriteSeed ??
+            exAny?.baseVisibleHead ??
+            ''
+        );
+
+        const forceDecideBySeed =
+          /(?:\n|^)PRESSURE:\n(?:narrow|push)(?:\n|$)/i.test(seedTextForGoal) ||
+          /(?:\n|^)MEANING:\n本当は「.*」ほうに寄っていると、もう分かっている(?:\n|$)/i.test(
+            seedTextForGoal,
+          );
+
+        const chosenGoalKind =
+          forceDecideBySeed
+            ? 'decide'
+            : chosenGoalKindRaw === 'resonate'
+              ? 'uncover'
+              : chosenGoalKindRaw;
+
+      console.log(
+        '[IROS/GOALKIND_SOURCE][CHOOSE]',
+        JSON.stringify({
+          existingStrongGoalKind,
+          existingStrongTargetKind,
+          normalizedFinalGoalKind,
+          chosenGoalKindRaw,
+          chosenGoalKind,
+          chosenTargetKind,
+          finalGoalKind,
+          shiftKindNow,
+          cp_goalKind: cpAny?.goalKind ?? null,
+          cp_targetKind: cpAny?.targetKind ?? null,
+          cp_replyGoalKind:
+            typeof cpAny?.replyGoal?.kind === 'string' ? cpAny.replyGoal.kind : null,
+          meta_targetKind: metaAny?.targetKind ?? null,
+          meta_target_kind: metaAny?.target_kind ?? null,
+        })
+      );
+
       cpAny.goalKind = chosenGoalKind;
-      cpAny.targetKind = chosenGoalKind;
+      cpAny.targetKind = chosenTargetKind;
       cpAny.replyGoal = { kind: chosenGoalKind };
 
-      metaAny.targetKind = chosenGoalKind;
-      metaAny.target_kind = chosenGoalKind;
+      metaAny.targetKind = chosenTargetKind;
+      metaAny.target_kind = chosenTargetKind;
 
       exAny.goalKind = chosenGoalKind;
-      exAny.targetKind = chosenGoalKind;
-      exAny.target_kind = chosenGoalKind;
+      exAny.targetKind = chosenTargetKind;
+      exAny.target_kind = chosenTargetKind;
     }
+
+
         console.log('[IROS/AWAKEN]', {
           signal: cpAny?.awaken?.signal ?? null,
           score: cpAny?.awaken?.score ?? null,
@@ -5203,12 +5270,10 @@ const wantsResonanceSummaryLocal =
   (out.metaForSave as any)?.targetKind === 'resonate' ||
   (out.metaForSave as any)?.target_kind === 'resonate';
 
-const awakenOverride =
-  wantsResonanceSummaryLocal
-    ? 'resonate'
-    : ((awakenLevelLocal === 'rise' || awakenLevelLocal === 'stable')
-        ? 'resonate'
-        : (awakenCollapseLocal ? 'clarify' : null));
+  const awakenOverride =
+  awakenCollapseLocal
+    ? 'clarify'
+    : null;
 
 const goalKindBase =
   typeof cpForTargetKind?.goalKind === 'string' &&
@@ -5220,16 +5285,15 @@ const goalKindBase =
       : null;
 
 // ============================================
-// 🔥 FINAL TARGET KIND（吸い込み防止版）
+// 🔥 FINAL TARGET KIND（共鳴は方向、行為は保持）
 // ============================================
 
 const finalTargetKind =
+  (out.metaForSave as any)?.targetKind ??
+  cpForTargetKind?.targetKind ??
   awakenOverride ??
   goalKindBase ??
-  cpForTargetKind?.replyGoal?.kind ??
-  cpForTargetKind?.goalKind ??
-  (out.metaForSave as any)?.targetKind ??
-  'uncover';
+  'uncover'; // ← replyGoal を完全排除
 
 (out.metaForSave as any).targetKind = finalTargetKind;
 cpForTargetKind.targetKind = finalTargetKind;
@@ -5238,7 +5302,10 @@ cpForTargetKind.targetKind = finalTargetKind;
 if (
   !(typeof cpForTargetKind.goalKind === 'string' && cpForTargetKind.goalKind.trim())
 ) {
-  cpForTargetKind.goalKind = finalTargetKind;
+  cpForTargetKind.goalKind =
+    finalTargetKind === 'resonate'
+      ? (goalKindBase ?? cpForTargetKind?.replyGoal?.kind ?? 'uncover')
+      : finalTargetKind;
 }
 
 console.log('[IROS][TARGET_KIND_FINAL]', {
@@ -5297,13 +5364,33 @@ const remake = resolveRemakeState({
 ((out.metaForSave as any).extra ??= {});
 (((out.metaForSave as any).extra.ctxPack ??= {}) as any).remake = remake;
 
-// 🔥 remake が起きたら goalKind / replyGoal を同時に昇格
+// 🔥 remake が起きても goalKind / replyGoal を resonate にしない
 if (remake?.detected) {
   const cp = (((out.metaForSave as any).extra.ctxPack ??= {}) as any);
-  cp.goalKind = 'resonate';
-  cp.replyGoal = { kind: 'resonate' };
 
-  (out.metaForSave as any).goalKind = 'resonate';
+  // targetKind はそのまま活かすが、
+  // goalKind / replyGoal は既存の行為を保持する
+  const currentGoalKind = String(
+    cp.goalKind ??
+      cp.replyGoal?.kind ??
+      (out.metaForSave as any).goalKind ??
+      ''
+  )
+    .trim()
+    .toLowerCase();
+
+  const normalizedGoalKind =
+    currentGoalKind === 'clarify' ||
+    currentGoalKind === 'stabilize' ||
+    currentGoalKind === 'decide' ||
+    currentGoalKind === 'commit' ||
+    currentGoalKind === 'uncover'
+      ? currentGoalKind
+      : 'uncover';
+
+  cp.goalKind = normalizedGoalKind;
+  cp.replyGoal = { kind: normalizedGoalKind };
+  (out.metaForSave as any).goalKind = normalizedGoalKind;
 }
 // ✅ traceId をこの場で一回だけ正規化（alreadyHasBlocks 判定にも使う）
 const traceIdNow: string | null = (() => {
@@ -5922,7 +6009,7 @@ const inputKindCanon: string | null = (() => {
   // ✅ 最終fallback（flow固定）
   return 'flow';
 })();
-// 🔥 goalKind を司令塔（targetKind）で上書き
+// 🔥 goalKind を司令塔（targetKind）で上書きしない
 try {
   const targetKindRaw =
     String(
@@ -5932,17 +6019,16 @@ try {
     ).trim();
 
   if (
-    targetKindRaw === 'clarify' ||
-    targetKindRaw === 'stabilize' ||
-    targetKindRaw === 'decide' ||
-    targetKindRaw === 'resonate' ||
-    targetKindRaw === 'uncover'
+    targetKindRaw === 'clarify' &&
+    (out.metaForSave as any)?.extra?.ctxPack &&
+    typeof (out.metaForSave as any).extra.ctxPack === 'object'
   ) {
-    if (
-      (out.metaForSave as any)?.extra?.ctxPack &&
-      typeof (out.metaForSave as any).extra.ctxPack === 'object'
-    ) {
-      (out.metaForSave as any).extra.ctxPack.goalKind = targetKindRaw;
+    const currentGoalKind = String(
+      (out.metaForSave as any).extra.ctxPack.goalKind ?? ''
+    ).trim();
+
+    if (!currentGoalKind) {
+      (out.metaForSave as any).extra.ctxPack.goalKind = 'clarify';
     }
   }
 } catch {}
@@ -6517,20 +6603,17 @@ try {
             const awakenCollapse =
               cp?.awaken?.detail?.collapseHint === true;
 
-            const awakenGoalKind =
-              awakenLevel === 'rise' || awakenLevel === 'stable'
-                ? 'resonate'
-                : awakenCollapse
-                  ? 'clarify'
-                  : null;
+              const awakenGoalKind =
+              awakenCollapse
+                ? 'clarify'
+                : null;
 
-            const resolved =
-              awakenGoalKind ??
-              (out.metaForSave as any)?.targetKind ??
-              replyGoalKindNormalized ??
-              cp?.goalKind ??
-              (out.metaForSave as any)?.target_kind ??
-              null;
+                const resolved =
+                cp?.goalKind ??
+                replyGoalKindNormalized ??
+                (out.metaForSave as any)?.goalKind ??
+                awakenGoalKind ??
+                'uncover';
 
         console.log('[IROS/GOALKIND_BRIDGE][REPHRASE_GOALKIND_RESOLVED]', {
           traceId: traceIdCanon,

@@ -376,24 +376,31 @@ export async function saveIrosTrainingSample(params: SaveIrosTrainingSampleParam
   // target_kind（★ goal.kind を最優先にする）
   // target_kind（★ ctxPack / goal / top-level を最優先し、最後だけ resolver に落とす）
   const targetKind = (() => {
-    const c1 = normalizeTargetKindOrNull(pickString(meta?.extra?.ctxPack?.targetKind));
+    const c0 = normalizeTargetKindOrNull(
+      pickString(meta?.extra?.ctxPack?.targetKind)
+    );
+    if (c0 && c0 !== 'stabilize') return c0;
+
+    const c1 = normalizeTargetKindOrNull(pickString(meta?.targetKind));
     if (c1 && c1 !== 'stabilize') return c1;
 
-    const c2 = normalizeTargetKindOrNull(pickString(meta?.extra?.ctxPack?.goalKind));
+    const c2 = normalizeTargetKindOrNull(pickString(meta?.target_kind));
     if (c2 && c2 !== 'stabilize') return c2;
 
-    const c3 = normalizeTargetKindOrNull(pickString(meta?.extra?.ctxPack?.replyGoal?.kind));
+    const c3 = normalizeTargetKindOrNull(
+      pickString(meta?.extra?.ctxPack?.goalKind)
+    );
     if (c3 && c3 !== 'stabilize') return c3;
 
-    const c4 = normalizeTargetKindOrNull(pickString(meta?.targetKind));
+    const c4 = normalizeTargetKindOrNull(
+      pickString(meta?.extra?.ctxPack?.replyGoal?.kind)
+    );
     if (c4 && c4 !== 'stabilize') return c4;
-
-    const c5 = normalizeTargetKindOrNull(pickString(meta?.target_kind));
-    if (c5 && c5 !== 'stabilize') return c5;
 
     const resolved = resolveTrainingTargetKind(meta);
     return resolved === 'stabilize' ? 'resonate' : resolved;
   })();
+
   const targetLabel = pickString(meta?.targetLabel) ?? pickString(meta?.target_label) ?? null;
 
   /**

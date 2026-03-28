@@ -3039,11 +3039,11 @@ const shiftKindForLane =
   const tConcretizeHeader = wantsTConcretize
     ? [
       '【T_CONCRETIZE（優先）】',
-      '- 本文は短め（2〜8行目安）。',
+      '- 本文は短め（2〜6行目安）。',
       '- 冒頭でユーザー文をそのまま復唱しない（短く言い換えて言い切る）。',
       '- “次の一歩”は1つだけ。抽象語で逃げず、対象/操作点を1つに絞る（例示OK）。',
-      '- 未来の指示は「命令」ではなく“選択肢提示”で出す（例：A/B/C）。',
-      '- 質問は最大1つまで（必要なときだけ）。',
+      '- 選択肢列挙（A/B/C、候補、◯◯という選択肢）は禁止。1つに絞って言い切る。',
+      '- 質問は0。聞き返しで進めず、このターンで1つに収束させる。',
       '',
 
       ].join('\n')
@@ -3052,12 +3052,13 @@ const shiftKindForLane =
   // ✅ IDEA_BAND（候補生成）出力契約：Phase1をそのまま“強制”
   const ideaBandHeader = wantsIdeaBand
     ? [
-        '【IDEA_BAND 出力契約（最優先）】',
-        '- 出力は2〜5行のみ（1行=1候補）。',
-        '- 各行は「◯◯という選択肢」または同等の“候補提示”だけを書く。',
-        '- 行動指示・一手・具体化（ToDo/手順/時間/タイマー/次は…）は禁止。',
-        '- 説明・一般論・比喩・鏡（言い換え）・構造化（Aしたい/でもB）も書かない。',
-        '- 質問は0（聞き返しで進めない）。',
+      '【IDEA_BAND 出力契約（最優先）】',
+      '- 出力は2〜4行のみ。',
+      '- 候補列挙は禁止。「◯◯という選択肢」「A/B/C」「候補:」の形は使わない。',
+      '- まず、ユーザーの中で同時に立っている2つの力を自然文で1回だけ言語化する。',
+      '- その次に、そのズレが何を迷わせているかを1行で言い切る。',
+      '- 行動指示・ToDo・手順・時間指定・聞き返しは禁止。',
+      '- 一般論・箇条書き・メニュー化は禁止。共鳴による構造再配置だけを書く。',
         '',
       ].join('\n')
     : '';
@@ -4341,24 +4342,23 @@ let messages = buildFirstPassMessages({
       const awakenCollapse =
         ctxPack?.awaken?.detail?.collapseHint === true;
 
-      const awakenGoalKind =
-        awakenLevel === 'rise' || awakenLevel === 'stable'
-          ? 'resonate'
-          : awakenCollapse
-            ? 'clarify'
-            : null;
+        const awakenGoalKind =
+        awakenCollapse
+          ? 'clarify'
+          : null;
 
-      const structuralGoalKind =
-        awakenGoalKind ??
-        (opts as any)?.goalKind ??
-        (opts as any)?.userContext?.goalKind ??
-        ctxPack?.goalKind ??
-        null;
+          const structuralGoalKind =
+          (opts as any)?.goalKind ??
+          (opts as any)?.userContext?.goalKind ??
+          ctxPack?.goalKind ??
+          replyGoalKindNormalized ??
+          awakenGoalKind ??
+          null;
 
-      const goalKind =
-        replyGoalKindNormalized ??
-        structuralGoalKind ??
-        null;
+        const goalKind =
+          structuralGoalKind ??
+          replyGoalKindNormalized ??
+          null;
 
   // ✅ depth / IT は “構造メタ” から拾う（BlockPlan 自動条件に必要）
   const depthStage =

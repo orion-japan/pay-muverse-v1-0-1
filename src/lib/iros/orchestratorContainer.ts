@@ -248,17 +248,20 @@ export function applyContainerDecision(
     goalKind,
   });
 
-  const rawTargetKind =
-    continuityOverride ??
-    (
-      ((meta as any)?.extra?.ctxPack?.goalKind === 'resonate')
-        ? 'resonate'
-        : awakenOverride ??
-          (goalKind === 'clarify' || goalKind === 'decide' || goalKind === 'commit'
-            ? goalKind
-            : null) ??
-          'uncover'
-    );
+  const continuityKindNow = String(continuityOverride ?? '')
+  .trim()
+  .toLowerCase();
+
+const rawTargetKind =
+  awakenOverride ??
+  (continuityKindNow === 'same_line' || continuityKindNow === 'continuation'
+    ? 'resonate'
+    : null) ??
+  (goalKind === 'clarify' || goalKind === 'decide' || goalKind === 'commit'
+    ? goalKind
+    : null) ??
+  null;
+
   let targetKindNorm: string | null = null;
 
   if (rawTargetKind) {

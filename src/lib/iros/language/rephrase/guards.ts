@@ -259,10 +259,17 @@ export function checkWriterGuardsMinimal(args: {
     // 落とすのは、説明モードの宣言行が複数段落にまたがる時だけ。
     if (hasMeta) {
       const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-      const metaLines = lines.filter((l) =>
-        /解説します|解説すると|ポイント|まとめ|結論から|要約|以下/.test(l),
+
+      const isHeading = (l: string) =>
+        /^#+\s/.test(l) || /^[■◆▶︎▶️]/.test(l);
+
+      const metaLines = lines.filter(
+        (l) =>
+          !isHeading(l) &&
+          /解説します|解説すると|ポイント|まとめ|結論から|要約|以下/.test(l),
       );
-      if (metaLines.length >= 1 && lines.length >= 5) {
+
+      if (metaLines.length >= 2 && lines.length >= 6) {
         return {
           ok: false,
           reason: 'WG:OUTPUT_ONLY_META',

@@ -72,13 +72,16 @@ export function ideaBandLineLooksLikeCandidate(line: string): boolean {
 
   // 明示フォーマット（互換）
   if (/^(?:候補|選択肢)\s*[:：]/u.test(String(line ?? '').trim())) return true;
-  if (/という選択肢/u.test(core)) return true;
 
-  // 句点や疑問符がある「文章」は候補ではない（契約固定）
+  // 「◯◯という選択肢」は浅い候補列挙を固定化してしまうので無効
+  if (/という選択肢/u.test(core)) return false;
+
+  // 深いCは自然文での構造再配置を優先するため、
+  // 句点や疑問符がなくても短いラベル列挙だけの文は候補として弱い
   if (IDEA_BAND_PUNCT_RE.test(core)) return false;
 
   // 長すぎ/短すぎは候補として弱い
-  if (core.length < 4 || core.length > 34) return false;
+  if (core.length < 6 || core.length > 48) return false;
 
   // “提案として読める”最低条件
   if (endsWithVerbLike(core)) return true;
