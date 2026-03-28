@@ -2248,7 +2248,26 @@ function normForRecall(v: any): string {
       if (resolvedAskEarly) {
         preOrchCtxPack.resolvedAsk = resolvedAskEarly;
       }
+      // 🧠 continuity による履歴カット
+      const continuityKind = String(
+        preOrchCtxPack?.continuityKind ??
+          histCtx?.continuityKind ??
+          ''
+      ).toLowerCase();
 
+      const shouldResetContext =
+        continuityKind === 'new' ||
+        continuityKind === 'topic_switch' ||
+        continuityKind === 'greeting';
+
+      if (shouldResetContext) {
+        // 過去文脈を完全遮断
+        if (histCtx && typeof histCtx === 'object') {
+          delete histCtx.topicDigest;
+          delete histCtx.conversationLine;
+          delete histCtx.historyDigestV1;
+        }
+      }
       if (
         !preOrchCtxPack.topicDigest &&
         typeof histCtx?.topicDigest === 'string' &&
