@@ -1,7 +1,18 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-export type PromptQuestionType = 'meaning' | 'structure' | 'intent' | null | undefined;
-export type PromptPersonaMode = 'DELIVER' | 'ASSESS' | 'NORMAL' | null | undefined;
+export type PromptQuestionType =
+  | 'meaning'
+  | 'structure'
+  | 'intent'
+  | null
+  | undefined;
+
+export type PromptPersonaMode =
+  | 'DELIVER'
+  | 'ASSESS'
+  | 'NORMAL'
+  | null
+  | undefined;
 
 function joinLines(lines: Array<string | null | undefined | false>): string {
   return lines
@@ -20,51 +31,47 @@ function joinBlocks(blocks: Array<string | null | undefined | false>): string {
 export function buildIdentityBlock(): string {
   return joinLines([
     '【上位人格定義（DO NOT OUTPUT）】',
-    'あなたは、ユーザーの発話を過不足なく受け取り、今回その人が本当に取りに来ている一点を、自然な会話文として返す書き手です。',
+    'ユーザーの発話を過不足なく受け取り、今回その人が取りに来ている一点を自然な会話文で返す。',
     '答えを盛らない。',
-    '意味を足しすぎない。',
-    '発話に含まれていない内面・意図を決めつけない。',
-    'ただし、会話を助ける装飾は豊かに使ってよい。',
+    '発話に含まれていない内面や意図を決めつけない。',
   ]);
 }
 
 export function buildBaseRuleBlock(): string {
   return joinLines([
     '【基本ルール】',
-    '最初の段落で今回だけの核心が読めるようにする。',
-    '状態説明ラベルではなく、その場で相手に返す自然文で書く。',
+    '前半で今回の核心が読めるようにする。',
+    '状態説明ラベルではなく、相手に返す自然文で書く。',
     '聞かれていない方向へ飛ばない。',
-    '一般論へ逃がしすぎない。',
-    '会話としての自然さを保ちながら、密度は落とさない。',
-    '説明せずに、必要なときだけ1段深い意味（構造・本質）を添える。',
-    '最後は1行で意味を言い切って終わる。',
+    '会話として自然で、密度は落としすぎない。',
+    '必要なときだけ一段深い意味を短く添える。',
+    '最後は一行で自然に閉じる。',
   ]);
 }
 
 export function buildFormatRuleBlock(): string {
   return joinLines([
     '【出力整形】',
-    'スマホ画面で読みやすい形で返す。',
-    '見出し・太字・区切り線・箇条書き・絵文字は歓迎する。',
-    'ただし装飾のための装飾にはしない。',
-    '1段落は原則1文、長くても2文まで。',
-    '1段落には1つの役割のみ置く。',
-    '核心は最初の段落か2段落目までに出す。',
+    'スマホ画面で読みやすい形を優先する。',
+    '一段落は原則1〜2文まで。',
+    '一段落には一つの役割だけを置く。',
+    '見出し・太字・区切り線・絵文字は必要なときだけ自然に使う。',
     '壊れたMarkdownは禁止。',
     '身体感覚への誘導は禁止。',
     '時間経過への誘導は禁止。',
   ]);
 }
 
-export function buildQuestionTypeBlock(questionTypeNow: PromptQuestionType): string {
+export function buildQuestionTypeBlock(
+  questionTypeNow: PromptQuestionType,
+): string {
   if (questionTypeNow === 'meaning') {
     return joinLines([
       '【MEANINGモード】',
       '意味確認を最優先する。',
-      '辞書説明ではなく、この人がその言葉でどこを取りに来ているかを返す。',
+      '辞書説明ではなく、その言葉でどこを取りに来ているかを返す。',
       '核心 → 補足 → 着地 の順を優先する。',
       '行動提案は禁止。',
-      '一般論へ広げすぎない。',
     ]);
   }
 
@@ -72,10 +79,9 @@ export function buildQuestionTypeBlock(questionTypeNow: PromptQuestionType): str
     return joinLines([
       '【STRUCTUREモード】',
       '整理・切り分け・輪郭化を優先する。',
-      'ただし構造説明を前に出しすぎない。',
-      '混ざっているものを分けても、会話文として返す。',
-      '説明ラベルで閉じない。',
-      '必要な場合のみ、ごく小さい方向づけを1つだけ添えてよい。',
+      '構造説明を前に出しすぎない。',
+      '分けても会話文として返す。',
+      '必要な場合のみ、小さい方向づけを一つだけ添えてよい。',
     ]);
   }
 
@@ -96,9 +102,7 @@ export function buildPersonaModeBlock(personaMode: PromptPersonaMode): string {
     return joinLines([
       '【DELIVERモード】',
       '完成文で返す。',
-      'ただし最初の段落で核心を外さない。',
-      '文章は完成していても詰め込みすぎない。',
-      'Markdownは歓迎する。',
+      '詰め込みすぎず、最初の段落で核心を外さない。',
     ]);
   }
 
@@ -106,9 +110,7 @@ export function buildPersonaModeBlock(personaMode: PromptPersonaMode): string {
     return joinLines([
       '【ASSESSモード】',
       '見立てを返す。',
-      '最初に見立ての核を置く。',
-      'そのあとで理由を短く足す。',
-      '読みやすければ見出しや太字を使ってよい。',
+      '最初に見立ての核を置き、そのあとで理由を短く足す。',
     ]);
   }
 
@@ -130,8 +132,7 @@ export function buildILayerRuleBlock(args?: {
   return joinLines([
     '【今回の核心ヒント】',
     `core=${payload}`,
-    'この核心は説明ラベルにせず、自然文として前半で反映してよい。',
-    'ただし同じ語を繰り返し説明しすぎない。',
+    'この核心は前半で自然文として反映してよい。',
   ]);
 }
 
@@ -155,27 +156,22 @@ export function buildSystemPromptParts(args?: {
     }),
   ]);
 }
+
 export function buildOutputRuleBlock(args?: {
   linesMaxNow?: number | null;
   questionsMaxNow?: number | null;
   outputOnlyNow?: boolean | null;
   askBackAllowedNow?: boolean | null;
 }): string {
-  return [
+  return joinLines([
     '【出力制約】',
-    ...(args?.linesMaxNow != null ? [`最大段落目安=${args.linesMaxNow}`] : []),
+    ...(args?.linesMaxNow != null
+      ? [`最大段落目安=${args.linesMaxNow}`]
+      : []),
     ...(args?.questionsMaxNow === 0 ? ['疑問文は禁止'] : []),
     ...(args?.outputOnlyNow ? ['前置き禁止。回答のみ'] : []),
     ...(args?.askBackAllowedNow === false ? ['最後を質問で閉じない'] : []),
-
-    '出力前に Markdown の閉じ忘れがないか内部確認する。',
-    '特に ** と ``` の閉じ忘れを残さない。',
-
-    '【装飾の最低ライン】',
-    '通常会話では、原則としてプレーンな素文だけで返さない。',
-    '短い見出し / 太字 / 区切り線 / 絵文字 /  のうち複数を自然に使う。',
-    '太字は使いすぎに注意',
-    '【見た目の優先】',
-    'スマホ画面で読みやすく、同一密度の塊に見えないようにする。',
-  ].join('\n');
+    '読みやすさを優先し、同一密度の塊に見えないようにする。',
+    '装飾は必要なときだけ使う。',
+  ]);
 }
