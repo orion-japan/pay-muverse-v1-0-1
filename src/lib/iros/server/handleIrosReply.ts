@@ -16,6 +16,7 @@ import { getIrosSupabaseAdmin } from './handleIrosReply.supabase';
 
 import { resolveAwakenState } from '@/lib/iros/awaken/resolveAwakenState';
 import { resolveRemakeState } from '@/lib/iros/remake/resolveRemakeState';
+import { diagnosisEngine } from '@/lib/iros/diagnosis/diagnosisEngine';
 
 import { runGreetingGate } from './handleIrosReply.gates';
 import { buildTurnContext } from './handleIrosReply.context';
@@ -215,7 +216,7 @@ function stampSingleWriter(metaForSave: any): any {
     ...m0,
     extra: {
       ...prevExtra,
-      persistAssistantMessage: false,
+      persistAssistantMessage: true,
       persistPolicyHint: prevExtra.persistPolicyHint ?? 'REPLY_SINGLE_WRITER',
     },
   };
@@ -1170,6 +1171,152 @@ export async function handleIrosReply(
 // ✅ extra は const のままなので、ローカルで更新して回す（関数スコープで宣言）
 let extraLocal: any = extra ?? null;
 
+const isIrDiagnosisInput =
+String(mode ?? '').trim().toLowerCase() === 'diagnosis' ||
+String((extra as any)?.mode ?? '').trim().toLowerCase() === 'diagnosis' ||
+String((extra as any)?.presentationKind ?? '').trim().toLowerCase() === 'diagnosis' ||
+(extra as any)?.isIrDiagnosisTurn === true;
+
+if (isIrDiagnosisInput) {
+  const rawIrText = String(
+    (params as any)?.userText ??
+      (params as any)?.text ??
+      (params as any)?.inputText ??
+      (params as any)?.message ??
+      ''
+  ).trim();
+
+  const cleanedTargetLabel = rawIrText
+    .replace(/^\s*ir診断[\s:：　-]*/u, '')
+    .replace(/^\s*irで見て[\s:：　-]*/u, '')
+    .replace(/^\s*ir[\s:：　-]*/u, '')
+    .trim();
+
+  const targetLabel = cleanedTargetLabel || '自分';
+
+  const diag = await diagnosisEngine({
+    targetLabel,
+    meta: {
+      extra: {
+        ...(extraLocal ?? {}),
+        isIrDiagnosisTurn: true,
+        presentationKind: 'diagnosis',
+        mode: 'diagnosis',
+        renderEngine: false,
+        renderEngineGate: false,
+        persistAssistantMessage: true,
+        ctxPack: {},
+        slotPlanKeys: [],
+        slotPlan_keys: [],
+      },
+    } as any,
+    slots: {
+      userText: rawIrText,
+    },
+    userText: rawIrText,
+    inputText: rawIrText,
+    conversationId,
+    userCode,
+    traceId: traceId ?? null,
+  });
+  const diagIrMeta =
+  (diag as any)?.meta?.extra?.ctxPack?.irMeta ??
+  (diag as any)?.meta?.extra?.irMeta ??
+  null;
+
+if (diagIrMeta) {
+  extraLocal = extraLocal && typeof extraLocal === 'object' ? extraLocal : {};
+  extraLocal.ctxPack =
+    extraLocal.ctxPack && typeof extraLocal.ctxPack === 'object'
+      ? extraLocal.ctxPack
+      : {};
+
+  extraLocal.irMeta = diagIrMeta;
+  extraLocal.ctxPack.irMeta = diagIrMeta;
+}
+  const baseText =
+  typeof diag.text === 'string' && diag.text.trim()
+    ? diag.text.trim()
+    : [
+        '🧿 観測対象：自分',
+        '---',
+        '🌀 観測結果：まだ流れははっきり形になっていないものの、内側では次の動きが静かに準備されているような状態です。',
+        '---',
+        '🌿 意識状態：いまは複数の流れが重なり、どこに乗るかで体感が変わりやすい状態です。',
+        '---',
+        '🌱 まとめ：いまは無理に進めるより、ひとつ整えることで次の流れが見えやすくなる局面です。',
+      ].join('\n');
+
+// 👇 最終出力
+const finalText = baseText;
+
+const irMeta =
+  diag.ok &&
+  diag.debug &&
+  typeof diag.debug === 'object' &&
+  (diag.debug as any).irMeta &&
+  typeof (diag.debug as any).irMeta === 'object'
+    ? (diag.debug as any).irMeta
+    : {
+        flowA: null,
+        flowB: null,
+        relation: null,
+      };
+
+      return {
+        ok: true,
+        assistantText: finalText,
+        finalMode: 'diagnosis',
+        metaForSave: {
+          presentationKind: 'diagnosis',
+          mode: 'diagnosis',
+          extra: {
+            ...(extraLocal ?? {}),
+            isIrDiagnosisTurn: true,
+            presentationKind: 'diagnosis',
+            mode: 'diagnosis',
+            renderEngine: false,
+            renderEngineGate: false,
+            persistAssistantMessage: true,
+            ctxPack: {
+              ...(((extraLocal as any)?.ctxPack ?? {}) as any),
+              irMeta,
+              detailMode: true,
+            },
+            slotPlanKeys: [],
+            slotPlan_keys: [],
+            irMeta,
+          },
+        },
+        result: {
+          ok: true,
+          assistantText: finalText,
+          finalMode: 'diagnosis',
+          metaForSave: {
+            presentationKind: 'diagnosis',
+            mode: 'diagnosis',
+            extra: {
+              ...(extraLocal ?? {}),
+              isIrDiagnosisTurn: true,
+              presentationKind: 'diagnosis',
+              mode: 'diagnosis',
+              renderEngine: false,
+              renderEngineGate: false,
+              persistAssistantMessage: true,
+              ctxPack: {
+                ...(((extraLocal as any)?.ctxPack ?? {}) as any),
+                irMeta,
+                detailMode: true,
+              },
+              slotPlanKeys: [],
+              slotPlan_keys: [],
+              irMeta,
+            },
+          },
+        },
+      };
+}
+
 // src/lib/iros/server/handleIrosReply.ts
 // 置換範囲: 1088〜1100（console.log('[IROS/Reply] handleIrosReply start', ...) のブロック）
 
@@ -1594,14 +1741,12 @@ if (!wantsMicroNow) {
         const cp: any = (ex as any).ctxPack;
         const keep: any = {};
 
-        // --- 必須（LLM 入力/検証に必要）---
         if (cp.flow) keep.flow = cp.flow;
         if (cp.resonanceState) keep.resonanceState = cp.resonanceState;
         if (typeof cp.seed_text === 'string' && cp.seed_text.trim()) {
           keep.seed_text = cp.seed_text.trim();
         }
 
-        // --- writer / rephrase の入口として残す ---
         if (cp.historyForWriter) keep.historyForWriter = cp.historyForWriter;
         if (cp.historyDigestV1) keep.historyDigestV1 = cp.historyDigestV1;
 
@@ -1614,9 +1759,15 @@ if (!wantsMicroNow) {
         if (cp.exprMeta) keep.exprMeta = cp.exprMeta;
         if (cp.traceId) keep.traceId = cp.traceId;
 
-        (ex as any).ctxPack = keep;
-      } else {
-        delete (ex as any).ctxPack;
+        // --- ir診断の持ち越し ---
+        if (cp.irMeta && typeof cp.irMeta === 'object') keep.irMeta = cp.irMeta;
+        if (cp.detailMode === true) keep.detailMode = true;
+
+        if (Object.keys(keep).length > 0) {
+          (ex as any).ctxPack = keep;
+        } else {
+          delete (ex as any).ctxPack;
+        }
       }
 
       delete (ex as any).historyForWriter;
@@ -1721,18 +1872,24 @@ if (!wantsMicroNow) {
       if (cp.historyForWriter) keep.historyForWriter = cp.historyForWriter;
       if (cp.historyDigestV1) keep.historyDigestV1 = cp.historyDigestV1;
 
-        // --- 構造メタ（軽いので残す）---
-        if (cp.phase) keep.phase = cp.phase;
-        if (cp.depthStage) keep.depthStage = cp.depthStage;
-        if (cp.qCode) keep.qCode = cp.qCode;
-        if (cp.slotPlanPolicy) keep.slotPlanPolicy = cp.slotPlanPolicy;
-        if (cp.goalKind) keep.goalKind = cp.goalKind;
-        if (cp.exprMeta) keep.exprMeta = cp.exprMeta;
-        if (cp.traceId) keep.traceId = cp.traceId;
+      // --- 構造メタ（軽いので残す）---
+      if (cp.phase) keep.phase = cp.phase;
+      if (cp.depthStage) keep.depthStage = cp.depthStage;
+      if (cp.qCode) keep.qCode = cp.qCode;
+      if (cp.slotPlanPolicy) keep.slotPlanPolicy = cp.slotPlanPolicy;
+      if (cp.goalKind) keep.goalKind = cp.goalKind;
+      if (cp.exprMeta) keep.exprMeta = cp.exprMeta;
+      if (cp.traceId) keep.traceId = cp.traceId;
 
-      (ex as any).ctxPack = keep;
-    } else {
-      delete (ex as any).ctxPack;
+      // --- ir診断の持ち越し ---
+      if (cp.irMeta && typeof cp.irMeta === 'object') keep.irMeta = cp.irMeta;
+      if (cp.detailMode === true) keep.detailMode = true;
+
+      if (Object.keys(keep).length > 0) {
+        (ex as any).ctxPack = keep;
+      } else {
+        delete (ex as any).ctxPack;
+      }
     }
 
     delete (ex as any).historyForWriter;
@@ -2299,7 +2456,42 @@ function normForRecall(v: any): string {
       ) {
         preOrchCtxPack.historyDigestV1 = histCtx.historyDigestV1;
       }
+      if (
+        !preOrchCtxPack.historyForWriter &&
+        Array.isArray(histCtx?.historyForWriter) &&
+        histCtx.historyForWriter.length > 0
+      ) {
+        preOrchCtxPack.historyForWriter = histCtx.historyForWriter
+          .map((m: any) => {
+            const role =
+              m?.role === 'assistant'
+                ? 'assistant'
+                : m?.role === 'user'
+                  ? 'user'
+                  : null;
 
+            const content =
+              typeof m?.content === 'string'
+                ? String(m.content).trim()
+                : typeof m?.text === 'string'
+                  ? String(m.text).trim()
+                  : '';
+
+            if (!role || !content) return null;
+            return { role, content };
+          })
+          .filter(
+            (m: any): m is { role: 'user' | 'assistant'; content: string } => Boolean(m),
+          );
+      }
+
+      if (
+        !preOrchCtxPack.historyForWriterAt &&
+        typeof histCtx?.historyForWriterAt === 'string' &&
+        histCtx.historyForWriterAt.trim()
+      ) {
+        preOrchCtxPack.historyForWriterAt = histCtx.historyForWriterAt.trim();
+      }
       if (
         !preOrchCtxPack.flow &&
         histCtx?.flow &&
@@ -2314,7 +2506,21 @@ function normForRecall(v: any): string {
       ) {
         preOrchCtxPack.returnStreak = histCtx.returnStreak;
       }
+      if (
+        !preOrchCtxPack.historyForWriter &&
+        Array.isArray(histCtx?.historyForWriter) &&
+        histCtx.historyForWriter.length > 0
+      ) {
+        preOrchCtxPack.historyForWriter = histCtx.historyForWriter;
+      }
 
+      if (
+        !preOrchCtxPack.historyForWriterAt &&
+        typeof histCtx?.historyForWriterAt === 'string' &&
+        histCtx.historyForWriterAt.trim()
+      ) {
+        preOrchCtxPack.historyForWriterAt = histCtx.historyForWriterAt.trim();
+      }
       console.log('[IROS/VIEWSHIFT][pre-orch][inject]', {
         hasSnap: Boolean(snap),
         snapKeys: snap && typeof snap === 'object' ? Object.keys(snap).slice(0, 20) : null,
@@ -2323,8 +2529,18 @@ function normForRecall(v: any): string {
         injectedConversationLine: typeof preOrchCtxPack.conversationLine === 'string' ? preOrchCtxPack.conversationLine.slice(0, 80) : '',
         injectedObservedBasedOn: typeof preOrchCtxPack.observedBasedOn === 'string' ? preOrchCtxPack.observedBasedOn.slice(0, 80) : '',
         hasHistoryDigestV1: Boolean(preOrchCtxPack.historyDigestV1),
+        hasHistHistoryForWriter: Array.isArray(histCtx?.historyForWriter) && histCtx.historyForWriter.length > 0,
+        hasPreHistoryForWriter: Array.isArray(preOrchCtxPack?.historyForWriter) && preOrchCtxPack.historyForWriter.length > 0,
+        histHistoryForWriterLen: Array.isArray(histCtx?.historyForWriter) ? histCtx.historyForWriter.length : 0,
+        preHistoryForWriterLen: Array.isArray(preOrchCtxPack?.historyForWriter) ? preOrchCtxPack.historyForWriter.length : 0,
         hasFlow: Boolean(preOrchCtxPack.flow),
         returnStreak: preOrchCtxPack.returnStreak ?? null,
+        hasHistoryForWriter: Array.isArray(preOrchCtxPack.historyForWriter),
+historyForWriterLen: Array.isArray(preOrchCtxPack.historyForWriter)
+  ? preOrchCtxPack.historyForWriter.length
+  : 0,
+hasHistoryForWriterAt:
+  typeof preOrchCtxPack.historyForWriterAt === 'string',
       });
     } catch (e) {
       console.log('[IROS/VIEWSHIFT][pre-orch][inject][ERR]', { err: String(e ?? '') });
@@ -2349,13 +2565,124 @@ function normForRecall(v: any): string {
       history: historyForTurn,
       sb: supabase,
     });
+
     t.orchestrator_ms = msSince(to);
 
     const orchMeta = (orch as any)?.meta ?? {};
     const orchExtra = orchMeta?.extra ?? {};
+
+    // =========================
+    // ✅ ir診断：完全別ルート
+    // - flowSeed / postprocess / rephrase / render に入れない
+    // - diagnosisEngine が確定した本文をそのまま返す
+    // =========================
+    const isIrDiagnosis =
+      orchExtra?.isIrDiagnosisTurn === true ||
+      orchExtra?.presentationKind === 'diagnosis' ||
+      orchExtra?.modeHint === 'IR';
+
+      if (isIrDiagnosis) {
+        const finalText =
+          typeof orchExtra?.finalAssistantText === 'string' && orchExtra.finalAssistantText.trim()
+            ? orchExtra.finalAssistantText.trim()
+            : typeof orchExtra?.assistantText === 'string' && orchExtra.assistantText.trim()
+            ? orchExtra.assistantText.trim()
+            : typeof orchExtra?.contentOverride === 'string' && orchExtra.contentOverride.trim()
+            ? orchExtra.contentOverride.trim()
+            : '';
+
+            const irMeta =
+            typeof orchExtra?.irMeta === 'object' && orchExtra.irMeta
+              ? orchExtra.irMeta
+              : typeof orchExtra?.ctxPack?.irMeta === 'object' && orchExtra.ctxPack.irMeta
+                ? orchExtra.ctxPack.irMeta
+                : {
+                    flowA: null,
+                    flowB: null,
+                    relation: null,
+                  };
+
+                  const diagnosisHistoryForWriter =
+                  finalText
+                    ? [
+                        {
+                          role: 'assistant' as const,
+                          content: finalText,
+                        },
+                      ]
+                    : [];
+
+                const diagnosisCtxPack =
+                  orchExtra?.ctxPack && typeof orchExtra.ctxPack === 'object'
+                    ? {
+                        ...orchExtra.ctxPack,
+                        irMeta,
+                        detailMode: true,
+                        historyForWriter: diagnosisHistoryForWriter,
+                        historyForWriterAt: new Date().toISOString(),
+                      }
+                    : {
+                        irMeta,
+                        detailMode: true,
+                        historyForWriter: diagnosisHistoryForWriter,
+                        historyForWriterAt: new Date().toISOString(),
+                      };
+
+                return {
+                  ok: true,
+                  assistantText: finalText,
+                  finalMode: 'diagnosis',
+                  metaForSave: {
+                    ...(orchMeta ?? {}),
+                    presentationKind: 'diagnosis',
+                    mode: 'diagnosis',
+                    extra: {
+                      ...(orchExtra ?? {}),
+                      isIrDiagnosisTurn: true,
+                      presentationKind: 'diagnosis',
+                      mode: 'diagnosis',
+                      renderEngine: false,
+                      renderEngineGate: false,
+                      persistAssistantMessage: false,
+                      detailMode: true,
+                      ctxPack: diagnosisCtxPack,
+                      historyForWriter: diagnosisHistoryForWriter,
+                      historyForWriterAt: diagnosisCtxPack.historyForWriterAt,
+                      slotPlanKeys: [],
+                      slotPlan_keys: [],
+                      irMeta,
+                    },
+                  },
+                  result: {
+                    ok: true,
+                    assistantText: finalText,
+                    metaForSave: {
+                      ...(orchMeta ?? {}),
+                      presentationKind: 'diagnosis',
+                      mode: 'diagnosis',
+                      extra: {
+                        ...(orchExtra ?? {}),
+                        isIrDiagnosisTurn: true,
+                        presentationKind: 'diagnosis',
+                        mode: 'diagnosis',
+                        renderEngine: false,
+                        renderEngineGate: false,
+                        persistAssistantMessage: false,
+                        detailMode: true,
+                        ctxPack: diagnosisCtxPack,
+                        historyForWriter: diagnosisHistoryForWriter,
+                        historyForWriterAt: diagnosisCtxPack.historyForWriterAt,
+                        slotPlanKeys: [],
+                        slotPlan_keys: [],
+                        irMeta,
+                      },
+                    },
+                    finalMode: 'diagnosis',
+                  },
+                };
+      }
     const orchCtxPack = orchExtra?.ctxPack ?? {};
     const orchFlow = orchCtxPack?.flow ?? orchExtra?.flow ?? orchMeta?.flow ?? null;
-
     const flowSeedObj = buildFlowSeedV1({
       flow: {
         current:
@@ -2383,24 +2710,24 @@ function normForRecall(v: any): string {
       },
       userCore:
         String(text ?? '').trim() || null,
-        historyLine: (() => {
-          const rawHistory = String(
-            orchCtxPack?.conversationLine ??
-              orchExtra?.conversationLine ??
-              '',
-          ).trim();
+      historyLine: (() => {
+        const rawHistory = String(
+          orchCtxPack?.conversationLine ??
+            orchExtra?.conversationLine ??
+            '',
+        ).trim();
 
-          const isHeavyInput =
-            String(orchCtxPack?.shiftKind ?? '').trim() === 'uncover_shift' ||
-            String(orchCtxPack?.goalKind ?? '').trim() === 'uncover';
+        const isHeavyInput =
+          String(orchCtxPack?.shiftKind ?? '').trim() === 'uncover_shift' ||
+          String(orchCtxPack?.goalKind ?? '').trim() === 'uncover';
 
-          if (!rawHistory) return null;
+        if (!rawHistory) return null;
 
-          // 🔥 uncoverは履歴完全遮断
-          if (isHeavyInput) return null;
+        // 🔥 uncoverは履歴完全遮断
+        if (isHeavyInput) return null;
 
-          return rawHistory;
-        })(),
+        return rawHistory;
+      })(),
       memoryLine:
         String(
           orchCtxPack?.topicDigest ??
@@ -2410,7 +2737,6 @@ function normForRecall(v: any): string {
     });
 
     const flowSeed = formatFlowSeedV1(flowSeedObj).trim();
-
     /* ---------------------------
        4) PostProcess
     ---------------------------- */
@@ -2761,11 +3087,27 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
   })();
 
   // STEP1:
-  // historyForWriter へ finalAssistantContent を再注入しない
-  // - writer は current turn の assistant 本文に引っ張られず、
-  //   Seed + current user を主参照にする
-  // - 直前 assistant の参照が必要な処理は、historyForWriter ではなく
-  //   専用の軽量メタ側で扱う
+  // historyForWriter へ finalAssistantContent を再注入する
+  // - 次ターンでは、前回 assistant 自然文を通常履歴として参照する
+  // - INTERNAL PACK / DO NOT OUTPUT 系は入れない
+  {
+    const assistantNatural = String(finalAssistantContent ?? '').trim();
+
+    const isInternalAssistant =
+      /(?:DO NOT OUTPUT|INTERNAL PACK|STATE_CUES_V3|HISTORY_LITE|COORD \()/i.test(
+        assistantNatural,
+      );
+
+      if (isIrDiagnosis && assistantNatural && !isInternalAssistant) {
+        tail = [
+          ...tail,
+          {
+            role: 'assistant',
+            content: assistantNatural,
+          },
+        ];
+      }
+  }
 
   // 最大件数に再調整
   tail = tail.slice(-Math.max(1, maxMsgs));
@@ -3404,71 +3746,114 @@ const restoreCtxPackFromHistory = (historyForTurn: any[]): any | null => {
             .slice(-5)
         : [];
 
-    const restoredHistoryDigestV1 =
-      (ctx as any).historyDigestV1 && typeof (ctx as any).historyDigestV1 === 'object'
-        ? (ctx as any).historyDigestV1
-        : null;
-
-    const restoredFlow = (() => {
-      const f =
-        (ctx as any).flow && typeof (ctx as any).flow === 'object'
-          ? (ctx as any).flow
+        const restoredHistoryDigestV1 =
+        (ctx as any).historyDigestV1 && typeof (ctx as any).historyDigestV1 === 'object'
+          ? (ctx as any).historyDigestV1
           : null;
 
-      if (!f) return null;
+      const restoredHistoryForWriter =
+        Array.isArray((ctx as any).historyForWriter)
+          ? (ctx as any).historyForWriter
+              .map((m: any) => {
+                const role =
+                  m?.role === 'assistant'
+                    ? 'assistant'
+                    : m?.role === 'user'
+                      ? 'user'
+                      : null;
 
-      const out: any = {};
+                const content =
+                  typeof m?.content === 'string'
+                    ? String(m.content).trim()
+                    : typeof m?.text === 'string'
+                      ? String(m.text).trim()
+                      : '';
 
-      if (typeof f.delta === 'string' && f.delta.trim()) {
-        out.delta = f.delta.trim();
-      }
+                if (!role || !content) return null;
+                return { role, content };
+              })
+              .filter(
+                (m: any): m is { role: 'user' | 'assistant'; content: string } => Boolean(m),
+              )
+          : [];
 
-      if (
-        typeof f.returnStreak === 'number' &&
-        Number.isFinite(f.returnStreak)
-      ) {
-        out.returnStreak = f.returnStreak;
-      } else if (
-        typeof f.returnStreak === 'string' &&
-        f.returnStreak.trim() &&
-        Number.isFinite(Number(f.returnStreak))
-      ) {
-        out.returnStreak = Number(f.returnStreak);
-      }
+      const restoredHistoryForWriterAt =
+        typeof (ctx as any).historyForWriterAt === 'string' &&
+        String((ctx as any).historyForWriterAt).trim()
+          ? String((ctx as any).historyForWriterAt).trim()
+          : null;
 
-      if (typeof f.at === 'string' && f.at.trim()) {
-        out.at = f.at.trim();
-      }
+      const restoredIrMeta =
+        (ctx as any).irMeta && typeof (ctx as any).irMeta === 'object'
+          ? (ctx as any).irMeta
+          : null;
 
-      if (typeof f.sessionBreak === 'boolean') {
-        out.sessionBreak = f.sessionBreak;
-      }
+      const restoredDetailMode = (ctx as any).detailMode === true;
 
-      if (
-        typeof f.ageSec === 'number' &&
-        Number.isFinite(f.ageSec)
-      ) {
-        out.ageSec = f.ageSec;
-      }
+      const restoredFlow = (() => {
+        const f =
+          (ctx as any).flow && typeof (ctx as any).flow === 'object'
+            ? (ctx as any).flow
+            : null;
 
-      return Object.keys(out).length > 0 ? out : null;
-    })();
+        if (!f) return null;
 
-    const restored: any = {
-      qCode: typeof (ctx as any).qCode === 'string' ? (ctx as any).qCode : null,
-      depthStage: typeof (ctx as any).depthStage === 'string' ? (ctx as any).depthStage : null,
-      phase: typeof (ctx as any).phase === 'string' ? (ctx as any).phase : null,
-      conversationLine:
-        typeof (ctx as any).conversationLine === 'string' ? (ctx as any).conversationLine : null,
-      topicDigest:
-        typeof (ctx as any).topicDigest === 'string' ? (ctx as any).topicDigest : null,
-      observedBasedOn:
-        typeof (ctx as any).observedBasedOn === 'string' ? (ctx as any).observedBasedOn : null,
-      stingLevel:
-        typeof (ctx as any).stingLevel === 'string' ? (ctx as any).stingLevel : null,
-      depthHistoryLite: restoredDepthHistoryLite,
-      historyDigestV1: restoredHistoryDigestV1,
-      flow: restoredFlow,
+        const out: any = {};
+
+        if (typeof f.delta === 'string' && f.delta.trim()) {
+          out.delta = f.delta.trim();
+        }
+
+        if (
+          typeof f.returnStreak === 'number' &&
+          Number.isFinite(f.returnStreak)
+        ) {
+          out.returnStreak = f.returnStreak;
+        } else if (
+          typeof f.returnStreak === 'string' &&
+          f.returnStreak.trim() &&
+          Number.isFinite(Number(f.returnStreak))
+        ) {
+          out.returnStreak = Number(f.returnStreak);
+        }
+
+        if (typeof f.at === 'string' && f.at.trim()) {
+          out.at = f.at.trim();
+        }
+
+        if (typeof f.sessionBreak === 'boolean') {
+          out.sessionBreak = f.sessionBreak;
+        }
+
+        if (
+          typeof f.ageSec === 'number' &&
+          Number.isFinite(f.ageSec)
+        ) {
+          out.ageSec = f.ageSec;
+        }
+
+        return Object.keys(out).length > 0 ? out : null;
+      })();
+
+      const restored: any = {
+        qCode: typeof (ctx as any).qCode === 'string' ? (ctx as any).qCode : null,
+        depthStage: typeof (ctx as any).depthStage === 'string' ? (ctx as any).depthStage : null,
+        phase: typeof (ctx as any).phase === 'string' ? (ctx as any).phase : null,
+        conversationLine:
+          typeof (ctx as any).conversationLine === 'string' ? (ctx as any).conversationLine : null,
+        topicDigest:
+          typeof (ctx as any).topicDigest === 'string' ? (ctx as any).topicDigest : null,
+        observedBasedOn:
+          typeof (ctx as any).observedBasedOn === 'string' ? (ctx as any).observedBasedOn : null,
+        stingLevel:
+          typeof (ctx as any).stingLevel === 'string' ? (ctx as any).stingLevel : null,
+        depthHistoryLite: restoredDepthHistoryLite,
+        historyDigestV1: restoredHistoryDigestV1,
+        historyForWriter: restoredHistoryForWriter,
+        historyForWriterAt: restoredHistoryForWriterAt,
+        irMeta: restoredIrMeta,
+        detailMode: restoredDetailMode,
+        flow: restoredFlow,
       returnStreak:
         typeof (ctx as any).returnStreak === 'number' && Number.isFinite((ctx as any).returnStreak)
           ? (ctx as any).returnStreak
@@ -3842,6 +4227,30 @@ const normalizedHfw = Array.isArray(hfw)
       .filter((m) => m.content.length > 0)
   : [];
 
+  console.log('[IROS/HFW_SYNC_DEBUG]', {
+    cand0_len: Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
+      ? (out.metaForSave as any).extra.historyForWriter.length
+      : 0,
+    cand1_len: Array.isArray((out.extraForHandle as any)?.historyForWriter)
+      ? (out.extraForHandle as any).historyForWriter.length
+      : 0,
+    cand2_len: Array.isArray((out.extraForHandle as any)?.ctxPack?.historyForWriter)
+      ? (out.extraForHandle as any).extra?.ctxPack?.historyForWriter.length
+      : 0,
+    cand3_len: Array.isArray((extra2.ctxPack as any)?.historyForWriter)
+      ? (extra2.ctxPack as any).historyForWriter.length
+      : 0,
+    picked_len: Array.isArray(hfw) ? hfw.length : 0,
+    normalized_len: Array.isArray(normalizedHfw) ? normalizedHfw.length : 0,
+    first_content_type:
+      Array.isArray(hfw) && hfw.length > 0
+        ? typeof (hfw[0] as any)?.content
+        : null,
+    first_content_head:
+      Array.isArray(hfw) && hfw.length > 0
+        ? String((hfw[0] as any)?.content ?? '').slice(0, 120)
+        : '',
+  });
 // ✅ 重要：空でない historyForWriter が見つかったら、ctxPack 正本へ必ず同期
 if (normalizedHfw.length > 0) {
   (extra2.ctxPack as any).historyForWriter = normalizedHfw;
@@ -3870,6 +4279,33 @@ const digestV1Raw =
 if (digestV1Raw) {
   (extra2.ctxPack as any).historyDigestV1 = digestV1Raw;
 }
+
+// ✅ ctxPack にも irMeta / detailMode を同期（再診断の正本）
+const irMetaRaw =
+  (out.metaForSave as any)?.extra?.irMeta ??
+  (out.metaForSave as any)?.extra?.ctxPack?.irMeta ??
+  (out.extraForHandle as any)?.irMeta ??
+  (out.extraForHandle as any)?.ctxPack?.irMeta ??
+  (extra2 as any)?.irMeta ??
+  (extra2.ctxPack as any)?.irMeta ??
+  null;
+
+const detailModeRaw =
+  (out.metaForSave as any)?.extra?.detailMode === true ||
+  (out.metaForSave as any)?.extra?.ctxPack?.detailMode === true ||
+  (out.extraForHandle as any)?.detailMode === true ||
+  (out.extraForHandle as any)?.ctxPack?.detailMode === true ||
+  (extra2 as any)?.detailMode === true ||
+  (extra2.ctxPack as any)?.detailMode === true;
+
+if (irMetaRaw && typeof irMetaRaw === 'object') {
+  (extra2.ctxPack as any).irMeta = irMetaRaw;
+}
+
+if (detailModeRaw) {
+  (extra2.ctxPack as any).detailMode = true;
+}
+
 // ✅ Phase 2-1: personal SHIFT 用の軽量推定を ctxPack 正本へ stamp
 // - 断定診断ではなく "hint" として保持
 // - relation / temperature / shiftKind をまず先に入れる

@@ -356,10 +356,66 @@ export async function buildTurnContext(
       descentGate: descentGate ?? null,
     } as any;
 
-    const framePlan = buildFramePlan({ state: stateLite, inputKind });
+    const isIrDiagnosisTurn =
+    mode === 'ir' ||
+    mode === 'diagnosis' ||
+    (baseMetaForTurn as any)?.extra?.isIrDiagnosisTurn === true ||
+    (baseMetaForTurn as any)?.presentationKind === 'diagnosis';
 
-    baseMetaForTurn.inputKind = inputKind;
+  // 🔥 詳細要求検知
+  const detailSourceText = String(
+    (baseMetaForTurn as any)?.userText ??
+      (baseMetaForTurn as any)?.inputText ??
+      (baseMetaForTurn as any)?.text ??
+      ''
+  );
+
+  const wantsDetail = /詳しく|詳細|もう少し|深く/.test(detailSourceText);
+
+  // 🔥 前回 irMeta 取得
+  const prevIrMeta =
+    (baseMetaForTurn as any)?.prevMeta?.extra?.irMeta ??
+    (baseMetaForTurn as any)?.prevMeta?.extra?.ctxPack?.irMeta ??
+    (baseMetaForTurn as any)?.prevMeta?.ctxPack?.irMeta ??
+    null;
+
+  const prevDetailMode =
+    (baseMetaForTurn as any)?.prevMeta?.extra?.detailMode === true ||
+    (baseMetaForTurn as any)?.prevMeta?.extra?.ctxPack?.detailMode === true ||
+    (baseMetaForTurn as any)?.prevMeta?.ctxPack?.detailMode === true;
+
+  // 🔥 履歴ベース再診断フラグ
+  const isDiagnosisDetailTurn =
+    !isIrDiagnosisTurn && wantsDetail && !!prevIrMeta;
+
+  if (isDiagnosisDetailTurn) {
+    (baseMetaForTurn as any).extra = (baseMetaForTurn as any).extra ?? {};
+    (baseMetaForTurn as any).extra.ctxPack =
+      (baseMetaForTurn as any).extra.ctxPack ?? {};
+
+    (baseMetaForTurn as any).extra.isIrDiagnosisTurn = true;
+    (baseMetaForTurn as any).extra.detailMode = true;
+    (baseMetaForTurn as any).extra.irMeta = prevIrMeta;
+
+    (baseMetaForTurn as any).extra.ctxPack.detailMode =
+      prevDetailMode || true;
+    (baseMetaForTurn as any).extra.ctxPack.irMeta = prevIrMeta;
+
+    (baseMetaForTurn as any).presentationKind = 'diagnosis';
+    (baseMetaForTurn as any).mode = 'diagnosis';
+  }
+  const framePlan =
+    isIrDiagnosisTurn || isDiagnosisDetailTurn
+      ? null
+      : buildFramePlan({ state: stateLite, inputKind });
+
+  baseMetaForTurn.inputKind = inputKind;
+
+  if (!(isIrDiagnosisTurn || isDiagnosisDetailTurn) && framePlan) {
     baseMetaForTurn.framePlan = framePlan;
+  } else {
+    delete (baseMetaForTurn as any).framePlan;
+  }
 
     // =========================
     // ✅ FINAL pre-seed（writer前に seed を必ず用意）

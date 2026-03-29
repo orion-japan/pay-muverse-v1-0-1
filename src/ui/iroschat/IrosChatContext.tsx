@@ -28,6 +28,10 @@ type SendResult =
     conversations: IrosConversation[];
     userInfo: IrosUserInfo | null;
 
+    /** 引用・入力補助用 draft */
+    draftText: string;
+    setDraftText: (text: string) => void;
+
     /** UI表示用（state） */
     activeConversationId: string | null;
 
@@ -152,6 +156,9 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
   const [messages, setMessages] = useState<IrosMessage[]>([]);
   const [conversations, setConversations] = useState<IrosConversation[]>([]);
   const [userInfo, setUserInfo] = useState<IrosUserInfo | null>(null);
+
+  // 引用ボタンから ChatInput に流し込むための draft
+  const [draftText, setDraftText] = useState('');
 
   // 口調スタイル（/iros-ai/settings で localStorage に保存した値を読む）
   const [style, setStyle] = useState<IrosStyle>('friendly');
@@ -700,14 +707,18 @@ const payload: any = {
 
   return (
     <IrosChatContext.Provider
-      value={{
-        loading,
-        messages,
-        conversations,
-        userInfo,
-        activeConversationId,
-        getActiveConversationId: () => activeConversationIdRef.current,
-        style,
+    value={{
+      loading,
+      messages,
+      conversations,
+      userInfo,
+
+      draftText,
+      setDraftText,
+
+      activeConversationId,
+      getActiveConversationId: () => activeConversationIdRef.current,
+      style,
 
         currentMeta: lastMeta,
         lastMeta,

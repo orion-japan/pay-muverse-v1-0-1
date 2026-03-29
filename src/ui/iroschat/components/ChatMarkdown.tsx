@@ -162,32 +162,45 @@ export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
 <ReactMarkdown
   remarkPlugins={[remarkGfm, remarkBreaks]}
   components={{
-          p: ({ children, ...props }) => {
-            const raw = plainTextFromChildren(children);
-            const idx = pIndex++;
-            const shouldDecorate = enableParaDecor && raw.trim() && !hasLeadingEmoji(raw) && idx <= 2;
-            const icon = pickParagraphIcon(idx);
+    p: ({ children, ...props }) => {
+      const raw = plainTextFromChildren(children);
+      const idx = pIndex++;
+      const isGuideParagraph = raw.includes('詳しく内容を分析するには');
+      const shouldDecorate =
+        !isGuideParagraph && enableParaDecor && raw.trim() && !hasLeadingEmoji(raw) && idx <= 2;
+      const icon = pickParagraphIcon(idx);
 
-            return (
-              <p {...props} className="iros-p">
-                {shouldDecorate && (
-                  <span className="iros-picon" aria-hidden="true">
-                    {icon}
-                  </span>
-                )}
-                <span
-                  className="iros-ptext"
-                  style={{
-                    display: 'block',
-                    whiteSpace: 'pre-wrap',
-                  }}
-                >
-                  {children}
-                </span>
-              </p>
-            );
-          },
-
+      return (
+        <p
+          {...props}
+          className={`iros-p${isGuideParagraph ? ' iros-guide-p' : ''}`}
+          style={
+            isGuideParagraph
+              ? {
+                  marginTop: '8px',
+                  marginBottom: '0',
+                  lineHeight: 1.7,
+                }
+              : undefined
+          }
+        >
+          {shouldDecorate && (
+            <span className="iros-picon" aria-hidden="true">
+              {icon}
+            </span>
+          )}
+          <span
+            className="iros-ptext"
+            style={{
+              display: 'block',
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {children}
+          </span>
+        </p>
+      );
+    },
           h1: ({ children }) => <HeadingLine title={plainTextFromChildren(children)} level={1} />,
           h2: ({ children }) => <HeadingLine title={plainTextFromChildren(children)} level={2} />,
           h3: ({ children }) => <HeadingLine title={plainTextFromChildren(children)} level={3} />,

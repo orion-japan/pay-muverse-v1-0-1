@@ -486,9 +486,22 @@ const obsCard = (() => {
     const pickStr = (...cands: any[]) => {
       for (const v of cands) {
         if (v === undefined || v === null) continue;
-        const s = String(v).trim();
-        if (!s) continue;
-        return s;
+
+        if (typeof v === 'string') {
+          const s = v.trim();
+          if (!s) continue;
+          return s;
+        }
+
+        if (typeof v === 'number' || typeof v === 'boolean') {
+          const s = String(v).trim();
+          if (!s) continue;
+          return s;
+        }
+
+        // object / array はここでは文字列化しない
+        // polarity などで [object Object] 汚染を防ぐ
+        continue;
       }
       return null;
     };
@@ -2763,97 +2776,59 @@ const mustIncludeRuleText = buildMustIncludeRuleText(
 //
 // 目的：seedDraftを「seedFinal一本」にし、userText混入の地雷を消す。
 
-const seedDraftSanitized = sanitizeSeedDraftForLLM(seedDraft0);
+const isIrDiagnosis =
+  (opts as any)?.meta?.extra?.isIrDiagnosisTurn === true ||
+  (opts as any)?.meta?.extra?.presentationKind === 'diagnosis' ||
+  (opts as any)?.meta?.extra?.irDiagnosis === true ||
+  (opts as any)?.meta?.extra?.mode === 'ir' ||
+  (opts as any)?.meta?.extra?.intent === 'ir';
 
-// ✅ canonical one-line seed を FLOW_V2 から直接作る
-const canonicalOneLineSeed = (() => {
-  try {
-    const source = [String(seedDraftRaw ?? ''), String(slotsTextRawAll ?? '')]
-      .find((s) => /FLOW_V2\s*\(DO NOT OUTPUT\):/i.test(String(s ?? ''))) ?? '';
+// =========================
+// ir診断は完全に軽量seed固定
+// =========================
+let seedFinal = '';
 
-    if (!source) return '';
+if (isIrDiagnosis) {
+  const override =
+    String(
+      (opts as any)?.meta?.extra?.contentOverride ??
+      (opts as any)?.meta?.extra?.finalAssistantTextCandidate ??
+      (opts as any)?.meta?.extra?.finalAssistantText ??
+      ''
+    ).trim();
 
-    const current =
-      (source.match(/(?:^|\n)current=([^\n]+)/)?.[1] ?? '').trim();
-    const prev =
-      (source.match(/(?:^|\n)prev=([^\n]+)/)?.[1] ?? '').trim();
-    const delta =
-      (source.match(/(?:^|\n)delta=([^\n]+)/)?.[1] ?? '').trim();
+  seedFinal = override || 'ir診断';
+} else {
+  const seedDraftSanitized = sanitizeSeedDraftForLLM(seedDraft0);
 
-    if (!current) return '';
+  const canonicalOneLineSeed = (() => {
+    try {
+      const source = [String(seedDraftRaw ?? ''), String(slotsTextRawAll ?? '')]
+        .find((s) => /FLOW_V2\s*\(DO NOT OUTPUT\):/i.test(String(s ?? ''))) ?? '';
 
-    const [e_prev, layer_prev, polarity_prev] =
-      prev && prev !== '(null)' ? prev.split('-') : [null, null, null];
+      if (!source) return '';
 
-    const [e_now, layer_now, polarity_now] =
-      current && current !== '(null)' ? current.split('-') : [null, null, null];
+      const current =
+        (source.match(/(?:^|\n)current=([^\n]+)/)?.[1] ?? '').trim();
 
-    const sevenPattern = (() => {
-      if (!prev || prev === '(null)') return 'start_anchor';
-      if (
-        layer_prev === layer_now &&
-        polarity_prev === polarity_now &&
-        (delta === 'same' || delta.length === 0)
-      ) {
-        return e_prev !== e_now ? 'energy_shift' : 'hold';
-      }
-      if (layer_prev !== layer_now && polarity_prev === polarity_now) {
-        return 'layer_shift';
-      }
-      if (layer_prev === layer_now && polarity_prev !== polarity_now) {
-        return 'polarity_shift';
-      }
-      if (layer_prev !== layer_now && polarity_prev !== polarity_now) {
-        return 'turn_shift';
-      }
-      return 'structure_shift';
-    })();
+      if (!current) return '';
 
-    const oneLineText = (() => {
-      switch (sevenPattern) {
-        case 'start_anchor':
-          return 'いま新しい論点に重心が置かれた';
-        case 'hold':
-          return 'いま同じ論点に留まっている';
-        case 'energy_shift':
-          return '同じ論点のまま温度が変わっている';
-        case 'layer_shift':
-          return '見ている層が切り替わっている';
-        case 'polarity_shift':
-          return '受け取り方の向きが反転している';
-        case 'turn_shift':
-          return '視点と向きが同時に切り替わっている';
-        default:
-          return '関心の重心が別の論点へ移っている';
-      }
-    })();
-
-    if (!oneLineText) return '';
-
-    return oneLineText;
-
+      return '関心の重心が別の論点へ移っている';
     } catch {
       return '';
     }
-    })();
-console.log('[IROS/CANONICAL_ONE_LINE_SEED]', {
-  traceId: debug.traceId,
-  conversationId: debug.conversationId,
-  userCode: debug.userCode,
-  hasCanonicalOneLineSeed: canonicalOneLineSeed.length > 0,
-  canonicalOneLineSeedHead: safeHead(canonicalOneLineSeed, 160),
-});
+  })();
 
-// ✅ 方針：writer へ userText を絶対に渡さない
-// - chooseSeedForLLM の userText 経路を遮断
-// - seed が空になる場合は「落ちても意味が通る」安全seedにフォールバック
-const FALLBACK_SEED = 'ユーザーの最後の発話に、結論を先にして短く直接答えてください。必要なら要点→補足の順で。';
+  const FALLBACK_SEED =
+    'ユーザーの最後の発話に、結論を先にして短く直接答えてください。';
 
-const seedFinal =
-  canonicalOneLineSeed ||
-  chooseSeedForLLM(seedDraftSanitized, '') ||
-  FALLBACK_SEED;
+  seedFinal =
+    canonicalOneLineSeed ||
+    chooseSeedForLLM(seedDraftSanitized, '') ||
+    FALLBACK_SEED;
+}
 
+// 正本
 // ✅ seedDraft は seedFinal を正本とする（userText遮断の一貫性）
 const seedDraft = seedFinal;
 
@@ -3690,24 +3665,29 @@ const shouldPreferPastStateRecall =
     pastStateTriggerKindForWriter === 'recent_topic');
 
     const rawTurnsForWriter =
-    shouldPreferPastStateRecall
-      ? (
-          (opts as any)?.turnsForWriter ??
-          (opts as any)?.userContext?.turnsForWriter ??
-          (opts as any)?.userContext?.ctxPack?.turnsForWriter ??
-          (opts as any)?.userContext?.ctxPack?.turns ??
-          (opts as any)?.userContext?.turns ??
-          []
-        )
-      : (
-          (opts as any)?.turnsForWriter ??
-          (opts as any)?.userContext?.turnsForWriter ??
-          (opts as any)?.userContext?.ctxPack?.turnsForWriter ??
-          (opts as any)?.userContext?.ctxPack?.turns ??
-          (opts as any)?.userContext?.turns ??
-          lastTurnsSafe ??
-          []
-        );
+      shouldPreferPastStateRecall
+        ? (
+            (opts as any)?.turnsForWriter ??
+            (opts as any)?.userContext?.turnsForWriter ??
+            (opts as any)?.userContext?.ctxPack?.turnsForWriter ??
+            (opts as any)?.userContext?.ctxPack?.turns ??
+            (opts as any)?.userContext?.turns ??
+            (opts as any)?.userContext?.ctxPack?.historyForWriter ??
+            (opts as any)?.userContext?.historyForWriter ??
+            lastTurnsSafe ??
+            []
+          )
+        : (
+            (opts as any)?.turnsForWriter ??
+            (opts as any)?.userContext?.turnsForWriter ??
+            (opts as any)?.userContext?.ctxPack?.turnsForWriter ??
+            (opts as any)?.userContext?.ctxPack?.turns ??
+            (opts as any)?.userContext?.turns ??
+            (opts as any)?.userContext?.ctxPack?.historyForWriter ??
+            (opts as any)?.userContext?.historyForWriter ??
+            lastTurnsSafe ??
+            []
+          );
 
 console.log('[IROS/PAST_STATE][turnsForWriter_policy]', {
   traceId: (opts as any)?.traceId ?? (opts as any)?.extra?.traceId ?? null,
@@ -3824,7 +3804,37 @@ try {
     primary_question: primaryQuestionForWriter,
   });
 } catch {}
+try {
+  console.log('[IROS/rephraseEngine][CTXPACK_FOR_WRITER_PICK]', {
+    traceId: debug.traceId ?? null,
+    conversationId: debug.conversationId ?? null,
+    userCode: debug.userCode ?? null,
 
+    opts_ctxPack_keys:
+      (opts as any)?.ctxPack && typeof (opts as any).ctxPack === 'object'
+        ? Object.keys((opts as any).ctxPack)
+        : [],
+
+    userContext_ctxPack_keys:
+      (opts as any)?.userContext?.ctxPack &&
+      typeof (opts as any).userContext.ctxPack === 'object'
+        ? Object.keys((opts as any).userContext.ctxPack)
+        : [],
+
+    picked_keys:
+      ctxPackForWriter && typeof ctxPackForWriter === 'object'
+        ? Object.keys(ctxPackForWriter)
+        : [],
+
+    picked_hasHistoryForWriter:
+      !!(ctxPackForWriter && Array.isArray((ctxPackForWriter as any).historyForWriter)),
+
+    picked_historyForWriter_len:
+      ctxPackForWriter && Array.isArray((ctxPackForWriter as any).historyForWriter)
+        ? (ctxPackForWriter as any).historyForWriter.length
+        : 0,
+  });
+} catch {}
 const continuityKindForWriter =
   String(
     (opts as any)?.continuityKind ??
@@ -5863,6 +5873,26 @@ extra: {
 
 userContext: {
   ...(((opts as any)?.userContext && typeof (opts as any).userContext === 'object') ? (opts as any).userContext : {}),
+
+  ctxPack: {
+    ...((((opts as any)?.userContext?.ctxPack &&
+      typeof (opts as any).userContext.ctxPack === 'object')
+      ? (opts as any).userContext.ctxPack
+      : {})),
+    ...((((opts as any)?.ctxPack &&
+      typeof (opts as any).ctxPack === 'object')
+      ? (opts as any).ctxPack
+      : {})),
+    ...((((opts as any)?.ctxPack?.irMeta &&
+      typeof (opts as any).ctxPack.irMeta === 'object')
+      ? { irMeta: (opts as any).ctxPack.irMeta }
+      : {})),
+    ...((((opts as any)?.ctxPack?.detailMode === true) ||
+      ((opts as any)?.userContext?.ctxPack?.detailMode === true))
+      ? { detailMode: true }
+      : {}),
+  },
+
   meta: {
     ...((((opts as any)?.userContext?.meta && typeof (opts as any).userContext.meta === 'object')
       ? (opts as any).userContext.meta

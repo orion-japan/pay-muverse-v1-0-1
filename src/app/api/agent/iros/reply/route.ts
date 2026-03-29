@@ -1268,7 +1268,82 @@ extraSoT = {
   const upperMode = String(effectiveMode ?? '').toUpperCase();
   const enableRenderEngine = extraSoT?.renderEngine === true || extraSoT?.renderEngineGate === true;
   const isIT = upperMode === 'IT' || Boolean((meta as any)?.extra?.renderReplyForcedIT);
+  // ✅ ir診断は render / rephrase に入れない
+  const isIrDiagnosis =
+    (result as any)?.metaForSave?.extra?.isIrDiagnosisTurn === true ||
+    (result as any)?.metaForSave?.extra?.presentationKind === 'diagnosis';
 
+    if (isIrDiagnosis) {
+      const finalText = String(
+        (result as any)?.content ??
+          (result as any)?.assistantText ??
+          (result as any)?.result?.assistantText ??
+          (result as any)?.text ??
+          '',
+      ).trim();
+
+const baseDiagExtra =
+  (((result as any)?.metaForSave?.extra ?? {}) as any);
+
+const baseDiagCtxPack =
+  (baseDiagExtra?.ctxPack && typeof baseDiagExtra.ctxPack === 'object')
+    ? baseDiagExtra.ctxPack
+    : {};
+
+const persistMeta = {
+  ...((result as any)?.metaForSave ?? {}),
+  presentationKind: 'diagnosis',
+  mode: 'diagnosis',
+  extra: {
+    ...baseDiagExtra,
+    persistedByRoute: true,
+    persistPolicy: 'REPLY_SINGLE_WRITER',
+    persistAssistantMessage: true,
+    isIrDiagnosisTurn: true,
+    presentationKind: 'diagnosis',
+    mode: 'diagnosis',
+    finalAssistantText: finalText,
+    resolvedText: finalText,
+    rawTextFromModel: finalText,
+    extractedTextFromModel: finalText,
+    ctxPack: {
+      ...baseDiagCtxPack,
+      ...(baseDiagExtra?.irMeta && typeof baseDiagExtra.irMeta === 'object'
+        ? { irMeta: baseDiagExtra.irMeta }
+        : {}),
+      ...(baseDiagCtxPack?.irMeta && typeof baseDiagCtxPack.irMeta === 'object'
+        ? { irMeta: baseDiagCtxPack.irMeta }
+        : {}),
+      ...(baseDiagCtxPack?.detailMode === true || baseDiagExtra?.detailMode === true
+        ? { detailMode: true }
+        : {}),
+    },
+  },
+};
+try {
+  const persistRes = await persistAssistantMessageToIrosMessages({
+    supabase,
+    conversationId,
+    userCode,
+    content: finalText,
+    meta: persistMeta,
+  });
+
+  console.log('[IROS][DIAGNOSIS_PERSIST_RESULT]', persistRes);
+
+  if (!persistRes || (persistRes as any).ok !== true || (persistRes as any).inserted !== true) {
+    console.error('[IROS][DIAGNOSIS_PERSIST_NOT_INSERTED]', persistRes);
+  }
+} catch (e) {
+  console.error('[IROS][DIAGNOSIS_PERSIST_ERROR]', e);
+}
+      return NextResponse.json({
+        ok: true,
+        assistantText: finalText,
+        content: finalText,
+        meta: persistMeta,
+      });
+    }
   const applied = await applyRenderEngineIfEnabled({
     enableRenderEngine,
     isIT,

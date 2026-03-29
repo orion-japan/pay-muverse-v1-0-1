@@ -245,25 +245,38 @@ export function computeGoalAndPriority(args: ComputeGoalAndPriorityArgs): Comput
     userText: text,
   };
 
-  // ★ safety: goal.targetQ が空なら「このターンで決まった qCode」を入れておく
-  if (!(goal as any).targetQ && qNow) {
-    (goal as any).targetQ = qNow;
+  const isIrDiagnosisTurn =
+  String((args as any)?.mode ?? '').trim() === 'diagnosis' ||
+  String((args as any)?.requestedMode ?? '').trim() === 'diagnosis' ||
+  (args as any)?.isIrDiagnosisTurn === true ||
+  String((args as any)?.presentationKind ?? '').trim() === 'diagnosis';
+
+  // ★ safety: ir診断では通常会話の goal continuity を通さない
+  if (!isIrDiagnosisTurn) {
+    if (!(goal as any).targetQ && qNow) {
+      (goal as any).targetQ = qNow;
+    }
+
+    // eslint-disable-next-line no-console
+    console.log('[IROS/GOAL_CONT] applyGoalContinuity', {
+      conversationId: conversationId ?? null,
+      goal_in: goal,
+      ctx: {
+        lastQ: continuity.lastQ,
+        lastDepth: continuity.lastDepth,
+        qTrace: (continuity as any)?.qTrace ?? null,
+        memoryQ: (continuity as any)?.memoryState?.qPrimary ?? null,
+      },
+    });
+
+    goal = applyGoalContinuity(goal, continuity);
+  } else {
+    // eslint-disable-next-line no-console
+    console.log('[IROS/GOAL_CONT][SKIP_IR_DIAGNOSIS]', {
+      conversationId: conversationId ?? null,
+      isIrDiagnosisTurn: true,
+    });
   }
-
-  // eslint-disable-next-line no-console
-  console.log('[IROS/GOAL_CONT] applyGoalContinuity', {
-    conversationId: conversationId ?? null,
-    goal_in: goal,
-    ctx: {
-      lastQ: continuity.lastQ,
-      lastDepth: continuity.lastDepth,
-      qTrace: (continuity as any)?.qTrace ?? null,
-      memoryQ: (continuity as any)?.memoryState?.qPrimary ?? null,
-    },
-  });
-
-  goal = applyGoalContinuity(goal, continuity);
-
   // eslint-disable-next-line no-console
   console.log('[IROS/GOAL_CONT]  result', {
     conversationId: conversationId ?? null,

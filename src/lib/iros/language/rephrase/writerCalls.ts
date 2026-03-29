@@ -2314,35 +2314,85 @@ const internalPackRawCleaned =
   const meaningKindRaw = shiftMeta.meaningKind;
   const shiftIntentRaw = shiftMeta.intent;
 
-  // writer には delta を混ぜない。
-  // delta はここでは補助観測にとどめ、pack 正本は internalPackFixed に固定する。
-  const internalPackForWriterSource = internalPackFixed;
+// writer には delta を混ぜない。
+// delta はここでは補助観測にとどめ、pack 正本は internalPackFixed に固定する。
 
-  const internalPackForWriter = (() => {
-    let base = String(internalPackForWriterSource ?? '')
-      .replace(/^[ \t]*@OBS[^\n]*(?:\n|$)/gm, '')
-      .replace(/^[ \t]*@SHIFT[^\n]*(?:\n|$)/gm, '')
-      .replace(/^[ \t]*@SAFE[^\n]*(?:\n|$)/gm, '')
-      .replace(/^[ \t]*@NEXT_HINT[^\n]*(?:\n|$)/gm, '')
-      .replace(/(?:^|\n)@DELTA[^\n]*/g, '')
+const internalPackForWriterSource = internalPackFixed;
 
-      // 旧 FLOW / FLOW_V2 は writer には渡さない
-      .replace(/\nFLOW:\n[\s\S]*?(?=\n[A-Z_]+:|$)/g, '')
-      .replace(
-        /\nFLOW_V2\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ \-]+(?:\s*\(DO NOT OUTPUT\))?:|$)/g,
-        '',
-      )
+const irMeta =
+  (args as any)?.meta?.extra?.irMeta ??
+  (args as any)?.meta?.irMeta ??
+  (args as any)?.meta?.extra?.ctxPack?.irMeta ??
+  (args as any)?.meta?.ctxPack?.irMeta ??
+  (args as any)?.userContext?.meta?.extra?.irMeta ??
+  (args as any)?.userContext?.meta?.irMeta ??
+  (args as any)?.userContext?.ctxPack?.irMeta ??
+  (args as any)?.userContext?.extra?.ctxPack?.irMeta ??
+  null;
 
-      // directive 系
-      .replace(
-        /\nWRITER_DIRECTIVES\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ \-]+(?:\s*\(DO NOT OUTPUT\))?:|$)/g,
-        '',
-      )
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+const isDetailMode =
+  (args as any)?.meta?.extra?.detailMode === true ||
+  (args as any)?.meta?.detailMode === true ||
+  (args as any)?.meta?.extra?.ctxPack?.detailMode === true ||
+  (args as any)?.meta?.ctxPack?.detailMode === true ||
+  (args as any)?.userContext?.meta?.extra?.detailMode === true ||
+  (args as any)?.userContext?.meta?.detailMode === true ||
+  (args as any)?.userContext?.ctxPack?.detailMode === true ||
+  (args as any)?.userContext?.extra?.ctxPack?.detailMode === true;
+  console.log('[DEBUG][IR_META_CHECK]', {
+    isDetailMode,
+    hasIrMeta: !!irMeta,
+    irMeta,
+  });
+const irMetaBlock = (() => {
+  if (!isDetailMode || !irMeta || typeof irMeta !== 'object') return '';
 
-    return base;
-  })();
+  const obs = String((irMeta as any)?.observationResult ?? '').trim();
+  const aware = String((irMeta as any)?.awarenessText ?? '').trim();
+  const summary = String((irMeta as any)?.summaryText ?? '').trim();
+
+  if (!obs && !aware && !summary) return '';
+
+  return [
+    'IR_META (DO NOT OUTPUT):',
+    obs ? `observation=${obs}` : '',
+    aware ? `awareness=${aware}` : '',
+    summary ? `summary=${summary}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+})();
+
+const internalPackForWriter = (() => {
+  let base = [
+    String(internalPackForWriterSource ?? ''),
+    irMetaBlock,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+    .replace(/^[ \t]*@OBS[^\n]*(?:\n|$)/gm, '')
+    .replace(/^[ \t]*@SHIFT[^\n]*(?:\n|$)/gm, '')
+    .replace(/^[ \t]*@SAFE[^\n]*(?:\n|$)/gm, '')
+    .replace(/^[ \t]*@NEXT_HINT[^\n]*(?:\n|$)/gm, '')
+    .replace(/(?:^|\n)@DELTA[^\n]*/g, '')
+
+    // 旧 FLOW / FLOW_V2 は writer には渡さない
+    .replace(/\nFLOW:\n[\s\S]*?(?=\n[A-Z_]+:|$)/g, '')
+    .replace(
+      /\nFLOW_V2\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ \-]+(?:\s*\(DO NOT OUTPUT\))?:|$)/g,
+      '',
+    )
+
+    // directive 系
+    .replace(
+      /\nWRITER_DIRECTIVES\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ \-]+(?:\s*\(DO NOT OUTPUT\))?:|$)/g,
+      '',
+    )
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return base;
+})();
 
     try {
       const packNormFinal = norm(internalPackForWriter);

@@ -236,12 +236,23 @@ function transformIrTemplateToMarkdown(input: string): string {
   //   改行や段落構造がUI側で崩れる
   // - 旧テンプレの見出し（観測対象 / 深度 / 位相 / 意識状態 / メッセージ）が
   //   実際に含まれているときだけ下の既存変換へ進める
-  const looksLikeLegacyIrTemplate =
-    /(?:^|\n)\s*(?:観測対象|深度|位相|意識状態|メッセージ)\s*[:：]?/m.test(input);
+// 新 ir診断フォーマット（まとめあり）はそのまま通す
+const looksLikeNewIrFormat =
+  /(?:^|\n)\s*観測対象\s*[:：]/m.test(input) &&
+  /(?:^|\n)\s*意識状態\s*[:：]/m.test(input) &&
+  /(?:^|\n)\s*まとめ\s*[:：]/m.test(input);
 
-  if (!looksLikeLegacyIrTemplate) {
-    return input;
-  }
+if (looksLikeNewIrFormat) {
+  return input;
+}
+
+// 旧テンプレ判定
+const looksLikeLegacyIrTemplate =
+  /(?:^|\n)\s*(?:観測対象|深度|位相|意識状態|メッセージ)\s*[:：]?/m.test(input);
+
+if (!looksLikeLegacyIrTemplate) {
+  return input;
+}
   // ③ 旧 I層テンプレ → Markdown（既存ロジック）
   const rawLines = input.split(/\r?\n/);
 
@@ -362,19 +373,67 @@ function transformIrTemplateToMarkdown(input: string): string {
   return out.join('\n');
 }
 
+function extractDiagnosisSummary(raw: string): string {
+  const text = String(raw ?? '').trim();
+  if (!text) return '';
 
+  const lines = text.split(/\r?\n/);
+
+  const normalizeLine = (line: string): string =>
+    line
+      .replace(/^🌀\s*/, '')
+      .replace(/^🧿\s*/, '')
+      .replace(/^🌿\s*/, '')
+      .replace(/^🌱\s*/, '')
+      .replace(/\*\*/g, '')
+      .trim();
+
+  const isHeadingLine = (line: string): boolean => {
+    const t = normalizeLine(line);
+    return /^(観測対象|観測結果|意識状態|メッセージ|まとめ)\s*[:：]/.test(t);
+  };
+
+  const startIndex = lines.findIndex((line) => {
+    const t = normalizeLine(line);
+    return /^まとめ\s*[:：]/.test(t);
+  });
+
+  if (startIndex < 0) return '';
+
+  const firstLineNormalized = normalizeLine(lines[startIndex]);
+  const firstLine = firstLineNormalized.replace(/^まとめ\s*[:：]\s*/, '').trim();
+
+  const collected: string[] = firstLine ? [firstLine] : [];
+
+  for (let i = startIndex + 1; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const normalized = normalizeLine(rawLine);
+
+    if (isHeadingLine(rawLine)) break;
+
+    collected.push(normalized.length > 0 ? rawLine.trim() : '');
+  }
+
+  return collected.join('\n').trim();
+}
 export default function MessageList() {
-  const { messages, loading, error, sendNextStepChoice } =
-    useIrosChat() as unknown as {
-      messages: IrosMessage[];
-      loading: boolean;
-      error?: string | null;
-      sendNextStepChoice?: (opt: {
-        key: string; // ✅ ここは choiceId を渡す
-        label: string;
-        gear?: string | null;
-      }) => Promise<unknown>;
-    };
+  const {
+    messages,
+    loading,
+    error,
+    sendNextStepChoice,
+    setDraftText,
+  } = useIrosChat() as unknown as {
+    messages: IrosMessage[];
+    loading: boolean;
+    error?: string | null;
+    setDraftText?: (text: string) => void;
+    sendNextStepChoice?: (opt: {
+      key: string; // ✅ ここは choiceId を渡す
+      label: string;
+      gear?: string | null;
+    }) => Promise<unknown>;
+  };
 
   const authVal = (typeof useAuth === 'function' ? useAuth() : {}) as {
     user?: { avatarUrl?: string | null };
@@ -385,8 +444,15 @@ export default function MessageList() {
   const bottomRef = React.useRef<HTMLDivElement | null>(null);
   const first = React.useRef(true);
 
-  const scrollToBottom = (behavior: ScrollBehavior = 'auto') =>
-    bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
+  const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
+    const container = listRef.current;
+    if (!container) return;
+
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior,
+    });
+  };
 
   React.useEffect(() => {
     if (!messages.length) return;
@@ -405,25 +471,8 @@ export default function MessageList() {
       return;
     }
 
-    const container = listRef.current;
-    const bottomEl = bottomRef.current;
-    if (!container || !bottomEl) return;
-
-    if (last.role === 'user') {
-      // ユーザーメッセージ送信時：画面中央付近に持ち上げる
-      const bottomOffset = bottomEl.offsetTop;
-      const viewHeight = container.clientHeight;
-      const desiredRatio = 0.5;
-
-      const targetTopRaw = bottomOffset - viewHeight * desiredRatio;
-      const maxScroll = container.scrollHeight - viewHeight;
-      const targetTop = Math.max(0, Math.min(targetTopRaw, maxScroll));
-
-      container.scrollTo({ top: targetTop, behavior: 'smooth' });
-    } else {
-      // Iros の返答時：一番下まで追尾
-      scrollToBottom('smooth');
-    }
+    // 送信後も返答後も、常に下端へだけ追尾する
+    scrollToBottom('smooth');
   }, [messages]);
 
   const resolveUserAvatar = (msg: IrosMessage): string => {
@@ -453,8 +502,30 @@ const rawText = stripIrosMetaHeader(toSafeString(m.text));
 const displayText = stripNextStepTagsForDisplay(rawText);
 
 // ✅ Markdown は “潰さない” で ChatMarkdown に渡す（整形は ChatMarkdown 側でやる）
-const safeText = transformIrTemplateToMarkdown(displayText);
+let safeText = transformIrTemplateToMarkdown(displayText);
 
+// ▼ ir診断ガイドを装飾分離（HTML使わない版）
+// ▼ ir診断ガイドを装飾分離（HTML使わない版）
+if (m.meta?.presentationKind === 'diagnosis') {
+  const guideMatch = safeText.match(/（詳しく内容を分析するには.*?）。?/);
+
+  if (guideMatch) {
+    const guide = guideMatch[0];
+    const main = safeText.replace(guide, '').trim();
+
+    safeText = `
+${main}
+
+──────────────
+🪔 ${guide.replace(/[（）]/g, '')}
+`;
+  }
+}
+
+const diagnosisSummary =
+  !isUser && m.meta?.presentationKind === 'diagnosis'
+    ? extractDiagnosisSummary(safeText)
+    : '';
 
         // ✅ UIモード（SILENCE判定）: serverの meta.extra.uiMode を最優先で拾う
         const uiMode =
@@ -475,6 +546,16 @@ const safeText = transformIrTemplateToMarkdown(displayText);
           safeText,
           uiMode,
           isSilence,
+          presentationKind_top: (m.meta as any)?.presentationKind ?? null,
+          presentationKind_extra: (m.meta as any)?.extra?.presentationKind ?? null,
+          mode_top: (m.meta as any)?.mode ?? null,
+          mode_extra: (m.meta as any)?.extra?.mode ?? null,
+          metaKeys:
+            m.meta && typeof m.meta === 'object' ? Object.keys(m.meta as any) : [],
+          metaExtraKeys:
+            (m.meta as any)?.extra && typeof (m.meta as any).extra === 'object'
+              ? Object.keys((m.meta as any).extra)
+              : [],
           nextStep: m.meta?.nextStep
             ? {
                 gear: m.meta.nextStep.gear,
@@ -482,7 +563,6 @@ const safeText = transformIrTemplateToMarkdown(displayText);
               }
             : null,
         });
-
         // ✅ 表示用Qコードは「現在Q」を優先して拾う（targetQ / goalTargetQ は表示に使わない）
         const qToShowRaw =
           (m.meta?.qCode as any) ??
@@ -514,6 +594,16 @@ const safeText = transformIrTemplateToMarkdown(displayText);
           typeof eTurnToShowRaw === 'string' && /^e[1-5]$/i.test(eTurnToShowRaw.trim())
             ? (eTurnToShowRaw.trim().toLowerCase() as 'e1' | 'e2' | 'e3' | 'e4' | 'e5')
             : null;
+
+            function stripDiagnosisQuoteTags(text?: string) {
+              if (!text) return text;
+
+              return text
+                .replace(/<<DIAGNOSIS_QUOTE>>/g, '')
+                .replace(/<<\/DIAGNOSIS_QUOTE>>/g, '')
+                .trim();
+            }
+
 
         // ✅ 表示用 depth 候補
         // 優先順位:
@@ -576,109 +666,121 @@ const safeText = transformIrTemplateToMarkdown(displayText);
           modeToShowSafe ??
           null;
 
-        return (
-          <div
-            key={m.id}
-            className={`message ${isUser ? 'is-user' : 'is-assistant'}`}
-          >
-            {/* ▼ アイコン＋Qバッジを横一列に並べるヘッダー行 ▼ */}
+          return (
             <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: isUser ? 'flex-end' : 'flex-start',
-                gap: 6,
-                marginBottom: 4,
-              }}
+              key={m.id}
+              className={`message ${isUser ? 'is-user' : 'is-assistant'}`}
             >
-              {/* アバター */}
-              <div className="avatar" style={{ alignSelf: 'center' }}>
+              {/* ▼ アイコン＋Qバッジを横一列に並べるヘッダー行 ▼ */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: isUser ? 'flex-end' : 'flex-start',
+                  gap: 6,
+                  marginBottom: 4,
+                }}
+              >
                 <img
                   src={iconSrc}
-                  alt={isUser ? 'you' : 'Iros'}
-                  width={AVATAR_SIZE}
-                  height={AVATAR_SIZE}
-                  onError={(e) => {
-                    const el = e.currentTarget as HTMLImageElement & {
-                      dataset: Record<string, string | undefined>;
-                    };
-                    if (!el.dataset.fallback1) {
-                      el.dataset.fallback1 = '1';
-                      el.src = FALLBACK_USER;
-                      return;
-                    }
-                    if (!el.dataset.fallback2) {
-                      el.dataset.fallback2 = '1';
-                      el.src = FALLBACK_DATA;
-                    }
-                  }}
-                  style={{
-                    borderRadius: '50%',
-                    objectFit: 'cover',
-                    display: 'block',
-                  }}
+                  alt={isUser ? 'you' : 'iros'}
+                  className={isUser ? 'avatar user' : 'avatar assistant'}
                 />
-              </div>
 
-{/* Metaバッジ：Iros（assistant）のときだけ */}
-{!isUser && (
-  <IrosMetaBadge
-    eTurn={eTurnToShowSafe ?? undefined}
-    depth={depthToShowSafe}
-    responseType={responseTypeToShow}
-    mode={modeToShowSafe}
-    laneKey={laneKeyToShowSafe}
-    flowDelta={flowDeltaToShowSafe}
-    compact
-  />
-)}
-            </div>
-
-            {/* 吹き出し */}
-            <div
-              className={`bubble ${isUser ? 'is-user' : 'is-assistant'}`}
-              style={{
-                ...(isUser ? userBubbleStyle : assistantBubbleShellStyle),
-                alignSelf: isUser ? 'flex-end' : 'flex-start',
-                maxWidth:
-                  typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches
-                    ? 'min(1100px, 92%)'
-                    : 'min(760px, 88%)',
-              }}
-            >
-              {/* 本文 */}
-              <div
-                className="msgBody"
-                style={{ fontSize: 14, lineHeight: 1.9, color: '#111827' }}
-              >
-                {isSilence ? (
-                  <div
-                    className="assistant-silence"
-                    style={{
-                      opacity: 0.75,
-                      letterSpacing: 2,
-                      padding: '2px 0',
-                      userSelect: 'none',
-                    }}
-                    aria-label="silence"
-                  >
-                    …
-                  </div>
-                ) : (
-                  <ChatMarkdown text={safeText} />
+                {/* Metaバッジ：Iros（assistant）のときだけ */}
+                {!isUser && (
+                  <IrosMetaBadge
+                    eTurn={eTurnToShowSafe ?? undefined}
+                    depth={depthToShowSafe}
+                    responseType={responseTypeToShow}
+                    mode={modeToShowSafe}
+                    laneKey={laneKeyToShowSafe}
+                    flowDelta={flowDeltaToShowSafe}
+                    compact
+                  />
                 )}
               </div>
 
+              {/* 吹き出し */}
+              <div
+                className={`bubble ${isUser ? 'is-user' : 'is-assistant'}`}
+                style={{
+                  ...(isUser ? userBubbleStyle : assistantBubbleShellStyle),
+                  alignSelf: isUser ? 'flex-end' : 'flex-start',
+                  maxWidth:
+                    typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches
+                      ? 'min(1100px, 92%)'
+                      : 'min(760px, 88%)',
+                }}
+              >
+                {/* 本文 */}
+                <div
+                  className="msgBody"
+                  style={{ fontSize: 14, lineHeight: 1.9, color: '#111827' }}
+                >
+                  {isSilence ? (
+                    <div
+                      className="assistant-silence"
+                      style={{
+                        opacity: 0.75,
+                        letterSpacing: 2,
+                        padding: '2px 0',
+                        userSelect: 'none',
+                      }}
+                      aria-label="silence"
+                    >
+                      …
+                    </div>
+                  ) : (
+                    <>
+                      <ChatMarkdown text={safeText} />
 
+                      {!isUser &&
+                        (((m.meta as any)?.presentationKind === 'diagnosis') ||
+                          ((m.meta as any)?.extra?.presentationKind === 'diagnosis')) && (
+                        <div className="diagnosisFooter">
+                          {diagnosisSummary ? (
+                            <div style={{ marginBottom: 8 }}>
+<button
+  type="button"
+  onClick={() => {
+    const quoted = `【前回の診断まとめ（引用）】
+<<DIAGNOSIS_QUOTE>>
+${diagnosisSummary}
+<</DIAGNOSIS_QUOTE>>`;
 
+    setDraftText?.(quoted);
+  }}
+  style={{
+    border: '1px solid rgba(147, 116, 255, 0.35)',
+    background: 'rgba(255,255,255,0.9)',
+    color: '#5b3fd1',
+    borderRadius: 999,
+    padding: '6px 12px',
+    fontSize: 12,
+    cursor: 'pointer',
+  }}
+>
+  まとめを引用
+</button>
+                            </div>
+                          ) : null}
+
+                          ※詳しくは、「まとめを引用」ボタンをおして入力してください。<br />
+                          ※なお、何度も同じ観測対象で入力すると、結果が不安定になります。
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {loading && <div className={styles.loadingRow}>...</div>}
+                  {error && <div className={styles.error}>{error}</div>}
+                  <div ref={bottomRef} />
+                </div>
+              </div>
             </div>
-          </div>
-        );
-      })}
-
-      {loading && <div className={styles.loadingRow}>...</div>}
-      {error && <div className={styles.error}>{error}</div>}
-      <div ref={bottomRef} />
-    </div>
-  );
-}
+          );
+        })}
+      </div>
+    );
+  }

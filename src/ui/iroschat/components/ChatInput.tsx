@@ -46,6 +46,9 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
   const chat = useIrosChat();
   const sendMessage: any = (chat as any)?.sendMessage;
   const loading: boolean = Boolean((chat as any)?.loading);
+  const draftText: string = String((chat as any)?.draftText ?? '');
+  const setDraftText: ((text: string) => void) | undefined = (chat as any)
+    ?.setDraftText;
 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -119,6 +122,7 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
       taRef.current?.blur();
 
       setText('');
+      setDraftText?.('');
       try {
         window.localStorage.removeItem(DRAFT_KEY);
       } catch {}
@@ -154,6 +158,33 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
   useEffect(() => {
     taRef.current?.focus();
   }, []);
+
+  // Context から流れてきた引用文を入力欄へ反映
+  useEffect(() => {
+    const next = String(draftText ?? '').trim();
+    if (!next) return;
+
+    setText((prev) => {
+      const prevTrim = String(prev ?? '').trim();
+
+      // すでに同じ内容が入っているなら二重注入しない
+      if (prevTrim === next) return prev;
+
+      // 入力中の文章が空ならそのまま置く
+      if (!prevTrim) return `${next}\n\n`;
+
+      // 何か入力中なら末尾に追記する
+      return `${prev.replace(/\s*$/, '')}\n\n${next}\n\n`;
+    });
+
+    // 一度反映したら draft は空に戻す
+    setDraftText?.('');
+
+    requestAnimationFrame(() => {
+      taRef.current?.focus();
+      autoSize();
+    });
+  }, [draftText, setDraftText, autoSize]);
 
   return (
     <div className="sof-compose" aria-label="メッセージ入力エリア">

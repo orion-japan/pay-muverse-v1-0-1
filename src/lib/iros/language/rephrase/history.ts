@@ -312,18 +312,34 @@ export function extractLastTurnsFromContext(userContext: unknown): TurnMsg[] {
     pickArray(ctx?.ctx_pack?.historyForWriter) ||
     null;
 
-  const normalizeRoleContentArray = (raw: any[]): TurnMsg[] => {
-    return raw
-      .filter(Boolean)
-      .flatMap((m: any): TurnMsg[] => {
-        if (isSystemish(m)) return [];
-        const role = normalizeRole(m?.role ?? m?.r ?? m?.speaker ?? m?.type ?? m?.from);
-        const content = norm(m?.content ?? m?.text ?? m?.message ?? '');
-        if (!role || !content) return [];
-        return [{ role, content }];
-      });
-  };
+    const normalizeRoleContentArray = (raw: any[]): TurnMsg[] => {
+      return raw
+        .filter(Boolean)
+        .flatMap((m: any): TurnMsg[] => {
+          if (isSystemish(m)) return [];
 
+          const role = normalizeRole(m?.role ?? m?.r ?? m?.speaker ?? m?.type ?? m?.from);
+
+          const rawContent =
+            typeof m?.content === 'string'
+              ? m.content
+              : typeof m?.text === 'string'
+                ? m.text
+                : typeof m?.message === 'string'
+                  ? m.message
+                  : m?.content && typeof m.content === 'object'
+                    ? JSON.stringify(m.content)
+                    : m?.text && typeof m.text === 'object'
+                      ? JSON.stringify(m.text)
+                      : m?.message && typeof m.message === 'object'
+                        ? JSON.stringify(m.message)
+                        : '';
+
+          const content = norm(rawContent);
+          if (!role || !content) return [];
+          return [{ role, content }];
+        });
+    };
   const hasBothRoles = (arr: TurnMsg[]) => {
     const hasA = arr.some((m) => m.role === 'assistant');
     const hasU = arr.some((m) => m.role === 'user');
@@ -333,8 +349,25 @@ export function extractLastTurnsFromContext(userContext: unknown): TurnMsg[] {
   let normalized: TurnMsg[] = [];
   let pickedFrom: 'turns' | 'historyForWriter' | 'historyMessages' | 'none' = 'none';
 
-  // 1) turns/chat（ただし片側しか無いなら採用しない）
-  if (rawTurns) {
+  const isDiagnosisHistoryPreferred =
+    ctx?.ctxPack?.detailMode === true ||
+    ctx?.detailMode === true ||
+    ctx?.meta?.extra?.detailMode === true ||
+    ctx?.ctxPack?.irMeta != null ||
+    ctx?.irMeta != null ||
+    ctx?.meta?.extra?.irMeta != null;
+
+  // 1) 診断詳細ターンでは historyForWriter を優先
+  if (isDiagnosisHistoryPreferred && rawHistoryForWriter) {
+    const n = normalizeRoleContentArray(rawHistoryForWriter);
+    if (n.length > 0) {
+      normalized = n;
+      pickedFrom = 'historyForWriter';
+    }
+  }
+
+  // 2) turns/chat（ただし片側しか無いなら採用しない）
+  if (normalized.length === 0 && rawTurns) {
     const n = normalizeRoleContentArray(rawTurns);
     if (n.length > 0 && hasBothRoles(n)) {
       normalized = n;
@@ -342,7 +375,7 @@ export function extractLastTurnsFromContext(userContext: unknown): TurnMsg[] {
     }
   }
 
-  // 2) historyForWriter
+  // 3) historyForWriter（通常ターン fallback）
   if (normalized.length === 0 && rawHistoryForWriter) {
     const n = normalizeRoleContentArray(rawHistoryForWriter);
     if (n.length > 0) {

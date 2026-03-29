@@ -214,19 +214,27 @@ function extractAssistantText(orchResult: any): string {
   if (orchResult && typeof orchResult === 'object') {
     const r: any = orchResult;
 
-    // ✅ V2: Orchestrator/Writer が確定した本文を最優先
-    const a = toNonEmptyString(r.assistantText);
-    if (a) return a;
+    // ✅ ① contentOverride 最優先（今回の核）
+    const override =
+      r?.meta?.extra?.contentOverride ??
+      r?.extra?.contentOverride ??
+      null;
 
-    // 互換（古い呼び出しや一部経路）
-    const c = toNonEmptyString(r.content);
-    if (c) return c;
+    if (typeof override === 'string' && override.trim().length > 0) {
+      return override.trim();
+    }
 
-    const t = toNonEmptyString(r.text);
-    if (t) return t;
+    // ✅ ② 通常ルート
+    const text =
+      r?.assistantText ??
+      r?.text ??
+      null;
 
-    return '';
+    if (typeof text === 'string' && text.trim().length > 0) {
+      return text.trim();
+    }
   }
+
   return typeof orchResult === 'string' ? orchResult : '';
 }
 
@@ -2804,22 +2812,42 @@ try {
       // }
 
 
-      // 露出OKの核1行を混ぜる（短すぎる時だけ）
-      const CLEAN_MIN = 48;
-      const cleaned0 = seedForWriterRaw
-        .split('\n')
-        .map((l) => String(l ?? '').trim())
-        .filter((l) => l.length > 0 && !l.startsWith('@'))
-        .join('\n')
-        .trim();
+      // ✅ ir診断は重いseedを通さない
+      const isIrDiagnosis =
+        (metaForSave?.extra?.isIrDiagnosisTurn === true) ||
+        (metaForSave?.extra?.presentationKind === 'diagnosis');
 
-      if (coreLine && cleaned0.length < CLEAN_MIN && !seedForWriterRaw.includes(coreLine)) {
-        const seedLine = `@SEED_TEXT ${JSON.stringify({ text: coreLine })}`;
-        seedForWriterRaw = `${seedForWriterRaw}\n${coreLine}\n${seedLine}`.trim();
+      let seedForWriterSanitized = '';
+
+      if (isIrDiagnosis) {
+        const diagSeed =
+          String(
+            (metaForSave?.extra?.contentOverride ??
+              metaForSave?.extra?.finalAssistantTextCandidate ??
+              metaForSave?.extra?.finalAssistantText ??
+              '') as string,
+          ).trim();
+
+        seedForWriterRaw = diagSeed || String(seedForWriterRaw ?? '').trim();
+        seedForWriterSanitized = seedForWriterRaw;
+      } else {
+        // 露出OKの核1行を混ぜる（短すぎる時だけ）
+        const CLEAN_MIN = 48;
+        const cleaned0 = seedForWriterRaw
+          .split('\n')
+          .map((l) => String(l ?? '').trim())
+          .filter((l) => l.length > 0 && !l.startsWith('@'))
+          .join('\n')
+          .trim();
+
+        if (coreLine && cleaned0.length < CLEAN_MIN && !seedForWriterRaw.includes(coreLine)) {
+          const seedLine = `@SEED_TEXT ${JSON.stringify({ text: coreLine })}`;
+          seedForWriterRaw = `${seedForWriterRaw}\n${coreLine}\n${seedLine}`.trim();
+        }
+
+        // sanitize
+        seedForWriterSanitized = sanitizeLlmRewriteSeed(seedForWriterRaw, userText);
       }
-
-      // sanitize
-      const seedForWriterSanitized = sanitizeLlmRewriteSeed(seedForWriterRaw, userText);
 
       // meta肥大対策：rawはdev限定 + 長さ制限
       const isDev = process.env.NODE_ENV !== 'production';
@@ -2927,16 +2955,20 @@ try {
         .toLowerCase();
 
       const seedTextNow = String(baseVisible ?? '');
-      const isDecideLike =
-        goalKindNow === 'decide' ||
-        targetKindNow === 'decide' ||
-        /(?:\n|^)PRESSURE:\n(?:narrow|push)(?:\n|$)/i.test(seedTextNow) ||
-        /(?:\n|^)MEANING:\n本当は「.*」ほうに寄っていると、もう分かっている(?:\n|$)/i.test(
-          seedTextNow,
-        );
+      const isIrDiagnosis =
+      (metaForSave?.extra?.isIrDiagnosisTurn === true) ||
+      (metaForSave?.extra?.presentationKind === 'diagnosis');
 
-      // ✅ 重要：decide/narrow は seed-only defer にしない
-      finalAssistantText = isDecideLike ? baseVisible : '';
+    const isDecideLike =
+      isIrDiagnosis || // ← 🔥これ追加（最重要）
+      goalKindNow === 'decide' ||
+      targetKindNow === 'decide' ||
+      /(?:\n|^)PRESSURE:\n(?:narrow|push)(?:\n|$)/i.test(seedTextNow) ||
+      /(?:\n|^)MEANING:\n本当は「.*」ほうに寄っていると、もう分かっている(?:\n|$)/i.test(
+        seedTextNow,
+      );
+
+    finalAssistantText = isDecideLike ? baseVisible : '';
 
       metaForSave.extra = {
         ...(metaForSave.extra ?? {}),

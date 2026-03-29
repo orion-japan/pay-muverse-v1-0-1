@@ -2298,74 +2298,21 @@ if (shouldFallbackNormalChat) {
     }
   }
 } else {
-  // ✅ ir診断ターン：normalChat/flagReply/counsel で上書きしない
-  // ただし upstream が slot を返さない場合があるので、最低限の seed slot をここで補完する
-  const slotsEmpty_ir = !Array.isArray(slotsArr) || slotsArr.length === 0;
-  const policyEmpty_ir = !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
+  // ✅ ir診断ターン：入口（handleIrosReply）で完全分離するため、
+  // orchestrator 側では補完しない
+  slotsArr = null;
+  slotPlanPolicy = null;
 
-  if (slotsEmpty_ir) {
-    const raw = String(text ?? '').trim();
-
-    // "ir診断 自分" / "ir診断 ひろみの母" などからラベルを拾う（無ければ self）
-    let label = 'self';
-    if (raw.startsWith('ir診断')) {
-      const rest = raw.slice('ir診断'.length).trim();
-      if (rest) label = rest;
-    }
-
-    // ✅ irDiagnosis: diagnosisEngine に接続（src/lib/iros/diagnosis/* を通す）
-    const diag = diagnosisEngine({
-      targetLabel: label,
-      meta: meta as any,
-      slots: null,
-      conversationId: null,
-      userCode: (userCode as any) ?? null,
-      traceId: null,
-    });
-
-
-  const seedText =
-    diag.ok
-      ? diag.text
-      : [
-          `ir診断 ${label}`,
-          '',
-          '観測対象：' + label,
-          '出力：フェーズ／位相／深度（S/R/C/I/T）＋短い意識状態＋短いメッセージ',
-          '',
-          '入力：' + (raw || `(none)`),
-          '',
-          `※diagnosisEngine失敗: ${diag.reason}`,
-        ].join('\n');
-
-// ✅ 重要：API本文を空にしない（NormalBase fallback を回避）
-// content は後段で const 定義されるため、ここでは代入しない。
-// 代わりに meta.extra に “本文候補” を退避しておく（後段で拾う）。
-{
-  const ex =
-    (meta as any).extra && typeof (meta as any).extra === 'object'
-      ? (meta as any).extra
-      : ((meta as any).extra = {});
-  ex.contentOverride = seedText;
+  if ((meta as any).extra && typeof (meta as any).extra === 'object') {
+    const ex = (meta as any).extra as any;
+    ex.isIrDiagnosisTurn = true;
+    ex.irTriggered = true;
+    ex.presentationKind = 'diagnosis';
+    ex.modeHint = 'IR';
+  }
 }
-
-  slotsArr = [{ key: 'SEED_TEXT', text: seedText }];
-  slotPlanPolicy = 'FINAL';
-
-  console.log('[IROS/ORCH][irDiagnosis-diagnosisEngine]', {
-    label,
-    ok: diag.ok,
-    head: diag.ok ? diag.head : null,
-    slotsLen: Array.isArray(slotsArr) ? slotsArr.length : null,
-    policy: slotPlanPolicy,
-    rawLen: raw.length,
-  });
-}
-
   // ✅ ir診断ターン：fallback 表示は残さない
   if ((meta as any).slotPlanFallback) delete (meta as any).slotPlanFallback;
-}
-
     // 6) 最終ガード：slots が配列でないなら null
     if (slotsArr != null && !Array.isArray(slotsArr)) {
       slotsArr = null;
@@ -2918,23 +2865,27 @@ if (userCode && finalMeta) {
   const anyMeta = finalMeta as any;
   const trimmed = (text || '').trim();
 
-  // ir診断モードをトリガーしないように、'ir診断'のテキストが含まれていても診断モードに入らないように
+  // ir診断は anyMeta.isIrDiagnosisTurn を正本にする。
+  // ただし "iros" 単体の誤反応だけは除外する。
+  const normalizedText = trimmed.normalize('NFKC').trim();
+  const isStandaloneIros = /^iros$/i.test(normalizedText);
+
   const isIrDiagnosisTurn =
-    !!anyMeta.isIrDiagnosisTurn &&
-    !/^(iros|Iros|IROS)/i.test(trimmed) &&  // "Iros" や "iros" を除外
-    !trimmed.startsWith('ir診断'); // 'ir診断' で始まるテキストを除外
+    Boolean(anyMeta.isIrDiagnosisTurn) &&
+    !isStandaloneIros;
 
   if (isIrDiagnosisTurn) {
-    let label = 'self';
-
-    // 'ir診断'のテキストに基づいて処理を変更
-    const rest = trimmed.slice('ir診断'.length).trim();
-    if (rest.length > 0) label = rest;
-
+    const label = 'random';
 
     // ✅ core_need を meta から拾う（intentLine 優先 → soulNote → unified.soulNote）
     const il = (anyMeta.intentLine ?? anyMeta.intent_line ?? null) as any;
-    const sn = (anyMeta.soulNote ?? anyMeta.soul_note ?? anyMeta.unified?.soulNote ?? anyMeta.unified?.soul_note ?? null) as any;
+    const sn = (
+      anyMeta.soulNote ??
+      anyMeta.soul_note ??
+      anyMeta.unified?.soulNote ??
+      anyMeta.unified?.soul_note ??
+      null
+    ) as any;
 
     const coreNeedRaw =
       (typeof il?.coreNeed === 'string' ? il.coreNeed : null) ??
@@ -2954,22 +2905,25 @@ if (userCode && finalMeta) {
         targetType: 'ir-diagnosis',
         targetLabel: label,
         qPrimary: finalMeta.qCode ?? null,
-        depthStage: (finalMeta as any).depth ?? null,
+        depthStage:
+          (finalMeta as any).depthStage ??
+          (finalMeta as any).depth ??
+          null,
         phase: (finalMeta as any).phase ?? null,
         tLayerHint: (finalMeta as any).tLayerHint ?? null,
         selfAcceptance:
-          typeof finalMeta.selfAcceptance === 'number' ? finalMeta.selfAcceptance : null,
+          typeof finalMeta.selfAcceptance === 'number'
+            ? finalMeta.selfAcceptance
+            : null,
 
-        // ✅ 追加：core_need を保存
+        // ✅ core_need を保存
         coreNeed,
       });
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error('[IROS/Orchestrator] savePersonIntentState error', e);
     }
-  }
-}
-  }
+  }}}
 // ----------------------------------------------------------------
 // 12. Orchestrator 結果として返却（V2：contentは空）
 // ----------------------------------------------------------------
