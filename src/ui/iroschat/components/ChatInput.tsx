@@ -17,10 +17,6 @@ type ChatInputProps = {
   onMeta?: (meta: any) => void;
 };
 
-//
-// =========================================================
-// ghost / ellipsis normalize（UI側）
-// =========================================================
 function normalizeGhostWhitespace(input: string): string {
   const s = String(input ?? '');
   const removed = s.replace(/[\u3164\u200B-\u200D\u2060\uFEFF\u2800]/g, '');
@@ -42,13 +38,38 @@ function normalizeSendText(input: string): string {
   return norm;
 }
 
+function setKeyboardOpenUI(open: boolean) {
+  if (typeof document === 'undefined') return;
+
+  const root = document.documentElement;
+  const footer = document.getElementById('mu-footer-root');
+
+  root.classList.toggle('keyboard-open', open);
+  root.style.setProperty('--footer-safe-pad', open ? '0px' : 'var(--footer-h, 56px)');
+
+  if (footer) {
+    footer.style.transform = open ? 'translateY(140%)' : '';
+    footer.style.pointerEvents = open ? 'none' : '';
+    footer.style.opacity = open ? '0' : '';
+  }
+}
+
+function detectKeyboardOpen(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  const vv = window.visualViewport;
+  if (!vv) return false;
+
+  const heightGap = window.innerHeight - vv.height;
+  return heightGap > 120;
+}
+
 export default function ChatInput({ onMeta }: ChatInputProps) {
   const chat = useIrosChat();
   const sendMessage: any = (chat as any)?.sendMessage;
   const loading: boolean = Boolean((chat as any)?.loading);
   const draftText: string = String((chat as any)?.draftText ?? '');
-  const setDraftText: ((text: string) => void) | undefined = (chat as any)
-    ?.setDraftText;
+  const setDraftText: ((text: string) => void) | undefined = (chat as any)?.setDraftText;
 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -57,15 +78,11 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const sendLockRef = useRef(false);
 
-  // ▼ 送信可否（本番定義）
   const disabled = loading || sending;
-  const normalizedForSend = useMemo(
-    () => normalizeSendText(text),
-    [text],
-  );
+  const normalizedForSend = useMemo(() => normalizeSendText(text), [text]);
   const hasActiveConversation = Boolean((chat as any)?.activeConversationId);
   const canSend = !disabled && hasActiveConversation && normalizedForSend.length > 0;
-  // ▼ 下書きロード／保存
+
   useEffect(() => {
     try {
       const saved =
@@ -84,10 +101,10 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
     } catch {}
   }, [text]);
 
-  // ▼ 自動リサイズ
   const autoSize = useCallback(() => {
     const ta = taRef.current;
     if (!ta) return;
+
     requestAnimationFrame(() => {
       ta.style.height = 'auto';
       const minH = 66;
@@ -101,7 +118,37 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
     autoSize();
   }, [text, autoSize]);
 
-  // ▼ 送信処理
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    let raf = 0;
+
+    const syncKeyboardState = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const open = detectKeyboardOpen();
+        setKeyboardOpenUI(open);
+      });
+    };
+
+    vv.addEventListener('resize', syncKeyboardState);
+    vv.addEventListener('scroll', syncKeyboardState);
+    window.addEventListener('resize', syncKeyboardState);
+
+    syncKeyboardState();
+
+    return () => {
+      cancelAnimationFrame(raf);
+      vv.removeEventListener('resize', syncKeyboardState);
+      vv.removeEventListener('scroll', syncKeyboardState);
+      window.removeEventListener('resize', syncKeyboardState);
+      setKeyboardOpenUI(false);
+    };
+  }, []);
+
   const handleSend = useCallback(async () => {
     const value = normalizeSendText(text);
 
@@ -110,7 +157,7 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
       return;
     }
     if (typeof sendMessage !== 'function') {
-      return; // ← ログも消す
+      return;
     }
 
     sendLockRef.current = true;
@@ -137,9 +184,8 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
       sendLockRef.current = false;
       autoSize();
     }
-  }, [text, disabled, sendMessage, onMeta, autoSize]);
+  }, [text, sendMessage, onMeta, autoSize, setDraftText]);
 
-  // ▼ キー操作
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
@@ -152,12 +198,10 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
     [isComposing, canSend, handleSend],
   );
 
-  // 初期フォーカス
   useEffect(() => {
     taRef.current?.focus();
   }, []);
 
-  // Context から流れてきた引用文を入力欄へ反映
   useEffect(() => {
     const next = String(draftText ?? '').trim();
     if (!next) return;
@@ -165,17 +209,12 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
     setText((prev) => {
       const prevTrim = String(prev ?? '').trim();
 
-      // すでに同じ内容が入っているなら二重注入しない
       if (prevTrim === next) return prev;
-
-      // 入力中の文章が空ならそのまま置く
       if (!prevTrim) return `${next}\n\n`;
 
-      // 何か入力中なら末尾に追記する
       return `${prev.replace(/\s*$/, '')}\n\n${next}\n\n`;
     });
 
-    // 一度反映したら draft は空に戻す
     setDraftText?.('');
 
     requestAnimationFrame(() => {
@@ -196,6 +235,16 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           onInput={autoSize}
+          onFocus={() => {
+            requestAnimationFrame(() => {
+              setKeyboardOpenUI(detectKeyboardOpen());
+            });
+          }}
+          onBlur={() => {
+            setTimeout(() => {
+              setKeyboardOpenUI(detectKeyboardOpen());
+            }, 120);
+          }}
           onCompositionStart={() => setIsComposing(true)}
           onCompositionEnd={() => setIsComposing(false)}
           disabled={disabled}
