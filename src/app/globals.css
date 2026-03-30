@@ -1289,3 +1289,10 @@ body[data-iros="true"],
 }
 
 
+body.mu-body[data-iros="true"] {
+  overflow: hidden;
+}
+body:has(.iros-settings-main) .mu-main {
+  padding-top: 0 !important;
+  padding-bottom: var(--footer-safe-pad, 56px) !important;
+}

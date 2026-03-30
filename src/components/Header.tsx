@@ -77,7 +77,7 @@ export default function Header({ onLoginClick }: Props) {
           }}
         >
           <span aria-hidden>🏠</span>
-          <span>Home</span>
+          <span>iros</span>
         </Link>
 
         <div

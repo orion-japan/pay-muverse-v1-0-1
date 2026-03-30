@@ -1,89 +1,30 @@
-// src/components/Footer.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { usePathname, useRouter } from 'next/navigation';
-import { useAuth } from '@/context/AuthContext';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 const FALLBACK_H = 56;
-type ItemId = 'home' | 'talk' | 'board' | 'pay' | 'mypage';
-type Item = { id: ItemId; label: string; href: string; icon?: React.ReactNode };
 
-// ★ 追加：未読ポーリングを有効にするフラグ（デフォルト off）
-const ENABLE_UNREAD_POLL =
-  process.env.NEXT_PUBLIC_ENABLE_UNREAD_POLL === '1' &&
-  process.env.NODE_ENV === 'production';
+type ItemId = 'iros' | 'event' | 'mypage' | 'plan' | 'setting';
 
-function toast(msg: string) {
-  const id = 'mu-footer-toast';
-  document.getElementById(id)?.remove();
-  const div = document.createElement('div');
-  div.id = id;
-  div.style.cssText =
-    'position:fixed;left:50%;bottom:calc(12px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:2147483647;' +
-    'background:rgba(30,30,30,.92);color:#fff;padding:10px 12px;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);' +
-    'font:600 12px/1.2 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif';
-  div.textContent = msg;
-  document.body.appendChild(div);
-  setTimeout(() => div.remove(), 2200);
-}
-
-// ---- Supabase singleton（ブラウザのみ） ----
-function getSb(): SupabaseClient | null {
-  if (typeof window === 'undefined') return null;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) return null;
-  const g = window as any;
-  if (!g.__sb_footer) g.__sb_footer = createClient(url, key);
-  return g.__sb_footer as SupabaseClient;
-}
-
-// ---- debug badge (?debug_footer_badge=数字) ----
-const getDebugBadge = () => {
-  if (typeof window === 'undefined') return 0;
-  const v = new URLSearchParams(window.location.search).get('debug_footer_badge');
-  return v ? Math.max(0, Number(v) || 0) : 0;
+type Item = {
+  id: ItemId;
+  label: string;
+  href: string;
+  icon?: React.ReactNode;
 };
-
-// ---- timeout付きfetch（ハング回避）----
-async function fetchWithTimeout(input: RequestInfo, init: RequestInit = {}, timeoutMs = 8000) {
-  const ac = new AbortController();
-  const id = setTimeout(() => ac.abort(), timeoutMs);
-  try {
-    return await fetch(input, { ...init, signal: ac.signal, cache: 'no-store' });
-  } finally {
-    clearTimeout(id);
-  }
-}
 
 export default function Footer() {
   const [host, setHost] = useState<HTMLElement | null>(null);
   const [mounted, setMounted] = useState(false);
   const navRef = useRef<HTMLElement | null>(null);
+
   const router = useRouter();
   const pathname = usePathname();
-  const { user, userCode } = useAuth();
-  const isLoggedIn = !!user;
-
-  const [counts, setCounts] = useState<Record<ItemId, number>>({
-    home: 0,
-    talk: 0,
-    board: 0,
-    pay: 0,
-    mypage: 0,
-  });
-
-  const debugBadge = useMemo(
-    () => (process.env.NODE_ENV === 'development' ? getDebugBadge() : 0),
-    [],
-  );
 
   useEffect(() => setMounted(true), []);
 
-  // ---- portal host ----
   useEffect(() => {
     let el = document.getElementById('mu-footer-root') as HTMLDivElement | null;
     if (!el) {
@@ -94,7 +35,6 @@ export default function Footer() {
     setHost(el);
   }, []);
 
-  // 高さを CSS 変数に
   useEffect(() => {
     const setPad = (h: number) => {
       const px = Math.max(0, Math.round(h || 0));
@@ -104,6 +44,7 @@ export default function Footer() {
         `calc(${px}px + env(safe-area-inset-bottom))`,
       );
     };
+
     setPad(FALLBACK_H);
 
     const el = navRef.current;
@@ -112,238 +53,39 @@ export default function Footer() {
     const update = () => setPad(el.getBoundingClientRect().height);
     update();
 
-    let ro: ResizeObserver | null = null;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
 
-    if ('ResizeObserver' in globalThis) {
-      ro = new ResizeObserver(update);
-      ro.observe(el);
-    } else {
-      // ← ここを setInterval ではなく setTimeout 再帰に
-      const loop = () => {
-        update();
-        timeoutId = setTimeout(loop, 500);
-      };
-      timeoutId = setTimeout(loop, 500);
-    }
-
-    const onResize = () => update();
-    window.addEventListener('resize', onResize);
-
-    return () => {
-      ro?.disconnect();
-      window.removeEventListener('resize', onResize);
-      if (timeoutId) clearTimeout(timeoutId);
-    };
+    return () => ro.disconnect();
   }, [host, mounted]);
 
+  // ✅ ここが今回の本体
   const items: Item[] = useMemo(
     () => [
-      { id: 'home', label: 'Home', href: '/', icon: <span>🏠</span> },
-      { id: 'talk', label: 'Talk', href: '/talk', icon: <span>💬</span> },
-      { id: 'board', label: 'I Board', href: '/board', icon: <span>🧩</span> },
-      { id: 'pay', label: 'Plan', href: '/pay', icon: <span>💳</span> },
+      { id: 'iros', label: 'Iros', href: '/', icon: <span>🌀</span> },
+      { id: 'event', label: 'Event', href: '/event', icon: <span>🎉</span> },
       { id: 'mypage', label: 'My Page', href: '/mypage', icon: <span>👤</span> },
+      { id: 'plan', label: 'Plan', href: '/pay', icon: <span>💳</span> },
+      {
+        id: 'setting',
+        label: 'Setting',
+        href: '/iros-ai/settings',
+        icon: <span>⚙️</span>,
+      },
     ],
     [],
   );
 
   const onClick = (it: Item) => (e: React.MouseEvent) => {
-    const isHome = it.href === '/';
-    if (!isLoggedIn && !isHome) {
-      e.preventDefault();
-      toast('この機能はログインが必要です');
-      return;
-    }
     e.preventDefault();
     if (pathname !== it.href) router.push(it.href);
   };
 
-   // ===== 未読バッジ（止まらない安全版）=====
-   useEffect(() => {
-    // ★ 追加：ポーリング自体を無効化（ログを止める本体）
-    if (!ENABLE_UNREAD_POLL) {
-      setCounts((c) => ({ ...c, talk: 0 }));
-      return;
-    }
-
-    if (debugBadge > 0) {
-      setCounts((c) => ({ ...c, talk: debugBadge }));
-      return;
-    }
-    if (!isLoggedIn) {
-      setCounts((c) => ({ ...c, talk: 0 }));
-      return;
-    }
-
-
-    const sb = getSb();
-    const cleanups: Array<() => void> = [];
-
-    const setTalk = (n: number) => setCounts((c) => (c.talk !== n ? { ...c, talk: n } : c));
-
-    let inFlight = false;
-    let stopped = false;
-    let timerId: number | undefined;
-
-    const load = async () => {
-      if (inFlight || stopped) return;
-      inFlight = true;
-      try {
-        let idToken: string | null = null;
-        try {
-          const { getAuth } = await import('firebase/auth');
-          const auth = getAuth();
-          idToken = (await auth.currentUser?.getIdToken().catch(() => null)) ?? null;
-        } catch {}
-
-        const url = `/api/talk/unread-count?ts=${Date.now()}`;
-        const ctrl = new AbortController();
-        const timeout = setTimeout(() => ctrl.abort(), 4000); // ← タイムアウト追加（4秒）
-        let res: Response | null = null;
-
-        try {
-          res = await fetch(url, {
-            method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
-            },
-            signal: ctrl.signal,
-            cache: 'no-store',
-          });
-        } catch (e) {
-          console.warn('[unread] fetch failed', e);
-        } finally {
-          clearTimeout(timeout);
-        }
-
-        if (!res || !res.ok) {
-          console.warn('[unread] HTTP error', res?.status);
-          setTalk(0);
-        } else {
-          let j: any = null;
-          try {
-            j = await res.json();
-          } catch (e) {
-            console.warn('[unread] JSON parse', e);
-          }
-          setTalk(Math.max(0, Number(j?.unread ?? 0)));
-        }
-      } catch (e) {
-        console.warn('[unread] unexpected', e);
-        setTalk(0);
-      } finally {
-        inFlight = false;
-        if (!stopped) timerId = window.setTimeout(load, 20000); // 20秒ごとに再試行
-      }
-    };
-
-    // 初回
-    load();
-
-    // 可視化イベント
-    const onVis = () => {
-      if (document.visibilityState === 'visible') load();
-    };
-    document.addEventListener('visibilitychange', onVis);
-    cleanups.push(() => document.removeEventListener('visibilitychange', onVis));
-
-    // 手動バッジイベント
-    const onBadge = (e: CustomEvent<{ total?: number }>) => {
-      setTalk(Math.max(0, Number(e.detail?.total ?? 0)));
-    };
-    window.addEventListener('talk:badge', onBadge as unknown as EventListener);
-    cleanups.push(() =>
-      window.removeEventListener('talk:badge', onBadge as unknown as EventListener),
-    );
-
-    // localStorage 経由
-    const onStorage = (ev: StorageEvent) => {
-      if (ev.key === 'mu_talk_total_unread') {
-        setTalk(Math.max(0, Number(ev.newValue ?? 0)));
-      }
-    };
-    window.addEventListener('storage', onStorage);
-    cleanups.push(() => window.removeEventListener('storage', onStorage));
-
-    // SW 経由
-    const onUpdated = () => load();
-    window.addEventListener('talk:updated', onUpdated);
-    cleanups.push(() => window.removeEventListener('talk:updated', onUpdated));
-
-    if (navigator?.serviceWorker) {
-      const swHandler = (e: MessageEvent) => {
-        if ((e.data as any)?.type === 'talk:updated') load();
-      };
-      navigator.serviceWorker.addEventListener('message', swHandler as any);
-      cleanups.push(() => navigator.serviceWorker.removeEventListener('message', swHandler as any));
-    }
-
-    // Realtime
-    if (sb) {
-      const ch1 = sb
-        .channel('rt-chats-footer')
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'chats' },
-          (payload) => {
-            try {
-              if (userCode && payload?.new && (payload.new as any)['user_code'] === userCode)
-                return;
-            } catch {}
-            load();
-          },
-        )
-        .subscribe();
-      cleanups.push(() => sb.removeChannel(ch1));
-
-      const ch2 = sb
-        .channel('rt-reads-footer')
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'conversation_reads' },
-          (payload) => {
-            try {
-              if (payload?.new && (payload.new as any)['user_code'] === userCode) load();
-            } catch {}
-          },
-        )
-        .subscribe();
-      cleanups.push(() => sb.removeChannel(ch2));
-    }
-
-    return () => {
-      stopped = true;
-      if (timerId) clearTimeout(timerId);
-      cleanups.forEach((fn) => fn());
-    };
-  }, [isLoggedIn, debugBadge, userCode]);
-
   if (!mounted) return null;
-
-  const Bg = (
-    <div
-      aria-hidden
-      style={{
-        position: 'fixed',
-        left: 0,
-        right: 0,
-        bottom: 0,
-        /* navの高さ + 外側の余白(12px*2=24px) + セーフエリア */
-        height: `calc(var(--footer-h, ${FALLBACK_H}px) + 24px + env(safe-area-inset-bottom))`,
-        background: '#fff', // ← 完全な白板
-        boxShadow: '0 -1px 0 #e5e7eb', // 上端の薄い境界線（任意）
-        zIndex: 999, // コンテンツより上、Nav(1000)より下
-        pointerEvents: 'none', // 背面板はクリックを透過
-      }}
-    />
-  );
 
   const Nav = (
     <nav
       ref={navRef}
-      aria-label="primary"
       style={{
         position: 'fixed',
         left: '50%',
@@ -356,83 +98,33 @@ export default function Footer() {
         gap: 8,
         padding: '6px 8px',
         borderRadius: 12,
-        background: '#fff', // ← 不透明の白
-        /* ぼかしはオフにして完全不透過 */
+        background: '#fff',
         boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
         zIndex: 1000,
         paddingBottom: 'max(6px, env(safe-area-inset-bottom))',
-        borderTop: '1px solid #e5e7eb', // 視認性向上（任意）
+        borderTop: '1px solid #e5e7eb',
       }}
     >
       {items.map((it) => {
-        const active = pathname === it.href || (it.href !== '/' && pathname?.startsWith(it.href));
-        const disabled = !isLoggedIn && it.href !== '/';
-        const base = counts[it.id] ?? 0;
-        const badge = it.id === 'talk' && debugBadge > 0 ? debugBadge : base;
-        const showBadge = badge > 0;
+        const active = pathname === it.href;
 
         return (
           <a
-            key={it.href}
+            key={it.id}
             href={it.href}
-            role="button"
-            aria-current={active ? 'page' : undefined}
-            aria-disabled={disabled || undefined}
             onClick={onClick(it)}
             style={{
-              position: 'relative',
               display: 'grid',
               placeItems: 'center',
               gap: 2,
               textDecoration: 'none',
               borderRadius: 12,
               padding: '4px 2px',
-              color: disabled ? '#999' : active ? '#4b5cff' : '#333',
-              filter: disabled ? 'grayscale(0.2)' : undefined,
-              transition: 'transform .12s ease, background .12s ease, color .12s ease',
+              color: active ? '#4b5cff' : '#333',
             }}
           >
-            <div style={{ fontSize: 15, lineHeight: 1, position: 'relative' }}>
-              {it.icon}
-              {showBadge && (
-                <span
-                  aria-label="unread count"
-                  style={{
-                    position: 'absolute',
-                    top: -6,
-                    right: -10,
-                    minWidth: 18,
-                    height: 18,
-                    padding: '0 5px',
-                    borderRadius: 999,
-                    background: '#ff3b30',
-                    color: '#fff',
-                    fontSize: 11,
-                    fontWeight: 800,
-                    lineHeight: '18px',
-                    textAlign: 'center',
-                    boxShadow: '0 2px 6px rgba(0,0,0,.18)',
-                  }}
-                >
-                  {badge > 99 ? '99+' : badge}
-                </span>
-              )}
-            </div>
-            <div style={{ fontSize: 10.5, fontWeight: 600 }}>{it.label}</div>
-            {active && (
-              <span
-                aria-hidden
-                style={{
-                  position: 'absolute',
-                  bottom: 6,
-                  width: 22,
-                  height: 4,
-                  background: 'currentColor',
-                  borderRadius: 999,
-                  opacity: 0.85,
-                }}
-              />
-            )}
+            <div style={{ fontSize: 16 }}>{it.icon}</div>
+            <div style={{ fontSize: 11, fontWeight: 600 }}>{it.label}</div>
           </a>
         );
       })}

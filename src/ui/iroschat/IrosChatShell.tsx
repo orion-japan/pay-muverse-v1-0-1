@@ -6,7 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { SOFIA_CONFIG } from '@/lib/sofia/config';
 import IrosSidebarMobile from './IrosSidebarMobile';
-import IrosHeader from './IrosHeader';
+
 import MessageList from './components/MessageList';
 import ChatInput from './components/ChatInput';
 import IrosMetaBadge from './components/IrosMetaBadge';
@@ -285,25 +285,8 @@ function IrosChatInner({ open }: Props) {
 
   return (
     <div className="sofia-container sof-center">
-      <div className="sof-header-fixed">
-        <IrosHeader
-          onShowSideBar={() => setIsMobileMenuOpen(true)}
-          onCreateNewChat={() => {
-            try {
-              if (typeof window !== 'undefined') {
-                window.localStorage.removeItem(lastConvKey(agentK));
-              }
-            } catch {}
-            chat.startConversation().catch(() => {});
-          }}
-        />
-      </div>
 
-      <div
-        className="sof-top-spacer"
-        style={{ height: 'calc(var(--sof-header-h, 25px) + 3px)' }}
-        aria-hidden
-      />
+
 
       {authLoading ? (
         <div style={{ display: 'grid', placeItems: 'center', minHeight: '60vh' }}>
