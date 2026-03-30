@@ -63,8 +63,8 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
     () => normalizeSendText(text),
     [text],
   );
-  const canSend = !disabled && normalizedForSend.length > 0;
-
+  const hasActiveConversation = Boolean((chat as any)?.activeConversationId);
+  const canSend = !disabled && hasActiveConversation && normalizedForSend.length > 0;
   // ▼ 下書きロード／保存
   useEffect(() => {
     try {
@@ -109,10 +109,8 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
       console.warn('[IrosChatInput] blocked: empty after normalize');
       return;
     }
-    if (disabled || sendLockRef.current) return;
     if (typeof sendMessage !== 'function') {
-      console.error('[IrosChatInput] sendMessage missing');
-      return;
+      return; // ← ログも消す
     }
 
     sendLockRef.current = true;

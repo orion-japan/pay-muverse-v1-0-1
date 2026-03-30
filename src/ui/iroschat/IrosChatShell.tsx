@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { SOFIA_CONFIG } from '@/lib/sofia/config';
 import IrosSidebarMobile from './IrosSidebarMobile';
+import IrosHeader from './IrosHeader';
 
 import MessageList from './components/MessageList';
 import ChatInput from './components/ChatInput';
@@ -51,13 +52,15 @@ function IrosChatInner({ open }: Props) {
   const canUse = useMemo(() => !!userCode && !authLoading, [userCode, authLoading]);
 
   const openTarget: OpenTarget = useMemo(() => {
+    if (urlCid === 'new') return { type: 'new', cid: undefined };
+    if (urlCid) return { type: 'cid', cid: urlCid };
+
     if (!open) return { type: null, cid: undefined };
     if (open === 'menu') return { type: 'menu', cid: undefined };
     if (open === 'new') return { type: 'new', cid: undefined };
     if (open.startsWith('cid:')) return { type: 'cid', cid: open.slice(4) };
     return { type: 'uuid', cid: open };
-  }, [open]);
-
+  }, [open, urlCid]);
   // テーマ設定（CSS変数）
   useEffect(() => {
     const ui = ((SOFIA_CONFIG as any)?.ui ?? {}) as Record<string, any>;
@@ -189,12 +192,17 @@ function IrosChatInner({ open }: Props) {
 
   // 初回オープン/初期選択（フェッチは必ず1回だけ）
   const didInitialFetchRef = useRef(false);
+  useEffect(() => {
+    if (urlCid === 'new' || openTarget.type === 'new') {
+      didInitialFetchRef.current = false;
+    }
+  }, [urlCid, openTarget.type]);
 
   useEffect(() => {
     if (!canUse) return;
     if (didInitialFetchRef.current) return;
 
-    const convs = Array.isArray(chat.conversations) ? chat.conversations : [];
+    const convs = Array.isArray(chat?.conversations) ? chat?.conversations ?? [] : [];
 
     // ====== 1) openTarget: new ======
     if (openTarget.type === 'new') {
@@ -261,7 +269,7 @@ function IrosChatInner({ open }: Props) {
       chat.fetchMessages(latest.id).catch(() => {});
       return;
     }
-  }, [canUse, chat, chat.conversations, openTarget, urlCid, agentK]);
+  }, [canUse, chat, openTarget, urlCid, agentK]);
 
 
   const handleDelete = async () => {
@@ -298,63 +306,17 @@ function IrosChatInner({ open }: Props) {
         </div>
       ) : (
         <>
-          <div className="iro-chat-main">
-            <div className="iro-chat-bg" />
+<div className="iro-chat-main">
+  <div className="iro-chat-bg" />
 
-            {/* 右上メタ表示 */}
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'flex-end',
-                padding: '6px 12px 0',
-                position: 'relative',
-                zIndex: 3,
-              }}
-            >
-<IrosMetaBadge
-  qCode={
-    (((chat as any)?.currentMeta?.qCode ??
-      (chat as any)?.currentMeta?.q_code ??
-      (chat as any)?.currentMeta?.q ??
-      (chat as any)?.currentMeta?.extra?.ctxPack?.qCode ??
-      (chat as any)?.currentMeta?.extra?.ctxPack?.qPrimary ??
-      (chat as any)?.currentMeta?.unified?.q?.current ??
-      (chat as any)?.lastMeta?.qCode ??
-      (chat as any)?.lastMeta?.q_code ??
-      (chat as any)?.lastMeta?.q ??
-      (chat as any)?.lastMeta?.extra?.ctxPack?.qCode ??
-      (chat as any)?.lastMeta?.extra?.ctxPack?.qPrimary ??
-      (chat as any)?.lastMeta?.unified?.q?.current ??
-      undefined) as 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5' | undefined)
-  }
-  depth={
-    (chat as any)?.currentMeta?.depth ??
-    (chat as any)?.currentMeta?.depthStage ??
-    (chat as any)?.currentMeta?.depth_stage ??
-    (chat as any)?.currentMeta?.extra?.ctxPack?.depthStage ??
-    (chat as any)?.currentMeta?.unified?.depth?.stage ??
-    (chat as any)?.lastMeta?.depth ??
-    (chat as any)?.lastMeta?.depthStage ??
-    (chat as any)?.lastMeta?.depth_stage ??
-    (chat as any)?.lastMeta?.extra?.ctxPack?.depthStage ??
-    (chat as any)?.lastMeta?.unified?.depth?.stage ??
-    null
-  }
-  mode={
-    (chat as any)?.currentMeta?.mode ??
-    (chat as any)?.lastMeta?.mode ??
-    null
-  }
-  compact
-/>
-            </div>
+  <IrosHeader onShowSideBar={() => setIsMobileMenuOpen(true)} />
 
             <IrosSidebarMobile
               isOpen={isMobileMenuOpen}
               onClose={() => setIsMobileMenuOpen(false)}
               conversations={
-                Array.isArray(chat.conversations)
-                  ? (chat.conversations as any)
+                Array.isArray(chat?.conversations)
+                  ? (chat?.conversations as any)
                   : []
               }
               onSelect={(id) => {

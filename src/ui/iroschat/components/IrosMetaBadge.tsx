@@ -158,7 +158,8 @@ export default function IrosMetaBadge(props: IrosMetaBadgeProps) {
   const responseTypeSafe = normStr(responseType);
 
   // ✅ 左側メッセージ用の新表示
-  const hasAnyTurnStyle = Boolean(eInfo) || Boolean(depthStage) || Boolean(responseTypeSafe);
+  const hasAnyTurnStyle =
+  !compact && (Boolean(eInfo) || Boolean(depthStage) || Boolean(responseTypeSafe));
 
   if (hasAnyTurnStyle) {
     const hasAnyTurnStyleInner = Boolean(eInfo) || Boolean(depthStage) || Boolean(responseTypeSafe);
@@ -205,22 +206,22 @@ export default function IrosMetaBadge(props: IrosMetaBadgeProps) {
           </div>
         )}
 
-{eInfo && (depthStage || responseTypeSafe) && <Sep compact={compact} />}
+        {eInfo && (depthHeadTurnSafe || responseTypeSafe) && <Sep compact={compact} />}
 
-{depthHeadTurnSafe && (
-  <div
-  title={`depth band: ${depthHeadTurnSafe}`}
-    style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 4,
-    }}
-  >
-<span style={{ fontWeight: 700 }}>{depthHeadTurnSafe}</span>
-  </div>
-)}
+        {depthHeadTurnSafe && (
+          <div
+            title={`depth band: ${depthHeadTurnSafe}`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <span style={{ fontWeight: 700 }}>{depthHeadTurnSafe}</span>
+          </div>
+        )}
 
-{depthStage && responseTypeSafe && <Sep compact={compact} />}
+        {depthHeadTurnSafe && responseTypeSafe && <Sep compact={compact} />}
 
         {responseTypeSafe && (
           <div
@@ -313,27 +314,24 @@ export default function IrosMetaBadge(props: IrosMetaBadgeProps) {
           boxShadow: '0 1px 3px rgba(15, 23, 42, 0.08)',
         }}
       >
-        {qInfo && (
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-            }}
-            title={qInfo.label}
-          >
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: 999,
-                background: qInfo.color,
-                boxShadow: '0 0 0 2px rgba(148, 163, 184, 0.25)',
-              }}
-            />
-            <span style={{ fontWeight: 600, letterSpacing: 0.3 }}>{qCode}</span>
-          </div>
-        )}
+{qInfo && (
+  <div
+    style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4,
+    }}
+    title={qInfo.label}
+  >
+    <span style={{ fontWeight: 600, letterSpacing: 0.3 }}>
+      {qCode === 'Q1' ? '⚪️' :
+       qCode === 'Q2' ? '🟢' :
+       qCode === 'Q3' ? '🟡' :
+       qCode === 'Q4' ? '🔵' :
+       qCode === 'Q5' ? '🔴' : '⚪️'} {qCode}
+    </span>
+  </div>
+)}
 
         {qInfo && depthHeadSafe && <Sep compact />}
 
@@ -346,7 +344,14 @@ export default function IrosMetaBadge(props: IrosMetaBadgeProps) {
             }}
             title={`depth band: ${depthHeadSafe}`}
           >
-            <span style={{ fontWeight: 600 }}>{depthHeadSafe}</span>
+<span style={{ fontWeight: 600 }}>
+  {depthHeadSafe === 'S' ? '🌱' :
+   depthHeadSafe === 'R' ? '🌊' :
+   depthHeadSafe === 'C' ? '🔧' :
+   depthHeadSafe === 'I' ? '🌌' :
+   depthHeadSafe === 'T' ? '🪔' :
+   '🌱'} {depthHeadSafe}
+</span>
           </div>
         )}
       </div>
@@ -401,7 +406,13 @@ export default function IrosMetaBadge(props: IrosMetaBadgeProps) {
               boxShadow: `0 0 0 2px rgba(148, 163, 184, 0.25)`,
             }}
           />
-          <span style={{ fontWeight: 600, letterSpacing: 0.3 }}>{qCode}</span>
+          <span style={{ fontWeight: 600, letterSpacing: 0.3 }}>
+  {qCode === 'Q1' ? '⚪️' :
+   qCode === 'Q2' ? '🟢' :
+   qCode === 'Q3' ? '🟡' :
+   qCode === 'Q4' ? '🔵' :
+   qCode === 'Q5' ? '🔴' : '⚪️'} {qCode}
+</span>
         </div>
       )}
 

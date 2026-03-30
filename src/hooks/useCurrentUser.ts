@@ -60,12 +60,24 @@ export function useCurrentUser(opts?: { userCode?: string }) {
       if (!alive) return;
 
       const id = userCode ?? authUid ?? 'guest';
+      const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+      let avatarUrl: string | null = prof?.avatar_url ?? null;
+
+      if (avatarUrl && base && !/^https?:\/\//i.test(avatarUrl)) {
+        const key = avatarUrl.startsWith('avatars/')
+          ? avatarUrl.slice('avatars/'.length)
+          : avatarUrl;
+
+        avatarUrl = `${base}/storage/v1/object/public/avatars/${key}`;
+      }
+
       setUser({
         id,
         name: prof?.name ?? 'user',
         userType: 'member',
         credits: 0,
-        avatarUrl: prof?.avatar_url ?? null, // ★ ここが肝
+        avatarUrl,
       });
       setLoading(false);
     })();

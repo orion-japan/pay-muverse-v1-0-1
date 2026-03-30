@@ -164,7 +164,7 @@ export default function IrosSidebarMobile({
                 className="sof-list__title"
                 onClick={() => {
                   log('click conversation', c);
-                  const url = `/iros?cid=${encodeURIComponent(c.id)}&agent=iros`;
+                  const url = `/?cid=${encodeURIComponent(c.id)}&agent=iros`;
                   log('router.push', url);
                   router.push(url);
                   onClose();

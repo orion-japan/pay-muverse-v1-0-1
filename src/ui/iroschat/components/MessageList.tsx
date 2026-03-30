@@ -4,10 +4,10 @@ import React from 'react';
 import { useIrosChat } from '../IrosChatContext';
 import styles from '../index.module.css';
 import { useAuth } from '@/context/AuthContext';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import '../IrosChat.css';
 
 import ChatMarkdown from './ChatMarkdown';
-
 import IrosMetaBadge from './IrosMetaBadge';
 
 // メッセージ型
@@ -417,29 +417,32 @@ function extractDiagnosisSummary(raw: string): string {
   return collected.join('\n').trim();
 }
 export default function MessageList() {
-  const {
-    messages,
-    loading,
-    error,
-    sendNextStepChoice,
-    setDraftText,
-  } = useIrosChat() as unknown as {
-    messages: IrosMessage[];
-    loading: boolean;
-    error?: string | null;
-    setDraftText?: (text: string) => void;
-    sendNextStepChoice?: (opt: {
-      key: string; // ✅ ここは choiceId を渡す
-      label: string;
-      gear?: string | null;
-    }) => Promise<unknown>;
-  };
+  const chat = useIrosChat() as
+    | {
+        messages: IrosMessage[];
+        loading: boolean;
+        error?: string | null;
+        setDraftText?: (text: string) => void;
+        sendNextStepChoice?: (opt: {
+          key: string; // ✅ ここは choiceId を渡す
+          label: string;
+          gear?: string | null;
+        }) => Promise<unknown>;
+      }
+    | null;
+
+  const messages = chat?.messages ?? [];
+  const loading = chat?.loading ?? false;
+  const error = chat?.error ?? null;
+  const sendNextStepChoice = chat?.sendNextStepChoice;
+  const setDraftText = chat?.setDraftText;
 
   const authVal = (typeof useAuth === 'function' ? useAuth() : {}) as {
-    user?: { avatarUrl?: string | null };
+    userCode?: string | null;
   };
-  const { user } = authVal || {};
 
+  const { userCode } = authVal || {};
+  const { user } = useCurrentUser({ userCode: userCode ?? undefined });
   const listRef = React.useRef<HTMLDivElement | null>(null);
   const bottomRef = React.useRef<HTMLDivElement | null>(null);
   const first = React.useRef(true);
@@ -495,7 +498,7 @@ export default function MessageList() {
 
       {messages.map((m) => {
         const isUser = m.role === 'user';
-        const iconSrc = isUser ? resolveUserAvatar(m) : '/ir.png';
+        const iconSrc = isUser ? resolveUserAvatar(m) : '/iros.png';
 
 // ★ メタを本文から隠す：toSafeString → stripIrosMetaHeader → stripNextStepTags → transform
 const rawText = stripIrosMetaHeader(toSafeString(m.text));
@@ -696,7 +699,6 @@ const diagnosisSummary =
                     mode={modeToShowSafe}
                     laneKey={laneKeyToShowSafe}
                     flowDelta={flowDeltaToShowSafe}
-                    compact
                   />
                 )}
               </div>

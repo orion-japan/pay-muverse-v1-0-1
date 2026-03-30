@@ -1,4 +1,4 @@
-// src/app/iros-ai/page.tsx
+// src/app/page.tsx
 import React, { Suspense } from 'react';
 import IrosAiLayout from '@/ui/iroschat/IrosAiLayout';
 import IrosChat from '@/ui/iroschat/IrosChat';

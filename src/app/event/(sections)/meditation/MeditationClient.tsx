@@ -69,7 +69,7 @@ export default function MeditationClient() {
 
   const handleJoinAinori = async () => {
     if (!canJoinAinoriFixed()) {
-      alert('愛祈は平日7:00開始です（05:50〜07:10のみ参加可能／日曜・祝日休み）');
+      alert('愛祈は平日6:00と7:00開始です（05:50〜07:10のみ参加可能／日曜・祝日休み）');
       return;
     }
 
@@ -125,8 +125,8 @@ export default function MeditationClient() {
 
         <div className="km-schedule">
           <div className="km-schedule-row">
-            <span className="km-label">開始（固定）</span>
-            <span className="km-value">毎朝 7:00（平日）</span>
+            <span className="km-label">開始</span>
+            <span className="km-value">毎朝 6:00〜と7:00〜２回開催</span>
           </div>
           <div className="km-schedule-row">
             <span className="km-label">OPEN時間</span>
@@ -175,9 +175,25 @@ export default function MeditationClient() {
             </button>
           </div>
           <p style={{ marginTop: 6 }}>
-            ※ 平日のみ 05:50〜07:10（JST）にOPEN／日曜・祝日休み。
-            <br />※ 瞑想会は参加資格なし、<b>全員参加OK</b>です。
-          </p>
+  ※ 平日・土のみ 06:00〜と07:00〜（JST）にOPEN／日曜・祝日休み。
+  <br />※ 瞑想会は参加資格なし、<b>全員参加OK</b>です。
+</p>
+
+<div style={{ marginTop: 8, marginBottom: 12 }}>
+  <a
+    href="https://www.clinic-toku.com/archives/4739"
+    target="_blank"
+    rel="noopener noreferrer"
+    style={{
+      fontSize: '0.9rem',
+      color: '#6b7280',
+      textDecoration: 'underline',
+      cursor: 'pointer',
+    }}
+  >
+    主催　統合医療  クリニック徳
+  </a>
+</div>
         </div>
 
         <div className="km-actions">

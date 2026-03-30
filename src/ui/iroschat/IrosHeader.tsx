@@ -61,13 +61,16 @@ export default function IrosHeader({
 
   const defaultIcon = (
     <Image
-      src="/ir.png"
+      src="/iros.png"
       alt="Iros"
       width={28}
       height={28}
       className="sof-icon-img"
       priority
-      style={{ objectFit: 'cover' }}
+      style={{
+        objectFit: 'cover',
+        borderRadius: '50%',
+      }}
     />
   );
 
@@ -97,7 +100,7 @@ export default function IrosHeader({
     if (onCreateNewChat) {
       onCreateNewChat();
     } else {
-      router.replace('/iros?cid=new&agent=iros', { scroll: false });
+      router.replace('/?cid=new&agent=iros', { scroll: false });
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('iros:new-chat'));
       }
@@ -126,27 +129,12 @@ export default function IrosHeader({
       </div>
 
       <div className="sof-right">
-        {/* ★ 追加：右上の Q / 深度 / モード インジケーター（compact 表示） */}
-        {false && currentMeta && (
-  <div className="sof-meta-wrap" aria-label="Iros meta indicator">
-    <IrosMetaBadge
-      qCode={qCode}
-      depth={depth}
-      mode={mode}
-      compact
-    />
-  </div>
-)}
+        {currentMeta && (
+          <div className="sof-meta-wrap" aria-label="Iros meta indicator">
+            <IrosMetaBadge qCode={qCode} depth={depth} mode={mode} compact />
+          </div>
+        )}
 
-        <button
-          type="button"
-          onClick={handleRefresh}
-          className="sof-btn"
-          aria-label="読み直す"
-          title="読み直し"
-        >
-          ⟳
-        </button>
         <button
           type="button"
           onClick={handleNewChat}
@@ -159,20 +147,22 @@ export default function IrosHeader({
       </div>
 
       <style jsx>{`
-        .sof-header {
-          display: grid;
-          grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-          align-items: center;
-          gap: 8px;
-          width: 100%;
-          height: 44px;
-          padding: 4px 8px;
-          border-bottom: 1px solid #e6e6ee;
-          background: #ffffff;
-          position: sticky;
-          top: 0;
-          z-index: 10;
-        }
+.sof-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 42px;
+  min-height: 42px;
+  padding: 4px 8px;
+  margin: 0;
+  border-bottom: 1px solid #e6e6ee;
+  background: #ffffff;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
         .sof-left,
         .sof-right {
           display: flex;

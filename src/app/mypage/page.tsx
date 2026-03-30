@@ -336,7 +336,7 @@ export default function MyPage() {
           <button className="edit-btn" onClick={() => router.push('/mypage/create')}>
             ✏️ プロフィールを編集
           </button>
-          <Link href="/mypage/settings" className="settings-btn">
+          <Link href="/iros-ai/settings" className="settings-btn">
             ⚙️ 設定
           </Link>
         </div>

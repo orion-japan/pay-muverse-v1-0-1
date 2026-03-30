@@ -341,18 +341,28 @@ main.mu-main,
   }
 
 
-  .avatar,
-  .avatar.assistant,
-  .avatar.user {
-    width: 36px !important;
-    height: 36px !important;
-    min-width: 36px;
-    max-width: 36px;
+  .avatar {
     border-radius: 999px !important;
     object-fit: cover;
     overflow: hidden;
     flex-shrink: 0;
     display: block;
+  }
+
+  /* iros（今と同じ） */
+  .avatar.assistant {
+    width: 38px !important;
+    height: 38px !important;
+    min-width: 38px;
+    max-width: 38px;
+  }
+
+  /* ユーザー（大きくする） */
+  .avatar.user {
+    width: 40px !important;
+    height: 40px !important;
+    min-width: 40px;
+    max-width: 40px;
   }
 
   .diagnosisFooter {
@@ -370,3 +380,14 @@ main.mu-main,
     padding-bottom: calc(var(--footer-safe-pad, 56px) + 24px);
     scroll-padding-bottom: calc(var(--footer-safe-pad, 56px) + 24px);
   }
+/* 上のMuverseヘッダーとの隙間を消す */
+.iro-chat-main {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+/* irosヘッダー自体も詰める */
+.iro-header {
+  margin-top: 0 !important;
+  border-radius: 0 !important;
+}

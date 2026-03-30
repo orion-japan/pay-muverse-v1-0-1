@@ -224,6 +224,17 @@ export default function KyomeikaiClient() {
 
         <div className="km-card-title">共鳴会</div>
         <div className="km-subtitle">次回のスケジュール</div>
+<p
+  style={{
+    marginTop: 6,
+    marginBottom: 12,
+    fontSize: '0.9rem',
+    color: '#6b7280',
+    lineHeight: 1.6,
+  }}
+>
+  主にirosの使い方についてzoomミーティング開催中<br/>毎週火曜日２１時〜の予定です。
+</p>
 
         <div className="km-image-wrap">
           {/* LCP 最適化したいなら next/image へ置換可 */}
@@ -250,7 +261,7 @@ export default function KyomeikaiClient() {
             </div>
           </div>
         ) : (
-          <div className="km-schedule km-muted">予定は未定です。後ほどご確認ください。</div>
+          <div className="km-schedule km-muted">開催１０分前より参加ボタン開放します。</div>
         )}
 
         <div className="km-actions">
