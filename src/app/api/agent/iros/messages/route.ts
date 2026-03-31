@@ -964,18 +964,10 @@ export async function POST(req: NextRequest) {
       ok: true,
       message: {
         id: String(inserted.id),
-        conversation_id: cidExternal, // ✅ 外部cidで返す
+        conversation_id: cidExternal,
         role,
         content: finalText,
         created_at: inserted.created_at,
-
-        q_code: q_code_final,
-        depth_stage: depth_stage_final,
-        intent_layer: intent_layer_final,
-
-        streak_q: streakQ,
-        streak_len: streakLenNum != null ? String(streakLenNum) : null,
-        qtu_from: qtuFrom,
       },
     });
 
