@@ -42,15 +42,38 @@ function setKeyboardOpenUI(open: boolean) {
   if (typeof document === 'undefined') return;
 
   const root = document.documentElement;
-  const footer = document.getElementById('mu-footer-root');
+  const footerHost = document.getElementById('mu-footer-root') as HTMLElement | null;
+  const footerNav =
+    (footerHost?.querySelector('nav') as HTMLElement | null) ??
+    (document.querySelector('#mu-footer-root nav') as HTMLElement | null);
 
   root.classList.toggle('keyboard-open', open);
   root.style.setProperty('--footer-safe-pad', open ? '0px' : 'var(--footer-h, 56px)');
 
-  if (footer) {
-    footer.style.transform = open ? 'translateY(140%)' : '';
-    footer.style.pointerEvents = open ? 'none' : '';
-    footer.style.opacity = open ? '0' : '';
+  const hiddenStyle = {
+    transform: 'translateY(140%)',
+    pointerEvents: 'none',
+    opacity: '0',
+  } as const;
+
+  const resetStyle = {
+    transform: '',
+    pointerEvents: '',
+    opacity: '',
+  } as const;
+
+  const next = open ? hiddenStyle : resetStyle;
+
+  if (footerHost) {
+    footerHost.style.transform = next.transform;
+    footerHost.style.pointerEvents = next.pointerEvents;
+    footerHost.style.opacity = next.opacity;
+  }
+
+  if (footerNav) {
+    footerNav.style.transform = next.transform;
+    footerNav.style.pointerEvents = next.pointerEvents;
+    footerNav.style.opacity = next.opacity;
   }
 }
 
