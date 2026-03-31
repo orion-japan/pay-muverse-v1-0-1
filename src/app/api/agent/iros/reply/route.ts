@@ -1137,18 +1137,10 @@ if (isNonForwardButEmpty) {
       finalMode ||
       (result && typeof result === 'object' && typeof (result as any).mode === 'string' ? (result as any).mode : mode);
 
-    const basePayload = {
-      ok: true,
-      mode: effectiveMode,
-      credit: {
-        ref: creditRef,
-        amount: CREDIT_AMOUNT,
-        authorize: authRes,
-        capture: capRes,
-        ...(lowWarn ? { warning: lowWarn } : {}),
-      },
-      ...(lowWarn ? { warning: lowWarn } : {}),
-    };
+      const basePayload = {
+        ok: true,
+        mode: effectiveMode,
+      };
 
     // =========================================================
     // result が object のとき
@@ -1337,12 +1329,10 @@ try {
 } catch (e) {
   console.error('[IROS][DIAGNOSIS_PERSIST_ERROR]', e);
 }
-      return NextResponse.json({
-        ok: true,
-        assistantText: finalText,
-        content: finalText,
-        meta: persistMeta,
-      });
+return NextResponse.json({
+  ok: true,
+  text: finalText,
+});
     }
   const applied = await applyRenderEngineIfEnabled({
     enableRenderEngine,
@@ -2081,7 +2071,10 @@ if (!skipTraining) {
       delete (resultObj as any).credit;
 
       return NextResponse.json(
-        { ...resultObj, ...basePayload, mode: effectiveMode, meta },
+        {
+          ok: true,
+          text: String((result as any)?.content ?? ''),
+        },
         { status: 200, headers },
       );
     }
@@ -2092,23 +2085,11 @@ if (!skipTraining) {
     {
       const finalText = String(result ?? '').trim();
 
-      const metaString: any = {
-        userProfile: userProfile ?? null,
-        extra: {
-          userCode,
-          hintText,
-          traceId,
-          historyLen: Array.isArray(chatHistory) ? chatHistory.length : 0,
-          persistedByRoute: true,
-          persistPolicy: PERSIST_POLICY,
-          persistAssistantMessage: false,
-          renderEngineGate: extraSoT?.renderEngineGate === true,
-          renderEngine: extraSoT?.renderEngine === true,
-        },
-      };
-
       return NextResponse.json(
-        { ...basePayload, content: finalText, meta: metaString },
+        {
+          ok: true,
+          text: finalText,
+        },
         { status: 200, headers },
       );
     }

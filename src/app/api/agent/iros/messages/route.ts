@@ -391,7 +391,7 @@ export async function GET(req: NextRequest) {
     } catch (e: any) {
       const ms = msSince(t0);
       return json(
-        { ok: false, error: 'authz_throw', error_code: 'authz_throw', detail: String(e?.message ?? e), ms },
+        { ok: false, error: 'authz_throw', detail: String(e?.message ?? e), ms },
         isUpstreamTimeout(e) ? 504 : 401,
       );
     }
@@ -399,12 +399,12 @@ export async function GET(req: NextRequest) {
     if (!auth.ok) {
       const ms = msSince(t0);
       const status = isUpstreamTimeout(auth) ? 504 : auth.status || 401;
-      return json({ ok: false, error: auth.error, error_code: 'authz_not_ok', ms }, status);
+      return json({ ok: false, error: auth.error, ms }, status);
     }
 
     const userCode =
       (auth.user?.user_code as string) || (auth.user?.uid as string) || (auth.userCode as string) || '';
-    if (!userCode) return json({ ok: false, error: 'user_code_missing', error_code: 'user_code_missing' }, 400);
+    if (!userCode) return json({ ok: false, error: 'user_code_missing' }, 400);
 
     // (B) Params
     const cid =
@@ -415,7 +415,7 @@ export async function GET(req: NextRequest) {
       req.nextUrl.searchParams.get('id') ||
       '';
     if (!cid) {
-      return json({ ok: false, error: 'missing_conversation_id', error_code: 'missing_conversation_id' }, 400);
+      return json({ ok: false, error: 'missing_conversation_id' }, 400);
     }
 
     const limitRaw = req.nextUrl.searchParams.get('limit');
@@ -438,18 +438,18 @@ export async function GET(req: NextRequest) {
     const convRow = await resolveConversationRow(supabase, cid);
 
     if (!convRow) {
-      return json({ ok: true, messages: [], llm_messages: [], note: 'conversation_not_found' }, 200);
+      return json({ ok: true, messages: [] }, 200);
     }
 
     const owner = String(convRow.user_code ?? '');
     if (owner && owner !== userCode) {
-      return json({ ok: true, messages: [], llm_messages: [], note: 'forbidden_owner_mismatch' }, 200);
+      return json({ ok: true, messages: [] }, 200);
     }
 
     // (C2) Resolve internal uuid used by iros_messages.conversation_id
     const convUuid = resolveInternalUuid(cid, convRow);
     if (!convUuid) {
-      return json({ ok: true, messages: [], llm_messages: [], note: 'no_conversation_uuid_mapping' }, 200);
+      return json({ ok: true, messages: [] }, 200);
     }
 
     // (D) Messages select (use convUuid)
@@ -496,7 +496,7 @@ export async function GET(req: NextRequest) {
 
     if (!res.ok) {
       return json(
-        { ok: false, error: 'messages_select_failed', error_code: 'messages_select_failed', messages: [], llm_messages: [] },
+        { ok: false, error: 'messages_select_failed', messages: [] },
         200,
       );
     }
@@ -550,10 +550,17 @@ export async function GET(req: NextRequest) {
       .slice(-llmLimit)
       .map((m) => ({ role: m.role, content: m.content }));
 
-    return json({ ok: true, messages, llm_messages, includeMeta, source: (res as any).table }, 200);
+      return json({
+        ok: true,
+        messages: messages.map(m => ({
+          role: m.role,
+          content: m.content,
+        })),
+      }, 200);
+
   } catch (e: any) {
     return json(
-      { ok: false, error: 'unhandled_error', error_code: 'unhandled_error', detail: String(e?.message ?? e), ms: msSince(t0) },
+      { ok: false, error: 'unhandled_error', detail: String(e?.message ?? e), ms: msSince(t0) },
       500,
     );
   }
@@ -574,7 +581,7 @@ export async function POST(req: NextRequest) {
     } catch (e: any) {
       const ms = msSince(t0);
       return json(
-        { ok: false, error: 'authz_throw', error_code: 'authz_throw', detail: String(e?.message ?? e), ms },
+        { ok: false, error: 'authz_throw', detail: String(e?.message ?? e), ms },
         isUpstreamTimeout(e) ? 504 : 401,
       );
     }
@@ -582,12 +589,12 @@ export async function POST(req: NextRequest) {
     if (!auth.ok) {
       const ms = msSince(t0);
       const status = isUpstreamTimeout(auth) ? 504 : auth.status || 401;
-      return json({ ok: false, error: auth.error, error_code: 'authz_not_ok', ms }, status);
+      return json({ ok: false, error: auth.error, ms }, status);
     }
 
     const userCode =
       (auth.user?.user_code as string) || (auth.user?.uid as string) || (auth.userCode as string) || '';
-    if (!userCode) return json({ ok: false, error: 'user_code_missing', error_code: 'user_code_missing' }, 400);
+    if (!userCode) return json({ ok: false, error: 'user_code_missing' }, 400);
 
     // (B) Body
     let body: any = {};
@@ -603,7 +610,7 @@ export async function POST(req: NextRequest) {
 
     const cidExternal: string = String(body?.conversation_id || body?.conversationId || body?.id || '').trim();
     if (!cidExternal) {
-      return json({ ok: false, error: 'missing_conversation_id', error_code: 'missing_conversation_id', reqId }, 400);
+      return json({ ok: false, error: 'missing_conversation_id', reqId }, 400);
     }
 
     const role: 'user' | 'assistant' =
@@ -617,7 +624,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!rawText || !String(rawText).trim()) {
-      return json({ ok: false, error: 'text_empty', error_code: 'text_empty', reqId }, 400);
+      return json({ ok: false, error: 'text_empty', reqId }, 400);
     }
 
     const supabase = sb();
@@ -626,17 +633,17 @@ export async function POST(req: NextRequest) {
     const convRow = await resolveConversationRow(supabase, cidExternal);
 
     if (!convRow) {
-      return json({ ok: true, messages: [], llm_messages: [], note: 'conversation_not_found', reqId }, 200);
+      return json({ ok: true, messages: [], reqId }, 200);
     }
 
     const owner = String(convRow.user_code ?? '');
     if (owner && owner !== userCode) {
-      return json({ ok: true, messages: [], llm_messages: [], note: 'forbidden_owner_mismatch', reqId }, 200);
+      return json({ ok: true, messages: [], reqId }, 200);
     }
 
     const convUuid = resolveInternalUuid(cidExternal, convRow);
     if (!convUuid) {
-      return json({ ok: true, messages: [], llm_messages: [], note: 'no_conversation_uuid_mapping', reqId }, 200);
+      return json({ ok: true, messages: [], reqId }, 200);
     }
 
     // (D) NextStep + text normalize（choiceIdは使用しない）
@@ -652,7 +659,7 @@ export async function POST(req: NextRequest) {
 
     let finalText = (cleanTextAfterTagStrip.length ? cleanTextAfterTagStrip : rawTextNorm).trim();
     if (isEllipsisOnly(finalText)) finalText = '';
-    if (!finalText) return json({ ok: false, error: 'text_empty', error_code: 'text_empty', reqId }, 400);
+    if (!finalText) return json({ ok: false, error: 'text_empty', reqId }, 400);
 
     // (E) meta build + sanitize（NextStep関連は付与しない）
     const metaRaw = body?.meta ?? null;
@@ -948,14 +955,13 @@ export async function POST(req: NextRequest) {
 
     if (!inserted) {
       return json(
-        { ok: false, error: 'insert_failed_all_candidates', error_code: 'insert_failed_all_candidates', ms: msSince(t0), reqId },
+        { ok: false, error: 'insert_failed_all_candidates', ms: msSince(t0), reqId },
         500,
       );
     }
 
     return json({
       ok: true,
-      reqId,
       message: {
         id: String(inserted.id),
         conversation_id: cidExternal, // ✅ 外部cidで返す
@@ -970,14 +976,12 @@ export async function POST(req: NextRequest) {
         streak_q: streakQ,
         streak_len: streakLenNum != null ? String(streakLenNum) : null,
         qtu_from: qtuFrom,
-
-        meta: metaFilled,
       },
     });
 
   } catch (e: any) {
     return json(
-      { ok: false, error: 'unhandled_error', error_code: 'unhandled_error', detail: String(e?.message ?? e), ms: msSince(t0) },
+      { ok: false, error: 'unhandled_error', detail: String(e?.message ?? e), ms: msSince(t0) },
       500,
     );
   }

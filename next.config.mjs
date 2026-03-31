@@ -5,6 +5,10 @@ import path from 'node:path';
 const nextConfig = {
   reactStrictMode: true,
 
+  compiler: {
+    removeConsole: process.env.NODE_ENV === 'production',
+  },
+
   experimental: {
     serverActions: { bodySizeLimit: '10mb' },
   },

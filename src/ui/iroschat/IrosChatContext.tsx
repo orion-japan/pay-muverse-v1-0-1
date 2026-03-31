@@ -14,6 +14,7 @@ import { irosClient } from './lib/irosApi';
 import type { IrosStyle } from './lib/irosApi';
 import type { IrosMessage, IrosConversation, IrosUserInfo } from './types';
 import { auth } from '@/lib/firebase';
+import { devlog, devwarn } from '@/lib/utils/devlog';
 
 type SendResult =
   | {
@@ -251,7 +252,7 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
       rowsRaw = await irosClient.fetchMessages(cid);
     } catch (e) {
       // ✅ 取得失敗時に messages を空にしない（リロードで消える問題の止血）
-      console.warn('[IROS][client] fetchMessages failed (keep prev messages)', {
+      devwarn('[IROS][client] fetchMessages failed (keep prev messages)', {
         cid,
         prevCid,
         error: String((e as any)?.message ?? e),
@@ -322,15 +323,15 @@ const sendMessage = useCallback(
 
     // 新規ユーザーなどで会話が無い場合は、ここで作成する
     if (!cid) {
-      console.log('[UI/sendMessage] no active conversation → startConversation');
+      devlog('[UI/sendMessage] no active conversation → startConversation');
       cid = await startConversation();
       if (!cid) {
-        console.warn('[UI/sendMessage] startConversation failed');
+        devwarn('[UI/sendMessage] startConversation failed');
         return null;
       }
     }
 
-    console.log('[UI/sendMessage] outbound(raw)', {
+    devlog('[UI/sendMessage] outbound(raw)', {
       cid,
       mode,
       textLen: text?.length ?? 0,
@@ -340,7 +341,7 @@ const sendMessage = useCallback(
     const norm = normalizeForSend(text);
 
     if (norm.blockedReason) {
-      console.warn('[UI/sendMessage] blocked', {
+      devwarn('[UI/sendMessage] blocked', {
         cid,
         mode,
         reason: norm.blockedReason,
@@ -349,7 +350,7 @@ const sendMessage = useCallback(
       return { assistant: '', meta: { blocked: true, reason: norm.blockedReason } };
     }
 
-    console.log('[UI/sendMessage] outbound(norm)', {
+    devlog('[UI/sendMessage] outbound(norm)', {
       cid,
       mode,
       textLen: norm.text.length,
@@ -370,18 +371,18 @@ const sendMessage = useCallback(
     try {
       setMessages((m) => [...m, userMsg]);
 
-      console.log('[UI/sendMessage] BEFORE postMessage', { cid });
+      devlog('[UI/sendMessage] BEFORE postMessage', { cid });
       await irosClient.postMessage({
         conversationId: cid,
         text: norm.text,
         role: 'user',
         meta: {},
       });
-      console.log('[UI/sendMessage] AFTER postMessage', { cid });
+      devlog('[UI/sendMessage] AFTER postMessage', { cid });
 
       const history = buildHistoryForLLM([...(messagesRef.current || []), userMsg], 10);
 
-      console.log('[UI/sendMessage] BEFORE replyAndStore', { cid, mode });
+      devlog('[UI/sendMessage] BEFORE replyAndStore', { cid, mode });
       const r: any = await irosClient.replyAndStore({
         conversationId: cid,
         user_text: norm.text,
@@ -389,7 +390,7 @@ const sendMessage = useCallback(
         style,
         history,
       });
-      console.log('[UI/sendMessage] AFTER replyAndStore', { cid });
+      devlog('[UI/sendMessage] AFTER replyAndStore', { cid });
 
       const assistant = normalizeText(r?.assistant ?? '');
       const meta = r?.meta ?? null;
@@ -561,16 +562,16 @@ const payload: any = {
       }
 
       if (cid) {
-        console.log('[IROS] Future-Seed: activeConversationId を補完しました', cid);
+        devlog('[IROS] Future-Seed: activeConversationId を補完しました', cid);
         activeConversationIdRef.current = cid;
         setActiveConversationId(cid);
       }
     }
 
-    console.log('[IROS] Seed ボタンが押されました（Future-Seed 起動）');
+    devlog('[IROS] Seed ボタンが押されました（Future-Seed 起動）');
 
     if (!cid) {
-      console.warn('[IROS] No active conversation for future-seed (after fallback)');
+      devwarn('[IROS] No active conversation for future-seed (after fallback)');
       return null;
     }
 
@@ -580,12 +581,12 @@ const payload: any = {
       const idToken = currentUser ? await currentUser.getIdToken() : null;
 
       if (!idToken) {
-        console.warn('[IROS] Future-Seed: no idToken (not logged in?)');
+        devwarn('[IROS] Future-Seed: no idToken (not logged in?)');
         return null;
       }
 
       const body = { conversationId: cid };
-      console.log('[IROS] Future-Seed request body', body);
+      devlog('[IROS] Future-Seed request body', body);
 
       const res = await fetch('/api/agent/iros/future-seed', {
         method: 'POST',
@@ -610,7 +611,7 @@ const payload: any = {
       const meta = data?.meta ?? data?.result?.meta ?? null;
 
       if (!assistant) {
-        console.warn('[IROS] Future-Seed result null');
+        devwarn('[IROS] Future-Seed result null');
         return null;
       }
 
@@ -629,7 +630,7 @@ const payload: any = {
           } as IrosMessage,
         ];
 
-        console.log('[IROS] Seed setMessages', {
+        devlog('[IROS] Seed setMessages', {
           before: m.length,
           after: next.length,
           last: {

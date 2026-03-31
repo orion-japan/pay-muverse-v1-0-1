@@ -107,13 +107,11 @@ export async function POST(req: NextRequest) {
     return json(
       {
         ok: true,
-        reply: replyText, // 新
-        assistant: replyText, // 旧UI互換
-        text: replyText, // jq '{mode, meta, text}'
+        reply: replyText,
+        assistant: replyText,
+        text: replyText,
         mode: finalMode,
-        meta,
         layer: finalMode,
-        credit,
       },
       200,
     );
