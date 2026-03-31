@@ -74,7 +74,9 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
   const disabled = loading || sending;
   const normalizedForSend = useMemo(() => normalizeSendText(text), [text]);
   const hasActiveConversation = Boolean((chat as any)?.activeConversationId);
-  const canSend = !disabled && hasActiveConversation && normalizedForSend.length > 0;
+  const canSend =
+  !disabled &&
+  normalizedForSend.length > 0;
 
   useEffect(() => {
     try {
@@ -159,17 +161,18 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
     try {
       taRef.current?.blur();
 
-      setText('');
-      setDraftText?.('');
-      try {
-        window.localStorage.removeItem(DRAFT_KEY);
-      } catch {}
-
       const res: any = await sendMessage(value);
 
       if (onMeta && res?.meta) {
         onMeta(res.meta);
       }
+
+      // ✅ 成功後にクリア
+      setText('');
+      setDraftText?.('');
+      try {
+        window.localStorage.removeItem(DRAFT_KEY);
+      } catch {}
     } catch (e) {
       console.error('[IrosChatInput] send error', e);
     } finally {
@@ -178,7 +181,6 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
       autoSize();
     }
   }, [text, sendMessage, onMeta, autoSize, setDraftText]);
-
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
@@ -202,10 +204,14 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
     setText((prev) => {
       const prevTrim = String(prev ?? '').trim();
 
+      // すでに同じ内容なら何もしない
       if (prevTrim === next) return prev;
-      if (!prevTrim) return `${next}\n\n`;
 
-      return `${prev.replace(/\s*$/, '')}\n\n${next}\n\n`;
+      // ユーザーが入力中なら上書きしない
+      if (prevTrim.length > 0) return prev;
+
+      // 空のときだけ draft を反映
+      return next;
     });
 
     setDraftText?.('');
@@ -248,21 +254,41 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
         />
 
         <div className="sof-actions sof-actions--single">
-          <button
-            data-sof-send
-            type="button"
-            className="sof-actionBtn sof-actionBtn--send sof-actionBtn--lg"
-            onClick={() => {
-              if (canSend) {
-                void handleSend();
-              }
-            }}
-            disabled={!canSend}
-            aria-label="送信"
-            title="送信（Enter）"
-          >
-            {sending ? '送信中…' : '送信'}
-          </button>
+        <button
+  data-sof-send
+  type="button"
+  className="sof-actionBtn sof-actionBtn--send sof-actionBtn--lg"
+  onClick={() => {
+    console.log('[IROS][ChatInput] send button click', {
+      canSend,
+      disabled,
+      sending,
+      text,
+      draftText,
+      normalizedForSend,
+      activeConversationId: (chat as any)?.activeConversationId ?? null,
+    });
+
+    if (canSend) {
+      void handleSend();
+    } else {
+      console.log('[IROS][ChatInput] blocked at button', {
+        canSend,
+        disabled,
+        sending,
+        text,
+        draftText,
+        normalizedForSend,
+        activeConversationId: (chat as any)?.activeConversationId ?? null,
+      });
+    }
+  }}
+  disabled={!canSend}
+  aria-label="送信"
+  title="送信（Enter）"
+>
+  {sending ? '送信中…' : '送信'}
+</button>
         </div>
       </div>
     </div>

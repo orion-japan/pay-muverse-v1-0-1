@@ -160,12 +160,21 @@ async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
       const t = await res.text().catch(() => '');
       if (DEV) console.warn('[IROS/API] authFetch error', res.status, t);
 
+      // 402 は UI でそのまま出したい文言に揃える
+      if (res.status === 402) {
+        throw new Error('クレジットが不足しています');
+      }
+
       // ★ timeout が body に混ざって 401 になってるケースを識別しやすくする
       if (res.status === 401 && /timeout of 25000ms exceeded/i.test(t)) {
         throw new Error(`HTTP 401 (upstream-timeout) ${t}`);
       }
 
-      throw new Error(`HTTP ${res.status} ${t}`);
+      let message = `HTTP ${res.status}`;
+      if (t) {
+        message += ` ${t}`;
+      }
+      throw new Error(message);
     }
 
     return res;

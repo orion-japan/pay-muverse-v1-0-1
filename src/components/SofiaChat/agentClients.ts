@@ -288,7 +288,19 @@ export async function sendText(
         headers: { 'Content-Type': 'application/json', 'x-user-code': userCode },
         body: JSON.stringify(c.body),
       });
-      if (resp.ok || (resp.status !== 401 && resp.status !== 404)) break;
+      if (!resp.ok) {
+        const j = await resp.json().catch(() => ({}));
+
+        if (resp.status === 402) {
+          throw new Error('クレジットが不足しています');
+        }
+
+        if (resp.status === 401) {
+          throw new Error('ログイン状態が無効です');
+        }
+
+        throw new Error(j?.error || '通信エラー');
+      } break;
     }
     if (!resp) throw new Error('mirra send failed (no response)');
 

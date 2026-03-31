@@ -318,8 +318,17 @@ function normalizeForSend(raw: string): { text: string; blockedReason: string | 
 
 const sendMessage = useCallback(
   async (text: string, mode: string = 'auto'): Promise<SendResult> => {
-    const cid = activeConversationIdRef.current;
-    if (!cid) return null;
+    let cid = activeConversationIdRef.current;
+
+    // 新規ユーザーなどで会話が無い場合は、ここで作成する
+    if (!cid) {
+      console.log('[UI/sendMessage] no active conversation → startConversation');
+      cid = await startConversation();
+      if (!cid) {
+        console.warn('[UI/sendMessage] startConversation failed');
+        return null;
+      }
+    }
 
     console.log('[UI/sendMessage] outbound(raw)', {
       cid,
@@ -349,7 +358,6 @@ const sendMessage = useCallback(
 
     setLoading(true);
 
-    // ① UIに user を即反映（ここが無いと「送ったのに増えない」になる）
     const userMsg: IrosMessage = {
       id: crypto.randomUUID(),
       role: 'user',
@@ -362,20 +370,17 @@ const sendMessage = useCallback(
     try {
       setMessages((m) => [...m, userMsg]);
 
-      // ② DBへ保存
       console.log('[UI/sendMessage] BEFORE postMessage', { cid });
       await irosClient.postMessage({
         conversationId: cid,
         text: norm.text,
         role: 'user',
-        meta: {}, // ✅ traceId を meta.extra に確実に入れるため
+        meta: {},
       });
       console.log('[UI/sendMessage] AFTER postMessage', { cid });
 
-      // ③ LLM用 history を作る（既存の関数を使う）
       const history = buildHistoryForLLM([...(messagesRef.current || []), userMsg], 10);
 
-      // ④ reply を生成＋保存（ここが無いと「iros返答が出ない」）
       console.log('[UI/sendMessage] BEFORE replyAndStore', { cid, mode });
       const r: any = await irosClient.replyAndStore({
         conversationId: cid,
@@ -389,7 +394,6 @@ const sendMessage = useCallback(
       const assistant = normalizeText(r?.assistant ?? '');
       const meta = r?.meta ?? null;
 
-      // ⑤ UIに assistant を反映
       setMessages((m) => [
         ...m,
         {
@@ -413,7 +417,7 @@ const sendMessage = useCallback(
       setLoading(false);
     }
   },
-  [reloadConversations, style],
+  [reloadConversations, startConversation, style],
 );
 
 

@@ -30,6 +30,24 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
     } catch {}
   };
 
+  const resetIrosClientState = () => {
+    try {
+      if (typeof window === 'undefined') return;
+
+      // 下書き削除
+      window.localStorage.removeItem('iros_chat_draft');
+
+      // agent別の最後の会話IDを削除
+      Object.keys(window.localStorage).forEach((k) => {
+        if (k.startsWith('sofia:lastConv:')) {
+          window.localStorage.removeItem(k);
+        }
+      });
+    } catch (e) {
+      console.warn('[IROS] reset failed', e);
+    }
+  };
+
   const handleLogin = async () => {
     if (loading) return;
     setError('');
@@ -40,17 +58,29 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
       const cred = await signInWithEmailAndPassword(auth, email, password);
       const user = cred.user;
 
-      await user.reload(); // ステータス最新化
+      await user.reload();
 
-      // メール未認証 → 認証案内モーダル表示
-      if (!user.emailVerified) {
+      // Firebase未認証でも、あとでDB判定するため一旦通す
+      const idToken = await user.getIdToken(true);
+
+      // 先にDB側の状態を確認
+      const statusResPre = await fetch('/api/account-status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({}),
+      });
+
+      const statusJsonPre = await statusResPre.json().catch(() => ({}));
+
+      // FirebaseもDBも未認証ならブロック
+      if (!user.emailVerified && statusJsonPre.email_verified === false) {
         setShowVerifyModal(true);
         setLoading(false);
         return;
       }
-
-      // 常に最新の ID トークン
-      const idToken = await user.getIdToken(true);
 
       // 1) /api/login
       const loginRes = await fetch('/api/login', {
@@ -94,7 +124,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
         );
       }
 
-      // Supabase 側のメール認証が false なら同期（任意）
+      // DB側が未認証なら同期
       if (statusJson.email_verified === false) {
         const verifyRes = await fetch('/api/verify-complete', {
           method: 'POST',
@@ -104,12 +134,16 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
           },
           body: JSON.stringify({}),
         });
+
         if (!verifyRes.ok) {
           await hardSignOut();
           const errData = await verifyRes.json().catch(() => ({}));
           throw new Error(errData.error || 'メール認証状態の同期に失敗しました');
         }
       }
+
+      // ログイン成功時に前ユーザーの iros 状態をクリア
+      resetIrosClientState();
 
       onLoginSuccess?.();
       onClose();
@@ -126,7 +160,6 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
     }
   };
 
-  // 認証メール再送信 → 成功扱いで閉じる
   const handleResendAndClose = async () => {
     try {
       const user = auth.currentUser;

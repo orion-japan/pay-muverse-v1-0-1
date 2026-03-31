@@ -354,76 +354,92 @@ export default function SofiaChatShell({ agent: agentProp = 'mu', open }: Props)
         },
       ]);
 
-      const res = await sendText(agentK, {
-        userCode,
-        conversationId,
-        messagesSoFar: messages,
-        text,
-      });
-
-      try { console.info('[handleSend] sendText result:', res); } catch {}
-
-      const nextConvId = res.conversationId ?? conversationId;
-      if (nextConvId && nextConvId !== conversationId) {
-        setConversationId(nextConvId);
-        try { window.localStorage.setItem(lastConvKey(agentK), nextConvId); } catch {}
-      }
-
-      // 1) rows 優先（空配列なら何もしない）
-      if (Array.isArray(res.rows) && res.rows.length > 0) {
-        setMessages((prev) => {
-          const merged: Message[] = [
-            ...prev.filter((m) => !res.rows!.some((r) => r.id && r.id === m.id)),
-            ...res.rows!,
-          ].filter(notShare);
-
-          const hasSeed = res.rows!.some((r) => r.meta?.seed || r.meta?.seed_reply);
-          const maybeSeeded =
-            agentK === 'mirra' && !hasSeed ? injectMtalkSeed(merged, nextConvId!) : merged;
-
-          return dedupeMessages(maybeSeeded);
+      try {
+        const res = await sendText(agentK, {
+          userCode,
+          conversationId,
+          messagesSoFar: messages,
+          text,
         });
-      } else {
-        // 2) replyText があれば追加
-        const replyTextSafe =
-          typeof res.replyText === 'number'
-            ? String(res.replyText)
-            : typeof res.replyText === 'string'
-            ? res.replyText
-            : '';
 
-        if (replyTextSafe && replyTextSafe.trim() !== '') {
-          setMessages((prev) => {
-            const reply: Message = {
-              id: crypto.randomUUID?.() ?? `a-${Date.now()}`,
-              role: 'assistant',
-              content: replyTextSafe,
-              created_at: new Date().toISOString(),
-              agent: agentK,
-              ...(res.meta ? { meta: res.meta as any } : {}),
-            };
-            const arr: Message[] = [...prev, reply];
-            const cleaned: Message[] = arr.filter(notShare as (m: Message) => boolean);
-            return dedupeMessages(cleaned);
-          });
-        } else if (nextConvId) {
-          // 3) rows も replyText も無い → 保存済み想定で強制再取得
-          await doFetchMessages(nextConvId, { force: true });
-        }
-      }
-
-      // 4) クレジット更新イベント
-      if (typeof res.credit === 'number') {
         try {
-          window.dispatchEvent(
-            new CustomEvent('sofia_credit', { detail: { credits: res.credit } })
-          );
+          console.info('[handleSend] sendText result:', res);
         } catch {}
+
+        const nextConvId = res.conversationId ?? conversationId;
+        if (nextConvId && nextConvId !== conversationId) {
+          setConversationId(nextConvId);
+          try {
+            window.localStorage.setItem(lastConvKey(agentK), nextConvId);
+          } catch {}
+        }
+
+        // 1) rows 優先（空配列なら何もしない）
+        if (Array.isArray(res.rows) && res.rows.length > 0) {
+          setMessages((prev) => {
+            const merged: Message[] = [
+              ...prev.filter((m) => !res.rows!.some((r) => r.id && r.id === m.id)),
+              ...res.rows!,
+            ].filter(notShare);
+
+            const hasSeed = res.rows!.some((r) => r.meta?.seed || r.meta?.seed_reply);
+            const maybeSeeded =
+              agentK === 'mirra' && !hasSeed ? injectMtalkSeed(merged, nextConvId!) : merged;
+
+            return dedupeMessages(maybeSeeded);
+          });
+        } else {
+          // 2) replyText があれば追加
+          const replyTextSafe =
+            typeof res.replyText === 'number'
+              ? String(res.replyText)
+              : typeof res.replyText === 'string'
+                ? res.replyText
+                : '';
+
+          if (replyTextSafe && replyTextSafe.trim() !== '') {
+            setMessages((prev) => {
+              const reply: Message = {
+                id: crypto.randomUUID?.() ?? `a-${Date.now()}`,
+                role: 'assistant',
+                content: replyTextSafe,
+                created_at: new Date().toISOString(),
+                agent: agentK,
+                ...(res.meta ? { meta: res.meta as any } : {}),
+              };
+              const arr: Message[] = [...prev, reply];
+              const cleaned: Message[] = arr.filter(notShare as (m: Message) => boolean);
+              return dedupeMessages(cleaned);
+            });
+          } else if (nextConvId) {
+            // 3) rows も replyText も無い → 保存済み想定で強制再取得
+            doFetchMessages(nextConvId, { force: true });
+          }
+        }
+
+        if (typeof res.credit === 'number') {
+          try {
+            window.dispatchEvent(new CustomEvent('sofia_credit', { detail: { credits: res.credit } }));
+          } catch {}
+        }
+
+        if (res.meta) {
+          setMeta(res.meta as any);
+        }
+      } catch (err: any) {
+        const msg =
+          typeof err?.message === 'string' && err.message.trim()
+            ? err.message
+            : '送信に失敗しました。';
+
+        setMessages((prev) =>
+          prev.filter((m) => !(m.isPreview && m.role === 'user' && m.content === text)),
+        );
+
+        alert(msg);
       }
-      // 🟢 ここを追加：送信後に上方向スクロール（GPT風の動き）
-      window.dispatchEvent(new CustomEvent('sof:scrollUp'));
     },
-    [agentK, userCode, conversationId, messages, injectMtalkSeed, doFetchMessages]
+    [agentK, conversationId, doFetchMessages, messages, userCode],
   );
 
   // 削除 / 改名
