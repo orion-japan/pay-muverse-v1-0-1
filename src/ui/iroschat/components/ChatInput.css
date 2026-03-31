@@ -18,9 +18,7 @@
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: calc(
-    var(--footer-safe-pad) + var(--safe-bottom) + var(--keyboard-inset) + var(--compose-lift)
-  );
+  bottom: var(--footer-safe-pad, 56px);
 
   width: 100%;
   max-width: var(--ui-max-width);
@@ -29,7 +27,7 @@
   border-top: 1px solid #e5e6eb;
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05);
   border-radius: 10px 10px 0 0;
-  z-index: 1000;
+  z-index: 1101;
 
   padding: 8px 10px;
   box-sizing: border-box;

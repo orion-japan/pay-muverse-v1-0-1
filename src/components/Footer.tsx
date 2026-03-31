@@ -15,9 +15,17 @@ type Item = {
   icon?: React.ReactNode;
 };
 
+function detectKeyboardOpen(): boolean {
+  if (typeof window === 'undefined') return false;
+  const vv = window.visualViewport;
+  if (!vv) return false;
+  return window.innerHeight - vv.height > 120;
+}
+
 export default function Footer() {
   const [host, setHost] = useState<HTMLElement | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const navRef = useRef<HTMLElement | null>(null);
 
   const router = useRouter();
@@ -36,30 +44,74 @@ export default function Footer() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    let raf = 0;
+
+    const syncKeyboardState = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        setKeyboardOpen(detectKeyboardOpen());
+      });
+    };
+
+    vv.addEventListener('resize', syncKeyboardState);
+    vv.addEventListener('scroll', syncKeyboardState);
+    window.addEventListener('resize', syncKeyboardState);
+
+    syncKeyboardState();
+
+    return () => {
+      cancelAnimationFrame(raf);
+      vv.removeEventListener('resize', syncKeyboardState);
+      vv.removeEventListener('scroll', syncKeyboardState);
+      window.removeEventListener('resize', syncKeyboardState);
+    };
+  }, []);
+
+  useEffect(() => {
     const setPad = (h: number) => {
       const px = Math.max(0, Math.round(h || 0));
-      document.documentElement.style.setProperty('--footer-h', `${px}px`);
+      const footerBottomGap = 12;
+      document.documentElement.style.setProperty(
+        '--footer-h',
+        `${px + footerBottomGap}px`,
+      );
       document.documentElement.style.setProperty(
         '--footer-safe-pad',
-        `calc(${px}px + env(safe-area-inset-bottom))`,
+        `calc(${px + footerBottomGap}px + env(safe-area-inset-bottom))`,
       );
     };
+
+    if (keyboardOpen) {
+      setPad(0);
+      return;
+    }
 
     setPad(FALLBACK_H);
 
     const el = navRef.current;
     if (!el) return;
 
-    const update = () => setPad(el.getBoundingClientRect().height);
+    const update = () => {
+      if (keyboardOpen) {
+        setPad(0);
+        return;
+      }
+      setPad(el.getBoundingClientRect().height);
+    };
+
     update();
 
     const ro = new ResizeObserver(update);
     ro.observe(el);
 
     return () => ro.disconnect();
-  }, [host, mounted]);
+  }, [host, mounted, keyboardOpen]);
 
-  // ✅ ここが今回の本体
   const items: Item[] = useMemo(
     () => [
       { id: 'iros', label: 'Iros', href: '/', icon: <span>🌀</span> },
@@ -81,7 +133,7 @@ export default function Footer() {
     if (pathname !== it.href) router.push(it.href);
   };
 
-  if (!mounted) return null;
+  if (!mounted || keyboardOpen) return null;
 
   const Nav = (
     <nav
