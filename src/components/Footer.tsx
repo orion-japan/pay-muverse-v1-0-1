@@ -16,10 +16,28 @@ type Item = {
 };
 
 function detectKeyboardOpen(): boolean {
-  if (typeof window === 'undefined') return false;
+  if (typeof window === 'undefined' || typeof document === 'undefined') return false;
+
   const vv = window.visualViewport;
-  if (!vv) return false;
-  return window.innerHeight - vv.height > 120;
+  const heightGap = vv ? window.innerHeight - vv.height : 0;
+
+  const active = document.activeElement as HTMLElement | null;
+  const tag = active?.tagName?.toLowerCase() ?? '';
+  const isEditable =
+    tag === 'textarea' ||
+    (tag === 'input' && !['button', 'checkbox', 'radio', 'range', 'file', 'submit'].includes((active as HTMLInputElement).type || '')) ||
+    Boolean(active?.isContentEditable);
+
+  const ua = navigator.userAgent || '';
+  const isIOS =
+    /iPhone|iPad|iPod/.test(ua) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  if (heightGap > 120) return true;
+
+  if (isIOS && isEditable) return true;
+
+  return false;
 }
 
 export default function Footer() {
