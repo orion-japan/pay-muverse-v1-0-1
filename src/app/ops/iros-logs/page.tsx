@@ -15,6 +15,11 @@ type Conversation = {
 
 type ConversationDetail = Conversation;
 
+type UserOption = {
+  user_code: string;
+  name: string;
+};
+
 type Turn = {
   id: string;
   conv_id: string;
@@ -30,7 +35,6 @@ type Turn = {
   // ✅ trace 可視化用（/api/iros-logs が返す）
   trace_id?: string | null;
 };
-
 
 type RawLog = {
   id: number | string;
@@ -135,7 +139,7 @@ export default function IrosLogsPage() {
   }, []);
 
   const [userCode, setUserCode] = useState('');
-  const [userOptions, setUserOptions] = useState<string[] | null>(null);
+  const [userOptions, setUserOptions] = useState<UserOption[] | null>(null);
   const [userListLoading, setUserListLoading] = useState(false);
 
   const [conversations, setConversations] = useState<Conversation[] | null>(null);
@@ -170,7 +174,7 @@ export default function IrosLogsPage() {
       setUserListLoading(true);
       try {
         const data = await callApi('/api/iros-logs?user_list=1');
-        const users: string[] = data.users ?? [];
+        const users: UserOption[] = data.users ?? [];
         setUserOptions(users);
       } catch {
         setUserOptions([]);
@@ -346,11 +350,11 @@ export default function IrosLogsPage() {
                 <option value="">
                   {userListLoading ? 'ユーザー一覧を読み込み中…' : 'ユーザーを選択…'}
                 </option>
-                {userOptions?.map((code) => (
-                  <option key={code} value={code}>
-                    {code}
-                  </option>
-                ))}
+                {userOptions?.map((user) => (
+  <option key={user.user_code} value={user.user_code}>
+    {user.name}
+  </option>
+))}
               </select>
             </div>
 

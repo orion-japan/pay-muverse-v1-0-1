@@ -236,14 +236,17 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
           onKeyDown={onKeyDown}
           onInput={autoSize}
           onFocus={() => {
+            setKeyboardOpenUI(true);
             requestAnimationFrame(() => {
-              setKeyboardOpenUI(detectKeyboardOpen());
+              requestAnimationFrame(() => {
+                setKeyboardOpenUI(detectKeyboardOpen() || true);
+              });
             });
           }}
           onBlur={() => {
             setTimeout(() => {
-              setKeyboardOpenUI(detectKeyboardOpen());
-            }, 120);
+              setKeyboardOpenUI(false);
+            }, 180);
           }}
           onCompositionStart={() => setIsComposing(true)}
           onCompositionEnd={() => setIsComposing(false)}

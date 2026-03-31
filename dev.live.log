@@ -6,129 +6,131 @@
   · serverActions
 
 ✓ Starting...
-✓ Ready in 670ms
+○ Compiling middleware ...
+✓ Ready in 51.2s
+○ Compiling / ...
 [firebase] DEBUG_LOCAL=1 → Firebase SDK log level set to "debug"
- GET / 200 in 560ms (compile: 255ms, render: 305ms)
- POST /api/telemetry 204 in 90ms (compile: 64ms, render: 26ms)
+ GET / 200 in 14.6s (compile: 14.3s, render: 298ms)
+ GET /mira.png 404 in 1981ms (compile: 1939ms, render: 42ms)
+ POST /api/telemetry 204 in 2.5s (compile: 2.5s, render: 13ms)
 [firebase-admin] initialized with ServiceAccount
-[authz] c49804f7-3f96-4c34-bf35-eeafb8ec0971 start { path: 'http://localhost:3000/api/agent/iros/userinfo' }
+[authz] a7d45335-98a4-420d-a925-97c8d330b706 start { path: 'http://localhost:3000/api/agent/iros/userinfo' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
- POST /api/register-push 200 in 343ms (compile: 28ms, render: 315ms)
-[authz] e27f1b47-287e-4760-892a-b64f74a7355f start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
+[authz] 55969fb2-ac32-4481-a1ad-4b3f5aa0de74 start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] c49804f7-3f96-4c34-bf35-eeafb8ec0971 verify firebase: 463.407ms
- POST /api/register-push 200 in 58ms (compile: 2ms, render: 56ms)
-[authz] c49804f7-3f96-4c34-bf35-eeafb8ec0971 fetch user: 81.613ms
-[authz] c49804f7-3f96-4c34-bf35-eeafb8ec0971 ok { user: '669933', role: 'admin', provider: 'password', ms: 552 }
+ POST /api/register-push 200 in 483ms (compile: 3ms, render: 480ms)
+ POST /api/register-push 200 in 1309ms (compile: 776ms, render: 533ms)
+[authz] 55969fb2-ac32-4481-a1ad-4b3f5aa0de74 verify firebase: 462.253ms
+[authz] a7d45335-98a4-420d-a925-97c8d330b706 verify firebase: 505.24ms
+[authz] 55969fb2-ac32-4481-a1ad-4b3f5aa0de74 fetch user: 117.126ms
+[authz] 55969fb2-ac32-4481-a1ad-4b3f5aa0de74 ok { user: '669933', role: 'admin', provider: 'password', ms: 587 }
+[authz] a7d45335-98a4-420d-a925-97c8d330b706 fetch user: 108.704ms
+[authz] a7d45335-98a4-420d-a925-97c8d330b706 ok { user: '669933', role: 'admin', provider: 'password', ms: 618 }
 [IROS/UserInfo] authz = {
   ok: true,
   allowed: true,
   status: 200,
-  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzQ4NzgyMzEsImlhdCI6MTc3NDg3NzMzMX0.Vqa_1_HBeSWWJPQ1RjiDlmB328he-_qisWtKuMdH4t0',
+  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzQ5MTMyMjYsImlhdCI6MTc3NDkxMjMyNn0.ASIuAT8xXYPmn7BRrd8BYABTO-JvgC1xU8UnaB28b8s',
   userCode: '669933',
   role: 'admin',
   user: { uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02', user_code: '669933' },
   uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02'
 }
- GET /api/agent/iros/userinfo 200 in 837ms (compile: 231ms, render: 606ms)
-[authz] b0dc0fab-a38d-4762-beaf-b7ad03d6569f start { path: 'http://localhost:3000/api/agent/iros/conversations' }
+ GET /api/agent/iros/userinfo 200 in 1982ms (compile: 1298ms, render: 685ms)
+[authz] e4909405-8c43-4a84-9fdc-bf920d1be462 start { path: 'http://localhost:3000/api/agent/iros/conversations' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] e27f1b47-287e-4760-892a-b64f74a7355f verify firebase: 302.847ms
-[authz] e27f1b47-287e-4760-892a-b64f74a7355f fetch user: 36.576ms
-[authz] e27f1b47-287e-4760-892a-b64f74a7355f ok { user: '669933', role: 'admin', provider: 'password', ms: 343 }
-[authz] b0dc0fab-a38d-4762-beaf-b7ad03d6569f verify firebase: 272.136ms
-[authz] b0dc0fab-a38d-4762-beaf-b7ad03d6569f fetch user: 45.863ms
-[authz] b0dc0fab-a38d-4762-beaf-b7ad03d6569f ok { user: '669933', role: 'admin', provider: 'password', ms: 325 }
- GET /api/agent/iros/conversations 200 in 521ms (compile: 39ms, render: 481ms)
-[authz] a049598c-e525-4bec-89e8-15bec04f2524 start {
+[authz] e4909405-8c43-4a84-9fdc-bf920d1be462 verify firebase: 273.8ms
+[authz] e4909405-8c43-4a84-9fdc-bf920d1be462 fetch user: 53.726ms
+[authz] e4909405-8c43-4a84-9fdc-bf920d1be462 ok { user: '669933', role: 'admin', provider: 'password', ms: 332 }
+ GET /api/agent/iros/conversations 200 in 612ms (compile: 119ms, render: 493ms)
+[authz] 7042e02c-fcc9-4c28-97df-b6e78279b6af start {
   path: 'http://localhost:3000/api/agent/iros/messages?conversation_id=83b2e746-f9fa-41b9-832c-23ebbf3ac59a&include_meta=1'
 }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] a049598c-e525-4bec-89e8-15bec04f2524 verify firebase: 255.353ms
-[authz] a049598c-e525-4bec-89e8-15bec04f2524 fetch user: 33.9ms
-[authz] a049598c-e525-4bec-89e8-15bec04f2524 ok { user: '669933', role: 'admin', provider: 'password', ms: 294 }
- GET /api/agent/iros/messages?conversation_id=83b2e746-f9fa-41b9-832c-23ebbf3ac59a&include_meta=1 200 in 1139ms (compile: 32ms, render: 1107ms)
- GET /api/q/unified?user_code=669933 200 in 7.7s (compile: 49ms, render: 7.7s)
-✓ Compiled in 24ms
- POST /api/register-push 200 in 706ms (compile: 2ms, render: 704ms)
- GET / 200 in 60ms (compile: 8ms, render: 53ms)
- POST /api/telemetry 204 in 7ms (compile: 3ms, render: 5ms)
-[authz] 5dac62c6-a2dd-43d0-8f9e-f7f515f469ac start { path: 'http://localhost:3000/api/agent/iros/userinfo' }
+[authz] 7042e02c-fcc9-4c28-97df-b6e78279b6af verify firebase: 309.324ms
+[authz] 7042e02c-fcc9-4c28-97df-b6e78279b6af fetch user: 59.488ms
+[authz] 7042e02c-fcc9-4c28-97df-b6e78279b6af ok { user: '669933', role: 'admin', provider: 'password', ms: 374 }
+ GET /api/agent/iros/messages?conversation_id=83b2e746-f9fa-41b9-832c-23ebbf3ac59a&include_meta=1 200 in 1092ms (compile: 307ms, render: 786ms)
+ GET /api/q/unified?user_code=669933 500 in 9.1s (compile: 465ms, render: 8.7s)
+ GET /dashboard 200 in 2.7s (compile: 2.6s, render: 55ms)
+ POST /api/telemetry 204 in 7ms (compile: 3ms, render: 4ms)
+[authz] 44831af7-11ea-4f06-a3b9-1df482d5d105 start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
- POST /api/register-push 200 in 210ms (compile: 1923µs, render: 208ms)
-[authz] 5dac62c6-a2dd-43d0-8f9e-f7f515f469ac verify firebase: 344.446ms
-[authz] 5dac62c6-a2dd-43d0-8f9e-f7f515f469ac fetch user: 50.328ms
-[authz] 5dac62c6-a2dd-43d0-8f9e-f7f515f469ac ok { user: '669933', role: 'admin', provider: 'password', ms: 403 }
-[IROS/UserInfo] authz = {
-  ok: true,
-  allowed: true,
-  status: 200,
-  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzQ4Nzg3MDUsImlhdCI6MTc3NDg3NzgwNX0.0HzQ2DiqNSMSOcHtA2u4smDTisr9izOIsX5uMrG3r4Q',
-  userCode: '669933',
-  role: 'admin',
-  user: { uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02', user_code: '669933' },
-  uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02'
-}
- GET /api/agent/iros/userinfo 200 in 480ms (compile: 4ms, render: 476ms)
-[authz] a2bc7a9e-d452-4fc3-a073-fd30e9194d86 start { path: 'http://localhost:3000/api/agent/iros/conversations' }
+ POST /api/register-push 200 in 328ms (compile: 1650µs, render: 326ms)
+ POST /api/register-push 200 in 152ms (compile: 1292µs, render: 151ms)
+[authz] 44831af7-11ea-4f06-a3b9-1df482d5d105 verify firebase: 326.534ms
+[authz] 44831af7-11ea-4f06-a3b9-1df482d5d105 fetch user: 51.567ms
+[authz] 44831af7-11ea-4f06-a3b9-1df482d5d105 ok { user: '669933', role: 'admin', provider: 'password', ms: 386 }
+ GET /ops/iros-logs 200 in 544ms (compile: 522ms, render: 22ms)
+ POST /api/telemetry 204 in 6ms (compile: 2ms, render: 3ms)
+ GET /api/iros-logs?user_list=1 200 in 262ms (compile: 169ms, render: 93ms)
+ GET /api/iros-logs?user_list=1 200 in 70ms (compile: 6ms, render: 64ms)
+ GET /api/iros-logs?user_code=36549 200 in 78ms (compile: 1442µs, render: 77ms)
+ GET /api/q/unified?user_code=669933 200 in 7.7s (compile: 1796µs, render: 7.7s)
+ GET /api/iros-logs?conv_id=7572b757-07fb-4324-b294-9f7cbeb8bcf2&include_raw=1&raw_limit=5 200 in 173ms (compile: 3ms, render: 170ms)
+ POST /api/register-push 200 in 565ms (compile: 7ms, render: 557ms)
+ GET /ops/iros-logs 200 in 93ms (compile: 9ms, render: 84ms)
+ POST /api/telemetry 204 in 5ms (compile: 1449µs, render: 3ms)
+ GET /api/iros-logs?user_list=1 200 in 331ms (compile: 69ms, render: 263ms)
+ POST /api/register-push 200 in 101ms (compile: 5ms, render: 95ms)
+[authz] fd9e485a-2ed7-4e79-baed-43df2ab4fff4 start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] a2bc7a9e-d452-4fc3-a073-fd30e9194d86 verify firebase: 285.715ms
-[authz] a2bc7a9e-d452-4fc3-a073-fd30e9194d86 fetch user: 47.948ms
-[authz] a2bc7a9e-d452-4fc3-a073-fd30e9194d86 ok { user: '669933', role: 'admin', provider: 'password', ms: 342 }
- GET /api/agent/iros/conversations 200 in 446ms (compile: 6ms, render: 440ms)
-[authz] 1de91fb9-b740-4342-90e5-64f4adbb4a90 start {
-  path: 'http://localhost:3000/api/agent/iros/messages?conversation_id=83b2e746-f9fa-41b9-832c-23ebbf3ac59a&include_meta=1'
-}
+ POST /api/register-push 200 in 58ms (compile: 3ms, render: 55ms)
+[authz] fd9e485a-2ed7-4e79-baed-43df2ab4fff4 verify firebase: 340.466ms
+[authz] fd9e485a-2ed7-4e79-baed-43df2ab4fff4 fetch user: 71.972ms
+[authz] fd9e485a-2ed7-4e79-baed-43df2ab4fff4 ok { user: '669933', role: 'admin', provider: 'password', ms: 421 }
+ GET /api/q/unified?user_code=669933 200 in 7.7s (compile: 3ms, render: 7.7s)
+ GET /ops/iros-logs 200 in 44ms (compile: 5ms, render: 40ms)
+ POST /api/telemetry 204 in 11ms (compile: 7ms, render: 4ms)
+[authz] 4548888e-49e0-41b0-852d-3656c036a1c9 start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] 1de91fb9-b740-4342-90e5-64f4adbb4a90 verify firebase: 266.691ms
-[authz] 1de91fb9-b740-4342-90e5-64f4adbb4a90 fetch user: 49.073ms
-[authz] 1de91fb9-b740-4342-90e5-64f4adbb4a90 ok { user: '669933', role: 'admin', provider: 'password', ms: 323 }
-[authz] 65cd5bb7-1b15-4a78-b3a0-4749411ccf31 start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
+ POST /api/register-push 200 in 4.1s (compile: 3ms, render: 4.1s)
+ POST /api/register-push 200 in 4.4s (compile: 5ms, render: 4.4s)
+ GET /api/iros-logs?user_list=1 200 in 5.2s (compile: 1852µs, render: 5.2s)
+[authz] 4548888e-49e0-41b0-852d-3656c036a1c9 verify firebase: 4.301s
+[authz] 4548888e-49e0-41b0-852d-3656c036a1c9 fetch user: 43.228ms
+[authz] 4548888e-49e0-41b0-852d-3656c036a1c9 ok { user: '669933', role: 'admin', provider: 'password', ms: 4349 }
+ GET /api/q/unified?user_code=669933 200 in 11.6s (compile: 5ms, render: 11.6s)
+ POST /api/register-push 200 in 685ms (compile: 2ms, render: 683ms)
+ GET /dashboard 200 in 26ms (compile: 3ms, render: 22ms)
+ POST /api/telemetry 204 in 6ms (compile: 1239µs, render: 5ms)
+ GET /ops/sofia-logs-normalized 200 in 338ms (compile: 295ms, render: 42ms)
+ POST /api/telemetry 204 in 6ms (compile: 3ms, render: 4ms)
+ GET /api/sofia-logs/users 200 in 408ms (compile: 154ms, render: 254ms)
+ GET /api/sofia-logs/users 200 in 129ms (compile: 1340µs, render: 127ms)
+ GET /api/sofia-logs?user_code=4544401&page_size=200&turn_type=normalized 200 in 216ms (compile: 93ms, render: 123ms)
+ POST /api/telemetry 204 in 6ms (compile: 3ms, render: 3ms)
+ GET /ops/iros-logs 200 in 18ms (compile: 2ms, render: 16ms)
+ POST /api/telemetry 204 in 3ms (compile: 1221µs, render: 2ms)
+ GET /api/iros-logs?user_list=1 200 in 100ms (compile: 1518µs, render: 99ms)
+ GET /api/iros-logs?user_list=1 200 in 79ms (compile: 5ms, render: 74ms)
+ POST /api/register-push 200 in 515ms (compile: 5ms, render: 510ms)
+ GET /ops/iros-logs 200 in 84ms (compile: 7ms, render: 77ms)
+ POST /api/telemetry 204 in 6ms (compile: 2ms, render: 4ms)
+ GET /api/iros-logs?user_list=1 200 in 96ms (compile: 1883µs, render: 95ms)
+ POST /api/register-push 200 in 90ms (compile: 2ms, render: 88ms)
+[authz] 9c9e950f-1ae9-47cd-8194-e212c2c0bf03 start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
- POST /api/register-push 200 in 113ms (compile: 2ms, render: 111ms)
- GET /api/agent/iros/messages?conversation_id=83b2e746-f9fa-41b9-832c-23ebbf3ac59a&include_meta=1 200 in 646ms (compile: 3ms, render: 642ms)
-[authz] 65cd5bb7-1b15-4a78-b3a0-4749411ccf31 verify firebase: 297.503ms
-[authz] 65cd5bb7-1b15-4a78-b3a0-4749411ccf31 fetch user: 49.228ms
-[authz] 65cd5bb7-1b15-4a78-b3a0-4749411ccf31 ok { user: '669933', role: 'admin', provider: 'password', ms: 351 }
- GET /api/q/unified?user_code=669933 200 in 7.9s (compile: 6ms, render: 7.9s)
-✓ Compiled in 4ms
- GET / 200 in 42ms (compile: 4ms, render: 38ms)
- POST /api/telemetry 204 in 5ms (compile: 1443µs, render: 4ms)
-[authz] eea048ff-d0d1-4206-a410-3aaf1541a54f start { path: 'http://localhost:3000/api/agent/iros/userinfo' }
+ POST /api/register-push 200 in 50ms (compile: 1941µs, render: 48ms)
+[authz] 9c9e950f-1ae9-47cd-8194-e212c2c0bf03 verify firebase: 337.788ms
+[authz] 9c9e950f-1ae9-47cd-8194-e212c2c0bf03 fetch user: 38.104ms
+[authz] 9c9e950f-1ae9-47cd-8194-e212c2c0bf03 ok { user: '669933', role: 'admin', provider: 'password', ms: 378 }
+ GET /api/q/unified?user_code=669933 200 in 8.0s (compile: 1232µs, render: 8.0s)
+ GET /api/iros-logs?user_list=1 200 in 380ms (compile: 2ms, render: 378ms)
+ GET /api/iros-logs?user_list=1 200 in 145ms (compile: 2ms, render: 143ms)
+ POST /api/register-push 200 in 877ms (compile: 1700µs, render: 876ms)
+ POST /api/register-push 200 in 848ms (compile: 7ms, render: 841ms)
+ POST /api/register-push 200 in 794ms (compile: 5ms, render: 789ms)
+ GET /ops/iros-logs 200 in 59ms (compile: 3ms, render: 57ms)
+ POST /api/telemetry 204 in 5ms (compile: 1610µs, render: 4ms)
+ GET /api/iros-logs?user_list=1 200 in 337ms (compile: 2ms, render: 334ms)
+ POST /api/register-push 200 in 143ms (compile: 1133µs, render: 142ms)
+[authz] 7baab415-1ff8-4ea3-b4cc-8fb3ab6f7c1d start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] eea048ff-d0d1-4206-a410-3aaf1541a54f verify firebase: 295.022ms
- POST /api/register-push 200 in 333ms (compile: 2ms, render: 331ms)
-[authz] eea048ff-d0d1-4206-a410-3aaf1541a54f fetch user: 95.277ms
-[authz] eea048ff-d0d1-4206-a410-3aaf1541a54f ok { user: '669933', role: 'admin', provider: 'password', ms: 395 }
-[IROS/UserInfo] authz = {
-  ok: true,
-  allowed: true,
-  status: 200,
-  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzQ4Nzg4NTQsImlhdCI6MTc3NDg3Nzk1NH0.Z7P2mnwcObjaT2iWiqntbRz0DCkWRPHOS3lTfPr8OaY',
-  userCode: '669933',
-  role: 'admin',
-  user: { uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02', user_code: '669933' },
-  uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02'
-}
- GET /api/agent/iros/userinfo 200 in 435ms (compile: 1784µs, render: 433ms)
-[authz] 606b06d3-ca96-41e5-8a87-6305d7f37bf2 start { path: 'http://localhost:3000/api/agent/iros/conversations' }
-[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] 039b6b2d-0817-4636-8cf5-5519c74ba77d start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
-[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
- POST /api/register-push 200 in 43ms (compile: 1532µs, render: 42ms)
-[authz] 606b06d3-ca96-41e5-8a87-6305d7f37bf2 verify firebase: 274.929ms
-[authz] 606b06d3-ca96-41e5-8a87-6305d7f37bf2 fetch user: 41.13ms
-[authz] 606b06d3-ca96-41e5-8a87-6305d7f37bf2 ok { user: '669933', role: 'admin', provider: 'password', ms: 322 }
-[authz] 039b6b2d-0817-4636-8cf5-5519c74ba77d verify firebase: 286.921ms
- GET /api/agent/iros/conversations 200 in 397ms (compile: 2ms, render: 395ms)
-[authz] 039b6b2d-0817-4636-8cf5-5519c74ba77d fetch user: 40.424ms
-[authz] 039b6b2d-0817-4636-8cf5-5519c74ba77d ok { user: '669933', role: 'admin', provider: 'password', ms: 332 }
-[authz] 5fc0475d-def0-4716-af70-802e27d5a26f start {
-  path: 'http://localhost:3000/api/agent/iros/messages?conversation_id=83b2e746-f9fa-41b9-832c-23ebbf3ac59a&include_meta=1'
-}
-[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] 5fc0475d-def0-4716-af70-802e27d5a26f verify firebase: 269.012ms
-[authz] 5fc0475d-def0-4716-af70-802e27d5a26f fetch user: 79.374ms
-[authz] 5fc0475d-def0-4716-af70-802e27d5a26f ok { user: '669933', role: 'admin', provider: 'password', ms: 355 }
- GET /api/agent/iros/messages?conversation_id=83b2e746-f9fa-41b9-832c-23ebbf3ac59a&include_meta=1 200 in 603ms (compile: 2ms, render: 601ms)
- GET /api/q/unified?user_code=669933 200 in 7.7s (compile: 1485µs, render: 7.7s)
+ POST /api/register-push 200 in 88ms (compile: 1163µs, render: 87ms)
+[authz] 7baab415-1ff8-4ea3-b4cc-8fb3ab6f7c1d verify firebase: 399.538ms
+[authz] 7baab415-1ff8-4ea3-b4cc-8fb3ab6f7c1d fetch user: 78.051ms
+[authz] 7baab415-1ff8-4ea3-b4cc-8fb3ab6f7c1d ok { user: '669933', role: 'admin', provider: 'password', ms: 481 }
+ GET /api/q/unified?user_code=669933 500 in 8.6s (compile: 1307µs, render: 8.6s)
+ GET /api/iros-logs?user_list=1 200 in 131ms (compile: 1263µs, render: 130ms)
+ GET /api/iros-logs?user_list=1 200 in 139ms (compile: 1170µs, render: 138ms)

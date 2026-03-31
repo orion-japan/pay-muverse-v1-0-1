@@ -36,17 +36,21 @@ type IrosConversationSummary = {
 };
 
 // Mu 互換の turn 形式（Viewer 側で扱いやすく）
-type IrosTurn = {
+type Turn = {
   id: string;
   conv_id: string;
+  user_code: string | null;
   role: 'user' | 'assistant' | string;
   content: string | null;
   q_code: string | null;
   depth_stage: string | null;
   self_acceptance: number | null;
-  meta: unknown | null;
+  meta?: any;
   used_credits: number | null;
-  created_at: string;
+  created_at: string | null;
+
+  // ✅ trace 可視化用（/api/iros-logs が返す）
+  trace_id?: string | null;
 };
 
 /** meta から SelfAcceptance を抽出（なければ null） */
@@ -137,20 +141,63 @@ export async function GET(req: NextRequest) {
 
   // --- user_list=1 → ユーザー一覧モード ---
   if (wantUserList) {
-    const { data, error } = await supabase
-      .from('iros_messages')
-      .select('user_code')
-      .not('user_code', 'is', null)
-      .order('user_code', { ascending: true });
+    console.log('[IROS-LOGS][USER_LIST][ROUTE_VERSION]=messages-v5');
 
-    if (error) {
-      console.error('[IROS-LOGS][USER_LIST] Supabase error:', error);
-      return NextResponse.json({ error: 'Failed to fetch user list.' }, { status: 500 });
+    const PAGE_SIZE = 1000;
+    let from = 0;
+    let allRows: Array<{ user_code: string | null }> = [];
+
+    while (true) {
+      const { data, error } = await supabase
+        .from('iros_messages')
+        .select('user_code')
+        .order('user_code', { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error) {
+        console.error('[IROS-LOGS][USER_LIST] Supabase error:', error);
+        return NextResponse.json({ error: 'Failed to fetch user list.' }, { status: 500 });
+      }
+
+      const rows = (data ?? []) as Array<{ user_code: string | null }>;
+      allRows = allRows.concat(rows);
+
+      if (rows.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
     }
 
-    const users = Array.from(new Set((data || []).map((r: any) => String(r.user_code))));
-    return NextResponse.json({ ok: true, users });
+    const userCodes = Array.from(
+      new Set(
+        allRows
+          .map((r) => String(r.user_code ?? '').trim())
+          .filter((v) => v.length > 0)
+      )
+    );
 
+    const { data: userRows, error: usersError } = await supabase
+      .from('users')
+      .select('user_code, click_username')
+      .in('user_code', userCodes);
+
+    if (usersError) {
+      console.error('[IROS-LOGS][USER_LIST][USERS] Supabase error:', usersError);
+      return NextResponse.json({ error: 'Failed to fetch usernames.' }, { status: 500 });
+    }
+
+    const nameMap = new Map<string, string>();
+    for (const row of userRows ?? []) {
+      const code = String((row as any).user_code ?? '').trim();
+      if (!code) continue;
+      const name = String((row as any).click_username ?? '').trim();
+      nameMap.set(code, name || code);
+    }
+
+    const users = userCodes.map((code) => ({
+      user_code: code,
+      name: nameMap.get(code) || code,
+    }));
+
+    return NextResponse.json({ ok: true, users });
   }
 
   // user_code も conv_id も無い場合はエラー
@@ -261,7 +308,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       conversation: null,
-      turns: [] as IrosTurn[],
+      turns: [] as Turn[],
       turns_count: 0,
       raw_logs, // ← includeRaw=true ならここも返せる
       error: null,
@@ -270,7 +317,7 @@ export async function GET(req: NextRequest) {
 
   const typedRows = rows as IrosMessageRow[];
 
-  const turns: IrosTurn[] = typedRows.map((row) => {
+  const turns: Turn[] = typedRows.map((row) => {
     const normalizedRole =
       row.role === 'user' || row.role === 'assistant'
         ? row.role
@@ -287,19 +334,20 @@ export async function GET(req: NextRequest) {
       (metaNorm as any)?.extra?.trace_id ??
       null;
 
-    return {
-      id: String(row.id),
-      conv_id: String(row.conversation_id),
-      role: normalizedRole,
-      content: row.text ?? null,
-      q_code: row.q_code ?? null,
-      depth_stage: row.depth_stage ?? null,
-      self_acceptance: sa ?? null,
-      meta: metaNorm,
-      used_credits: null,
-      created_at: row.created_at ?? null,
-      trace_id: (row as any).trace_id ?? traceFromMeta, // ← ここが肝
-    };
+      return {
+        id: String(row.id),
+        conv_id: String(row.conversation_id),
+        user_code: row.user_code ?? null,
+        role: normalizedRole,
+        content: row.text ?? null,
+        q_code: row.q_code ?? null,
+        depth_stage: row.depth_stage ?? null,
+        self_acceptance: sa ?? null,
+        meta: metaNorm,
+        used_credits: null,
+        created_at: row.created_at ?? null,
+        trace_id: (row as any).trace_id ?? traceFromMeta,
+      };
   });
 
 
