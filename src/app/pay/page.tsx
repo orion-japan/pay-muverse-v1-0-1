@@ -379,7 +379,7 @@ function PageInner() {
     const style = document.createElement('style');
     style.id = 'payjp-3ds-guard';
     style.textContent = `
-      body.payjp-3ds-open .pay-main, 
+      body.payjp-3ds-open .pay-main,
       body.payjp-3ds-open .pay-main * {
         pointer-events: none !important;
         -webkit-user-select: none !important;
@@ -586,10 +586,13 @@ function PageInner() {
       }
       if (!first?.confirmation_required) {
         const detail =
-          first?.detail ||
-          (Array.isArray(first?.missing) && first.missing.length
-            ? `欠落フィールド: ${first.missing.join(', ')}`
-            : '原因不明');
+          typeof first?.detail === 'string'
+            ? first.detail
+            : first?.detail
+              ? JSON.stringify(first.detail)
+              : Array.isArray(first?.missing) && first.missing.length
+                ? `欠落フィールド: ${first.missing.join(', ')}`
+                : '原因不明';
         throw new Error(detail || '初回リクエストに失敗しました');
       }
 
@@ -609,10 +612,13 @@ function PageInner() {
         log('subscribe finalize response (SDK)', { ok: finalizeRes.ok, finalize });
         if (!(finalizeRes.ok && finalize?.success) && !isAlreadySubscribed(finalize)) {
           const detail =
-            finalize?.detail ||
-            (Array.isArray(finalize?.missing) && finalize.missing.length
-              ? `欠落フィールド: ${finalize.missing.join(', ')}`
-              : '原因不明');
+            typeof finalize?.detail === 'string'
+              ? finalize.detail
+              : finalize?.detail
+                ? JSON.stringify(finalize.detail)
+                : Array.isArray(finalize?.missing) && finalize.missing.length
+                  ? `欠落フィールド: ${finalize.missing.join(', ')}`
+                  : '原因不明';
           throw new Error(detail || 'サブスク登録に失敗しました');
         }
       } else if (confirmUrl) {
@@ -637,6 +643,7 @@ function PageInner() {
           body: JSON.stringify(finalizePayload),
         });
         const finalize = await finalizeRes.json().catch(() => ({}) as any);
+        console.log('[PAY] finalize result raw:', finalize);
         log('subscribe finalize response (TDSR)', { ok: finalizeRes.ok, finalize });
         if (!(finalizeRes.ok && finalize?.success) && !isAlreadySubscribed(finalize)) {
           const detail =
