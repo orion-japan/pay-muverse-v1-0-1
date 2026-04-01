@@ -132,6 +132,9 @@ function resolveClickTypeFromSub(obj: any): string {
 export async function POST(req: NextRequest) {
   const raw = await req.text();
 
+  console.log('🔥 WEBHOOK HIT');
+  console.log('🔥 WEBHOOK RAW EVENT:', raw);
+
   const webhookToken =
     req.headers.get('x-payjp-webhook-token') ||
     req.headers.get('X-Payjp-Webhook-Token');
@@ -187,23 +190,11 @@ export async function POST(req: NextRequest) {
           const clickType = resolveClickTypeFromSub(obj);
           console.log(logPrefix, 'apply clickType=', clickType);
 
-          await planApply(
-            user.user_code,
-            clickType,
-            `webhook:${type}`,
-            periodEnd,
-            subId,
-          );
+          await planApply(user.user_code, clickType, `webhook:${type}`, periodEnd, subId);
         } else if (status === 'trial' || status === 'trialing') {
           console.log(logPrefix, 'apply clickType=trial');
 
-          await planApply(
-            user.user_code,
-            'trial',
-            `webhook:${type}`,
-            periodEnd,
-            subId,
-          );
+          await planApply(user.user_code, 'trial', `webhook:${type}`, periodEnd, subId);
         } else if (
           ['canceled', 'paused', 'past_due', 'expired', 'terminated'].includes(
             String(status || ''),
@@ -211,13 +202,7 @@ export async function POST(req: NextRequest) {
         ) {
           console.log(logPrefix, 'apply clickType=free');
 
-          await planApply(
-            user.user_code,
-            'free',
-            `webhook:${type}`,
-            null,
-            null,
-          );
+          await planApply(user.user_code, 'free', `webhook:${type}`, null, null);
         } else {
           console.log(logPrefix, 'subscription status ignored');
         }
