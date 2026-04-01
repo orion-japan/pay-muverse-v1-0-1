@@ -28,6 +28,11 @@ export default function AdminHome() {
     { href: '/ai-q-dashboard', title: 'AI Q Dashboard', desc: 'AI処理のメトリクス（雛形）' },
     { href: '/qcode', title: 'QCode 管理', desc: 'ユーザーコードと権限（雛形）' },
     {
+      href: 'https://join.muverse.jp/admin/manual-register',
+      title: 'ユーザーマニュアル登録',
+      desc: 'Firebase 手動+ Supabase 自動ユーザー登録（管理者用）',
+    },
+    {
       href: '/admin/delete-user',
       title: 'ユーザー削除',
       desc: 'Firebase + Supabase のユーザー削除（管理者用）',

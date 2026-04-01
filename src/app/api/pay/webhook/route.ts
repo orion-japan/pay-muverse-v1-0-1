@@ -169,7 +169,7 @@ export async function POST(req: NextRequest) {
 
         if (!user) break;
 
-        const status = obj?.status;
+        const status = String(obj?.status ?? '').trim().toLowerCase();
         const subId = obj?.id ?? null;
         const periodEnd = obj?.current_period_end ?? obj?.period?.end ?? null;
 
@@ -179,9 +179,7 @@ export async function POST(req: NextRequest) {
         } else if (status === 'trial' || status === 'trialing') {
           await planApply(user.user_code, 'trial', `webhook:${type}`, periodEnd, subId);
         } else if (
-          ['canceled', 'paused', 'past_due', 'expired', 'terminated'].includes(
-            String(status || ''),
-          )
+          ['canceled', 'paused', 'past_due', 'expired', 'terminated'].includes(status)
         ) {
           await planApply(user.user_code, 'free', `webhook:${type}`, null, null);
         }
