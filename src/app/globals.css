@@ -1296,3 +1296,21 @@ body:has(.iros-settings-main) .mu-main {
   padding-top: 0 !important;
   padding-bottom: var(--footer-safe-pad, 56px) !important;
 }
+
+
+.subscribe-box {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.registered-card-box {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+.iros-settings-main {
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 16px;
+}
