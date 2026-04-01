@@ -17,13 +17,13 @@ export async function POST(req: NextRequest) {
   // Supabaseクライアント（service_roleでフルアクセス）
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!, // 🔑 anonではなくservice_roleを使用
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
   );
 
   // 該当イベントの処理（subscription作成または更新）
   if (payload.type === 'subscription.created' || payload.type === 'subscription.updated') {
     const sub = payload.data.object;
-    const customerId = sub.customer; // PAY.JPの顧客ID
+    const customerId = sub.customer;
 
     // 該当するユーザーを取得（payjp_customer_idが一致するレコード）
     const { data: user, error } = await supabase
@@ -38,12 +38,11 @@ export async function POST(req: NextRequest) {
     }
 
     if (user) {
-      // 該当ユーザーを更新（プレミアム化・ソフィアクレジット加算）
+      // webhookではクレジットを触らない
       const { error: updateError } = await supabase
         .from('users')
         .update({
           click_type: 'premium',
-          sofiacredit: 200,
           payjp_subscription_id: sub.id,
           last_payment_date: new Date().toISOString(),
         })

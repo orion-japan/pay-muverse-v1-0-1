@@ -496,7 +496,7 @@ export default function MessageList() {
         <div className={styles.emptyHint}>ここに会話が表示されます</div>
       )}
 
-      {messages.map((m) => {
+{messages.map((m, index) => {
         const isUser = m.role === 'user';
         const iconSrc = isUser ? resolveUserAvatar(m) : '/iros.png';
 
@@ -671,7 +671,7 @@ const diagnosisSummary =
 
           return (
             <div
-              key={m.id}
+            key={m.id ?? `msg-${index}`}
               className={`message ${isUser ? 'is-user' : 'is-assistant'}`}
             >
               {/* ▼ アイコン＋Qバッジを横一列に並べるヘッダー行 ▼ */}

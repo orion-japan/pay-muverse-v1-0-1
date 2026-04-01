@@ -18,9 +18,9 @@ type Props = {
 };
 
 const plans: Plan[] = [
-  { name: 'Regular', icon: '🌱', plan_type: 'regular', credit: 45, price: 990 },
-  { name: 'Premium', icon: '🌟', plan_type: 'premium', credit: 200, price: 3300 },
-  { name: 'Master', icon: '🏆', plan_type: 'master', credit: 1500, price: 16500 },
+  { name: 'Regular', icon: '🌱', plan_type: 'regular', credit: 500, price: 990 },
+  { name: 'Premium', icon: '🌟', plan_type: 'premium', credit: 3000, price: 3300 },
+  { name: 'Master', icon: '🏆', plan_type: 'master', credit: 15000, price: 16500 },
 ];
 
 export default function PlanSelectPanel({

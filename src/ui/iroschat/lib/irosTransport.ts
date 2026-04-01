@@ -417,7 +417,13 @@ export async function fetchMessages(conversationId: string): Promise<IrosMessage
           };
 
           return {
-            id: String(m.id),
+            id:
+              m.id != null &&
+              String(m.id).trim() !== '' &&
+              String(m.id).trim() !== 'undefined' &&
+              String(m.id).trim() !== 'null'
+                ? String(m.id).trim()
+                : crypto.randomUUID(),
             role: m.role === 'assistant' ? 'assistant' : 'user',
             text,
             ts: created,
