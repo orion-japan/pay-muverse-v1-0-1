@@ -84,22 +84,29 @@ async function planApply(
     throw new Error('NEXT_PUBLIC_BASE_URL is missing');
   }
 
+  const payload = {
+    user_code,
+    new_click_type,
+    reason,
+    source: 'webhook',
+    plan_valid_until: periodEnd ?? null,
+    payjp_subscription_id: subId ?? null,
+  };
+
+  console.log('[PAYJP_WEBHOOK] planApply payload=', JSON.stringify(payload));
+
   const res = await fetch(`${baseUrl}/api/pay/plan/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      user_code,
-      new_click_type,
-      reason,
-      source: 'webhook',
-      plan_valid_until: periodEnd ?? null,
-      payjp_subscription_id: subId ?? null,
-    }),
+    body: JSON.stringify(payload),
     cache: 'no-store',
   });
 
+  const text = await res.text().catch(() => '');
+
+  console.log('[PAYJP_WEBHOOK] planApply response=', res.status, text);
+
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
     throw new Error(`planApply failed: ${res.status} ${text}`);
   }
 }
@@ -145,66 +152,103 @@ export async function POST(req: NextRequest) {
   }
 
   const type: string | undefined = event?.type;
+  const eventId: string | null = event?.id ?? null;
   const data = event?.data ?? {};
   const obj = data?.object ?? data;
+  const customerIdFromEvent = obj?.customer ?? data?.customer ?? null;
   const logPrefix = `[PAYJP_WEBHOOK ${type}]`;
 
+  console.log('[PAYJP_WEBHOOK] event.id=', eventId);
+  console.log('[PAYJP_WEBHOOK] event.type=', type ?? null);
+  console.log('[PAYJP_WEBHOOK] customer=', customerIdFromEvent);
   console.log(logPrefix, 'received');
 
   try {
     switch (true) {
       /* ---------- Subscription 系 ---------- */
       case /^subscription\./.test(type || ''): {
-        const customerId = obj?.customer ?? null;
+        const customerId = customerIdFromEvent;
         const user = await findUserByCustomer(customerId);
 
         console.log(logPrefix, 'customerId=', customerId, 'userFound=', Boolean(user));
 
-        if (!user) break;
+        if (!user) {
+          console.log(logPrefix, 'no matched user by payjp_customer_id');
+          break;
+        }
 
         const status: string | undefined = obj?.status;
+        const subId: string | null = obj?.id ?? null;
         const periodEnd: string | null = obj?.current_period_end || obj?.period?.end || null;
 
-        console.log(logPrefix, 'status=', status, 'subId=', obj?.id ?? null);
+        console.log(logPrefix, 'status=', status ?? null, 'subId=', subId, 'periodEnd=', periodEnd);
 
         if (status === 'active') {
           const clickType = resolveClickTypeFromSub(obj);
+          console.log(logPrefix, 'apply clickType=', clickType);
+
           await planApply(
             user.user_code,
             clickType,
             `webhook:${type}`,
             periodEnd,
-            obj?.id ?? null,
+            subId,
           );
-        } else if (status === 'trial') {
-          await planApply(user.user_code, 'trial', `webhook:${type}`, periodEnd, obj?.id ?? null);
+        } else if (status === 'trial' || status === 'trialing') {
+          console.log(logPrefix, 'apply clickType=trial');
+
+          await planApply(
+            user.user_code,
+            'trial',
+            `webhook:${type}`,
+            periodEnd,
+            subId,
+          );
         } else if (
           ['canceled', 'paused', 'past_due', 'expired', 'terminated'].includes(
             String(status || ''),
           )
         ) {
-          await planApply(user.user_code, 'free', `webhook:${type}`, null, null);
+          console.log(logPrefix, 'apply clickType=free');
+
+          await planApply(
+            user.user_code,
+            'free',
+            `webhook:${type}`,
+            null,
+            null,
+          );
+        } else {
+          console.log(logPrefix, 'subscription status ignored');
         }
 
         break;
       }
 
       case type === 'charge.succeeded': {
-        const customerId = obj?.customer ?? null;
+        const customerId = customerIdFromEvent;
         const user = await findUserByCustomer(customerId);
 
         console.log(logPrefix, 'customerId=', customerId, 'userFound=', Boolean(user));
 
-        if (!user) break;
+        if (!user) {
+          console.log(logPrefix, 'no matched user by payjp_customer_id');
+          break;
+        }
+
+        console.log(logPrefix, 'charge.succeeded received');
         break;
       }
 
       /* ---------- Card / Customer 系 ---------- */
       case type === 'customer.card.deleted': {
-        const customerId = obj?.customer ?? data?.customer ?? null;
+        const customerId = customerIdFromEvent;
+
+        console.log(logPrefix, 'customerId=', customerId);
 
         if (customerId) {
           await clearCardStateByCustomer(customerId);
+          console.log(logPrefix, 'card state cleared');
         } else {
           console.warn(`${logPrefix} missing customer id; skip DB sync`);
         }
@@ -213,12 +257,15 @@ export async function POST(req: NextRequest) {
       }
 
       case type === 'customer.card.created': {
-        const customerId = obj?.customer ?? data?.customer ?? null;
+        const customerId = customerIdFromEvent;
         const brand = obj?.brand ?? data?.object?.brand ?? null;
         const last4 = obj?.last4 ?? data?.object?.last4 ?? null;
 
+        console.log(logPrefix, 'customerId=', customerId, 'brand=', brand, 'last4=', last4);
+
         if (customerId) {
           await setCardStateByCustomer(customerId, brand, last4);
+          console.log(logPrefix, 'card state updated');
         } else {
           console.warn(`${logPrefix} missing customer id; skip DB sync`);
         }
@@ -229,8 +276,11 @@ export async function POST(req: NextRequest) {
       case type === 'customer.deleted': {
         const customerId = obj?.id ?? data?.id ?? null;
 
+        console.log(logPrefix, 'customerId=', customerId);
+
         if (customerId) {
           await clearCardStateByCustomer(customerId);
+          console.log(logPrefix, 'customer deleted -> card state cleared');
         }
 
         break;
