@@ -1,4 +1,3 @@
-// src/app/api/pay/webhook/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
@@ -7,20 +6,14 @@ export const dynamic = 'force-dynamic';
 
 const WEBHOOK_SECRET = process.env.PAYJP_WEBHOOK_SECRET || '';
 
-/* =========================
-   Token verification
-   ========================= */
 function verifyWebhookToken(headerValue: string | null) {
   if (!WEBHOOK_SECRET) {
-    console.warn('[PAYJP_WEBHOOK] WEBHOOK_SECRET missing. Skip verification (dev only).');
+    console.error('[PAYJP_WEBHOOK] WEBHOOK_SECRET missing (dev)');
     return true;
   }
   return headerValue === WEBHOOK_SECRET;
 }
 
-/* =========================
-   DB helpers
-   ========================= */
 async function findUserByCustomer(customerId: string) {
   if (!customerId) return null;
 
@@ -68,9 +61,6 @@ async function setCardStateByCustomer(
   if (error) throw error;
 }
 
-/* =========================
-   Subscription helpers
-   ========================= */
 async function planApply(
   user_code: string,
   new_click_type: string,
@@ -93,7 +83,7 @@ async function planApply(
     payjp_subscription_id: subId ?? null,
   };
 
-  console.log('[PAYJP_WEBHOOK] planApply payload=', JSON.stringify(payload));
+  console.error('[PAYJP_WEBHOOK] planApply payload=', JSON.stringify(payload));
 
   const res = await fetch(`${baseUrl}/api/pay/plan/apply`, {
     method: 'POST',
@@ -104,7 +94,7 @@ async function planApply(
 
   const text = await res.text().catch(() => '');
 
-  console.log('[PAYJP_WEBHOOK] planApply response=', res.status, text);
+  console.error('[PAYJP_WEBHOOK] planApply response=', res.status, text);
 
   if (!res.ok) {
     throw new Error(`planApply failed: ${res.status} ${text}`);
@@ -126,23 +116,20 @@ function resolveClickTypeFromSub(obj: any): string {
   return 'pro';
 }
 
-/* =========================
-   Main handler
-   ========================= */
 export async function POST(req: NextRequest) {
   const raw = await req.text();
 
-  console.log('🔥 WEBHOOK HIT');
-  console.log('🔥 WEBHOOK RAW EVENT:', raw);
+  console.error('🔥 WEBHOOK HIT');
+  console.error('🔥 WEBHOOK RAW EVENT:', raw);
 
   const webhookToken =
     req.headers.get('x-payjp-webhook-token') ||
     req.headers.get('X-Payjp-Webhook-Token');
 
-  console.log('[PAYJP_WEBHOOK] token header exists =', Boolean(webhookToken));
+  console.error('[PAYJP_WEBHOOK] token exists =', Boolean(webhookToken));
 
   if (!verifyWebhookToken(webhookToken)) {
-    console.warn('[PAYJP_WEBHOOK] invalid token');
+    console.error('[PAYJP_WEBHOOK] invalid token');
     return NextResponse.json({ error: 'invalid token' }, { status: 400 });
   }
 
@@ -150,7 +137,7 @@ export async function POST(req: NextRequest) {
   try {
     event = JSON.parse(raw);
   } catch {
-    console.warn('[PAYJP_WEBHOOK] invalid json');
+    console.error('[PAYJP_WEBHOOK] invalid json');
     return NextResponse.json({ error: 'invalid json' }, { status: 400 });
   }
 
@@ -158,121 +145,69 @@ export async function POST(req: NextRequest) {
   const eventId: string | null = event?.id ?? null;
   const data = event?.data ?? {};
   const obj = data?.object ?? data;
-  const customerIdFromEvent = obj?.customer ?? data?.customer ?? null;
+  const customerId = obj?.customer ?? data?.customer ?? null;
   const logPrefix = `[PAYJP_WEBHOOK ${type}]`;
 
-  console.log('[PAYJP_WEBHOOK] event.id=', eventId);
-  console.log('[PAYJP_WEBHOOK] event.type=', type ?? null);
-  console.log('[PAYJP_WEBHOOK] customer=', customerIdFromEvent);
-  console.log(logPrefix, 'received');
+  console.error('[PAYJP_WEBHOOK] event.id=', eventId);
+  console.error('[PAYJP_WEBHOOK] event.type=', type);
+  console.error('[PAYJP_WEBHOOK] customer=', customerId);
+  console.error(logPrefix, 'received');
 
   try {
     switch (true) {
-      /* ---------- Subscription 系 ---------- */
       case /^subscription\./.test(type || ''): {
-        const customerId = customerIdFromEvent;
         const user = await findUserByCustomer(customerId);
 
-        console.log(logPrefix, 'customerId=', customerId, 'userFound=', Boolean(user));
+        console.error(logPrefix, 'userFound=', Boolean(user));
 
-        if (!user) {
-          console.log(logPrefix, 'no matched user by payjp_customer_id');
-          break;
-        }
+        if (!user) break;
 
-        const status: string | undefined = obj?.status;
-        const subId: string | null = obj?.id ?? null;
-        const periodEnd: string | null = obj?.current_period_end || obj?.period?.end || null;
+        const status = obj?.status;
+        const subId = obj?.id ?? null;
+        const periodEnd = obj?.current_period_end ?? null;
 
-        console.log(logPrefix, 'status=', status ?? null, 'subId=', subId, 'periodEnd=', periodEnd);
+        console.error(logPrefix, 'status=', status);
 
         if (status === 'active') {
           const clickType = resolveClickTypeFromSub(obj);
-          console.log(logPrefix, 'apply clickType=', clickType);
-
           await planApply(user.user_code, clickType, `webhook:${type}`, periodEnd, subId);
-        } else if (status === 'trial' || status === 'trialing') {
-          console.log(logPrefix, 'apply clickType=trial');
-
-          await planApply(user.user_code, 'trial', `webhook:${type}`, periodEnd, subId);
-        } else if (
-          ['canceled', 'paused', 'past_due', 'expired', 'terminated'].includes(
-            String(status || ''),
-          )
-        ) {
-          console.log(logPrefix, 'apply clickType=free');
-
-          await planApply(user.user_code, 'free', `webhook:${type}`, null, null);
         } else {
-          console.log(logPrefix, 'subscription status ignored');
+          await planApply(user.user_code, 'free', `webhook:${type}`, null, null);
         }
 
         break;
       }
 
       case type === 'charge.succeeded': {
-        const customerId = customerIdFromEvent;
-        const user = await findUserByCustomer(customerId);
-
-        console.log(logPrefix, 'customerId=', customerId, 'userFound=', Boolean(user));
-
-        if (!user) {
-          console.log(logPrefix, 'no matched user by payjp_customer_id');
-          break;
-        }
-
-        console.log(logPrefix, 'charge.succeeded received');
-        break;
-      }
-
-      /* ---------- Card / Customer 系 ---------- */
-      case type === 'customer.card.deleted': {
-        const customerId = customerIdFromEvent;
-
-        console.log(logPrefix, 'customerId=', customerId);
-
-        if (customerId) {
-          await clearCardStateByCustomer(customerId);
-          console.log(logPrefix, 'card state cleared');
-        } else {
-          console.warn(`${logPrefix} missing customer id; skip DB sync`);
-        }
-
+        console.error(logPrefix, 'charge success');
         break;
       }
 
       case type === 'customer.card.created': {
-        const customerId = customerIdFromEvent;
-        const brand = obj?.brand ?? data?.object?.brand ?? null;
-        const last4 = obj?.last4 ?? data?.object?.last4 ?? null;
+        const brand = obj?.brand ?? null;
+        const last4 = obj?.last4 ?? null;
 
-        console.log(logPrefix, 'customerId=', customerId, 'brand=', brand, 'last4=', last4);
+        console.error(logPrefix, 'card created');
 
         if (customerId) {
           await setCardStateByCustomer(customerId, brand, last4);
-          console.log(logPrefix, 'card state updated');
-        } else {
-          console.warn(`${logPrefix} missing customer id; skip DB sync`);
         }
 
         break;
       }
 
-      case type === 'customer.deleted': {
-        const customerId = obj?.id ?? data?.id ?? null;
-
-        console.log(logPrefix, 'customerId=', customerId);
+      case type === 'customer.card.deleted': {
+        console.error(logPrefix, 'card deleted');
 
         if (customerId) {
           await clearCardStateByCustomer(customerId);
-          console.log(logPrefix, 'customer deleted -> card state cleared');
         }
 
         break;
       }
 
       default: {
-        console.log(logPrefix, 'ignored');
+        console.error(logPrefix, 'ignored');
         break;
       }
     }
@@ -281,5 +216,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true }, { status: 200 });
+  return NextResponse.json({ ok: true });
 }
