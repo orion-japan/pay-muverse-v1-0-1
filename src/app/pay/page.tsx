@@ -807,20 +807,34 @@ function PageInner() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-sm text-gray-800">
-              <b>現在のプラン</b>：{userData?.plan_status ?? 'free'}
-              {/* ← (click_type: …) は非表示にしました */}
+              <b>現在のプラン</b>：{userData?.click_type ?? 'free'}
             </div>
+
+            <div className="text-sm text-gray-800 mt-1">
+              <b>状態</b>：
+              {userData?.plan_status === 'canceled'
+                ? 'キャンセル中'
+                : userData?.plan_status ?? 'free'}
+            </div>
+
             <div className="text-sm text-gray-800 mt-1">
               <b>有効期限</b>：
               {userData?.plan_valid_until
                 ? dayjs(userData.plan_valid_until).format('YYYY/MM/DD HH:mm')
                 : '―'}
             </div>
+
             <div className="text-sm text-gray-800 mt-1">
               <b>クレジット残</b>：{userCredit}
             </div>
+
+            {userData?.plan_status === 'canceled' && (
+              <div className="mt-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">
+                このプランは解約受付済みです。<br />
+                有効期限まではご利用いただけます。
+              </div>
+            )}
           </div>
-          {/* 上部の同期ボタンは削除しました */}
         </div>
       </section>
 
