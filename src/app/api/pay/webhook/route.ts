@@ -262,6 +262,7 @@ export async function POST(req: NextRequest) {
             periodEnd,
             subId,
           );
+
           await writeDebugRow({
             eventType: 'env_check',
             eventId,
@@ -274,6 +275,7 @@ export async function POST(req: NextRequest) {
               url: process.env.NEXT_PUBLIC_SUPABASE_URL,
             },
           });
+
           await writeDebugRow({
             eventType: 'plan_apply_done',
             eventId,
@@ -284,9 +286,58 @@ export async function POST(req: NextRequest) {
               result,
             },
           });
-        } else if (
-          ['canceled', 'paused', 'past_due', 'expired', 'terminated'].includes(status)
-        ) {
+        } else if (status === 'canceled') {
+          await writeDebugRow({
+            eventType: 'canceled_reserve_start',
+            eventId,
+            customerId,
+            rawJson: {
+              user_code: user.user_code,
+              status,
+              periodEnd,
+              subId,
+            },
+          });
+
+          const eventAt = new Date().toISOString();
+
+          const { error: canceledError } = await supabaseAdmin.rpc(
+            'apply_canceled_plan_by_user_code',
+            {
+              p_user_code: user.user_code,
+              p_valid_until: periodEnd,
+              p_event_at: eventAt,
+            },
+          );
+
+          if (canceledError) {
+            await writeDebugRow({
+              eventType: 'canceled_reserve_error',
+              eventId,
+              customerId,
+              rawJson: {
+                user_code: user.user_code,
+                status,
+                periodEnd,
+                error: canceledError,
+              },
+            });
+            throw canceledError;
+          }
+
+          await writeDebugRow({
+            eventType: 'canceled_reserve_done',
+            eventId,
+            customerId,
+            rawJson: {
+              user_code: user.user_code,
+              status,
+              periodEnd,
+              eventAt,
+              mode: 'rpc',
+            },
+          });
+        } else if (['expired', 'terminated'].includes(status)) {
           await writeDebugRow({
             eventType: 'free_update_start',
             eventId,
@@ -296,6 +347,7 @@ export async function POST(req: NextRequest) {
               status,
             },
           });
+
           await writeDebugRow({
             eventType: 'update_try',
             eventId,
@@ -305,6 +357,7 @@ export async function POST(req: NextRequest) {
               using_service_role: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
             },
           });
+
           const eventAt = new Date().toISOString();
 
           const { error: freeUpdateError } = await supabaseAdmin.rpc(
@@ -312,7 +365,7 @@ export async function POST(req: NextRequest) {
             {
               p_user_code: user.user_code,
               p_event_at: eventAt,
-            }
+            },
           );
 
           if (freeUpdateError) {
@@ -336,6 +389,17 @@ export async function POST(req: NextRequest) {
               user_code: user.user_code,
               eventAt,
               mode: 'rpc',
+            },
+          });
+        } else if (status === 'paused' || status === 'past_due') {
+          await writeDebugRow({
+            eventType: 'subscription_status_skipped_pending_policy',
+            eventId,
+            customerId,
+            rawJson: {
+              status,
+              user_code: user.user_code,
+              note: 'paused / past_due policy is not fixed yet',
             },
           });
         } else {
@@ -441,7 +505,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(
       { ok: false, error: e?.message ?? 'webhook failed' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 
