@@ -127,6 +127,29 @@ function resolveClickTypeFromSub(obj: any): string {
   return 'pro';
 }
 
+function toIsoFromPayjpTime(value: any): string | null {
+  if (value == null) return null;
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value * 1000).toISOString();
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+
+    if (/^\d+$/.test(trimmed)) {
+      return new Date(Number(trimmed) * 1000).toISOString();
+    }
+
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
+  }
+
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   const raw = await req.text();
 
@@ -193,7 +216,8 @@ export async function POST(req: NextRequest) {
 
         const status = String(obj?.status ?? '').trim().toLowerCase();
         const subId = obj?.id ?? null;
-        const periodEnd = obj?.current_period_end ?? obj?.period?.end ?? null;
+        const rawPeriodEnd = obj?.current_period_end ?? obj?.period?.end ?? null;
+        const periodEnd = toIsoFromPayjpTime(rawPeriodEnd);
 
         await writeDebugRow({
           eventType: 'subscription_status',
