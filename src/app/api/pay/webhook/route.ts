@@ -154,8 +154,8 @@ export async function POST(req: NextRequest) {
   const type: string | undefined = event?.type;
   const eventId: string | null = event?.id ?? null;
   const data = event?.data ?? {};
-  const obj = data?.object ?? data;
-  const customerId = obj?.customer ?? data?.customer ?? null;
+  const obj = typeof data === 'object' && data !== null ? data : {};
+  const customerId = obj?.customer ?? null;
 
   try {
     await writeDebugRow({
@@ -352,8 +352,8 @@ export async function POST(req: NextRequest) {
       }
 
       case type === 'customer.card.created': {
-        const brand = obj?.brand ?? data?.object?.brand ?? null;
-        const last4 = obj?.last4 ?? data?.object?.last4 ?? null;
+        const brand = obj?.brand ?? null;
+        const last4 = obj?.last4 ?? null;
 
         if (customerId) {
           await setCardStateByCustomer(customerId, brand, last4);
@@ -388,7 +388,7 @@ export async function POST(req: NextRequest) {
       }
 
       case type === 'customer.deleted': {
-        const deletedCustomerId = obj?.id ?? data?.id ?? null;
+        const deletedCustomerId = obj?.id ?? null;
 
         if (deletedCustomerId) {
           await clearCardStateByCustomer(deletedCustomerId);
