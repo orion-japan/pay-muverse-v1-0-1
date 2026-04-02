@@ -205,7 +205,7 @@ export async function POST(req: NextRequest) {
 
           for (const s of targets) {
             try {
-              await payjp.subscriptions.cancel(s.id, { at_period_end: false } as any);
+              await payjp.subscriptions.cancel(s.id, { at_period_end: true } as any);
               log(`✅ canceled: ${s.id}`);
             } catch (e: any) {
               log(`⚠ cancel failed (${s.id}): ${e?.message}`);

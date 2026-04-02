@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
       for (const s of list.data) {
         if (['active', 'trial', 'trialing', 'paused'].includes(String(s.status))) {
           try {
-            await payjp.subscriptions.cancel(s.id, { at_period_end: false } as any);
+            await payjp.subscriptions.cancel(s.id, { at_period_end: true } as any);
             cancelled++;
           } catch (e: any) {
             logTrail.push('cancel list item failed: ' + (e?.message || e));
