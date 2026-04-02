@@ -181,7 +181,21 @@ export async function POST(req: NextRequest) {
         } else if (
           ['canceled', 'paused', 'past_due', 'expired', 'terminated'].includes(status)
         ) {
-          await planApply(user.user_code, 'free', `webhook:${type}`, null, null);
+          const { error: freeUpdateError } = await supabaseAdmin
+            .from('users')
+            .update({
+              click_type: 'free',
+              plan_status: 'free',
+              sofia_credit: 0,
+              payjp_subscription_id: null,
+              payjp_last_event_at: new Date().toISOString(),
+              last_payment_date: new Date().toISOString(),
+            })
+            .eq('user_code', user.user_code);
+
+          if (freeUpdateError) {
+            throw freeUpdateError;
+          }
         }
 
         break;

@@ -1325,10 +1325,22 @@ try {
 
   if (!persistRes || (persistRes as any).ok !== true || (persistRes as any).inserted !== true) {
     console.error('[IROS][DIAGNOSIS_PERSIST_NOT_INSERTED]', persistRes);
+  } else {
+    const { error: activeAtError } = await supabase
+      .from('users')
+      .update({
+        iros_last_active_at: new Date().toISOString(),
+      })
+      .eq('user_code', userCode);
+
+    if (activeAtError) {
+      console.error('[IROS][ACTIVE_AT_UPDATE_ERROR]', activeAtError);
+    }
   }
 } catch (e) {
   console.error('[IROS][DIAGNOSIS_PERSIST_ERROR]', e);
 }
+
 return NextResponse.json({
   ok: true,
   text: finalText,
