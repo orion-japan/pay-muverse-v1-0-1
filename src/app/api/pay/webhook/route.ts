@@ -314,13 +314,12 @@ export async function POST(req: NextRequest) {
             last_payment_date: new Date().toISOString(),
           };
 
-          const { data: updatedRows, error: freeUpdateError } = await supabaseAdmin
-            .from('users')
-            .update(updatePayload)
-            .eq('user_code', user.user_code)
-            .select(
-              'user_code, click_type, plan_status, sofia_credit, payjp_subscription_id, payjp_last_event_at, last_payment_date'
-            );
+          const { error: freeUpdateError } = await supabaseAdmin
+          .from('users')
+          .update(updatePayload)
+          .eq('user_code', user.user_code);
+
+        const updatedRows = null;
 
           if (freeUpdateError) {
             await writeDebugRow({
