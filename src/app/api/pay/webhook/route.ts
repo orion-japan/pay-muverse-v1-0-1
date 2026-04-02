@@ -231,6 +231,37 @@ export async function POST(req: NextRequest) {
           },
         });
 
+        const { data: currentUserState, error: currentUserStateError } = await supabaseAdmin
+        .from('users')
+        .select('plan_status, plan_valid_until')
+        .eq('user_code', user.user_code)
+        .maybeSingle();
+
+      if (currentUserStateError) {
+        throw currentUserStateError;
+      }
+
+      const isCanceledGuard =
+        currentUserState?.plan_status === 'canceled' &&
+        (status === 'active' || status === 'trial' || status === 'trialing');
+
+      if (isCanceledGuard) {
+        await writeDebugRow({
+          eventType: 'plan_apply_skipped_by_canceled_guard',
+          eventId,
+          customerId,
+          rawJson: {
+            user_code: user.user_code,
+            incoming_status: status,
+            current_plan_status: currentUserState?.plan_status ?? null,
+            current_plan_valid_until: currentUserState?.plan_valid_until ?? null,
+            subId,
+            periodEnd,
+          },
+        });
+        break;
+      }
+
         if (status === 'active') {
           const clickType = resolveClickTypeFromSub(obj);
 
