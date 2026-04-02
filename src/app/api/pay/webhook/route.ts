@@ -34,7 +34,7 @@ async function findUserByCustomer(customerId: string) {
 
   const { data, error } = await supabaseAdmin
     .from('users')
-    .select('user_code, payjp_subscription_id')
+    .select('user_code, payjp_subscription_id, payjp_customer_id')
     .eq('payjp_customer_id', customerId)
     .maybeSingle();
 
@@ -108,6 +108,8 @@ async function planApply(
   if (!res.ok) {
     throw new Error(`planApply failed: ${res.status} ${text}`);
   }
+
+  return { ok: true, status: res.status, text };
 }
 
 function resolveClickTypeFromSub(obj: any): string {
@@ -167,41 +169,185 @@ export async function POST(req: NextRequest) {
       case /^subscription\./.test(type || ''): {
         const user = await findUserByCustomer(customerId);
 
-        if (!user) break;
+        await writeDebugRow({
+          eventType: 'user_lookup',
+          eventId,
+          customerId,
+          rawJson: {
+            found: !!user,
+            user,
+          },
+        });
+
+        if (!user) {
+          await writeDebugRow({
+            eventType: 'user_not_found',
+            eventId,
+            customerId,
+            rawJson: {
+              message: 'No user matched payjp_customer_id',
+            },
+          });
+          break;
+        }
 
         const status = String(obj?.status ?? '').trim().toLowerCase();
         const subId = obj?.id ?? null;
         const periodEnd = obj?.current_period_end ?? obj?.period?.end ?? null;
 
+        await writeDebugRow({
+          eventType: 'subscription_status',
+          eventId,
+          customerId,
+          rawJson: {
+            status,
+            subId,
+            periodEnd,
+            user_code: user.user_code,
+          },
+        });
+
         if (status === 'active') {
           const clickType = resolveClickTypeFromSub(obj);
-          await planApply(user.user_code, clickType, `webhook:${type}`, periodEnd, subId);
+
+          await writeDebugRow({
+            eventType: 'plan_apply_start',
+            eventId,
+            customerId,
+            rawJson: {
+              user_code: user.user_code,
+              clickType,
+              reason: `webhook:${type}`,
+              periodEnd,
+              subId,
+            },
+          });
+
+          const result = await planApply(
+            user.user_code,
+            clickType,
+            `webhook:${type}`,
+            periodEnd,
+            subId,
+          );
+
+          await writeDebugRow({
+            eventType: 'plan_apply_done',
+            eventId,
+            customerId,
+            rawJson: {
+              user_code: user.user_code,
+              clickType,
+              result,
+            },
+          });
         } else if (status === 'trial' || status === 'trialing') {
-          await planApply(user.user_code, 'trial', `webhook:${type}`, periodEnd, subId);
+          await writeDebugRow({
+            eventType: 'plan_apply_start',
+            eventId,
+            customerId,
+            rawJson: {
+              user_code: user.user_code,
+              clickType: 'trial',
+              reason: `webhook:${type}`,
+              periodEnd,
+              subId,
+            },
+          });
+
+          const result = await planApply(
+            user.user_code,
+            'trial',
+            `webhook:${type}`,
+            periodEnd,
+            subId,
+          );
+
+          await writeDebugRow({
+            eventType: 'plan_apply_done',
+            eventId,
+            customerId,
+            rawJson: {
+              user_code: user.user_code,
+              clickType: 'trial',
+              result,
+            },
+          });
         } else if (
           ['canceled', 'paused', 'past_due', 'expired', 'terminated'].includes(status)
         ) {
-          const { error: freeUpdateError } = await supabaseAdmin
+          await writeDebugRow({
+            eventType: 'free_update_start',
+            eventId,
+            customerId,
+            rawJson: {
+              user_code: user.user_code,
+              status,
+            },
+          });
+
+          const updatePayload = {
+            click_type: 'free',
+            plan_status: 'free',
+            sofia_credit: 0,
+            payjp_subscription_id: null,
+            payjp_last_event_at: new Date().toISOString(),
+            last_payment_date: new Date().toISOString(),
+          };
+
+          const { data: updatedRows, error: freeUpdateError } = await supabaseAdmin
             .from('users')
-            .update({
-              click_type: 'free',
-              plan_status: 'free',
-              sofia_credit: 0,
-              payjp_subscription_id: null,
-              payjp_last_event_at: new Date().toISOString(),
-              last_payment_date: new Date().toISOString(),
-            })
-            .eq('user_code', user.user_code);
+            .update(updatePayload)
+            .eq('user_code', user.user_code)
+            .select(
+              'user_code, click_type, plan_status, sofia_credit, payjp_subscription_id, payjp_last_event_at, last_payment_date'
+            );
 
           if (freeUpdateError) {
+            await writeDebugRow({
+              eventType: 'free_update_error',
+              eventId,
+              customerId,
+              rawJson: {
+                user_code: user.user_code,
+                error: freeUpdateError,
+              },
+            });
             throw freeUpdateError;
           }
+
+          await writeDebugRow({
+            eventType: 'free_update_done',
+            eventId,
+            customerId,
+            rawJson: {
+              user_code: user.user_code,
+              updatePayload,
+              updatedRows,
+            },
+          });
+        } else {
+          await writeDebugRow({
+            eventType: 'subscription_status_skipped',
+            eventId,
+            customerId,
+            rawJson: {
+              status,
+              user_code: user.user_code,
+            },
+          });
         }
 
         break;
       }
 
       case type === 'charge.succeeded': {
+        await writeDebugRow({
+          eventType: 'charge_succeeded_seen',
+          eventId,
+          customerId,
+          rawJson: { type },
+        });
         break;
       }
 
@@ -211,6 +357,16 @@ export async function POST(req: NextRequest) {
 
         if (customerId) {
           await setCardStateByCustomer(customerId, brand, last4);
+
+          await writeDebugRow({
+            eventType: 'card_created_done',
+            eventId,
+            customerId,
+            rawJson: {
+              brand,
+              last4,
+            },
+          });
         }
 
         break;
@@ -219,6 +375,13 @@ export async function POST(req: NextRequest) {
       case type === 'customer.card.deleted': {
         if (customerId) {
           await clearCardStateByCustomer(customerId);
+
+          await writeDebugRow({
+            eventType: 'card_deleted_done',
+            eventId,
+            customerId,
+            rawJson: {},
+          });
         }
 
         break;
@@ -229,12 +392,27 @@ export async function POST(req: NextRequest) {
 
         if (deletedCustomerId) {
           await clearCardStateByCustomer(deletedCustomerId);
+
+          await writeDebugRow({
+            eventType: 'customer_deleted_done',
+            eventId,
+            customerId: deletedCustomerId,
+            rawJson: {},
+          });
         }
 
         break;
       }
 
       default: {
+        await writeDebugRow({
+          eventType: 'event_skipped',
+          eventId,
+          customerId,
+          rawJson: {
+            type,
+          },
+        });
         break;
       }
     }
@@ -249,7 +427,10 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    return NextResponse.json({ ok: false, error: e?.message ?? 'webhook failed' }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? 'webhook failed' },
+      { status: 500 }
+    );
   }
 
   return NextResponse.json({ ok: true }, { status: 200 });
