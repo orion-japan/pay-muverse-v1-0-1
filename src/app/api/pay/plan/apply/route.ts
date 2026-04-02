@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -41,51 +42,10 @@ function resolveCredit(clickType: string): number {
   return num;
 }
 
-function getSupabaseEnv() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url) throw new Error('Missing env: NEXT_PUBLIC_SUPABASE_URL');
-  if (!key) throw new Error('Missing env: SUPABASE_SERVICE_ROLE_KEY');
-
-  return { url: url.replace(/\/$/, ''), key };
-}
-
-async function sbFetch<T = any>(
-  path: string,
-  init?: {
-    method?: 'GET' | 'POST' | 'PATCH';
-    body?: unknown;
-    prefer?: string;
-  },
-): Promise<T> {
-  const { url, key } = getSupabaseEnv();
-
-  const res = await fetch(`${url}/rest/v1/${path}`, {
-    method: init?.method ?? 'GET',
-    headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...(init?.prefer ? { Prefer: init.prefer } : {}),
-    },
-    body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
-    cache: 'no-store',
-  });
-
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
-
-  if (!res.ok) {
-    throw new Error(
-      `Supabase REST ${init?.method ?? 'GET'} ${path} failed: ${res.status} ${
-        typeof data === 'object' ? JSON.stringify(data) : text
-      }`,
-    );
-  }
-
-  return data as T;
+function resolvePlanStatus(clickType: string): string {
+  if (clickType === 'trial') return 'trial';
+  if (clickType === 'free') return 'free';
+  return clickType;
 }
 
 export async function POST(req: NextRequest) {
@@ -114,87 +74,85 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const users = await sbFetch<any[]>(
-      `users?select=user_code,click_type,plan_status&user_code=eq.${encodeURIComponent(user_code)}`,
-      { method: 'GET' },
-    );
+    const { data: u, error: e1 } = await supabaseAdmin
+      .from('users')
+      .select('click_type, plan_status')
+      .eq('user_code', user_code)
+      .maybeSingle();
 
-    const u = users?.[0] ?? null;
+    if (e1) throw e1;
     if (!u) {
       return NextResponse.json({ ok: false, error: 'user not found' }, { status: 404 });
     }
 
     const old_click = u.click_type ?? null;
     const old_plan = u.plan_status ?? null;
-    const new_plan = new_click_type;
+    const new_plan = resolvePlanStatus(new_click_type);
     const credit = resolveCredit(new_click_type);
 
-    const updatePayload: Record<string, unknown> = {
-      click_type: new_click_type,
-      plan_status: new_plan,
-      sofia_credit: credit,
-    };
-
-    if (plan_valid_until !== null) {
-      updatePayload.plan_valid_until = plan_valid_until;
-      updatePayload.next_payment_date = plan_valid_until;
-    }
-
-    if (payjp_subscription_id !== null) {
-      updatePayload.payjp_subscription_id = payjp_subscription_id;
-    }
-
-    const updatedUsers = await sbFetch<any[]>(
-      `users?user_code=eq.${encodeURIComponent(user_code)}`,
-      {
-        method: 'PATCH',
-        body: updatePayload,
-        prefer: 'return=representation',
-      },
-    );
-
-    const updatedUser = updatedUsers?.[0] ?? null;
-
-    const openHist = await sbFetch<any[]>(
-      `plan_history?select=id&user_code=eq.${encodeURIComponent(user_code)}&ended_at=is.null&order=started_at.desc&limit=1`,
-      { method: 'GET' },
-    );
-
-    if (openHist && openHist[0]?.id != null) {
-      await sbFetch<any[]>(
-        `plan_history?id=eq.${encodeURIComponent(String(openHist[0].id))}`,
-        {
-          method: 'PATCH',
-          body: { ended_at: new Date().toISOString() },
-          prefer: 'return=representation',
-        },
-      );
-    }
-
-    await sbFetch<any[]>('plan_history', {
-      method: 'POST',
-      body: {
-        user_code,
-        from_click_type: old_click,
-        to_click_type: new_click_type,
-        from_plan_status: old_plan,
-        to_plan_status: new_plan,
-        reason,
-        source,
-        started_at: new Date().toISOString(),
-      },
-      prefer: 'return=representation',
+    const { error: rpcError } = await supabaseAdmin.rpc('apply_paid_plan_by_user_code', {
+      p_user_code: user_code,
+      p_click_type: new_click_type,
+      p_plan_status: new_plan,
+      p_sofia_credit: credit,
+      p_valid_until: plan_valid_until,
+      p_payjp_subscription_id: payjp_subscription_id,
+      p_event_at: new Date().toISOString(),
     });
+
+    if (rpcError) throw rpcError;
+
+    const { data: openHist, error: openHistError } = await supabaseAdmin
+      .from('plan_history')
+      .select('id')
+      .eq('user_code', user_code)
+      .is('ended_at', null)
+      .order('started_at', { ascending: false })
+      .limit(1);
+
+    if (openHistError) throw openHistError;
+
+    if (openHist && openHist[0]) {
+      const { error: closeHistError } = await supabaseAdmin
+        .from('plan_history')
+        .update({ ended_at: new Date().toISOString() })
+        .eq('id', openHist[0].id);
+
+      if (closeHistError) throw closeHistError;
+    }
+
+    const { error: histError } = await supabaseAdmin.from('plan_history').insert({
+      user_code,
+      from_click_type: old_click,
+      to_click_type: new_click_type,
+      from_plan_status: old_plan,
+      to_plan_status: new_plan,
+      reason,
+      source,
+      started_at: new Date().toISOString(),
+    });
+
+    if (histError) throw histError;
+
+    const { data: afterUser, error: afterError } = await supabaseAdmin
+      .from('users')
+      .select(
+        'user_code, click_type, plan_status, sofia_credit, plan_valid_until, payjp_subscription_id',
+      )
+      .eq('user_code', user_code)
+      .maybeSingle();
+
+    if (afterError) throw afterError;
 
     return NextResponse.json({
       ok: true,
       applied: {
         user_code,
-        click_type: updatedUser?.click_type ?? new_click_type,
-        plan_status: updatedUser?.plan_status ?? new_plan,
-        sofia_credit: updatedUser?.sofia_credit ?? credit,
-        plan_valid_until: updatedUser?.plan_valid_until ?? plan_valid_until,
-        payjp_subscription_id: updatedUser?.payjp_subscription_id ?? payjp_subscription_id,
+        click_type: afterUser?.click_type ?? new_click_type,
+        plan_status: afterUser?.plan_status ?? new_plan,
+        sofia_credit: afterUser?.sofia_credit ?? credit,
+        plan_valid_until: afterUser?.plan_valid_until ?? plan_valid_until,
+        payjp_subscription_id: afterUser?.payjp_subscription_id ?? payjp_subscription_id,
       },
     });
   } catch (e: any) {
