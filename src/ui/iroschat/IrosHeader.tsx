@@ -14,6 +14,7 @@ export type HeaderProps = {
   onCreateNewChat?: () => void;
   onRefresh?: () => void;
   icon?: React.ReactNode;
+  meta?: any;
 };
 
 export default function IrosHeader({
@@ -21,15 +22,15 @@ export default function IrosHeader({
   onCreateNewChat,
   onRefresh,
   icon,
+  meta,
 }: HeaderProps) {
   const router = useRouter();
   const title = 'iros_AI';
 
-  // ★ 追加：IrosChatContext から最新メタ情報を取得（型は any で柔らかく）
   const chatCtx = (typeof useIrosChat === 'function' ? useIrosChat() : null) as any;
 
-  // 可能性のあるキーを順番に探す（実装差異に強くするため）
   const currentMeta =
+    meta ??
     chatCtx?.currentMeta ??
     chatCtx?.lastMeta ??
     chatCtx?.meta ??
@@ -129,11 +130,9 @@ export default function IrosHeader({
       </div>
 
       <div className="sof-right">
-        {currentMeta && (
-          <div className="sof-meta-wrap" aria-label="Iros meta indicator">
-            <IrosMetaBadge qCode={qCode} depth={depth} mode={mode} compact />
-          </div>
-        )}
+      <div className="sof-meta-wrap" aria-label="Iros meta indicator">
+  <IrosMetaBadge qCode={qCode} depth={depth} mode={mode} compact />
+</div>
 
         <button
           type="button"

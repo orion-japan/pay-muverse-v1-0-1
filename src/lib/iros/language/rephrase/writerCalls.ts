@@ -834,13 +834,13 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                         '',
                       ),
                     ) || null,
-                  oneLineConstraint:
+                    oneLineConstraint:
                     cleanMeaningLine(
                       pick(
                         (ctxPack as any)?.seed?.oneLineConstraint,
-                        '1行・説明禁止・質問禁止',
+                        '1核心 / 同一テーマ内で自然に広げることは許可 / Δは1つ必ず含める / 質問しない',
                       ),
-                    ) || '1行・説明禁止・質問禁止',
+                    ) || '1核心 / 同一テーマ内で自然に広げることは許可 / Δは1つ必ず含める / 質問しない',
                 },
               });
 
@@ -852,8 +852,8 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                   (stateCore !== '(no_state_core)' ? stateCore : null),
                 relationContext: flowBridge !== '(bridge_unknown)' ? flowBridge : null,
                 oneLineConstraint:
-                  cleanMeaningLine(canonicalSeed.oneLineConstraint) ||
-                  '1行・説明禁止・質問禁止',
+                cleanMeaningLine(canonicalSeed.oneLineConstraint) ||
+                '1核心 / 同一テーマ内で自然に広げることは許可 / Δは1つ必ず含める / 質問しない',
               });
 
               console.log(
@@ -2003,20 +2003,79 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                 const flowLine =
                   String((args as any)?.flow180?.sentence ?? '').trim() || null;
 
+                const goalKindNow = String(
+                  (extra as any)?.goalKind ??
+                  (args as any)?.extra?.goalKind ??
+                  (ctxPack as any)?.goalKind ??
+                  ''
+                ).trim();
+
+                const touchHint = (() => {
+                  const latest = String(latestUserText ?? '').trim();
+                  const summary = String((ctxPack as any)?.topicDigestV2?.summary ?? '').trim();
+                  const situation = String((ctxPack as any)?.topicDigest ?? '').trim();
+
+                  return latest || summary || situation || null;
+                })();
+
+                const openingMode =
+                  goalKindNow === 'resonate' ? 'touch_first' : 'direct_core';
+
+                const responseLength =
+                  goalKindNow === 'resonate' ? 'soft_long' : 'compact';
+
                 return {
+                  openingMode,
+                  responseLength,
+
+                  firstTouch: {
+                    enabled: goalKindNow === 'resonate',
+                    hint: touchHint,
+                    rules: [
+                      '最初の1文は、相手の変化・気づき・違和感・届いた感じのいずれかに触れる',
+                      '構造説明から入らない',
+                      '一般論から入らない',
+                      '問い返しから入らない',
+                      '入力の意味を言い換える前に、まず相手に触れる',
+                    ],
+                  },
+
+                  bodyStyle: {
+                    coreFirst: true,
+                    allowSoftExpand: true,
+                    minSentences: 3,
+                    maxSentences: 6,
+                    allowEmpathicBridge: true,
+                    allowGentleRephrase: true,
+                    forbidTopicExpansion: true,
+
+                    // ★ これを追加
+                    delayClosure: true,
+                  },
+
                   flowLine,
                   deltaLine: bestShiftDirection || null,
                   flowFrom: String((args as any)?.flow180?.from ?? '').trim() || null,
                   flowTo: String((args as any)?.flow180?.to ?? '').trim() || null,
+
                   writeConstraints: [
+                    '最初に相手へ触れてから核心に入る',
                     '共感だけで終わらない',
                     'いまの焦点を一つに絞る',
-                    '最後は行動可能な一歩か判断軸で閉じる',
-
+                    'resonate時は少し長めでもよいが、1核心は崩さない',
+                    '寄り添いの一文を追加してよい',
+                    '最後は静かな着地で閉じる',
                     '新しい論点を増やさない',
-                    'ユーザーが聞いていない一般論へ広げない',
-                    'MEANINGを言い換えて完結させる（追加説明しない）',
-                  ],
+                    'ユーザーが聞いていない一般へ広げない',
+                    'MEANINGを言い換えて完結させず、先に触れてから返す',
+                    'Do not conclude early',
+                    'Let the response breathe before closing',
+                    'Allow natural expansion within the same theme',
+                    'Pick one concrete delta from the current input',
+                    'Prefer difference over atmosphere',
+                    'Name what is specifically off, stuck, or not matching',
+                    'Do not return the same structure for every vague discomfort input',
+                  ]
                 };
               })();
 
@@ -2170,10 +2229,92 @@ const internalPackRawCleaned =
                         `$1\n\nDELTA:\n${deltaReason}`
                       );
                     })();
+                    const writerDirectivesBlock = (() => {
+                      const wd = (args as any)?.writerDirectives;
+                      if (!wd || typeof wd !== 'object') return '';
+
+                      const lines: string[] = ['WRITER_DIRECTIVES (DO NOT OUTPUT):'];
+
+                      const openingMode = String(wd?.openingMode ?? '').trim();
+                      const responseLength = String(wd?.responseLength ?? '').trim();
+
+                      if (openingMode) lines.push(`openingMode=${openingMode}`);
+                      if (responseLength) lines.push(`responseLength=${responseLength}`);
+
+                      const firstTouch = wd?.firstTouch;
+                      if (firstTouch && typeof firstTouch === 'object') {
+                        const enabled = firstTouch?.enabled === true ? 'true' : 'false';
+                        const hint = String(firstTouch?.hint ?? '').trim();
+
+                        lines.push(`firstTouch.enabled=${enabled}`);
+                        if (hint) lines.push(`firstTouch.hint=${hint}`);
+
+                        const rules = Array.isArray(firstTouch?.rules) ? firstTouch.rules : [];
+                        rules
+                          .map((x: any) => String(x ?? '').trim())
+                          .filter(Boolean)
+                          .forEach((rule: string, i: number) => {
+                            lines.push(`firstTouch.rule${i + 1}=${rule}`);
+                          });
+                      }
+
+                      const bodyStyle = wd?.bodyStyle;
+                      if (bodyStyle && typeof bodyStyle === 'object') {
+                        if (typeof bodyStyle?.coreFirst === 'boolean') {
+                          lines.push(`bodyStyle.coreFirst=${bodyStyle.coreFirst ? 'true' : 'false'}`);
+                        }
+                        if (typeof bodyStyle?.allowSoftExpand === 'boolean') {
+                          lines.push(`bodyStyle.allowSoftExpand=${bodyStyle.allowSoftExpand ? 'true' : 'false'}`);
+                        }
+                        if (typeof bodyStyle?.minSentences === 'number') {
+                          lines.push(`bodyStyle.minSentences=${bodyStyle.minSentences}`);
+                        }
+                        if (typeof bodyStyle?.maxSentences === 'number') {
+                          lines.push(`bodyStyle.maxSentences=${bodyStyle.maxSentences}`);
+                        }
+                        if (typeof bodyStyle?.allowEmpathicBridge === 'boolean') {
+                          lines.push(
+                            `bodyStyle.allowEmpathicBridge=${bodyStyle.allowEmpathicBridge ? 'true' : 'false'}`
+                          );
+                        }
+                        if (typeof bodyStyle?.allowGentleRephrase === 'boolean') {
+                          lines.push(
+                            `bodyStyle.allowGentleRephrase=${bodyStyle.allowGentleRephrase ? 'true' : 'false'}`
+                          );
+                        }
+                        if (typeof bodyStyle?.forbidTopicExpansion === 'boolean') {
+                          lines.push(
+                            `bodyStyle.forbidTopicExpansion=${bodyStyle.forbidTopicExpansion ? 'true' : 'false'}`
+                          );
+                        }
+                      }
+
+                      const flowLine = String(wd?.flowLine ?? '').trim();
+                      const deltaLine = String(wd?.deltaLine ?? '').trim();
+                      const flowFrom = String(wd?.flowFrom ?? '').trim();
+                      const flowTo = String(wd?.flowTo ?? '').trim();
+
+                      if (flowLine) lines.push(`flowLine=${flowLine}`);
+                      if (deltaLine) lines.push(`deltaLine=${deltaLine}`);
+                      if (flowFrom) lines.push(`flowFrom=${flowFrom}`);
+                      if (flowTo) lines.push(`flowTo=${flowTo}`);
+
+                      const writeConstraints = Array.isArray(wd?.writeConstraints) ? wd.writeConstraints : [];
+                      writeConstraints
+                        .map((x: any) => String(x ?? '').trim())
+                        .filter(Boolean)
+                        .forEach((rule: string, i: number) => {
+                          lines.push(`writeConstraint${i + 1}=${rule}`);
+                        });
+
+                      return lines.join('\n').trim();
+                    })();
+
                     const seedBlocksForWriter = [
                       canonicalSeedText,
                       flowV2Text,
                       flow180Block,
+                      writerDirectivesBlock,
                     ]
                       .filter((x) => norm(x))
                       .map((x) =>
