@@ -15,7 +15,6 @@ type ApplyBody = {
 
 function normalizeClickType(value: unknown): string {
   const raw = String(value ?? '').trim().toLowerCase();
-
   if (raw === 'pro') return 'premium';
   return raw;
 }
@@ -74,19 +73,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { data: u, error: e1 } = await supabaseAdmin
+    const { data: beforeUser, error: beforeError } = await supabaseAdmin
       .from('users')
-      .select('click_type, plan_status')
+      .select(
+        'user_code, click_type, plan_status, sofia_credit, plan_valid_until, payjp_subscription_id',
+      )
       .eq('user_code', user_code)
       .maybeSingle();
 
-    if (e1) throw e1;
-    if (!u) {
+    if (beforeError) throw beforeError;
+    if (!beforeUser) {
       return NextResponse.json({ ok: false, error: 'user not found' }, { status: 404 });
     }
 
-    const old_click = u.click_type ?? null;
-    const old_plan = u.plan_status ?? null;
     const new_plan = resolvePlanStatus(new_click_type);
     const credit = resolveCredit(new_click_type);
 
@@ -102,35 +101,38 @@ export async function POST(req: NextRequest) {
 
     if (rpcError) throw rpcError;
 
-    const { data: openHist, error: openHistError } = await supabaseAdmin
-      .from('plan_history')
-      .select('id')
-      .eq('user_code', user_code)
-      .is('ended_at', null)
-      .order('started_at', { ascending: false })
-      .limit(1);
-
-    if (openHistError) throw openHistError;
-
-    if (openHist && openHist[0]) {
-      const { error: closeHistError } = await supabaseAdmin
-        .from('plan_history')
-        .update({ ended_at: new Date().toISOString() })
-        .eq('id', openHist[0].id);
-
-      if (closeHistError) throw closeHistError;
-    }
-
-    const { error: histError } = await supabaseAdmin.from('plan_history').insert({
+    const historyRow = {
       user_code,
-      from_click_type: old_click,
-      to_click_type: new_click_type,
-      from_plan_status: old_plan,
-      to_plan_status: new_plan,
-      reason,
+      plan_type: new_click_type,
+      change_source: source,
+      effective_from: new Date().toISOString(),
+      notes: reason,
+      note: {
+        reason,
+        source,
+        before: {
+          click_type: beforeUser.click_type ?? null,
+          plan_status: beforeUser.plan_status ?? null,
+          sofia_credit: beforeUser.sofia_credit ?? null,
+          plan_valid_until: beforeUser.plan_valid_until ?? null,
+          payjp_subscription_id: beforeUser.payjp_subscription_id ?? null,
+        },
+        after: {
+          click_type: new_click_type,
+          plan_status: new_plan,
+          sofia_credit: credit,
+          plan_valid_until,
+          payjp_subscription_id,
+        },
+      },
+      event: reason,
+      plan_status: new_plan,
+      click_type: new_click_type,
+      valid_until: plan_valid_until,
       source,
-      started_at: new Date().toISOString(),
-    });
+    };
+
+    const { error: histError } = await supabaseAdmin.from('plan_history').insert(historyRow);
 
     if (histError) throw histError;
 
