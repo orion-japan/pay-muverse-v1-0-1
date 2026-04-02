@@ -305,21 +305,15 @@ export async function POST(req: NextRequest) {
               using_service_role: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
             },
           });
-          const updatePayload = {
-            click_type: 'free',
-            plan_status: 'free',
-            sofia_credit: 0,
-            payjp_subscription_id: null,
-            payjp_last_event_at: new Date().toISOString(),
-            last_payment_date: new Date().toISOString(),
-          };
+          const eventAt = new Date().toISOString();
 
-          const { error: freeUpdateError } = await supabaseAdmin
-          .from('users')
-          .update(updatePayload)
-          .eq('user_code', user.user_code);
-
-        const updatedRows = null;
+          const { error: freeUpdateError } = await supabaseAdmin.rpc(
+            'apply_free_plan_by_user_code',
+            {
+              p_user_code: user.user_code,
+              p_event_at: eventAt,
+            }
+          );
 
           if (freeUpdateError) {
             await writeDebugRow({
@@ -340,8 +334,8 @@ export async function POST(req: NextRequest) {
             customerId,
             rawJson: {
               user_code: user.user_code,
-              updatePayload,
-              updatedRows,
+              eventAt,
+              mode: 'rpc',
             },
           });
         } else {

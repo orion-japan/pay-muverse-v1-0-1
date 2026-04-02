@@ -1314,3 +1314,13 @@ body:has(.iros-settings-main) .mu-main {
   margin: 0 auto;
   padding: 16px;
 }
+.history-acc__summary {
+  display: flex;
+  justify-content: center;  /* ← 横中央 */
+  text-align: center;
+}
+
+.text-sm.text-gray-800.mt-1 {
+  text-align: center;
+  width: 100%;
+}
