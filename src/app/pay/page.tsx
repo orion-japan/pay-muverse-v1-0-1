@@ -524,7 +524,16 @@ function PageInner() {
       setModalOpen(true);
       return;
     }
-    if (userData?.plan_status === selectedPlan.plan_type && !expired) {
+
+    const currentClickType = String(userData?.click_type ?? '').toLowerCase();
+    const currentPlanStatus = String(userData?.plan_status ?? '').toLowerCase();
+    const selectedPlanType = String(selectedPlan.plan_type ?? '').toLowerCase();
+
+    if (
+      currentClickType === selectedPlanType &&
+      currentPlanStatus !== 'canceled' &&
+      !expired
+    ) {
       log('already on this plan → short-circuit success');
       setModalTitle('すでにこのプランに加入済みです');
       setModalMessage('そのままご利用いただけます。');
@@ -673,7 +682,11 @@ function PageInner() {
 
   /* ---------- 追加：解約 / カード削除 ---------- */
   const handleCancelSubscription = async () => {
-    if (!confirm('現在のサブスクリプションを直ちにキャンセルします。よろしいですか？')) return;
+    if (
+      !confirm(
+        '現在のプランを解約します。ご利用は有効期限まで継続し、期限後に freeプランへ移行します。よろしいですか？'
+      )
+    ) return;
     setLoading(true);
     try {
       const idToken = await getIdTokenWithTimeout();
@@ -687,7 +700,15 @@ function PageInner() {
         throw new Error(j?.error || `キャンセルに失敗しました: ${res.status}`);
       setModalTitle('解約を受け付けました');
       setModalMessage(
-        'アプリ表示は即時に free へ反映されます（最終確定はWebhookでも同期されます）。',
+        `現在のプランは有効期限（${
+          userData?.plan_valid_until
+            ? dayjs(userData.plan_valid_until).format('YYYY/MM/DD HH:mm')
+            : '―'
+        }）までご利用いただけます。
+
+      有効期限を過ぎると、クレジットは0になり freeプランへ移行します。
+
+      ※最終確定はWebhookにより自動反映されます。`
       );
       setModalOpen(true);
       await fetchStatus(true);
@@ -868,7 +889,13 @@ function PageInner() {
               onClick={handleSubscribe}
               disabled={!selectedPlan || loading}
             >
-              {loading ? '処理中…' : expired ? 'プランを再購入する' : 'プランを購入する'}
+{loading
+  ? '処理中…'
+  : userData?.plan_status === 'canceled'
+    ? 'プランを再開する'
+    : expired
+      ? 'プランを再購入する'
+      : 'プランを購入する'}
             </button>
           </div>
         </>

@@ -188,99 +188,183 @@ export async function POST(req: NextRequest) {
         log(`⚠ status check failed: ${e?.message || e}`);
       }
 
-      if (force_cancel_existing) {
-        try {
-          const existing = await payjp.subscriptions.list({
-            customer: String(customer_id),
-            limit: 100,
-          } as any);
-
-          const targets = (existing?.data ?? []).filter((s: any) =>
-            ['active', 'trial', 'trialing', 'paused'].includes(String(s?.status)),
-          );
-
-          log(
-            `🪓 cancel targets: ${targets.map((s: any) => `${s.id}:${s.status}`).join(', ') || '(none)'}`,
-          );
-
-          for (const s of targets) {
-            try {
-              await payjp.subscriptions.cancel(s.id, { at_period_end: true } as any);
-              log(`✅ canceled: ${s.id}`);
-            } catch (e: any) {
-              log(`⚠ cancel failed (${s.id}): ${e?.message}`);
-            }
-          }
-
-          await sb
-            .from('users')
-            .update({
-              payjp_subscription_id: null,
-              last_payment_date: null,
-              next_payment_date: null,
-            })
-            .eq('user_code', user_code);
-
-          log('✅ DB subscription fields cleared');
-        } catch (e: any) {
-          log(`⚠ subscriptions.list failed: ${e?.message}`);
-        }
-      }
+      const normalizeSubPlanId = (sub: any): string | null => {
+        const p = sub?.plan;
+        if (!p) return null;
+        if (typeof p === 'string') return p;
+        if (typeof p === 'object' && p?.id) return String(p.id);
+        return null;
+      };
 
       let subscription: any = null;
 
-      try {
-        subscription = await payjp.subscriptions.create({
-          customer: String(customer_id),
-          plan: String(plan_price_id),
-        } as any);
+      const listed = await payjp.subscriptions.list({
+        customer: String(customer_id),
+        limit: 100,
+      } as any);
 
-        log(
-          `💳 subscription raw: ${JSON.stringify({
-            id: subscription?.id ?? null,
-            status: subscription?.status ?? null,
-            current_period_start: subscription?.current_period_start ?? null,
-            current_period_end: subscription?.current_period_end ?? null,
-            plan: subscription?.plan ?? null,
-          })}`,
+      const subscriptions = listed?.data ?? [];
+      const targetPlanId = String(plan_price_id);
+      const currentDbSubId = user?.payjp_subscription_id ? String(user.payjp_subscription_id) : null;
+
+      log(
+        `📚 existing subscriptions: ${
+          subscriptions.map((s: any) => `${s.id}:${s.status}:${normalizeSubPlanId(s) ?? '-'}`).join(', ') ||
+          '(none)'
+        }`,
+      );
+
+      const resumableByDbId = subscriptions.find((s: any) => {
+        if (!currentDbSubId) return false;
+        return (
+          String(s?.id) === currentDbSubId &&
+          String(s?.status) === 'canceled' &&
+          normalizeSubPlanId(s) === targetPlanId
         );
-      } catch (err: any) {
-        const nerr = normalizePayjpError(err);
-        log(`🔥 PAY.JP error (subscriptions.create): ${JSON.stringify(nerr)}`);
+      });
 
-        if (isAlreadySubscribedPayload(nerr)) {
-          try {
-            const listed = await payjp.subscriptions.list({
-              customer: String(customer_id),
-              limit: 100,
-            } as any);
+      const resumableByPlan = subscriptions.find((s: any) => {
+        return (
+          String(s?.status) === 'canceled' &&
+          normalizeSubPlanId(s) === targetPlanId
+        );
+      });
 
-            subscription =
-              (listed?.data ?? []).find((s: any) => String(s?.plan) === String(plan_price_id)) ||
-              (listed?.data ?? [])[0];
+      const resumable = resumableByDbId || resumableByPlan || null;
 
-            if (subscription) {
-              log(`ℹ️ use existing subscription: ${subscription.id}`);
-            } else {
-              log('🔴 already_subscribed but no subscription found');
-            }
-          } catch (e: any) {
-            log(`🔴 list after already_subscribed failed: ${e?.message}`);
-          }
-        }
+      if (resumable) {
+        log(`🔄 resume target found: ${resumable.id}`);
 
-        if (!subscription?.id) {
+        try {
+          subscription = await payjp.subscriptions.resume(String(resumable.id) as any);
+          log(
+            `✅ resumed subscription: ${JSON.stringify({
+              id: subscription?.id ?? null,
+              status: subscription?.status ?? null,
+              current_period_start: subscription?.current_period_start ?? null,
+              current_period_end: subscription?.current_period_end ?? null,
+              plan: normalizeSubPlanId(subscription),
+            })}`,
+          );
+        } catch (err: any) {
+          const nerr = normalizePayjpError(err);
+          log(`🔥 PAY.JP error (subscriptions.resume): ${JSON.stringify(nerr)}`);
           return NextResponse.json(
             {
               success: false,
-              error: 'サブスク登録に失敗しました',
-              detail: nerr.message || 'subscriptions.create error',
+              error: 'サブスク再開に失敗しました',
+              detail: nerr.message || 'subscriptions.resume error',
               payjp: nerr,
               logTrail,
             },
             { status: 500 },
           );
         }
+      } else {
+        if (force_cancel_existing) {
+          try {
+            const targets = subscriptions.filter((s: any) =>
+              ['active', 'trial', 'trialing', 'paused'].includes(String(s?.status)),
+            );
+
+            log(
+              `🪓 cancel targets: ${
+                targets.map((s: any) => `${s.id}:${s.status}`).join(', ') || '(none)'
+              }`,
+            );
+
+            for (const s of targets) {
+              try {
+                await payjp.subscriptions.cancel(s.id, { at_period_end: false } as any);
+                log(`✅ canceled: ${s.id}`);
+              } catch (e: any) {
+                log(`⚠ cancel failed (${s.id}): ${e?.message}`);
+              }
+            }
+
+            await sb
+              .from('users')
+              .update({
+                payjp_subscription_id: null,
+                last_payment_date: null,
+                next_payment_date: null,
+              })
+              .eq('user_code', user_code);
+
+            log('✅ DB subscription fields cleared');
+          } catch (e: any) {
+            log(`⚠ subscriptions.list/cancel failed: ${e?.message}`);
+          }
+        }
+
+        try {
+          subscription = await payjp.subscriptions.create({
+            customer: String(customer_id),
+            plan: String(plan_price_id),
+          } as any);
+
+          log(
+            `💳 subscription raw: ${JSON.stringify({
+              id: subscription?.id ?? null,
+              status: subscription?.status ?? null,
+              current_period_start: subscription?.current_period_start ?? null,
+              current_period_end: subscription?.current_period_end ?? null,
+              plan: normalizeSubPlanId(subscription),
+            })}`,
+          );
+        } catch (err: any) {
+          const nerr = normalizePayjpError(err);
+          log(`🔥 PAY.JP error (subscriptions.create): ${JSON.stringify(nerr)}`);
+
+          if (isAlreadySubscribedPayload(nerr)) {
+            try {
+              const retryListed = await payjp.subscriptions.list({
+                customer: String(customer_id),
+                limit: 100,
+              } as any);
+
+              const retrySubs = retryListed?.data ?? [];
+
+              subscription =
+                retrySubs.find((s: any) => normalizeSubPlanId(s) === targetPlanId) ||
+                retrySubs[0] ||
+                null;
+
+              if (subscription) {
+                log(`ℹ️ use existing subscription: ${subscription.id}`);
+              } else {
+                log('🔴 already_subscribed but no subscription found');
+              }
+            } catch (e: any) {
+              log(`🔴 list after already_subscribed failed: ${e?.message}`);
+            }
+          }
+
+          if (!subscription?.id) {
+            return NextResponse.json(
+              {
+                success: false,
+                error: 'サブスク登録に失敗しました',
+                detail: nerr.message || 'subscriptions.create error',
+                payjp: nerr,
+                logTrail,
+              },
+              { status: 500 },
+            );
+          }
+        }
+      }
+
+      if (!subscription?.id) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'サブスク処理に失敗しました',
+            detail: 'subscription id not found',
+            logTrail,
+          },
+          { status: 500 },
+        );
       }
 
       if (charge_id) {
