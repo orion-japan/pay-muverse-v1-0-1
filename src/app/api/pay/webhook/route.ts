@@ -262,7 +262,18 @@ export async function POST(req: NextRequest) {
             periodEnd,
             subId,
           );
-
+          await writeDebugRow({
+            eventType: 'env_check',
+            eventId,
+            customerId,
+            rawJson: {
+              has_service_role_key: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+              service_role_key_length: process.env.SUPABASE_SERVICE_ROLE_KEY
+                ? process.env.SUPABASE_SERVICE_ROLE_KEY.length
+                : 0,
+              url: process.env.NEXT_PUBLIC_SUPABASE_URL,
+            },
+          });
           await writeDebugRow({
             eventType: 'plan_apply_done',
             eventId,
@@ -285,7 +296,15 @@ export async function POST(req: NextRequest) {
               status,
             },
           });
-
+          await writeDebugRow({
+            eventType: 'update_try',
+            eventId,
+            customerId,
+            rawJson: {
+              user_code: user.user_code,
+              using_service_role: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+            },
+          });
           const updatePayload = {
             click_type: 'free',
             plan_status: 'free',
