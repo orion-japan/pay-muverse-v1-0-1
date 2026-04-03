@@ -679,7 +679,7 @@ export async function preparePastStateNoteForTurn(args: {
   // trigger が none のままなら、note は返さない
   // - 通常の知識質問 / 構造質問に pastStateNote を混ぜない
   // - 明示的な recall（keyword / recent_topic / semantic）のときだけ返す
-  if (finalTriggerKind === 'none') {
+  if (finalTriggerKind === 'none' && !hasNote) {
     console.log('[IROS/MemoryRecall] note suppressed by finalTriggerKind=none', {
       userCode,
       hasNote_raw: hasNote,

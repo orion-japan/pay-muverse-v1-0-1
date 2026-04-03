@@ -456,13 +456,17 @@ const scope = decideScope(args, evidenceScore, selectedSources);
 const mode = decideMode(scope, evidenceScore, args);
 const safety = decideSafety(scope, evidenceScore, args);
 
-  const recallEligible = scope !== 'none' && mode !== 'forbidden';
+const hasPastStateNoteText = Boolean(args.hasPastStateNoteText);
 
-  let disallowReason: string | null = null;
-  if (!recallEligible) {
-    if (evidenceScore < 0.35) disallowReason = 'low_evidence';
-    else disallowReason = 'scope_or_mode_blocked';
-  }
+const recallEligible =
+  scope !== 'none' &&
+  (mode !== 'forbidden' || hasPastStateNoteText);
+
+let disallowReason: string | null = null;
+if (!recallEligible) {
+  if (evidenceScore < 0.35 && !hasPastStateNoteText) disallowReason = 'low_evidence';
+  else disallowReason = 'scope_or_mode_blocked';
+}
 
   const out: RecallDecision = {
     recallEligible,

@@ -158,6 +158,16 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
     sendLockRef.current = true;
     setSending(true);
 
+    // ✅ 先に退避
+    const prevText = text;
+
+    // ✅ 送信と同時に見た目を消す
+    setText('');
+    setDraftText?.('');
+    try {
+      window.localStorage.removeItem(DRAFT_KEY);
+    } catch {}
+
     try {
       taRef.current?.blur();
 
@@ -166,21 +176,22 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
       if (onMeta && res?.meta) {
         onMeta(res.meta);
       }
-
-      // ✅ 成功後にクリア
-      setText('');
-      setDraftText?.('');
-      try {
-        window.localStorage.removeItem(DRAFT_KEY);
-      } catch {}
     } catch (e) {
       console.error('[IrosChatInput] send error', e);
+
+      // ✅ 失敗したら戻す
+      setText(prevText);
+      setDraftText?.(prevText);
+      try {
+        window.localStorage.setItem(DRAFT_KEY, prevText);
+      } catch {}
     } finally {
       setSending(false);
       sendLockRef.current = false;
       autoSize();
     }
   }, [text, sendMessage, onMeta, autoSize, setDraftText]);
+
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === 'Enter' && !e.shiftKey && !isComposing) {

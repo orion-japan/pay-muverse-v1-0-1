@@ -870,9 +870,101 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
         ).trim() || null,
       forceRecentTopicFallback: forceFallback,
     });
+    const relationshipRecallFallback = (() => {
+      const rel =
+        (metaForSave as any)?.extra?.ctxPack?.relationshipMemory ??
+        (metaForSave as any)?.extra?.relationshipMemory ??
+        null;
 
-    metaForSave.extra.pastStateNoteText = recall?.pastStateNoteText ?? null;
-    metaForSave.extra.pastStateTriggerKind = recall?.triggerKind ?? null;
+      if (!rel) return null;
+
+      const rows = Array.isArray(rel?.rows)
+        ? rel.rows
+        : Array.isArray(rel)
+          ? rel
+          : [];
+
+      if (!rows.length) return null;
+
+      const picked = rows.slice(0, 2);
+
+      const lines = picked.flatMap((row: any) => {
+        const xs: string[] = [];
+
+        const title = [
+          typeof row?.display_name === 'string' && row.display_name.trim()
+            ? `name=${row.display_name.trim()}`
+            : null,
+          typeof row?.role === 'string' && row.role.trim()
+            ? `role=${row.role.trim()}`
+            : null,
+          typeof row?.relation_id === 'string' && row.relation_id.trim()
+            ? `relationId=${row.relation_id.trim()}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(' / ');
+
+        if (title) xs.push(`- ${title}`);
+
+        if (Array.isArray(row?.unresolved_topics) && row.unresolved_topics.length > 0) {
+          xs.push(`  unresolved: ${row.unresolved_topics.join(' / ')}`);
+        }
+
+        if (Array.isArray(row?.user_reaction_pattern) && row.user_reaction_pattern.length > 0) {
+          xs.push(`  reaction: ${row.user_reaction_pattern.join(' / ')}`);
+        }
+
+        if (Array.isArray(row?.patterns) && row.patterns.length > 0) {
+          const patterns = row.patterns
+            .map((p: any) => {
+              const k = String(p?.key ?? '').trim();
+              const n = String(p?.note ?? '').trim();
+              if (k && n) return `${k}:${n}`;
+              return k || n;
+            })
+            .filter(Boolean)
+            .join(' / ');
+          if (patterns) xs.push(`  patterns: ${patterns}`);
+        }
+
+        return xs;
+      });
+
+      if (!lines.length) return null;
+
+      return ['【RELATIONSHIP_MEMORY / DO NOT OUTPUT】', ...lines].join('\n');
+    })();
+
+    console.log('[IROS/POSTPROCESS][REL_FALLBACK_INPUT]', {
+      relationshipMemory_top:
+        (metaForSave as any)?.extra?.relationshipMemory ?? null,
+      relationshipMemory_ctxPack:
+        (metaForSave as any)?.extra?.ctxPack?.relationshipMemory ?? null,
+      relationship_top:
+        (metaForSave as any)?.extra?.relationship ?? null,
+      relationship_ctxPack:
+        (metaForSave as any)?.extra?.ctxPack?.relationship ?? null,
+      ctxPackKeys: Object.keys(
+        ((metaForSave as any)?.extra?.ctxPack &&
+        typeof (metaForSave as any).extra.ctxPack === 'object')
+          ? (metaForSave as any).extra.ctxPack
+          : {}
+      ),
+    });
+
+    metaForSave.extra.pastStateNoteText =
+      recall?.pastStateNoteText ??
+      relationshipRecallFallback ??
+      null;
+
+    metaForSave.extra.pastStateTriggerKind =
+      recall?.pastStateNoteText
+        ? (recall?.triggerKind ?? null)
+        : relationshipRecallFallback
+          ? 'relationship_memory'
+          : null;
+
     metaForSave.extra.pastStateKeyword = recall?.keyword ?? null;
     try {
       const durableCandidates = extractDurableMemoriesV1({

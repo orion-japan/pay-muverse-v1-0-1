@@ -95,7 +95,15 @@ import { loadLatestGoalByUserCode } from '@/lib/iros/server/loadLatestGoalByUser
 //   handleIrosReply 側では「metaに入口3通りを刻む」までをやる
 import { probeLlmGate, writeLlmGateToMeta, logLlmGate } from './llmGate';
 
-
+import { buildRelationshipAnalysis } from '@/lib/iros/relationship/relationshipAnalysis';
+import { buildRelationshipPacket } from '@/lib/iros/relationship/relationshipSelectors';
+import { resolveRelation } from '@/lib/iros/relationship/resolveRelation';
+import { buildRelationshipContext } from '@/lib/iros/relationship/relationshipContext';
+import { upsertRelationshipMemory } from '@/lib/iros/memory/relationshipMemory';
+import {
+  loadRelationshipMemoriesForTurn,
+  buildRelationshipMemoryNoteText,
+} from '@/lib/iros/memory/relationshipMemoryRecall';
 /* =========================
    Types
 ========================= */
@@ -1749,6 +1757,7 @@ if (!wantsMicroNow) {
 
         if (cp.historyForWriter) keep.historyForWriter = cp.historyForWriter;
         if (cp.historyDigestV1) keep.historyDigestV1 = cp.historyDigestV1;
+        if (cp.recallCandidates) keep.recallCandidates = cp.recallCandidates;
 
         // --- 構造メタ（軽いので残す）---
         if (cp.phase) keep.phase = cp.phase;
@@ -1871,6 +1880,7 @@ if (!wantsMicroNow) {
 
       if (cp.historyForWriter) keep.historyForWriter = cp.historyForWriter;
       if (cp.historyDigestV1) keep.historyDigestV1 = cp.historyDigestV1;
+      if (cp.recallCandidates) keep.recallCandidates = cp.recallCandidates;
 
       // --- 構造メタ（軽いので残す）---
       if (cp.phase) keep.phase = cp.phase;
@@ -2740,7 +2750,27 @@ hasHistoryForWriterAt:
     /* ---------------------------
        4) PostProcess
     ---------------------------- */
+    console.log('[IROS/PRE_PP][REL_COMPARE]', {
+      extraLocal_ctxPack_keys:
+        (extraLocal as any)?.ctxPack && typeof (extraLocal as any).ctxPack === 'object'
+          ? Object.keys((extraLocal as any).ctxPack)
+          : [],
 
+      extraLocal_relationship:
+        (extraLocal as any)?.ctxPack && typeof (extraLocal as any).ctxPack === 'object'
+          ? ((extraLocal as any).ctxPack as any).relationship ?? null
+          : null,
+
+      extraLocal_relationshipMemory:
+        (extraLocal as any)?.ctxPack && typeof (extraLocal as any).ctxPack === 'object'
+          ? ((extraLocal as any).ctxPack as any).relationshipMemory ?? null
+          : null,
+
+      extra_arg_keys:
+        extra && typeof extra === 'object'
+          ? Object.keys(extra as any)
+          : [],
+    });
     const tp = nowNs();
     const out = await (postProcessReply as any)({
       supabase,
@@ -2756,6 +2786,42 @@ hasHistoryForWriterAt:
       history: historyForTurn,
       extra: extraLocal ?? null,
     });
+
+    // 🔥 relationship 系を out.metaForSave.extra.ctxPack に明示同期
+    {
+      const relCtx =
+        (extraLocal as any)?.ctxPack && typeof (extraLocal as any).ctxPack === 'object'
+          ? (extraLocal as any).ctxPack
+          : null;
+
+      if (relCtx) {
+        out.metaForSave = out.metaForSave ?? {};
+        (out.metaForSave as any).extra =
+          (out.metaForSave as any).extra && typeof (out.metaForSave as any).extra === 'object'
+            ? (out.metaForSave as any).extra
+            : {};
+
+        const ex: any = (out.metaForSave as any).extra;
+
+        ex.ctxPack =
+          ex.ctxPack && typeof ex.ctxPack === 'object'
+            ? ex.ctxPack
+            : {};
+
+        if (relCtx.relationship != null) {
+          ex.ctxPack.relationship = relCtx.relationship;
+        }
+
+        if (relCtx.relationshipMemory != null) {
+          ex.ctxPack.relationshipMemory = relCtx.relationshipMemory;
+        }
+
+        if (relCtx.relationId != null && ex.ctxPack.relationId == null) {
+          ex.ctxPack.relationId = relCtx.relationId;
+        }
+      }
+    }
+
     t.postprocess_ms = msSince(tp);
 
     /* ---------------------------
@@ -2779,11 +2845,34 @@ if (extra && typeof extra === 'object') {
     // ✅ postprocess が作る確定値は絶対に上書きしない
     if (k === 'uiCue') continue;
 
+    // ✅ ctxPack だけは shallow merge ではなく deep merge する
+    if (k === 'ctxPack' && v && typeof v === 'object') {
+      const prevCtx =
+        next.ctxPack && typeof next.ctxPack === 'object'
+          ? next.ctxPack
+          : {};
+
+      next.ctxPack = {
+        ...(v as any),
+        ...prevCtx,
+        relationship:
+          prevCtx.relationship ??
+          (v as any).relationship ??
+          null,
+        relationshipMemory:
+          prevCtx.relationshipMemory ??
+          (v as any).relationshipMemory ??
+          null,
+      };
+      continue;
+    }
+
     // ✅ 既に値があるなら、extra では潰さない（postprocess優先）
     if (next[k] !== undefined && next[k] !== null) continue;
 
     next[k] = v;
   }
+
   out.metaForSave.extra = next;
 }
 
@@ -3892,7 +3981,144 @@ if (restored) {
     ...(extra2.ctxPack as any),
   };
 }
+// ===== Relationship Layer injection =====
+try {
+  const userText = text ?? '';
 
+  const topicDigest =
+    (extra2 as any)?.ctxPack?.topicDigest ??
+    (out as any)?.metaForSave?.extra?.topicDigest ??
+    null;
+
+  const emotionalTemperature =
+    (extra2 as any)?.ctxPack?.emotionalTemperature ?? null;
+
+  // ===== ① 関係対象の解決 =====
+  const resolved = resolveRelation({
+    userText,
+    topicDigest,
+    historyText: null, // 今は未接続
+    candidates: null,  // memory recall 候補は次段
+    lastRelationId: (extra2 as any)?.ctxPack?.relationId ?? null,
+    selfId: userCode ?? 'self',
+  });
+
+  const recalledRows = resolved?.relationId
+    ? await loadRelationshipMemoriesForTurn({
+        userCode,
+        relationId: resolved.relationId,
+        limit: 1,
+      })
+    : [];
+
+  const recalledRow =
+    Array.isArray(recalledRows) && recalledRows.length > 0
+      ? recalledRows[0]
+      : null;
+
+  const recalledMemory = recalledRow
+    ? {
+        relationId: recalledRow.relation_id,
+        displayName: recalledRow.display_name ?? null,
+        role: recalledRow.role ?? null,
+        facts: Array.isArray(recalledRow.facts)
+          ? recalledRow.facts
+              .map((f: any) => String(f?.value ?? '').trim())
+              .filter(Boolean)
+          : [],
+        patterns: Array.isArray(recalledRow.patterns)
+          ? recalledRow.patterns
+              .map((p: any) => {
+                const k = String(p?.key ?? '').trim();
+                const n = String(p?.note ?? '').trim();
+                return [k, n].filter(Boolean).join(': ');
+              })
+              .filter(Boolean)
+          : [],
+        safeOpeners: recalledRow.safe_openers ?? [],
+        pressureTriggers: recalledRow.pressure_triggers ?? [],
+        userReactionPattern: recalledRow.user_reaction_pattern ?? [],
+        unresolvedTopics: recalledRow.unresolved_topics ?? [],
+        confidence:
+          typeof recalledRow.confidence === 'number'
+            ? recalledRow.confidence
+            : null,
+      }
+    : null;
+
+  // ===== ② 関係コンテキスト =====
+  const context = buildRelationshipContext({
+    userText,
+    topicDigest,
+    historyText: null,
+    recalledMemory,
+  });
+
+  // ===== ③ 反応解析 =====
+  const analysis = buildRelationshipAnalysis({
+    userText,
+    topicDigest,
+    emotionalTemperature,
+  });
+
+  // ===== ④ パケット統合 =====
+  const relationshipPacket = buildRelationshipPacket({
+    eNow: (extra2 as any)?.ctxPack?.e_now ?? null,
+    depthNow: (extra2 as any)?.ctxPack?.depth_now ?? null,
+    emotionalTemperature,
+
+    context,
+    analysis,
+
+    relationshipGoal: 'clarify',
+  });
+
+  if (!extra2.ctxPack || typeof extra2.ctxPack !== 'object') {
+    extra2.ctxPack = {};
+  }
+
+  (extra2.ctxPack as any).relationship = {
+    ...relationshipPacket,
+    relation: resolved,
+  };
+  (extra2.ctxPack as any).relationshipMemory = recalledMemory;
+  if (resolved?.relationId) {
+    (extra2.ctxPack as any).relationId = resolved.relationId;
+
+    await upsertRelationshipMemory({
+      userCode,
+      relationId: resolved.relationId,
+
+      displayName:
+        Array.isArray(resolved.matchedNames) && resolved.matchedNames.length > 0
+          ? resolved.matchedNames[0]
+          : null,
+
+      role:
+        resolved.mode === 'between_others'
+          ? 'other'
+          : resolved.mode === 'self_other'
+            ? 'other'
+            : null,
+
+      userReactionPattern: analysis?.attachment_hint
+        ? [analysis.attachment_hint]
+        : null,
+
+      unresolvedTopics: topicDigest ? [String(topicDigest)] : null,
+
+      confidence:
+        resolved.mode === 'between_others'
+          ? 0.75
+          : resolved.mode === 'self_other'
+            ? 0.8
+            : 0.5,
+    });
+  }
+} catch (e) {
+  // 安全に無視
+}
+// ===== END Relationship Layer =====
 // history から「直近の ctxPack.flow.at / returnStreak」を拾う
 let prevAtIso: string | null = null;
 let prevReturnStreak: number | null = null;
@@ -4279,7 +4505,28 @@ const digestV1Raw =
 if (digestV1Raw) {
   (extra2.ctxPack as any).historyDigestV1 = digestV1Raw;
 }
+// ===============================
+// 🔥 Recall 同期（MemoryRecall → ctxPack）
+// ===============================
+const recallRaw =
+  (out.metaForSave as any)?.extra?.pastStateNoteText ??
+  (out.extraForHandle as any)?.pastStateNoteText ??
+  (out.extraForHandle as any)?.ctxPack?.pastStateNoteText ??
+  (extra2 as any)?.pastStateNoteText ??
+  (extra2.ctxPack as any)?.pastStateNoteText ??
+  null;
 
+const recallTrigger =
+  (out.metaForSave as any)?.extra?.pastStateTriggerKind ??
+  (out.extraForHandle as any)?.pastStateTriggerKind ??
+  (extra2 as any)?.pastStateTriggerKind ??
+  null;
+
+if (typeof recallRaw === 'string' && recallRaw.trim()) {
+  (extra2.ctxPack as any).recallCandidates = [recallRaw.trim()];
+  (extra2.ctxPack as any).recallUsed = true;
+  (extra2.ctxPack as any).recallHit = recallTrigger ?? 'memory';
+}
 // ✅ ctxPack にも irMeta / detailMode を同期（再診断の正本）
 const irMetaRaw =
   (out.metaForSave as any)?.extra?.irMeta ??
@@ -6751,7 +6998,77 @@ try {
       rows: selectedLongTermRows,
       maxItems: 4,
     });
+// ===== RELATIONSHIP MEMORY RECALL =====
+let relationshipNoteText = '';
+try {
+  console.log('[IROS/REL_MEMORY][ENTER]');
 
+  const relationId =
+    (out as any)?.metaForSave?.extra?.ctxPack?.relationId ??
+    null;
+
+  const targetName =
+    (out as any)?.metaForSave?.extra?.ctxPack?.targetName ??
+    null;
+
+  const targetRole =
+    (out as any)?.metaForSave?.extra?.ctxPack?.targetRole ??
+    null;
+
+  const topic =
+    (out as any)?.metaForSave?.extra?.ctxPack?.topicDigest ??
+    (out as any)?.metaForSave?.extra?.topicDigest ??
+    null;
+
+  console.log('[IROS/REL_MEMORY][INPUT]', {
+    relationId,
+    targetName,
+    targetRole,
+    topic,
+  });
+
+  const relRows = await loadRelationshipMemoriesForTurn({
+    userCode: _userCode,
+    relationId: relationId || undefined,
+    displayName: targetName,
+    role: targetRole,
+    topic,
+    limit: 3,
+  });
+
+  console.log('[IROS/REL_MEMORY][ROWS]', relRows);
+
+  const built = buildRelationshipMemoryNoteText({
+    rows: relRows,
+    maxItems: 2,
+  });
+  console.log('[IROS/REL_MEMORY][RECALL_RESULT]', {
+    userCode: _userCode ?? null,
+    relationId: relationId ?? null,
+    topic:
+      (out as any)?.metaForSave?.extra?.ctxPack?.topicDigest ??
+      (out as any)?.metaForSave?.extra?.topicDigest ??
+      null,
+    relRowsCount: Array.isArray(relRows) ? relRows.length : -1,
+    relRowsHead: Array.isArray(relRows)
+      ? relRows.slice(0, 2).map((r: any) => ({
+          relation_id: r?.relation_id ?? null,
+          display_name: r?.display_name ?? null,
+          role: r?.role ?? null,
+          unresolved_topics: Array.isArray(r?.unresolved_topics) ? r.unresolved_topics.slice(0, 3) : [],
+        }))
+      : [],
+    noteLen: typeof (built as any)?.noteText === 'string' ? (built as any).noteText.length : -1,
+    noteHead:
+      typeof (built as any)?.noteText === 'string'
+        ? (built as any).noteText.slice(0, 300)
+        : null,
+  });
+  relationshipNoteText = (built as any)?.noteText || '';
+} catch (e) {
+  console.error('[IROS/REL_MEMORY][RECALL_FAIL]', e);
+}
+// ===== END RELATIONSHIP MEMORY RECALL =====
     console.log('[IROS/LTM][AFTER_BUILD]', {
       pickedCount: longTermBuilt?.picked?.length ?? 0,
       pickedIds: (longTermBuilt?.picked ?? []).map((r) => r.id),
@@ -6952,9 +7269,14 @@ try {
       exprMeta: exprMetaCanon,
 
       pastStateNoteText:
-        typeof (out.metaForSave as any)?.extra?.pastStateNoteText === 'string'
-          ? (out.metaForSave as any).extra.pastStateNoteText
-          : null,
+        [
+          relationshipNoteText,
+          typeof (out.metaForSave as any)?.extra?.pastStateNoteText === 'string'
+            ? (out.metaForSave as any).extra.pastStateNoteText
+            : null,
+        ]
+          .filter(Boolean)
+          .join('\n'),
 
       pastStateTriggerKind:
         typeof (out.metaForSave as any)?.extra?.pastStateTriggerKind === 'string'

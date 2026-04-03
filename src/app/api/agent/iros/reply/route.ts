@@ -1243,19 +1243,143 @@ if (isNonForwardButEmpty) {
 // =========================================================
 // ✅ LTM / memoryStateNoteText を extraSoT に確実に含める
 // =========================================================
+let forcedLongTermMemory: string | null = null;
+
+try {
+  const { data: rows } = await supabase
+    .from('iros_messages')
+    .select('conversation_id, role, content, text, created_at')
+    .eq('user_code', userCode)
+    .neq('conversation_id', conversationId ?? '')
+    .order('created_at', { ascending: false })
+    .limit(30);
+
+  if (Array.isArray(rows) && rows.length > 0) {
+    const lastAssistant = rows.find((r: any) => {
+      const role = String(r?.role ?? '').toLowerCase();
+      const txt = String(r?.content ?? r?.text ?? '').trim();
+      return role === 'assistant' && txt.length > 0;
+    });
+
+    if (lastAssistant) {
+      const raw = String(lastAssistant.content ?? lastAssistant.text ?? '').trim();
+      forcedLongTermMemory = raw.replace(/\s+/g, ' ').slice(0, 220);
+    }
+  }
+} catch (e) {
+  console.error('[IROS][MEMORY_LOAD_FAIL]', e);
+}
+// =========================================================
+// 🔍 Recall Lane（キーワード検索）
+// =========================================================
+let recallCandidates: { text: string; created_at: string }[] = [];
+
+try {
+  // ① 単語抽出（超シンプル）
+  const words = String(userTextClean ?? '')
+    .replace(/[。、！？\s]/g, ' ')
+    .split(' ')
+    .filter((w) => w.length >= 2)
+    .slice(0, 3); // 多すぎ防止
+
+  for (const w of words) {
+    const { data } = await supabase
+      .from('iros_messages')
+      .select('content, text, created_at')
+      .eq('user_code', userCode)
+      .ilike('content', `%${w}%`)
+      .order('created_at', { ascending: false })
+      .limit(2);
+
+    if (Array.isArray(data) && data.length > 0) {
+      for (const r of data) {
+        const txt = String(r?.content ?? r?.text ?? '').trim();
+        if (txt.length > 0) {
+          recallCandidates.push({
+            text: txt.slice(0, 200),
+            created_at: r.created_at,
+          });
+        }
+      }
+    }
+  }
+
+  // 最大2件に制限
+  recallCandidates = recallCandidates.slice(0, 2);
+} catch (e) {
+  console.error('[IROS][RECALL_FAIL]', e);
+}
+console.log(
+  '[IROS][LTM_FORCED_LOAD_JSON]',
+  JSON.stringify({
+    conversationId,
+    userCode,
+    forcedLongTermMemory,
+    memoryState_longTermNoteText: memoryStateForCtx?.longTermNoteText ?? null,
+    final_longTermMemoryNoteText:
+      forcedLongTermMemory ??
+      memoryStateForCtx?.longTermNoteText ??
+      null,
+    reqMeta_pastStateNoteText:
+      (result as any)?.metaForSave?.extra?.pastStateNoteText ??
+      metaForSave?.extra?.pastStateNoteText ??
+      reqMetaRaw?.pastStateNoteText ??
+      reqMetaRaw?.extra?.pastStateNoteText ??
+      null,
+  }),
+);
+
+extraSoT = {
+  ...(extraSoT ?? {}),
+
+  memoryStateForCtx,
+  memoryStateNoteText: memoryStateForCtx?.noteText ?? null,
+
+  longTermMemoryNoteText:
+    forcedLongTermMemory ??
+    memoryStateForCtx?.longTermNoteText ??
+    null,
+
+  pastStateNoteText:
+    (result as any)?.metaForSave?.extra?.pastStateNoteText ??
+    metaForSave?.extra?.pastStateNoteText ??
+    reqMetaRaw?.pastStateNoteText ??
+    reqMetaRaw?.extra?.pastStateNoteText ??
+    extraSoT?.pastStateNoteText ??
+    null,
+
+  recallCandidates: recallCandidates.length > 0 ? recallCandidates : null,
+
+  renderEngine: extraSoT?.renderEngine === true,
+  renderEngineGate: extraSoT?.renderEngineGate === true,
+};
+
+
 extraSoT = {
   ...(extraSoT ?? {}),
 
   // MemoryState
-  memoryStateForCtx, // route.ts で取得済みの state
+  memoryStateForCtx,
   memoryStateNoteText: memoryStateForCtx?.noteText ?? null,
-  longTermMemoryNoteText: memoryStateForCtx?.longTermNoteText ?? null,
+
+  longTermMemoryNoteText:
+    forcedLongTermMemory ??
+    memoryStateForCtx?.longTermNoteText ??
+    null,
+
+  // ✅ relationship / recall 系は writer が pastStateNoteText で読む
+  pastStateNoteText:
+    reqMetaRaw?.pastStateNoteText ??
+    reqMetaRaw?.extra?.pastStateNoteText ??
+    extraSoT?.pastStateNoteText ??
+    null,
+
+  recallCandidates: recallCandidates.length > 0 ? recallCandidates : null,
 
   // 既存の rephrase / render 指示を保持
   renderEngine: extraSoT?.renderEngine === true,
   renderEngineGate: extraSoT?.renderEngineGate === true,
 };
-
 // render engine apply（single entry）
 {
   const upperMode = String(effectiveMode ?? '').toUpperCase();

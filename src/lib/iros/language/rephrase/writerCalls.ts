@@ -1750,7 +1750,7 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                     },
                     historyForWriterLen,
                   });
-                  return decideRecallV1({
+                  const decision = decideRecallV1({
                     userText: userTextForRecall,
                     depthStage: depthStage || null,
                     qCode: qCode || null,
@@ -1844,11 +1844,23 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                     longTermMemoryTypes,
                     hasEpisodicCandidate,
                   });
+
+                  return {
+                    ...decision,
+                    __userTextForRecall: userTextForRecall,
+                  };
                 })();
 
-
+                const pastStateNoteText = String(
+                  (args as any)?.pastStateNoteText ??
+                    (args as any)?.extra?.pastStateNoteText ??
+                    (args as any)?.userContext?.pastStateNoteText ??
+                    (args as any)?.userContext?.meta?.extra?.pastStateNoteText ??
+                    '',
+                ).trim();
 
                 const memoryDecisionLines = [
+
                   'MEMORY_DECISION_V1:',
                   `RECALL_ELIGIBLE: ${recallDecision.recallEligible ? 'true' : 'false'}`,
                   `RECALL_SCOPE: ${recallDecision.recallScope}`,
@@ -2251,13 +2263,41 @@ const internalPackRawCleaned =
 
                       const lines: string[] = ['WRITER_DIRECTIVES (DO NOT OUTPUT):'];
 
+                      const firstTouch = wd?.firstTouch;
+                      const firstTouchHint =
+                        firstTouch && typeof firstTouch === 'object'
+                          ? String(firstTouch?.hint ?? '').trim()
+                          : '';
+
+                      let continuationRequested = false;
+
+                      // 🔥 continuation（続き接続モード）
+                      try {
+                        const recallUsedLocal = Boolean((args as any)?.userContext?.ctxPack?.recallUsed);
+                        const sourceText =
+                          firstTouchHint ||
+                          String((args as any)?.echoGuardUserText ?? '') ||
+                          String((args as any)?.userText ?? '');
+
+                        const isExplicitRequestLocal =
+                          /この前|続き|前に言ってた|前に|前の話(?:し)?|前の流れ|つなげて|続きとして/.test(sourceText);
+
+                          continuationRequested = Boolean(isExplicitRequestLocal);
+
+                        if (continuationRequested) {
+                          lines.push('continuation_mode=true');
+                          lines.push('first_line_must_be_connection=true');
+                          lines.push('forbid_observation_opening=true');
+                          lines.push('opening_style=connect_previous_flow');
+                        }
+                      } catch {}
+
                       const openingMode = String(wd?.openingMode ?? '').trim();
                       const responseLength = String(wd?.responseLength ?? '').trim();
 
                       if (openingMode) lines.push(`openingMode=${openingMode}`);
                       if (responseLength) lines.push(`responseLength=${responseLength}`);
 
-                      const firstTouch = wd?.firstTouch;
                       if (firstTouch && typeof firstTouch === 'object') {
                         const enabled = firstTouch?.enabled === true ? 'true' : 'false';
                         const hint = String(firstTouch?.hint ?? '').trim();
@@ -2266,12 +2306,17 @@ const internalPackRawCleaned =
                         if (hint) lines.push(`firstTouch.hint=${hint}`);
 
                         const rules = Array.isArray(firstTouch?.rules) ? firstTouch.rules : [];
-                        rules
+                        const filteredRules = rules
                           .map((x: any) => String(x ?? '').trim())
                           .filter(Boolean)
-                          .forEach((rule: string, i: number) => {
-                            lines.push(`firstTouch.rule${i + 1}=${rule}`);
+                          .filter((rule: string) => {
+                            if (!continuationRequested) return true;
+                            return !rule.includes('最初の1文は「相手の状態を見ている観測文」にする');
                           });
+
+                        filteredRules.forEach((rule: string, i: number) => {
+                          lines.push(`firstTouch.rule${i + 1}=${rule}`);
+                        });
                       }
 
                       const bodyStyle = wd?.bodyStyle;
@@ -2534,19 +2579,15 @@ const internalPackForWriter = (() => {
     .replace(/(?:^|\n)@DELTA[^\n]*/g, '')
 
     // 旧 FLOW / FLOW_V2 は writer には渡さない
-    .replace(/\nFLOW:\n[\s\S]*?(?=\n[A-Z_]+:|$)/g, '')
-    .replace(
-      /\nFLOW_V2\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ \-]+(?:\s*\(DO NOT OUTPUT\))?:|$)/g,
-      '',
-    )
+// 旧 FLOW / FLOW_V2 は writer には渡さない
+.replace(/\nFLOW:\n[\s\S]*?(?=\n[A-Z_]+:|$)/g, '')
+.replace(
+  /\nFLOW_V2\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ \-]+(?:\s*\(DO NOT OUTPUT\))?:|$)/g,
+  '',
+)
 
-    // directive 系
-    .replace(
-      /\nWRITER_DIRECTIVES\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ \-]+(?:\s*\(DO NOT OUTPUT\))?:|$)/g,
-      '',
-    )
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+.replace(/\n{3,}/g, '\n\n')
+.trim();
 
   return base;
 })();
@@ -2965,4 +3006,30 @@ export async function callWriterLLM(args: {
     },
   });
 
-  return stripLeadingEcho(out ?? '');}
+  const finalText = stripLeadingEcho(out ?? '');
+  let text = finalText;
+
+  const recallUsed = Boolean((args as any)?.userContext?.ctxPack?.recallUsed);
+  const recallHit = String((args as any)?.userContext?.ctxPack?.recallHit ?? '').trim();
+  const userText =
+    String(args.echoGuardUserText ?? '') ||
+    String((args as any)?.userContext?.rawUserText ?? '') ||
+    String((args as any)?.userText ?? '');
+
+  const isExplicitContinuation =
+    /この前|続き|前に言ってた|前に|前の話(?:し)?|前の流れ|つなげて|続きとして/.test(userText);
+
+  // continuation は writer に任せる。
+  // hook の前置きは、continuation 指示が入っていない時だけ付ける。
+  const shouldPrependRecallHook = Boolean(recallUsed && !isExplicitContinuation);
+
+  if (shouldPrependRecallHook) {
+    const hook = recallHit
+      ? '前の話の流れにつなげると、'
+      : '前の流れとして受け取ると、';
+
+    text = `${hook}\n\n${text}`;
+  }
+
+  return text;
+}
