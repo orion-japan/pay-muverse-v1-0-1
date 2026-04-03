@@ -309,7 +309,10 @@ function IrosChatInner({ open }: Props) {
 <div className="iro-chat-main">
   <div className="iro-chat-bg" />
 
-  <IrosHeader onShowSideBar={() => setIsMobileMenuOpen(true)} />
+  <IrosHeader
+  onShowSideBar={() => setIsMobileMenuOpen(true)}
+  meta={meta as any}
+/>
 
             <IrosSidebarMobile
               isOpen={isMobileMenuOpen}

@@ -2019,10 +2019,16 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                 })();
 
                 const openingMode =
-                  goalKindNow === 'resonate' ? 'touch_first' : 'direct_core';
+                  goalKindNow === 'resonate' || goalKindNow === 'decide'
+                    ? 'touch_first'
+                    : 'direct_core';
 
                 const responseLength =
-                  goalKindNow === 'resonate' ? 'soft_long' : 'compact';
+                  goalKindNow === 'resonate'
+                    ? 'soft_long'
+                    : goalKindNow === 'decide'
+                      ? 'medium'
+                      : 'compact';
 
                 return {
                   openingMode,
@@ -2032,24 +2038,27 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                     enabled: goalKindNow === 'resonate',
                     hint: touchHint,
                     rules: [
+                      '最初の1文は「相手の状態を見ている観測文」にする（一般論・説明は禁止）',
                       '最初の1文は、相手の変化・気づき・違和感・届いた感じのいずれかに触れる',
+                      'ユーザーの言い回し・断定・温度をそのまま受けて返す',
                       '構造説明から入らない',
                       '一般論から入らない',
                       '問い返しから入らない',
                       '入力の意味を言い換える前に、まず相手に触れる',
+                      '受け取りの一言を先に置いてよい',
+                      '一緒に見ている感じを含めてよい',
+                      '2〜3文で自然に広げてよい（1文で終わらせない）',
                     ],
                   },
 
                   bodyStyle: {
                     coreFirst: true,
                     allowSoftExpand: true,
-                    minSentences: 3,
-                    maxSentences: 6,
+                    minSentences: goalKindNow === 'decide' ? 4 : 3,
+                    maxSentences: goalKindNow === 'decide' ? 7 : 6,
                     allowEmpathicBridge: true,
                     allowGentleRephrase: true,
                     forbidTopicExpansion: true,
-
-                    // ★ これを追加
                     delayClosure: true,
                   },
 
@@ -2060,10 +2069,17 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
 
                   writeConstraints: [
                     '最初に相手へ触れてから核心に入る',
+                    '最初の1文は観測で始める',
                     '共感だけで終わらない',
                     'いまの焦点を一つに絞る',
-                    'resonate時は少し長めでもよいが、1核心は崩さない',
+                    'decide時も短く切りすぎず、少し滞在感を持たせてよい',
+                    'resonate時は説明だけで終わらず、同じ意味を別角度でもう1段だけ展開してよい',
+                    '1つの結論だけで終わらず、説明→補足→余白の順で最低2段階に展開する',
+                    '2〜4文で1まとまりにし、少なくとも2まとまり以上で構成する',
+                    '断定のあとに1拍おいて、その意味を少しだけほどく',
                     '寄り添いの一文を追加してよい',
+                    'やさしい言い回しを優先してよい',
+                    '構造語は必要なら一度やわらかい体感表現に言い換えてから使う',
                     '最後は静かな着地で閉じる',
                     '新しい論点を増やさない',
                     'ユーザーが聞いていない一般へ広げない',

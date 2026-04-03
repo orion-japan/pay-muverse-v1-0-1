@@ -384,27 +384,95 @@ export const irosClient: IrosAPI = {
         metaSafe != null
           ? {
               ...metaSafe,
-              qCode: metaSafe.qCode ?? metaSafe.q_code ?? qSafe ?? null,
-              q_code: metaSafe.q_code ?? metaSafe.qCode ?? qSafe ?? null,
-              q: metaSafe.q ?? qSafe ?? null,
+              qCode:
+                metaSafe.qCode ??
+                metaSafe.q_code ??
+                metaSafe.q ??
+                metaSafe.extra?.ctxPack?.qCode ??
+                metaSafe.extra?.ctxPack?.qPrimary ??
+                metaSafe.unified?.q?.current ??
+                qSafe ??
+                null,
+              q_code:
+                metaSafe.q_code ??
+                metaSafe.qCode ??
+                metaSafe.q ??
+                metaSafe.extra?.ctxPack?.qCode ??
+                metaSafe.extra?.ctxPack?.qPrimary ??
+                metaSafe.unified?.q?.current ??
+                qSafe ??
+                null,
+              q:
+                metaSafe.q ??
+                metaSafe.qCode ??
+                metaSafe.q_code ??
+                metaSafe.extra?.ctxPack?.qCode ??
+                metaSafe.extra?.ctxPack?.qPrimary ??
+                metaSafe.unified?.q?.current ??
+                qSafe ??
+                null,
+
               depth:
                 metaSafe.depth ??
+                metaSafe.observedStage ??
                 metaSafe.depthStage ??
                 metaSafe.depth_stage ??
+                metaSafe.extra?.ctxPack?.observedStage ??
+                metaSafe.extra?.ctxPack?.depthStage ??
+                metaSafe.unified?.depth?.current ??
                 depthSafe ??
                 null,
               depthStage:
                 metaSafe.depthStage ??
+                metaSafe.observedStage ??
                 metaSafe.depth_stage ??
                 metaSafe.depth ??
+                metaSafe.extra?.ctxPack?.observedStage ??
+                metaSafe.extra?.ctxPack?.depthStage ??
+                metaSafe.unified?.depth?.current ??
                 depthSafe ??
                 null,
               depth_stage:
                 metaSafe.depth_stage ??
                 metaSafe.depthStage ??
+                metaSafe.observedStage ??
                 metaSafe.depth ??
+                metaSafe.extra?.ctxPack?.observedStage ??
+                metaSafe.extra?.ctxPack?.depthStage ??
+                metaSafe.unified?.depth?.current ??
                 depthSafe ??
                 null,
+              observedStage:
+                metaSafe.observedStage ??
+                metaSafe.extra?.ctxPack?.observedStage ??
+                metaSafe.depthStage ??
+                metaSafe.depth_stage ??
+                metaSafe.depth ??
+                metaSafe.unified?.depth?.current ??
+                depthSafe ??
+                null,
+
+              e_turn:
+                metaSafe.e_turn ??
+                metaSafe.extra?.e_turn ??
+                metaSafe.extra?.mirror?.e_turn ??
+                metaSafe.extra?.mirrorFlowV1?.mirror?.e_turn ??
+                metaSafe.extra?.ctxPack?.e_turn ??
+                metaSafe.extra?.ctxPack?.mirror?.e_turn ??
+                null,
+
+              flow:
+                metaSafe.flow ??
+                metaSafe.extra?.flow ??
+                metaSafe.extra?.ctxPack?.flow ??
+                null,
+
+              returnStreak:
+                metaSafe.returnStreak ??
+                metaSafe.extra?.returnStreak ??
+                metaSafe.extra?.ctxPack?.returnStreak ??
+                null,
+
               intentLayer:
                 metaSafe.intentLayer ??
                 metaSafe.intent_layer ??
@@ -423,6 +491,10 @@ export const irosClient: IrosAPI = {
               depth: depthSafe,
               depthStage: depthSafe,
               depth_stage: depthSafe,
+              observedStage: depthSafe,
+              e_turn: null,
+              flow: null,
+              returnStreak: null,
               intentLayer: intentLayerSafe,
               intent_layer: intentLayerSafe,
             };
@@ -585,8 +657,13 @@ async replyAndStore(args) {
     });
   }
 
-  // 返すのは「UI表示用 + raw」
-  return { ...r, assistant, assistantRaw };
+  // 返すのは「UI表示用 + raw + meta」
+  return {
+    ...r,
+    assistant,
+    assistantRaw,
+    meta,
+  };
 },
 
 

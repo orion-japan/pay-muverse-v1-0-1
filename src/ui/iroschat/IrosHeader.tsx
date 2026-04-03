@@ -50,13 +50,15 @@ export default function IrosHeader({
       ? (qCodeRaw.toUpperCase() as 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5')
       : undefined;
 
-  const depth =
-    currentMeta?.depth ??
-    currentMeta?.depthStage ??
-    currentMeta?.depth_stage ??
-    currentMeta?.extra?.ctxPack?.depthStage ??
-    currentMeta?.unified?.depth?.current ??
-    null;
+      const depth =
+      currentMeta?.observedStage ??
+      currentMeta?.depth ??
+      currentMeta?.depthStage ??
+      currentMeta?.depth_stage ??
+      currentMeta?.extra?.ctxPack?.observedStage ??
+      currentMeta?.extra?.ctxPack?.depthStage ??
+      currentMeta?.unified?.depth?.current ??
+      null;
 
   const mode = currentMeta?.mode ?? null;
 
@@ -223,12 +225,14 @@ export default function IrosHeader({
         .sof-btn-accent:hover { background: #e6f0ff; }
 
         /* ★ インジケーター用の軽い余白調整 */
-        .sof-meta-wrap {
-          display: flex;
-          align-items: center;
-          margin-right: 4px;
-        }
-
+.sof-meta-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 60px;
+  min-height: 28px;
+  flex-shrink: 0;
+}
         @media (max-width: 480px) {
           .sof-header { height: 42px; padding: 4px 6px; }
           .sof-title { max-width: 54vw; font-size: 13px; }

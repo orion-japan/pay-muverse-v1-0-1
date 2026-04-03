@@ -159,12 +159,11 @@ export default function IrosMetaBadge(props: IrosMetaBadgeProps) {
 
   // ✅ 左側メッセージ用の新表示
   const hasAnyTurnStyle =
-  !compact && (Boolean(eInfo) || Boolean(depthStage) || Boolean(responseTypeSafe));
+    !compact && (Boolean(eInfo) || Boolean(depthStage) || Boolean(responseTypeSafe));
 
-  if (hasAnyTurnStyle) {
-    const hasAnyTurnStyleInner = Boolean(eInfo) || Boolean(depthStage) || Boolean(responseTypeSafe);
-
-    if (!hasAnyTurnStyleInner) return null;
+  if (!compact) {
+    const hasAnyTurnStyleInner =
+      Boolean(eInfo) || Boolean(depthStage) || Boolean(responseTypeSafe);
 
     return (
       <div
@@ -182,59 +181,77 @@ export default function IrosMetaBadge(props: IrosMetaBadgeProps) {
           lineHeight: 1.4,
           whiteSpace: 'nowrap',
           boxShadow: '0 1px 3px rgba(15, 23, 42, 0.08)',
+          opacity: hasAnyTurnStyleInner ? 1 : 0.72,
         }}
       >
-        {eInfo && (
-          <div
-            title={`e_turn: ${eInfo.label}`}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-            }}
-          >
+        {hasAnyTurnStyleInner ? (
+          <>
+            {eInfo && (
+              <div
+                title={`e_turn: ${eInfo.label}`}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                <span
+                  style={{
+                    width: compact ? 8 : 10,
+                    height: compact ? 8 : 10,
+                    borderRadius: 999,
+                    background: eInfo.color,
+                    boxShadow: '0 0 0 2px rgba(148, 163, 184, 0.25)',
+                  }}
+                />
+                <span style={{ fontWeight: 600, letterSpacing: 0.3 }}>{eInfo.label}</span>
+              </div>
+            )}
+
+            {eInfo && (depthHeadTurnSafe || responseTypeSafe) && <Sep compact={compact} />}
+
+            {depthHeadTurnSafe && (
+              <div
+                title={`depth band: ${depthHeadTurnSafe}`}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                <span style={{ fontWeight: 700 }}>{depthHeadTurnSafe}</span>
+              </div>
+            )}
+
+            {depthHeadTurnSafe && responseTypeSafe && <Sep compact={compact} />}
+
+            {responseTypeSafe && (
+              <div
+                title={`response type: ${responseTypeSafe}`}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                <span style={{ opacity: 0.72 }}>type</span>
+                <span style={{ fontWeight: 600 }}>{responseTypeSafe}</span>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
             <span
               style={{
                 width: compact ? 8 : 10,
                 height: compact ? 8 : 10,
                 borderRadius: 999,
-                background: eInfo.color,
-                boxShadow: '0 0 0 2px rgba(148, 163, 184, 0.25)',
+                background: '#cbd5e1',
+                boxShadow: '0 0 0 2px rgba(148, 163, 184, 0.18)',
               }}
             />
-            <span style={{ fontWeight: 600, letterSpacing: 0.3 }}>{eInfo.label}</span>
-          </div>
-        )}
-
-        {eInfo && (depthHeadTurnSafe || responseTypeSafe) && <Sep compact={compact} />}
-
-        {depthHeadTurnSafe && (
-          <div
-            title={`depth band: ${depthHeadTurnSafe}`}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-            }}
-          >
-            <span style={{ fontWeight: 700 }}>{depthHeadTurnSafe}</span>
-          </div>
-        )}
-
-        {depthHeadTurnSafe && responseTypeSafe && <Sep compact={compact} />}
-
-        {responseTypeSafe && (
-          <div
-            title={`response type: ${responseTypeSafe}`}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-            }}
-          >
-            <span style={{ opacity: 0.72 }}>type</span>
-            <span style={{ fontWeight: 600 }}>{responseTypeSafe}</span>
-          </div>
+            <span style={{ opacity: 0.7 }}>meta</span>
+          </>
         )}
       </div>
     );

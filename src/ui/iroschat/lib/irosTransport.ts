@@ -370,51 +370,124 @@ export async function fetchMessages(conversationId: string): Promise<IrosMessage
     const intentLayerSafe = m.intent_layer ?? null;
 
     const mergedMeta =
-      metaSafe != null
-        ? {
-            ...metaSafe,
-            qCode: metaSafe.qCode ?? metaSafe.q_code ?? metaSafe.q ?? qSafe ?? null,
-            q_code: metaSafe.q_code ?? metaSafe.qCode ?? metaSafe.q ?? qSafe ?? null,
-            q: metaSafe.q ?? metaSafe.qCode ?? metaSafe.q_code ?? qSafe ?? null,
-            depth:
-              metaSafe.depth ??
-              metaSafe.depthStage ??
-              metaSafe.depth_stage ??
-              depthSafe ??
-              null,
-            depthStage:
-              metaSafe.depthStage ??
-              metaSafe.depth_stage ??
-              metaSafe.depth ??
-              depthSafe ??
-              null,
-            depth_stage:
-              metaSafe.depth_stage ??
-              metaSafe.depthStage ??
-              metaSafe.depth ??
-              depthSafe ??
-              null,
-            intentLayer:
-              metaSafe.intentLayer ??
-              metaSafe.intent_layer ??
-              intentLayerSafe ??
-              null,
-            intent_layer:
-              metaSafe.intent_layer ??
-              metaSafe.intentLayer ??
-              intentLayerSafe ??
-              null,
-          }
-        : {
-            qCode: qSafe,
-            q_code: qSafe,
-            q: qSafe,
-            depth: depthSafe,
-            depthStage: depthSafe,
-            depth_stage: depthSafe,
-            intentLayer: intentLayerSafe,
-            intent_layer: intentLayerSafe,
-          };
+    metaSafe != null
+      ? {
+          ...metaSafe,
+
+          qCode:
+            metaSafe.qCode ??
+            metaSafe.q_code ??
+            metaSafe.q ??
+            metaSafe.extra?.ctxPack?.qCode ??
+            metaSafe.extra?.ctxPack?.qPrimary ??
+            metaSafe.unified?.q?.current ??
+            qSafe ??
+            null,
+          q_code:
+            metaSafe.q_code ??
+            metaSafe.qCode ??
+            metaSafe.q ??
+            metaSafe.extra?.ctxPack?.qCode ??
+            metaSafe.extra?.ctxPack?.qPrimary ??
+            metaSafe.unified?.q?.current ??
+            qSafe ??
+            null,
+          q:
+            metaSafe.q ??
+            metaSafe.qCode ??
+            metaSafe.q_code ??
+            metaSafe.extra?.ctxPack?.qCode ??
+            metaSafe.extra?.ctxPack?.qPrimary ??
+            metaSafe.unified?.q?.current ??
+            qSafe ??
+            null,
+
+          depth:
+            metaSafe.depth ??
+            metaSafe.observedStage ??
+            metaSafe.depthStage ??
+            metaSafe.depth_stage ??
+            metaSafe.extra?.ctxPack?.observedStage ??
+            metaSafe.extra?.ctxPack?.depthStage ??
+            metaSafe.unified?.depth?.current ??
+            depthSafe ??
+            null,
+          depthStage:
+            metaSafe.depthStage ??
+            metaSafe.observedStage ??
+            metaSafe.depth_stage ??
+            metaSafe.depth ??
+            metaSafe.extra?.ctxPack?.observedStage ??
+            metaSafe.extra?.ctxPack?.depthStage ??
+            metaSafe.unified?.depth?.current ??
+            depthSafe ??
+            null,
+          depth_stage:
+            metaSafe.depth_stage ??
+            metaSafe.depthStage ??
+            metaSafe.observedStage ??
+            metaSafe.depth ??
+            metaSafe.extra?.ctxPack?.observedStage ??
+            metaSafe.extra?.ctxPack?.depthStage ??
+            metaSafe.unified?.depth?.current ??
+            depthSafe ??
+            null,
+          observedStage:
+            metaSafe.observedStage ??
+            metaSafe.extra?.ctxPack?.observedStage ??
+            metaSafe.depthStage ??
+            metaSafe.depth_stage ??
+            metaSafe.depth ??
+            metaSafe.unified?.depth?.current ??
+            depthSafe ??
+            null,
+
+          e_turn:
+            metaSafe.e_turn ??
+            metaSafe.extra?.e_turn ??
+            metaSafe.extra?.mirror?.e_turn ??
+            metaSafe.extra?.mirrorFlowV1?.mirror?.e_turn ??
+            metaSafe.extra?.ctxPack?.e_turn ??
+            metaSafe.extra?.ctxPack?.mirror?.e_turn ??
+            null,
+
+          flow:
+            metaSafe.flow ??
+            metaSafe.extra?.flow ??
+            metaSafe.extra?.ctxPack?.flow ??
+            null,
+
+          returnStreak:
+            metaSafe.returnStreak ??
+            metaSafe.extra?.returnStreak ??
+            metaSafe.extra?.ctxPack?.returnStreak ??
+            null,
+
+          intentLayer:
+            metaSafe.intentLayer ??
+            metaSafe.intent_layer ??
+            intentLayerSafe ??
+            null,
+          intent_layer:
+            metaSafe.intent_layer ??
+            metaSafe.intentLayer ??
+            intentLayerSafe ??
+            null,
+        }
+      : {
+          qCode: qSafe,
+          q_code: qSafe,
+          q: qSafe,
+          depth: depthSafe,
+          depthStage: depthSafe,
+          depth_stage: depthSafe,
+          observedStage: depthSafe,
+          e_turn: null,
+          flow: null,
+          returnStreak: null,
+          intentLayer: intentLayerSafe,
+          intent_layer: intentLayerSafe,
+        };
 
           return {
             id:
@@ -583,9 +656,11 @@ export async function reply(params: {
   // ✅ デバッグ用：UIで追えるように返却オブジェクトへ混ぜる（破壊的変更は避ける）
   if (json && typeof json === 'object') {
     json.traceId = json.traceId ?? traceId;
-    json.meta = json.meta ?? {};
-    json.meta.extra = json.meta.extra ?? {};
-    json.meta.extra.traceId = json.meta.extra.traceId ?? traceId;
+
+    if (json.meta && typeof json.meta === 'object') {
+      json.meta.extra = json.meta.extra ?? {};
+      json.meta.extra.traceId = json.meta.extra.traceId ?? traceId;
+    }
   }
 
   console.log('[IROS][client] /reply response', {
@@ -623,17 +698,19 @@ export async function replyAndStore(args: {
 
   // ② テキスト正規化（[object Object] 対策＋🪔 付与）
   const assistantText = normalizeAssistantText(r);
-  const safe = (assistantText ?? '').trim();
+  const assistantRaw = (assistantText ?? '').trim();
+  const assistant = assistantRaw;
 
   // ③ orchestrator から返ってきた meta を拾う
   const meta = r?.meta ?? null;
-
+  console.log('🔥 meta raw', meta);
   // ★ クライアント側では assistant を DB に二重保存しない ★
   // （保存はサーバ側に任せる）
 
   return {
     ...r,
-    assistant: safe,
+    assistant,
+    assistantRaw,
     meta,
     saved: true,
   };

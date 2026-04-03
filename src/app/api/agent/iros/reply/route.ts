@@ -24,6 +24,7 @@ import { normalizeIrosStyleFinal } from '@/lib/iros/language/normalizeIrosStyleF
 
 import { loadIrosMemoryState } from '@/lib/iros/memoryState';
 import { applyRenderEngineIfEnabled } from './_impl/applyRenderEngineIfEnabled';
+import { applySoftExpression } from '@/lib/iros/language/softExpression';
 
 import {
   pickUserCode,
@@ -2086,6 +2087,7 @@ if (!skipTraining) {
         {
           ok: true,
           text: String((result as any)?.content ?? ''),
+          meta: metaForSave ?? null,
         },
         { status: 200, headers },
       );
@@ -2096,11 +2098,13 @@ if (!skipTraining) {
     // =========================================================
     {
       const finalText = String(result ?? '').trim();
+      const softened = applySoftExpression(finalText);
 
       return NextResponse.json(
         {
           ok: true,
-          text: finalText,
+          text: softened,
+          meta: metaForSave ?? null,
         },
         { status: 200, headers },
       );
