@@ -2030,10 +2030,7 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                   return latest || summary || situation || null;
                 })();
 
-                const openingMode =
-                  goalKindNow === 'resonate' || goalKindNow === 'decide'
-                    ? 'touch_first'
-                    : 'direct_core';
+                const openingMode = 'direct_core';
 
                 const responseLength =
                   goalKindNow === 'resonate'
@@ -2050,7 +2047,7 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                     enabled: goalKindNow === 'resonate',
                     hint: touchHint,
                     rules: [
-                      '最初の1文は「相手の状態を見ている観測文」にする（一般論・説明は禁止）',
+                      '最初の1文は観測のみ。理由・解釈・結論・一般化は禁止。',
                       '最初の1文は、相手の変化・気づき・違和感・届いた感じのいずれかに触れる',
                       'ユーザーの言い回し・断定・温度をそのまま受けて返す',
                       '構造説明から入らない',
@@ -2311,12 +2308,11 @@ const internalPackRawCleaned =
                           .filter(Boolean)
                           .filter((rule: string) => {
                             if (!continuationRequested) return true;
-                            return !rule.includes('最初の1文は「相手の状態を見ている観測文」にする');
+                            return !(
+                              rule.includes('最初の1文は「相手の状態を見ている観測文」にする') ||
+                              rule.includes('最初の1文は観測のみ。理由・解釈・結論・一般化は禁止。')
+                            );
                           });
-
-                        filteredRules.forEach((rule: string, i: number) => {
-                          lines.push(`firstTouch.rule${i + 1}=${rule}`);
-                        });
                       }
 
                       const bodyStyle = wd?.bodyStyle;
@@ -3019,17 +3015,9 @@ export async function callWriterLLM(args: {
   const isExplicitContinuation =
     /この前|続き|前に言ってた|前に|前の話(?:し)?|前の流れ|つなげて|続きとして/.test(userText);
 
-  // continuation は writer に任せる。
-  // hook の前置きは、continuation 指示が入っていない時だけ付ける。
-  const shouldPrependRecallHook = Boolean(recallUsed && !isExplicitContinuation);
-
-  if (shouldPrependRecallHook) {
-    const hook = recallHit
-      ? '前の話の流れにつなげると、'
-      : '前の流れとして受け取ると、';
-
-    text = `${hook}\n\n${text}`;
-  }
+  void recallUsed;
+  void recallHit;
+  void isExplicitContinuation;
 
   return text;
 }
