@@ -2308,9 +2308,8 @@ const internalPackRawCleaned =
                           .filter(Boolean)
                           .filter((rule: string) => {
                             if (!continuationRequested) return true;
-                            return !(
-                              rule.includes('最初の1文は「相手の状態を見ている観測文」にする') ||
-                              rule.includes('最初の1文は観測のみ。理由・解釈・結論・一般化は禁止。')
+                            return (
+                              !rule.includes('最初の1文は「相手の状態を見ている観測文」にする')
                             );
                           });
                       }
