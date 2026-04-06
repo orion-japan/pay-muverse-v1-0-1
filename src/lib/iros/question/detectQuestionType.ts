@@ -111,39 +111,41 @@ export function detectQuestionType(input: DetectQuestionTypeInput): QuestionType
     const asksRepairAnswer =
       /答えて|ちゃんと答えて|一文で|そのまま答えて|はぐらかさず/.test(text);
 
-    addIfMatched(
-      scores,
-      text,
-      'truth',
-      [
-        /本当|事実|真実|正しい|誤り|本当に|ほんとうに/,
-        /なのか|かどうか|ありえるか|存在するか/,
-        /証拠|根拠|検証|実証/,
-      ],
-      2 * contextWeight,
-    );
+      addIfMatched(
+        scores,
+        text,
+        'truth',
+        [
+          /本当|事実|真実|正しい|誤り|本当に|ほんとうに/,
+          /なのか|かどうか|ありえるか|存在するか|あるか|ないか/,
+          /証拠|根拠|検証|実証/,
+          /登場しますか|出ますか|出てきますか|書かれていますか|記されていますか|載っていますか/,
+        ],
+        2 * contextWeight,
+      );
 
-    addIfMatched(
-      scores,
-      text,
-      'structure',
-      [
-        /構造|構造的|整理|分解|切り分け|並び|地図|枠組み/,
-        /どう見える|どういう構造|どう捉える|俯瞰/,
-      ],
-      3 * contextWeight,
-    );
+      addIfMatched(
+        scores,
+        text,
+        'structure',
+        [
+          /構造|構造的|整理|分解|切り分け|並び|地図|枠組み/,
+          /どう見える|どういう構造|どう捉える|俯瞰/,
+          /背景|文脈|位置づけ|流れの中で|どういう背景|どのような背景/,
+        ],
+        3 * contextWeight,
+      );
 
-    addIfMatched(
-      scores,
-      text,
-      'cause',
-      [
-        /なぜ|どうして|原因|きっかけ|由来|理由/,
-        /なぜ起きた|なぜそうなる|なぜそうなった/,
-      ],
-      2 * contextWeight,
-    );
+      addIfMatched(
+        scores,
+        text,
+        'cause',
+        [
+          /なぜ|どうして|原因|きっかけ|由来|理由/,
+          /なぜ起きた|なぜそうなる|なぜそうなった/,
+        ],
+        2 * contextWeight,
+      );
 
     addIfMatched(
       scores,

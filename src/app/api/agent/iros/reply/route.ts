@@ -1328,33 +1328,30 @@ console.log(
       null,
   }),
 );
+// 🔥 recall → pastStateNote に昇格（IR診断もここで拾う）
+let pastStateNoteText =
+  (result as any)?.metaForSave?.extra?.pastStateNoteText ??
+  metaForSave?.extra?.pastStateNoteText ??
+  reqMetaRaw?.pastStateNoteText ??
+  reqMetaRaw?.extra?.pastStateNoteText ??
+  extraSoT?.pastStateNoteText ??
+  null;
 
-extraSoT = {
-  ...(extraSoT ?? {}),
+let pastStateTriggerKind =
+  (result as any)?.metaForSave?.extra?.pastStateTriggerKind ??
+  metaForSave?.extra?.pastStateTriggerKind ??
+  reqMetaRaw?.pastStateTriggerKind ??
+  reqMetaRaw?.extra?.pastStateTriggerKind ??
+  null;
 
-  memoryStateForCtx,
-  memoryStateNoteText: memoryStateForCtx?.noteText ?? null,
-
-  longTermMemoryNoteText:
-    forcedLongTermMemory ??
-    memoryStateForCtx?.longTermNoteText ??
-    null,
-
-  pastStateNoteText:
-    (result as any)?.metaForSave?.extra?.pastStateNoteText ??
-    metaForSave?.extra?.pastStateNoteText ??
-    reqMetaRaw?.pastStateNoteText ??
-    reqMetaRaw?.extra?.pastStateNoteText ??
-    extraSoT?.pastStateNoteText ??
-    null,
-
-  recallCandidates: recallCandidates.length > 0 ? recallCandidates : null,
-
-  renderEngine: extraSoT?.renderEngine === true,
-  renderEngineGate: extraSoT?.renderEngineGate === true,
-};
-
-
+// 👉 ここが今回の本質
+if (!pastStateNoteText && recallCandidates.length > 0) {
+  const topRecall = recallCandidates[0]?.text?.trim();
+  if (topRecall) {
+    pastStateNoteText = topRecall.slice(0, 800);
+    pastStateTriggerKind = 'recent_topic';
+  }
+}
 extraSoT = {
   ...(extraSoT ?? {}),
 
@@ -1368,11 +1365,8 @@ extraSoT = {
     null,
 
   // ✅ relationship / recall 系は writer が pastStateNoteText で読む
-  pastStateNoteText:
-    reqMetaRaw?.pastStateNoteText ??
-    reqMetaRaw?.extra?.pastStateNoteText ??
-    extraSoT?.pastStateNoteText ??
-    null,
+  pastStateNoteText,
+  pastStateTriggerKind,
 
   recallCandidates: recallCandidates.length > 0 ? recallCandidates : null,
 
@@ -1425,6 +1419,9 @@ const persistMeta = {
     extractedTextFromModel: finalText,
     ctxPack: {
       ...baseDiagCtxPack,
+      ...(pastStateNoteText ? { pastStateNoteText } : {}),
+      ...(pastStateTriggerKind ? { pastStateTriggerKind } : {}),
+      ...(recallCandidates.length > 0 ? { recallCandidates } : {}),
       ...(baseDiagExtra?.irMeta && typeof baseDiagExtra.irMeta === 'object'
         ? { irMeta: baseDiagExtra.irMeta }
         : {}),
@@ -1537,16 +1534,18 @@ return NextResponse.json({
       // FINAL本文の確定（生成しない：strip + recoverだけ）
       {
         const curRaw = String((result as any)?.content ?? '');
-        const curTrim = curRaw.trim();
-
-        const emptyLike = isEffectivelyEmptyText(curTrim);
         const hasSlotDirectives = /(^|\n)\s*@(OBS|SHIFT|NEXT|SAFE|DRAFT|SEED_TEXT)\b/.test(curRaw);
 
         const exMeta: any = (metaForSave as any)?.extra ?? {};
         const exMeta2: any = (meta as any)?.extra ?? {};
         const exSoT: any = (extraSoT as any) ?? {};
 
-        const head = String(exMeta?.rephraseHead ?? exMeta2?.rephraseHead ?? exSoT?.rephraseHead ?? '').trim();
+        const head = String(
+          exMeta?.rephraseHead ??
+          exMeta2?.rephraseHead ??
+          exSoT?.rephraseHead ??
+          ''
+        ).trim();
 
         const blocks: any[] = Array.isArray(exMeta?.rephraseBlocks)
           ? exMeta.rephraseBlocks
@@ -1556,10 +1555,8 @@ return NextResponse.json({
               ? exSoT.rephraseBlocks
               : [];
 
-        const recoveredFromBlocks = blocks.length > 0 ? blocksToText(blocks) : '';
-        const recoveredText = head || recoveredFromBlocks;
-
-        const needRecover = emptyLike || hasSlotDirectives;
+              const recoveredFromBlocks = blocks.length > 0 ? blocksToText(blocks) : '';
+              const recoveredText = recoveredFromBlocks || head;
 
         const stripSlotDirectives = (s: string) => {
           const raw = String(s ?? '');
@@ -1571,15 +1568,15 @@ return NextResponse.json({
         };
 
         const curNoSlots = hasSlotDirectives ? stripSlotDirectives(curRaw) : curRaw.trimEnd();
-        const curNoSlotsTrim = curNoSlots.trim();
 
-        let finalText = needRecover
-          ? recoveredText
-            ? recoveredText
-            : hasSlotDirectives && curNoSlotsTrim.length > 0
-              ? curNoSlots
-              : curRaw.trimEnd()
-          : curRaw.trimEnd();
+        let finalText =
+          recoveredText && recoveredText.length > 0
+            ? stripInternalLines(recoveredText).trimEnd()
+            : curNoSlots;
+
+        if (!finalText) {
+          finalText = curRaw.trimEnd();
+        }
 
         // =========================================================
         // ✅ Expression Lane（最後に適用）
@@ -1751,9 +1748,9 @@ return NextResponse.json({
           ...(meta.extra ?? {}),
           finalAssistantTextSynced: true,
           finalAssistantTextLen: finalText.length,
-          finalTextRecoveredFromSoT: needRecover && Boolean(recoveredText) ? true : undefined,
+          finalTextRecoveredFromSoT: Boolean(recoveredText) ? true : undefined,
           finalTextRecoveredSource:
-            needRecover && Boolean(recoveredText) ? (head ? 'rephraseHead' : 'rephraseBlocks') : undefined,
+            Boolean(recoveredText) ? (head ? 'rephraseHead' : 'rephraseBlocks') : undefined,
           finalTextHadSlotDirectives: hasSlotDirectives ? true : undefined,
         };
 
@@ -1827,22 +1824,7 @@ const fromBlocks = stripInternalLines(blocksJoinedCleaned);
 const fromResultObj = stripInternalLines(resultObjFinalRaw);
 
 const contentForPersist = (() => {
-  const isSeedLikePersistText = (s: string) => {
-    const t = String(s ?? '').replace(/\r\n/g, '\n').trim();
-    if (!t) return true;
-
-    if (t === '……') return true;
-    if (t === '続けてください') return true;
-
-    if (/^@(?:OBS|SHIFT|SAFE|NEXT_HINT)\b/m.test(t)) return true;
-    if (/^CARD_PACKET\b/m.test(t)) return true;
-    if (/^INTERNAL PACK\b/m.test(t)) return true;
-    if (/^COORD\b/m.test(t)) return true;
-    if (/^STATE_CUES_V3\b/m.test(t)) return true;
-
-    return false;
-  };
-
+  const fromBlocks = blocksJoinedCleaned.trim();
   const uiReturnText = stripInternalLines(
     String(
       (result as any)?.content ??
@@ -1860,23 +1842,17 @@ const contentForPersist = (() => {
     )
   ).trim();
 
-  const fromBlocks = blocksJoinedCleaned.trim();
-  const fromResultObj = stripInternalLines(resultObjFinalRaw).trim();
-
-  if (!isEffectivelyEmptyText(uiReturnText) && uiReturnText.length > 0 && !isSeedLikePersistText(uiReturnText)) {
-    return uiReturnText;
-  }
-
-  if (!isEffectivelyEmptyText(uiResolvedText) && uiResolvedText.length > 0 && !isSeedLikePersistText(uiResolvedText)) {
-    return uiResolvedText;
-  }
-
-  if (!isEffectivelyEmptyText(fromBlocks) && fromBlocks.length > 0 && !isSeedLikePersistText(fromBlocks)) {
+  // 🔥 主役を逆転
+  if (!isEffectivelyEmptyText(fromBlocks) && fromBlocks.length > 0) {
     return fromBlocks;
   }
 
-  if (!isEffectivelyEmptyText(fromResultObj) && fromResultObj.length > 0 && !isSeedLikePersistText(fromResultObj)) {
-    return fromResultObj;
+  if (!isEffectivelyEmptyText(uiReturnText) && uiReturnText.length > 0) {
+    return uiReturnText;
+  }
+
+  if (!isEffectivelyEmptyText(uiResolvedText) && uiResolvedText.length > 0) {
+    return uiResolvedText;
   }
 
   return '……';

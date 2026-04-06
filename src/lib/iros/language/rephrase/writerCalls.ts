@@ -1198,9 +1198,11 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
 
                 const questionMeta = (() => {
                   const q =
-                  (args as any)?.extra?.question ??
-                  (args as any)?.userContext?.question ??
-                  (args as any)?.userContext?.meta?.extra?.question ??
+                    (args as any)?.extra?.question ??
+                    (args as any)?.userContext?.question ??
+                    (args as any)?.userContext?.ctxPack?.question ??
+                    (args as any)?.userContext?.meta?.extra?.question ??
+                    (args as any)?.userContext?.meta?.extra?.ctxPack?.question ??
                     null;
                   return q && typeof q === 'object' ? q : null;
                 })();
@@ -2012,6 +2014,11 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
               })();
 
               (args as any).writerDirectives = (() => {
+                const incomingWriterDirectives =
+                  (args as any)?.writerDirectives && typeof (args as any).writerDirectives === 'object'
+                    ? { ...(args as any).writerDirectives }
+                    : {};
+
                 const flowLine =
                   String((args as any)?.flow180?.sentence ?? '').trim() || null;
 
@@ -2023,11 +2030,10 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                 ).trim();
 
                 const touchHint = (() => {
-                  const latest = String(latestUserText ?? '').trim();
                   const summary = String((ctxPack as any)?.topicDigestV2?.summary ?? '').trim();
                   const situation = String((ctxPack as any)?.topicDigest ?? '').trim();
 
-                  return latest || summary || situation || null;
+                  return summary || situation || null;
                 })();
 
                 const openingMode = 'direct_core';
@@ -2037,13 +2043,69 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                     ? 'soft_long'
                     : goalKindNow === 'decide'
                       ? 'medium'
-                      : 'compact';
+                      : goalKindNow === 'uncover'
+                        ? 'soft_long'
+                        : 'compact';
+
+                const incomingFirstTouch =
+                  incomingWriterDirectives.firstTouch && typeof incomingWriterDirectives.firstTouch === 'object'
+                    ? incomingWriterDirectives.firstTouch
+                    : {};
+
+                const incomingBodyStyle =
+                  incomingWriterDirectives.bodyStyle && typeof incomingWriterDirectives.bodyStyle === 'object'
+                    ? incomingWriterDirectives.bodyStyle
+                    : {};
+
+                const incomingWriteConstraints = Array.isArray(incomingWriterDirectives.writeConstraints)
+                  ? incomingWriterDirectives.writeConstraints
+                      .map((x: any) => String(x ?? '').trim())
+                      .filter(Boolean)
+                  : [];
+// --- questionType → writerDirectives反映 ---
+const effectiveQuestionType = String(
+  (args as any)?.questionType ??
+  (args as any)?.extra?.question?.questionType ??
+  (args as any)?.userContext?.question?.questionType ??
+  (args as any)?.userContext?.ctxPack?.question?.questionType ??
+  ''
+).trim();
+
+if (effectiveQuestionType === 'truth') {
+  incomingWriterDirectives.mode = 'answer_truth_structure';
+  incomingWriterDirectives.forbidTopicExpansion = true;
+  incomingWriterDirectives.forceSingleConclusion = true;
+  incomingWriterDirectives.noAbstractEscape = true;
+}
+                const mergedWriteConstraints = Array.from(
+                  new Set([
+                    ...incomingWriteConstraints,
+                    '最初に相手へ触れてから核心に入る',
+                    '最初の1文は観測で始める',
+                    '共感だけで終わらない',
+                    'いまの焦点を一つに絞る',
+                    'decide時も短く切りすぎず、少し滞在感を持たせてよい',
+                    'resonate時は説明だけで終わらず、同じ意味を別角度でもう1段だけ展開してよい',
+                    '1つの結論だけで終わらず、説明→補足→余白の順で最低2段階に展開する',
+                    '2〜4文で1まとまりにし、少なくとも2まとまり以上で構成する',
+                    '1つのまとまりに理由・補足・結論を詰め込みすぎない',
+                    '話題が切り替わる時、理由に移る時、まとめに移る時は段落を分ける',
+                    'OBSは今起きていることを先に置く',
+                    'SHIFTはその理由や背景構造を次のまとまりで述べる',
+                    'NEXTは次に見る一点や分岐点を最後のまとまりで述べる',
+                  ])
+                );
 
                 return {
+                  ...incomingWriterDirectives,
+
+                  mode: incomingWriterDirectives.mode ?? null, // ← これ追加
+
                   openingMode,
                   responseLength,
 
                   firstTouch: {
+                    ...incomingFirstTouch,
                     enabled: goalKindNow === 'resonate',
                     hint: touchHint,
                     rules: [
@@ -2061,6 +2123,7 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                   },
 
                   bodyStyle: {
+                    ...incomingBodyStyle,
                     coreFirst: true,
                     allowSoftExpand: true,
                     minSentences: goalKindNow === 'decide' ? 4 : 3,
@@ -2069,6 +2132,9 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                     allowGentleRephrase: true,
                     forbidTopicExpansion: true,
                     delayClosure: true,
+                    preferBlockSplit: true,
+                    maxSentencesPerBlock: 2,
+                    minBlocks: 2,
                   },
 
                   flowLine,
@@ -2076,31 +2142,7 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                   flowFrom: String((args as any)?.flow180?.from ?? '').trim() || null,
                   flowTo: String((args as any)?.flow180?.to ?? '').trim() || null,
 
-                  writeConstraints: [
-                    '最初に相手へ触れてから核心に入る',
-                    '最初の1文は観測で始める',
-                    '共感だけで終わらない',
-                    'いまの焦点を一つに絞る',
-                    'decide時も短く切りすぎず、少し滞在感を持たせてよい',
-                    'resonate時は説明だけで終わらず、同じ意味を別角度でもう1段だけ展開してよい',
-                    '1つの結論だけで終わらず、説明→補足→余白の順で最低2段階に展開する',
-                    '2〜4文で1まとまりにし、少なくとも2まとまり以上で構成する',
-                    '断定のあとに1拍おいて、その意味を少しだけほどく',
-                    '寄り添いの一文を追加してよい',
-                    'やさしい言い回しを優先してよい',
-                    '構造語は必要なら一度やわらかい体感表現に言い換えてから使う',
-                    '最後は静かな着地で閉じる',
-                    '新しい論点を増やさない',
-                    'ユーザーが聞いていない一般へ広げない',
-                    'MEANINGを言い換えて完結させず、先に触れてから返す',
-                    'Do not conclude early',
-                    'Let the response breathe before closing',
-                    'Allow natural expansion within the same theme',
-                    'Pick one concrete delta from the current input',
-                    'Prefer difference over atmosphere',
-                    'Name what is specifically off, stuck, or not matching',
-                    'Do not return the same structure for every vague discomfort input',
-                  ]
+                  writeConstraints: mergedWriteConstraints,
                 };
               })();
 
@@ -2255,11 +2297,120 @@ const internalPackRawCleaned =
                       );
                     })();
                     const writerDirectivesBlock = (() => {
+
+                      try {
+                        console.log(
+                          '[IROS/writerCalls][WD_ENTRY_CHECK]',
+                          JSON.stringify({
+                            traceId: (args as any)?.traceId ?? null,
+                            conversationId: (args as any)?.conversationId ?? null,
+                            userCode: (args as any)?.userCode ?? null,
+                            hasWriterDirectives: !!(args as any)?.writerDirectives,
+                            writerDirectivesType: typeof (args as any)?.writerDirectives,
+                            hasTopSlotDecision: !!(args as any)?.slotDecision,
+                            topSlotDecisionKeys:
+                              (args as any)?.slotDecision && typeof (args as any).slotDecision === 'object'
+                                ? Object.keys((args as any).slotDecision)
+                                : [],
+                            hasUserContext: !!(args as any)?.userContext,
+                            hasCtxPack: !!(args as any)?.userContext?.ctxPack,
+                            hasCtxSlotDecision: !!(args as any)?.userContext?.ctxPack?.slotDecision,
+                          })
+                        );
+                      } catch {}
+
                       const wd = (args as any)?.writerDirectives;
                       if (!wd || typeof wd !== 'object') return '';
 
                       const lines: string[] = ['WRITER_DIRECTIVES (DO NOT OUTPUT):'];
+                      const slotDecision = (args as any)?.slotDecision ?? (args as any)?.userContext?.ctxPack?.slotDecision;
 
+                      try {
+                        const topSd = (args as any)?.slotDecision;
+                        const uc = (args as any)?.userContext;
+                        const cp = (args as any)?.userContext?.ctxPack;
+                        const ctxSd = (args as any)?.userContext?.ctxPack?.slotDecision;
+                        const sd = topSd ?? ctxSd;
+
+                        console.log(
+                          '[IROS/writerCalls][SLOT_DECISION_CHECK_STR]',
+                          JSON.stringify({
+                            traceId: (args as any)?.traceId ?? null,
+                            conversationId: (args as any)?.conversationId ?? null,
+                            userCode: (args as any)?.userCode ?? null,
+                            hasTopSlotDecision: !!topSd,
+                            topSlotDecisionKeys:
+                              topSd && typeof topSd === 'object' ? Object.keys(topSd) : [],
+                            hasUserContext: !!uc,
+                            hasCtxPack: !!cp,
+                            ctxPackKeys:
+                              cp && typeof cp === 'object' ? Object.keys(cp) : [],
+                            hasCtxSlotDecision: !!ctxSd,
+                            ctxSlotDecisionKeys:
+                              ctxSd && typeof ctxSd === 'object' ? Object.keys(ctxSd) : [],
+                            hasSlotDecision: !!sd,
+                            slotDecisionKeys:
+                              sd && typeof sd === 'object' ? Object.keys(sd) : [],
+                            slotOrder:
+                              Array.isArray((sd as any)?.order) ? (sd as any).order : [],
+                            writerDirectiveKeys:
+                              (args as any)?.writerDirectives &&
+                              typeof (args as any).writerDirectives === 'object'
+                                ? Object.keys((args as any).writerDirectives)
+                                : [],
+                          })
+                        );
+                      } catch {}
+
+                      if (slotDecision && typeof slotDecision === 'object') {
+                        const slotOrder = Array.isArray(slotDecision?.order)
+                          ? slotDecision.order
+                              .map((v: unknown) => String(v ?? '').trim())
+                              .filter(Boolean)
+                          : [];
+
+                        const slotEmphasis =
+                          slotDecision?.emphasis && typeof slotDecision.emphasis === 'object'
+                            ? slotDecision.emphasis
+                            : null;
+
+                        const slotWeights =
+                          slotDecision?.weights && typeof slotDecision.weights === 'object'
+                            ? slotDecision.weights
+                            : null;
+
+                        if (slotOrder.length > 0) {
+                          lines.push(`slot_order=${slotOrder.join(',')}`);
+                          lines.push(`slot_opening_role=${slotOrder[0]}`);
+                          if (slotOrder[1]) lines.push(`slot_second_role=${slotOrder[1]}`);
+                          if (slotOrder[2]) lines.push(`slot_third_role=${slotOrder[2]}`);
+                          lines.push('slot_safe_last=true');
+                        }
+
+                        if (slotEmphasis) {
+                          const obs = Number((slotEmphasis as any)?.OBS ?? 1);
+                          const shift = Number((slotEmphasis as any)?.SHIFT ?? 1);
+                          const next = Number((slotEmphasis as any)?.NEXT ?? 1);
+                          const safe = Number((slotEmphasis as any)?.SAFE ?? 1);
+
+                          lines.push(`slot_emphasis_obs=${obs}`);
+                          lines.push(`slot_emphasis_shift=${shift}`);
+                          lines.push(`slot_emphasis_next=${next}`);
+                          lines.push(`slot_emphasis_safe=${safe}`);
+                        }
+
+                        if (slotWeights) {
+                          const obs = Number((slotWeights as any)?.OBS ?? 0);
+                          const shift = Number((slotWeights as any)?.SHIFT ?? 0);
+                          const next = Number((slotWeights as any)?.NEXT ?? 0);
+                          const safe = Number((slotWeights as any)?.SAFE ?? 0);
+
+                          lines.push(`slot_weight_obs=${obs}`);
+                          lines.push(`slot_weight_shift=${shift}`);
+                          lines.push(`slot_weight_next=${next}`);
+                          lines.push(`slot_weight_safe=${safe}`);
+                        }
+                      }
                       const firstTouch = wd?.firstTouch;
                       const firstTouchHint =
                         firstTouch && typeof firstTouch === 'object'
@@ -2342,6 +2493,20 @@ const internalPackRawCleaned =
                           lines.push(
                             `bodyStyle.forbidTopicExpansion=${bodyStyle.forbidTopicExpansion ? 'true' : 'false'}`
                           );
+                        }
+                        if (typeof bodyStyle?.delayClosure === 'boolean') {
+                          lines.push(`bodyStyle.delayClosure=${bodyStyle.delayClosure ? 'true' : 'false'}`);
+                        }
+                        if (typeof bodyStyle?.preferBlockSplit === 'boolean') {
+                          lines.push(
+                            `bodyStyle.preferBlockSplit=${bodyStyle.preferBlockSplit ? 'true' : 'false'}`
+                          );
+                        }
+                        if (typeof bodyStyle?.maxSentencesPerBlock === 'number') {
+                          lines.push(`bodyStyle.maxSentencesPerBlock=${bodyStyle.maxSentencesPerBlock}`);
+                        }
+                        if (typeof bodyStyle?.minBlocks === 'number') {
+                          lines.push(`bodyStyle.minBlocks=${bodyStyle.minBlocks}`);
                         }
                       }
 
@@ -2560,10 +2725,62 @@ const irMetaBlock = (() => {
     .join('\n');
 })();
 
+const diagnosisFollowup =
+  (args as any)?.meta?.extra?.diagnosisFollowup ??
+  (args as any)?.meta?.extra?.ctxPack?.diagnosisFollowup ??
+  (args as any)?.meta?.ctxPack?.diagnosisFollowup ??
+  (args as any)?.userContext?.meta?.extra?.diagnosisFollowup ??
+  (args as any)?.userContext?.meta?.extra?.ctxPack?.diagnosisFollowup ??
+  (args as any)?.userContext?.ctxPack?.diagnosisFollowup ??
+  false;
+
+const followupKind =
+  (args as any)?.meta?.extra?.followupKind ??
+  (args as any)?.meta?.extra?.ctxPack?.followupKind ??
+  (args as any)?.meta?.ctxPack?.followupKind ??
+  (args as any)?.userContext?.meta?.extra?.followupKind ??
+  (args as any)?.userContext?.meta?.extra?.ctxPack?.followupKind ??
+  (args as any)?.userContext?.ctxPack?.followupKind ??
+  null;
+
+  const diagnosisFollowupBlock = (() => {
+    if (!diagnosisFollowup) return '';
+
+    const kind = String(followupKind ?? 'concretize').trim();
+
+    const obs = String((irMeta as any)?.observationResult ?? '').trim();
+    const aware = String((irMeta as any)?.awarenessText ?? '').trim();
+    const summary = String((irMeta as any)?.summaryText ?? '').trim();
+    const target = String((irMeta as any)?.targetLabel ?? '').trim();
+
+    const kindRule =
+      kind === 'action'
+        ? 'Return exactly one next step derived from the diagnosis. Do not ask the user to narrow scope. Do not request clarification.'
+        : kind === 'rephrase'
+          ? 'Rephrase the diagnosis briefly in plain language. Keep the diagnosis meaning. Do not switch to advice.'
+          : kind === 'deepen'
+            ? 'Explain why this diagnosis is happening and what background structure supports it. Do not switch topic.'
+            : 'Explain the last diagnosis itself. Expand abstract phrases into concrete states, mismatches, and possible actions. Do not ask the user what they mean.';
+
+    return [
+      'DIAGNOSIS_FOLLOWUP (DO NOT OUTPUT):',
+      `FOLLOWUP_KIND=${kind || 'concretize'}`,
+      target ? `DIAGNOSIS_TARGET=${target}` : '',
+      obs ? `DIAGNOSIS_OBSERVATION=${obs}` : '',
+      aware ? `DIAGNOSIS_STATE=${aware}` : '',
+      summary ? `DIAGNOSIS_SUMMARY=${summary}` : '',
+      `RULE=${kindRule}`,
+      'FORBIDDEN=Do not ask the user to specify what they want concretized. Do not broaden to a normal practical question. Do not return to previous normal topics.',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  })();
+
 const internalPackForWriter = (() => {
   let base = [
     String(internalPackForWriterSource ?? ''),
     irMetaBlock,
+    diagnosisFollowupBlock,
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -2574,15 +2791,14 @@ const internalPackForWriter = (() => {
     .replace(/(?:^|\n)@DELTA[^\n]*/g, '')
 
     // 旧 FLOW / FLOW_V2 は writer には渡さない
-// 旧 FLOW / FLOW_V2 は writer には渡さない
-.replace(/\nFLOW:\n[\s\S]*?(?=\n[A-Z_]+:|$)/g, '')
-.replace(
-  /\nFLOW_V2\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ \-]+(?:\s*\(DO NOT OUTPUT\))?:|$)/g,
-  '',
-)
+    .replace(/\nFLOW:\n[\s\S]*?(?=\n[A-Z_]+:|$)/g, '')
+    .replace(
+      /\nFLOW_V2\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ \-]+(?:\s*\(DO NOT OUTPUT\))?:|$)/g,
+      '',
+    )
 
-.replace(/\n{3,}/g, '\n\n')
-.trim();
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 
   return base;
 })();
@@ -2863,6 +3079,7 @@ export async function callWriterLLM(args: {
   extraBody?: any;
   extra?: any;
   userContext?: any;
+  slotDecision?: any;
   audit?: any;
 
   // ✅ 追加：HistoryDigest v1（存在する時だけ注入）
@@ -2928,7 +3145,9 @@ export async function callWriterLLM(args: {
           /^FLOW180(?:_SEED)? \(DO NOT OUTPUT\):/i.test(a1) ||
           /^DELTA_HINT \(DO NOT OUTPUT\):/i.test(a1) ||
           /^SEED \(DO NOT OUTPUT\):/i.test(a1) ||
-          /(?:^|\n)WRITER_DIRECTIVES(?:\n|$)/i.test(a1);
+          /(?:^|\n)WRITER_DIRECTIVES(?:\n|$)/i.test(a1) ||
+          /(?:^|\n)PAST_STATE_RECALL:\s*enabled(?:\n|$)/i.test(a1) ||
+          /(?:^|\n)PAST_STATE_NOTE:\s*/i.test(a1);
 
         return isInternalPack
           ? ({ role: 'assistant', content: a1 } as WriterMessage)

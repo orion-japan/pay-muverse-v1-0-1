@@ -65,6 +65,12 @@ import {
   ILINE_OPEN,
   ILINE_CLOSE,
 } from './ilineLock';
+import { computeSlotDecision } from './slotWeightEngine';
+import {
+  computeSlotDecision as computeSlotDecisionFromEngine,
+  type SlotName as SlotNameFromEngine,
+  type SlotWeightInput as SlotWeightInputFromEngine,
+} from './slotWeightEngine';
 
 // ==============================
 // PATCH: 2-line format enforce (single retry)
@@ -2127,6 +2133,44 @@ export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: Rephra
     return u === 'SHIFT' || u === '@SHIFT';
   };
 
+  function verbalizeSlotText(raw: string): string | null {
+    if (!raw) return null;
+
+    const s = String(raw).trim();
+
+    // JSON部分だけ抜く
+    const jsonMatch = s.match(/\{[\s\S]*\}$/);
+    let obj: any = null;
+    if (jsonMatch) {
+      try {
+        obj = JSON.parse(jsonMatch[0]);
+      } catch {}
+    }
+
+    // fallback
+    const line =
+      obj?.line ||
+      obj?.hint ||
+      obj?.text ||
+      '';
+
+    if (!line) return null;
+
+    // --- Sofia寄り自然文整形 ---
+    let t = String(line).trim();
+
+    // 変な記号除去
+    t = t.replace(/[「」]/g, '');
+    t = t.replace(/\s+/g, ' ');
+
+    // 語尾を軽く整える（固すぎ防止）
+    if (!/[。]$/.test(t)) {
+      t = t + 'です。';
+    }
+
+    return t;
+  }
+
   const isShiftKind = (k: any) => {
     const u = upperKey(k);
     // kind 側に shift が入る場合
@@ -2284,34 +2328,155 @@ const stripInternalMarkersForLock = (s: string) => {
   return out.join('\n').trim();
 };
 
+type SlotName = SlotNameFromEngine;
+type SlotWeightInput = SlotWeightInputFromEngine;
 
-// ✅ blocks 生成（renderGateway が block 意図で拾える形）
-// NOTE: ここは "string[]" を返す。{text,kind} 化は adoptAsSlots 側で 1 回だけ行う。
 const toRephraseBlocks = (s: string): string[] => {
-  const raw = String(s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-  if (!raw) return [];
+  const text = String(s ?? '').replace(/\r\n/g, '\n').trim();
+  if (!text) return [];
 
-  // 1) 空行で段落ブロック化
-  let parts = raw
-    .split(/\n{2,}/g)
-    .map((b) => b.trim())
-    .filter(Boolean);
+  const cleanLine = (v: string): string =>
+    String(v ?? '')
+      .replace(/\[\[ILINE\]\]/g, '')
+      .replace(/\[\[\/ILINE\]\]/g, '')
+      .replace(/[ \t]+/g, ' ')
+      .trim();
 
-  // 2) 1ブロックしか取れないなら、単改行でブロック化（2行でもOK）
-  if (parts.length <= 1) {
-    const lines = raw
+  const isBulletLike = (v: string): boolean =>
+    /^[-*•・◯]\s+/u.test(String(v ?? '').trim());
+
+  const splitParagraphToSentences = (v: string): string[] => {
+    const src = cleanLine(v);
+    if (!src) return [];
+
+    const parts: string[] = [];
+    let buf = '';
+
+    for (const ch of src) {
+      buf += ch;
+      if (/[。！？]/u.test(ch)) {
+        const t = cleanLine(buf);
+        if (t) parts.push(t);
+        buf = '';
+      }
+    }
+
+    const tail = cleanLine(buf);
+    if (tail) parts.push(tail);
+
+    return parts.length > 0 ? parts : [src];
+  };
+
+  const mergeShortSentences = (items: string[]): string[] => {
+    const out: string[] = [];
+    let buf = '';
+
+    const flush = () => {
+      const t = cleanLine(buf);
+      if (t) out.push(t);
+      buf = '';
+    };
+
+    for (const raw of items) {
+      const t = cleanLine(raw);
+      if (!t) continue;
+
+      if (!buf) {
+        buf = t;
+        continue;
+      }
+
+      const bufShort = buf.length < 38;
+      const tShort = t.length < 30;
+      const combinedShort = cleanLine(`${buf} ${t}`).length < 56;
+
+      if (bufShort && tShort && combinedShort) {
+        buf = cleanLine(`${buf} ${t}`);
+      } else {
+        flush();
+        buf = t;
+      }
+    }
+
+    flush();
+    return out;
+  };
+
+  const splitLongBlock = (v: string): string[] => {
+    const src = cleanLine(v);
+    if (!src) return [];
+
+    if (src.length <= 88) return [src];
+
+    const pivotPatterns = [
+      /ただし/u,
+      /一方で/u,
+      /なので/u,
+      /そのため/u,
+      /つまり/u,
+      /要するに/u,
+      /です。ただ/u,
+      /ます。ただ/u,
+      /です。一方で/u,
+      /ます。一方で/u,
+    ];
+
+    for (const re of pivotPatterns) {
+      const m = src.match(re);
+      if (!m || m.index == null) continue;
+
+      const idx = m.index;
+      if (idx < 18 || idx > src.length - 18) continue;
+
+      const a = cleanLine(src.slice(0, idx));
+      const b = cleanLine(src.slice(idx));
+      if (a && b) return [a, b];
+    }
+
+    return [src];
+  };
+
+  const paragraphs = text
+    .split(/\n{2,}/)
+    .map((p) => p.split('\n').map(cleanLine).filter(Boolean).join(' '))
+    .map(cleanLine)
+    .filter(Boolean)
+    .filter((p) => !isBulletLike(p));
+
+  let blocks: string[] = [];
+
+  if (paragraphs.length >= 2) {
+    blocks = paragraphs.flatMap((p) => splitLongBlock(p));
+  } else {
+    const lines = text
       .split('\n')
-      .map((x) => String(x ?? '').trim())
-      .filter(Boolean);
-    if (lines.length >= 2) parts = lines;
+      .map(cleanLine)
+      .filter(Boolean)
+      .filter((p) => !isBulletLike(p));
+
+    const sentenceUnits = mergeShortSentences(
+      lines.flatMap((line) => splitParagraphToSentences(line))
+    );
+
+    blocks = sentenceUnits.flatMap((p) => splitLongBlock(p));
   }
 
-  // ✅ 重要：8固定だと multi7（見出し+本文）で後半が落ちる
-  // - 見出し+本文 で 6段を作る場合、最大 12 まで必要になり得る
-  // - ここは “保険” なので少し広めに取る（renderGateway側で表示はクランプされる）
-  const MAX_REPHRASE_BLOCKS = 16;
+  blocks = blocks
+    .map(cleanLine)
+    .filter(Boolean)
+    .filter((v, i, arr) => i === 0 || v !== arr[i - 1]);
 
-  return parts.slice(0, MAX_REPHRASE_BLOCKS);
+  if (blocks.length >= 5) {
+    const head = blocks.slice(0, 3);
+    const tail = cleanLine(blocks.slice(3).join(' '));
+    blocks = tail ? [...head, tail] : head;
+  }
+
+  if (blocks.length === 0) {
+    return [cleanLine(text)];
+  }
+
+  return blocks;
 };
 
 
@@ -3856,7 +4021,107 @@ const systemPromptForWriter = [
   .filter(Boolean)
   .join('\n\n');
 
-let messages = buildFirstPassMessages({
+  const slotDecisionForFirstPass = computeSlotDecisionFromEngine({
+    depthStage:
+      String((ctxPackForWriter as any)?.depthStage ?? '').trim() || null,
+
+      questionType: (() => {
+        const s = String((opts as any)?.userText ?? '').trim();
+        if (/構造|仕組み|関係|違い|配置|流れ|構成/u.test(s)) return 'structure';
+        if (/意味|なぜ|どういうこと|どう受け止め|どう読める/u.test(s)) return 'meaning';
+        if (/意図|どうしたい|どう進む|どこへ向かう|何のため/u.test(s)) return 'intent';
+        if (/とは|教えて|ありますか|ですか/u.test(s)) return 'truth';
+        return null;
+      })(),
+
+    goalKind:
+    String(
+      (ctxPackForWriter as any)?.goalKind ??
+      (ctxPackForWriter as any)?.targetKind ??
+      ''
+    ).trim() || null,
+
+    deltaType: (() => {
+      const packForFirstPass = String(internalPack ?? '');
+
+      const fromFlow180 =
+        packForFirstPass
+          ? String(
+              packForFirstPass.match(/FLOW180\s*\(DO NOT OUTPUT\):[\s\S]*?deltaType=([^\n]+)/)?.[1] ?? ''
+            ).trim()
+          : '';
+      if (fromFlow180) return fromFlow180;
+
+      const fromState =
+        packForFirstPass
+          ? String(
+              packForFirstPass.match(/STATE:\n[\s\S]*?deltaType=([^\n]+)/)?.[1] ?? ''
+            ).trim()
+          : '';
+      if (fromState) return fromState;
+
+      const flowDeltaObj = (ctxPackForWriter as any)?.flow?.delta;
+      if (flowDeltaObj && typeof flowDeltaObj === 'object') {
+        const v = String((flowDeltaObj as any)?.deltaType ?? '').trim();
+        if (v) return v;
+      }
+
+      const flowDeltaType = String((ctxPackForWriter as any)?.flow?.deltaType ?? '').trim();
+      if (flowDeltaType) return flowDeltaType;
+
+      const topDeltaType = String((ctxPackForWriter as any)?.deltaType ?? '').trim();
+      if (topDeltaType) return topDeltaType;
+
+      return null;
+    })(),
+
+  returnStreak: (() => {
+    const rsFromFlow = (ctxPackForWriter as any)?.flow?.returnStreak;
+    if (typeof rsFromFlow === 'number' && Number.isFinite(rsFromFlow)) {
+      return rsFromFlow;
+    }
+
+    const rsTop = (ctxPackForWriter as any)?.returnStreak;
+    if (typeof rsTop === 'number' && Number.isFinite(rsTop)) {
+      return rsTop;
+    }
+
+    return 0;
+  })(),
+
+  continuityKind:
+    String((ctxPackForWriter as any)?.continuityKind ?? '').trim() || null,
+  });
+
+  const writerDirectivesFromSlotForFirstPass = {
+    slot_order: Array.isArray(slotDecisionForFirstPass?.order)
+      ? slotDecisionForFirstPass.order.join(',')
+      : '',
+
+    slot_opening_role: Array.isArray(slotDecisionForFirstPass?.order)
+      ? String(slotDecisionForFirstPass.order[0] ?? '')
+      : '',
+
+    ...(slotDecisionForFirstPass?.emphasis
+      ? Object.fromEntries(
+          Object.entries(slotDecisionForFirstPass.emphasis).map(([k, v]) => [
+            `slot_emphasis_${String(k).toLowerCase()}`,
+            String(v),
+          ])
+        )
+      : {}),
+
+    ...(slotDecisionForFirstPass?.weights
+      ? Object.fromEntries(
+          Object.entries(slotDecisionForFirstPass.weights).map(([k, v]) => [
+            `slot_weight_${String(k).toLowerCase()}`,
+            String(v),
+          ])
+        )
+      : {}),
+  };
+
+  let messages = buildFirstPassMessages({
   systemPrompt: systemPromptForWriter,
   internalPack,
   turns: turnsForWriter,
@@ -3877,12 +4142,26 @@ let messages = buildFirstPassMessages({
 
   userText: String((opts as any)?.userText ?? ''),
 
+  slotDecision: slotDecisionForFirstPass,
+  writerDirectives: {
+    ...writerDirectivesFromSlotForFirstPass,
+  },
+  traceId: debug.traceId ?? null,
+  conversationId: debug.conversationId ?? null,
+  userCode: debug.userCode ?? null,
+
   extra: {
     question:
-      (opts as any)?.extra?.question ??
-      (opts as any)?.userContext?.question ??
-      (opts as any)?.userContext?.meta?.extra?.question ??
-      null,
+      ((opts as any)?.ctxPack?.question &&
+      typeof (opts as any).ctxPack.question === 'object')
+        ? (opts as any).ctxPack.question
+        : ((opts as any)?.userContext?.ctxPack?.question &&
+            typeof (opts as any).userContext.ctxPack.question === 'object')
+          ? (opts as any).userContext.ctxPack.question
+          : (opts as any)?.extra?.question ??
+            (opts as any)?.userContext?.question ??
+            (opts as any)?.userContext?.meta?.extra?.question ??
+            null,
     pastStateNoteText:
       (opts as any)?.extra?.pastStateNoteText ??
       (opts as any)?.userContext?.pastStateNoteText ??
@@ -4851,11 +5130,15 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
     const isIdeaBand = detectIdeaBandProposeFromExtracted(extracted);
 
     // rephraseBlocks は renderGateway の正本になるため、
-    // adoptAsSlots に渡された本文を必ず同一ソースとして使う
+    // 表示本文の正本は writer が返した normalizedText を使う。
+    // slotPlan / llmRewriteSeed 由来の slot は control-plane なので、
+    // ここでは display 用 block の正本には採用しない。
     const normalizedText = String(text ?? '').trim();
 
-    // idea_band は「2ブロック以上」が取れないと [] になることがある。
-    // その場合は通常の段落/改行分割にフォールバックして、最低でも 1 block を作る。
+    // control-plane の slot は display block に昇格させない。
+    // slotDecision は後段の text_blocks 再配置だけに使う。
+    const slotBlocksText: string[] = [];
+
     let blocksText = isIdeaBand
       ? makeIdeaBandCandidateBlocks(normalizedText)
       : toRephraseBlocks(normalizedText);
@@ -4864,6 +5147,374 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
       blocksText = toRephraseBlocks(normalizedText);
     }
 
+    const questionTypeFromContext = String(
+      (
+        (opts as any)?.userContext?.question?.questionType ??
+        (opts as any)?.userContext?.meta?.extra?.question?.questionType ??
+        (metaExtra as any)?.ctxPack?.question?.questionType ??
+        (metaExtra as any)?.question?.questionType ??
+        ''
+      )
+    )
+      .trim()
+      .toLowerCase();
+
+    // questionType は writer 本文ではなく、必ず「ユーザーの質問文」から推定する。
+    const questionTypeSourceText = String(
+      userText ??
+        (opts as any)?.userText ??
+        (
+          Array.isArray((opts as any)?.messages)
+            ? (opts as any).messages.filter((m: any) => m?.role === 'user').slice(-1)[0]?.content
+            : ''
+        ) ??
+        ''
+    ).trim();
+
+    const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
+      const explicit = questionTypeFromContext;
+      if (
+        explicit === 'meaning' ||
+        explicit === 'structure' ||
+        explicit === 'intent' ||
+        explicit === 'truth'
+      ) {
+        return explicit;
+      }
+
+      const s = String(v ?? '').trim();
+
+      if (/構造|仕組み|関係|違い|配置|流れ|構成|背景|文脈|位置づけ/u.test(s)) return 'structure';
+      if (/意味|なぜ|どういうこと|どう受け止め|どう読める/u.test(s)) return 'meaning';
+      if (/意図|どうしたい|どう進む|どこへ向かう|何のため/u.test(s)) return 'intent';
+      if (
+        /とは|教えて|ありますか|ですか|登場しますか|出てきますか|書かれていますか|記されていますか|載っていますか|あるか|ないか/u.test(
+          s
+        )
+      ) {
+        return 'truth';
+      }
+
+      return null;
+    };
+
+    const resolvedQuestionType = inferQuestionType(
+      questionTypeSourceText || normalizedText
+    );
+
+    const slotDecision =
+      (ctxPackForWriter &&
+      typeof ctxPackForWriter === 'object' &&
+      (ctxPackForWriter as any).slotDecision &&
+      typeof (ctxPackForWriter as any).slotDecision === 'object' &&
+      Array.isArray((ctxPackForWriter as any).slotDecision.order))
+        ? ((ctxPackForWriter as any).slotDecision as {
+            weights: Record<'OBS' | 'SHIFT' | 'NEXT' | 'SAFE', number>;
+            order: Array<'OBS' | 'SHIFT' | 'NEXT' | 'SAFE'>;
+            emphasis: Record<'OBS' | 'SHIFT' | 'NEXT' | 'SAFE', 1 | 2>;
+          })
+        : computeSlotDecisionFromEngine({
+            depthStage:
+              String((ctxPackForWriter as any)?.depthStage ?? '').trim() || null,
+
+            questionType: resolvedQuestionType,
+
+            goalKind:
+              String(
+                (ctxPackForWriter as any)?.goalKind ??
+                  (ctxPackForWriter as any)?.targetKind ??
+                  ''
+              ).trim() || null,
+
+            deltaType:
+              String(
+                (ctxPackForWriter as any)?.flow?.deltaType ??
+                  (ctxPackForWriter as any)?.deltaType ??
+                  ''
+              ).trim() || null,
+
+            returnStreak:
+              typeof (ctxPackForWriter as any)?.returnStreak === 'number' &&
+              Number.isFinite((ctxPackForWriter as any).returnStreak)
+                ? (ctxPackForWriter as any).returnStreak
+                : 0,
+
+            continuityKind:
+              String((ctxPackForWriter as any)?.continuityKind ?? '').trim() || null,
+          });
+// ▼ 追加：slotDecision を ctxPack に正本として格納
+if (slotDecision && typeof slotDecision === 'object') {
+  if ((opts as any)?.ctxPack && typeof (opts as any).ctxPack === 'object') {
+    (opts as any).ctxPack.slotDecision = slotDecision;
+  }
+
+  if ((opts as any)?.userContext?.ctxPack && typeof (opts as any).userContext.ctxPack === 'object') {
+    (opts as any).userContext.ctxPack.slotDecision = slotDecision;
+  }
+}
+    let usedSlotBlocksForDisplay = false;
+
+    const normalizeBlockKey = (v: string): string =>
+      String(v ?? '')
+        .replace(/\s+/g, '')
+        .replace(/[「」『』（）()［］\[\]{}｛｝、。,.!！?？:：・\-—―_]/g, '')
+        .trim();
+
+    const originalBlocks = (Array.isArray(blocksText) ? blocksText : [])
+      .map((x) => String(x ?? '').trim())
+      .filter(Boolean);
+
+    const lockedHead = originalBlocks.length > 0 ? originalBlocks[0] : '';
+
+    const emitBlocksByEmphasis = (items: string[], emphasis: 1 | 2): string[] => {
+      const cleaned = items.map((t) => String(t ?? '').trim()).filter(Boolean);
+      if (cleaned.length === 0) return [];
+
+      if (emphasis === 1) {
+        return [cleaned.join('\n\n')];
+      }
+
+      if (cleaned.length === 1) {
+        return [cleaned[0]];
+      }
+
+      if (cleaned.length === 2) {
+        return [cleaned[0], cleaned[1]];
+      }
+
+      return [
+        cleaned[0],
+        cleaned.slice(1).join('\n\n'),
+      ];
+    };
+
+    const stripSlotMarkerPrefix = (raw: string): string =>
+      String(raw ?? '').replace(/^@[A-Z_]+\s*/, '').trim();
+
+    const parseSlotPayload = (raw: string): any | null => {
+      const body = stripSlotMarkerPrefix(raw);
+      if (!body) return null;
+      if (body.startsWith('{') || body.startsWith('[')) {
+        return safeParseJson(body);
+      }
+      return null;
+    };
+
+    const pickSlotDisplayTexts = (key: SlotName, raw: string): string[] => {
+      const payload = parseSlotPayload(raw);
+      const out: string[] = [];
+
+      const push = (v: any) => {
+        const s = String(v ?? '').trim();
+        if (!s) return;
+        if (/^\{.*\}$/.test(s)) return;
+        out.push(s);
+      };
+
+      const naturalizeShift = (p: any): string | null => {
+        const kind = String(p?.kind ?? '').trim();
+        const line = String(p?.line ?? '').trim();
+        const summary = String(p?.summary ?? '').trim();
+        const message = String(p?.message ?? '').trim();
+
+        if (summary) return summary;
+        if (message) return message;
+
+        if (kind === 'stabilize_shift') {
+          return 'いまは、揺れている見方をいったん整え直して受け取る流れです。';
+        }
+        if (kind === 'decide_shift') {
+          return 'ここでは、論点をひとつに絞って答えを置く流れです。';
+        }
+        if (kind === 'narrow_shift') {
+          return 'ここでは、話を広げすぎず一点に絞って見ます。';
+        }
+
+        if (line) {
+          const intentNow = String((p as any)?.intent ?? '').trim();
+          const hintNow = String((p as any)?.hint ?? '').trim();
+
+          if (
+            intentNow === 'answer_truth_structure' ||
+            hintNow === 'clarify_truth_structure_v1'
+          ) {
+            return null;
+          }
+
+          if (/整理します|整える|見直す方向/.test(line)) {
+            return 'いまは、見方の基準を整え直す流れです。';
+          }
+          return line;
+        }
+
+        return null;
+      };
+
+      const naturalizeNext = (p: any): string | null => {
+        const qTypeNow = String(resolvedQuestionType ?? '').trim();
+        if (qTypeNow === 'truth') {
+          return null;
+        }
+
+        const mode = String(p?.mode ?? '').trim();
+        const hint = String(p?.hint ?? '').trim();
+        const message = String(p?.message ?? '').trim();
+        const line = String(p?.line ?? '').trim();
+
+        if (message) return message;
+
+        if (mode === 'observe_hint' && hint) {
+          return '次は、新しい材料を足すより、いま出ている流れをそのまま見ます。';
+        }
+
+        if (hint) {
+          return '次は、この流れのまま一段だけ先を見ます。';
+        }
+
+        if (line) return line;
+
+        return null;
+      };
+
+      const naturalizeSafe = (p: any): string | null => {
+        const message = String(p?.message ?? '').trim();
+        const hint = String(p?.hint ?? '').trim();
+        const line = String(p?.line ?? '').trim();
+
+        if (message) return message;
+        if (hint) return 'いまは、急いで結論を増やさなくても大丈夫です。';
+        if (line) return line;
+
+        return null;
+      };
+
+      if (payload && typeof payload === 'object') {
+        if (key === 'OBS') {
+          push((payload as any).line);
+          push((payload as any).summary);
+          push((payload as any).message);
+        } else if (key === 'SHIFT') {
+          push(naturalizeShift(payload));
+        } else if (key === 'NEXT') {
+          push(naturalizeNext(payload));
+        } else if (key === 'SAFE') {
+          push(naturalizeSafe(payload));
+        }
+      }
+
+      if (out.length === 0) {
+        const plain = stripSlotMarkerPrefix(raw);
+        if (plain && !plain.startsWith('{') && !plain.startsWith('[')) {
+          push(plain);
+        }
+      }
+
+      return out.filter((s, i, arr) => arr.findIndex((x) => normalizeBlockKey(x) === normalizeBlockKey(s)) === i);
+    };
+
+    const extractedSlotsList = Array.isArray((extracted as any)?.slots)
+      ? ((extracted as any).slots as any[])
+      : [];
+
+    const slotTextBuckets = new Map<SlotName, string[]>([
+      ['OBS', []],
+      ['SHIFT', []],
+      ['NEXT', []],
+      ['SAFE', []],
+    ]);
+
+    for (const s of extractedSlotsList) {
+      const keyRaw = String((s as any)?.key ?? '').trim().toUpperCase();
+      if (keyRaw !== 'OBS' && keyRaw !== 'SHIFT' && keyRaw !== 'NEXT' && keyRaw !== 'SAFE') continue;
+
+      const picked = pickSlotDisplayTexts(keyRaw as SlotName, String((s as any)?.text ?? ''));
+      for (const line of picked) {
+        slotTextBuckets.get(keyRaw as SlotName)?.push(line);
+      }
+    }
+
+    if ((slotTextBuckets.get('OBS') ?? []).length === 0 && originalBlocks.length > 0) {
+      for (const block of originalBlocks) {
+        slotTextBuckets.get('OBS')?.push(block);
+      }
+    }
+
+    const slotDisplayBlocks: string[] = [];
+
+    const pushUniqueDisplay = (text: string) => {
+      const t = String(text ?? '').trim();
+      if (!t) return;
+      const key = normalizeBlockKey(t);
+      if (!key) return;
+      if (slotDisplayBlocks.some((x) => normalizeBlockKey(x) === key)) return;
+      slotDisplayBlocks.push(t);
+    };
+
+    for (const role of slotDecision.order) {
+      const emitted = emitBlocksByEmphasis(
+        slotTextBuckets.get(role) ?? [],
+        (slotDecision.emphasis?.[role] ?? 1) as 1 | 2,
+      );
+
+      for (const block of emitted) {
+        pushUniqueDisplay(block);
+      }
+    }
+
+    // 通常 slot を display 用 blocks として採用する。
+    // BlockPlan は明示発動のまま維持し、ここでは通常スロットだけを blocks 化する。
+    if (slotDisplayBlocks.length > 0) {
+      slotBlocksText.push(...slotDisplayBlocks);
+      blocksText = [...slotDisplayBlocks];
+      usedSlotBlocksForDisplay = true;
+    }
+
+    // writer 本文を正本として使う。
+    // ここで text_blocks を slot order で再配置すると、
+    // writer が作った段落境界や論理のつながりが崩れてしまう。
+    // display 用 block は normalizedText → toRephraseBlocks() の結果をそのまま使う。
+    // slotDecision / slotOrder は writer への指示とログ用途に限定する。
+
+    const directSlotDisplayUsed =
+      slotDisplayBlocks.length > 0 &&
+      Array.isArray(blocksText) &&
+      blocksText.length === slotDisplayBlocks.length &&
+      blocksText.every(
+        (x, i) =>
+          normalizeBlockKey(String(x ?? '')) ===
+          normalizeBlockKey(String(slotDisplayBlocks[i] ?? ''))
+      );
+
+    const reorderedTextBlocksUsed =
+      !directSlotDisplayUsed &&
+      usedSlotBlocksForDisplay &&
+      slotBlocksText.length > 0;
+
+      console.log(
+        '[IROS/rephraseEngine][SLOT_BLOCKS_DIAG_STR]',
+        JSON.stringify({
+          traceId: (debug as any)?.traceId ?? null,
+          conversationId: (debug as any)?.conversationId ?? null,
+          userCode: (debug as any)?.userCode ?? null,
+          slotBlocksLen: slotBlocksText.length,
+          slotBlocksHead: slotBlocksText.slice(0, 4).map((x) => safeHead(String(x), 80)),
+          pickedBlocksSource: directSlotDisplayUsed
+            ? 'slot_blocks'
+            : reorderedTextBlocksUsed
+              ? 'text_blocks_reordered'
+              : 'text_blocks',
+          finalBlocksLen: Array.isArray(blocksText) ? blocksText.length : 0,
+          note: directSlotDisplayUsed
+            ? 'slot_blocks_used_for_display'
+            : reorderedTextBlocksUsed
+              ? 'text_blocks_reordered_for_display'
+              : 'slot_blocks_filtered_fallback_to_text_blocks',
+          slotOrder: slotDecision.order,
+          slotWeights: slotDecision.weights,
+          slotEmphasis: slotDecision.emphasis,
+          questionType: resolvedQuestionType,
+        })
+      );
 
     // --- LLM signals（密度など）を抽出して meta.extra に積む（depth直結禁止）
     const clamp01 = (x: number): number => {
@@ -4889,7 +5540,10 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
       return { density, charLen, newlines, punctRatio, kanjiRatio };
     };
 
-    const blocks = blocksText.map((t) => ({ text: t, kind: 'p' }));
+    const blocks = blocksText.map((t) => ({
+      text: String(t ?? '').trim(),
+      kind: 'p',
+    }));
 
     // ✅ 1回だけ代入（重複排除）
     metaExtra.rephraseBlocks = blocks;
@@ -4924,6 +5578,10 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
     try {
       (debug as any).rephraseBlocks = blocks;
       (debug as any).llmSignals = (metaExtra as any).llmSignals ?? null;
+      (metaExtra as any).ctxPack = {
+        ...(metaExtra as any).ctxPack,
+        slotDecision,
+      };
     } catch {}
 
     logRephraseAfterAttach(debug, inKeys, outSlots[0]?.text ?? '', note ?? 'LLM', metaExtra);
@@ -5422,13 +6080,24 @@ raw = await (async () => {
     (opts as any)?.userContext?.meta?.extra?.pastStateKeyword ??
     ''
   ).trim();
-
+  console.log(
+    `[IROS/PAST_STATE][raw_values] traceId=${String((opts as any)?.traceId ?? (opts as any)?.extra?.traceId ?? '')}` +
+      ` len=${pastStateNoteText.length}` +
+      ` trigger=${pastStateTriggerKind || '(null)'}` +
+      ` keyword=${pastStateKeyword || '(null)'}` +
+      ` head=${safeHead(pastStateNoteText, 200)}`
+  );
   const questionForWriter =
-    (opts as any)?.extra?.question ??
-    (opts as any)?.userContext?.question ??
-    (opts as any)?.userContext?.meta?.extra?.question ??
-    null;
-
+    ((opts as any)?.ctxPack?.question &&
+    typeof (opts as any).ctxPack.question === 'object')
+      ? (opts as any).ctxPack.question
+      : ((opts as any)?.userContext?.ctxPack?.question &&
+          typeof (opts as any).userContext.ctxPack.question === 'object')
+        ? (opts as any).userContext.ctxPack.question
+        : (opts as any)?.extra?.question ??
+          (opts as any)?.userContext?.question ??
+          (opts as any)?.userContext?.meta?.extra?.question ??
+          null;
   const questionDomainForWriter = String(
     (questionForWriter as any)?.domain ?? ''
   ).trim();
@@ -5579,48 +6248,81 @@ raw = await (async () => {
     return lines.join('\n');
   })();
 
-  const stateCuesMsg = null;
+  const shouldInjectStateCues =
+    !alreadyHasStateCues && !!stateCuesText.trim() && !!pastStateNoteText;
+
+  const stateCuesMsg =
+    shouldInjectStateCues
+      ? ({ role: 'assistant', content: stateCuesText } as const)
+      : null;
 
   // 今回は軽量優先:
-  // STATE_CUES_V3 を assistant message としては注入しない。
-  // 理由:
-  // - writer 入力の assistant 本数が増える
-  // - lastRole が assistant になりうる
-  // - INTERNAL_PACK / COORD / FLOW_MEANING で十分な局面理解を持てる
-  const messagesForWriter = sanitizedBaseMsgs;
+  // ただし pastStateNoteText がある時だけは STATE_CUES_V3 を assistant message として注入する。
+  const messagesForWriter = stateCuesMsg
+  ? sanitizedBaseMsgs.length > 0 && sanitizedBaseMsgs[0]?.role === 'system'
+    ? [sanitizedBaseMsgs[0], stateCuesMsg, ...sanitizedBaseMsgs.slice(1)]
+    : [stateCuesMsg, ...sanitizedBaseMsgs]
+  : sanitizedBaseMsgs;
 
-  const injectedStateCues = false;
-  const stateCuesDisabledReason = 'DISABLED_FOR_LIGHTWEIGHT_WRITER';
+  const injectedStateCues = !!stateCuesMsg;
+
+  const stateCuesDisabledReason =
+    stateCuesMsg
+      ? null
+      : 'DISABLED_FOR_LIGHTWEIGHT_WRITER';
 
   console.log('[IROS/STATE_CUES][inject]', {
     traceId: debug.traceId ?? null,
     baseLen: baseMsgs.length,
     finalLen: messagesForWriter.length,
     injected: injectedStateCues,
-    disabled: true,
+    disabled: !injectedStateCues,
     disabledReason: stateCuesDisabledReason,
     hasStateCues: messagesForWriter.some((m) => {
       const c = String(m?.content ?? '');
-      return c.includes('STATE_CUES (DO NOT OUTPUT)') || c.includes('STATE_CUES_V3 (DO NOT OUTPUT)');
+      return (
+        c.includes('STATE_CUES (DO NOT OUTPUT)') ||
+        c.includes('STATE_CUES_V3 (DO NOT OUTPUT)')
+      );
     }),
     stateCuesHead: safeHead(
       String(
         (
           messagesForWriter.find((m) => {
             const c = String(m?.content ?? '');
-            return c.includes('STATE_CUES (DO NOT OUTPUT)') || c.includes('STATE_CUES_V3 (DO NOT OUTPUT)');
+            return (
+              c.includes('STATE_CUES (DO NOT OUTPUT)') ||
+              c.includes('STATE_CUES_V3 (DO NOT OUTPUT)')
+            );
           }) as any
         )?.content ?? ''
       ),
       1600
     ),
     digest_has: !!historyDigestV1,
-    digest_kind: historyDigestV1 == null ? null : Array.isArray(historyDigestV1) ? 'array' : typeof historyDigestV1,
-    digest_topic: safeHead(String((historyDigestV1 as any)?.topic?.situationTopic ?? ''), 120),
-    digest_summary: safeHead(String((historyDigestV1 as any)?.topic?.situationSummary ?? ''), 160),
-    digest_last_user_core: safeHead(String((historyDigestV1 as any)?.continuity?.last_user_core ?? ''), 200),
-    digest_last_assistant_core: safeHead(String((historyDigestV1 as any)?.continuity?.last_assistant_core ?? ''), 200),
-    digest_repeat_signal: !!((historyDigestV1 as any)?.continuity?.repeatSignal),
+    digest_kind:
+      historyDigestV1 == null
+        ? 'null'
+        : Array.isArray(historyDigestV1)
+          ? 'array'
+          : typeof historyDigestV1,
+    digest_topic: safeHead(
+      String((historyDigestV1 as any)?.topic?.situationTopic ?? ''),
+      120
+    ),
+    digest_summary: safeHead(
+      String((historyDigestV1 as any)?.topic?.situationSummary ?? ''),
+      160
+    ),
+    digest_last_user_core: safeHead(
+      String((historyDigestV1 as any)?.continuity?.last_user_core ?? ''),
+      200
+    ),
+    digest_last_assistant_core: safeHead(
+      String((historyDigestV1 as any)?.continuity?.last_assistant_core ?? ''),
+      200
+    ),
+    digest_repeat_signal: !!((historyDigestV1 as any)?.continuity?.repeat_signal),
   });
   const __writerAssistantCandidates = messagesForWriter.filter(
     (m) => m?.role === 'assistant' && typeof m?.content === 'string'
@@ -5811,24 +6513,150 @@ let transitionMeaning: string | null = transitionMeaningFromSeed || null;
 }
 // ===== END =====
 
-  console.log('[IROS/rephraseEngine][STATE_SNAPSHOT_FOR_WRITER]', {
-    traceId: debug.traceId ?? null,
-    conversationId: debug.conversationId ?? null,
-    userCode: debug.userCode ?? null,
-    messagesLen: messagesForWriter.length,
-    roles: messagesForWriter.map((m) => m?.role),
-    hasMirrorFlowSeed:
+console.log('[IROS/rephraseEngine][STATE_SNAPSHOT_FOR_WRITER]', {
+  traceId: debug.traceId ?? null,
+  conversationId: debug.conversationId ?? null,
+  userCode: debug.userCode ?? null,
+  messagesLen: messagesForWriter.length,
+  roles: messagesForWriter.map((m) => m?.role),
+  hasMirrorFlowSeed:
     /MIRROR_FLOW_SEED_V1\b/.test(__writerInjectedPack) ||
     /FLOW_SEED_V1\b/.test(__writerInjectedPack) ||
     /FLOW:\s*\n/.test(__writerInjectedPack),
-    injectedPackHead: __writerInjectedPack.slice(0, 800),
-    stateAssistantHead: __writerStateHead,
-    lastAssistantHead: String(__writerAssistantLast?.content ?? '').slice(0, 300),
-  });
-      return await callWriterLLM({
-        model: opts.model ?? 'gpt-5',
-        temperature: opts.temperature ?? 0.7,
-        messages: messagesForWriter,
+  injectedPackHead: __writerInjectedPack.slice(0, 800),
+  stateAssistantHead: __writerStateHead,
+  lastAssistantHead: String(__writerAssistantLast?.content ?? '').slice(0, 300),
+});
+
+// ✅ writer直前で使う slotDecision をこの場で確定して ctxPackForWriter に注入
+const slotDecisionForWriter = computeSlotDecisionFromEngine({
+  depthStage:
+    String((ctxPackForWriter as any)?.depthStage ?? '').trim() || null,
+
+    questionType: (() => {
+      const s = String((opts as any)?.userText ?? '').trim();
+      if (/構造|仕組み|関係|違い|配置|流れ|構成/u.test(s)) return 'structure';
+      if (/意味|なぜ|どういうこと|どう受け止め|どう読める/u.test(s)) return 'meaning';
+      if (/意図|どうしたい|どう進む|どこへ向かう|何のため/u.test(s)) return 'intent';
+      if (/とは|教えて|ありますか|ですか/u.test(s)) return 'truth';
+      return null;
+    })(),
+
+  goalKind:
+    String(
+      (ctxPackForWriter as any)?.goalKind ??
+      (ctxPackForWriter as any)?.targetKind ??
+      ''
+    ).trim() || null,
+
+    deltaType: (() => {
+      const fromFlow180 =
+        typeof packNorm === 'string' && packNorm
+          ? String(
+              packNorm.match(/FLOW180\s*\(DO NOT OUTPUT\):[\s\S]*?deltaType=([^\n]+)/)?.[1] ?? ''
+            ).trim()
+          : '';
+      if (fromFlow180) return fromFlow180;
+
+      const fromState =
+        typeof packNorm === 'string' && packNorm
+          ? String(
+              packNorm.match(/STATE:\n[\s\S]*?deltaType=([^\n]+)/)?.[1] ?? ''
+            ).trim()
+          : '';
+      if (fromState) return fromState;
+
+      const flowDeltaObj = (ctxPackForWriter as any)?.flow?.delta;
+      if (flowDeltaObj && typeof flowDeltaObj === 'object') {
+        const v = String((flowDeltaObj as any)?.deltaType ?? '').trim();
+        if (v) return v;
+      }
+
+      const flowDeltaType = String((ctxPackForWriter as any)?.flow?.deltaType ?? '').trim();
+      if (flowDeltaType) return flowDeltaType;
+
+      const topDeltaType = String((ctxPackForWriter as any)?.deltaType ?? '').trim();
+      if (topDeltaType) return topDeltaType;
+
+      return null;
+    })(),
+
+  returnStreak: (() => {
+    const rsFromFlow = (ctxPackForWriter as any)?.flow?.returnStreak;
+    if (typeof rsFromFlow === 'number' && Number.isFinite(rsFromFlow)) {
+      return rsFromFlow;
+    }
+
+    const rsTop = (ctxPackForWriter as any)?.returnStreak;
+    if (typeof rsTop === 'number' && Number.isFinite(rsTop)) {
+      return rsTop;
+    }
+
+    return 0;
+  })(),
+
+  continuityKind:
+    String((ctxPackForWriter as any)?.continuityKind ?? '').trim() || null,
+});
+
+if (ctxPackForWriter && typeof ctxPackForWriter === 'object') {
+  (ctxPackForWriter as any).slotDecision = slotDecisionForWriter;
+}
+const writerDirectivesFromSlot = {
+  slot_order: Array.isArray(slotDecisionForWriter?.order)
+    ? slotDecisionForWriter.order.join(',')
+    : '',
+
+  slot_opening_role: Array.isArray(slotDecisionForWriter?.order)
+    ? String(slotDecisionForWriter.order[0] ?? '')
+    : '',
+
+  ...(slotDecisionForWriter?.emphasis
+    ? Object.fromEntries(
+        Object.entries(slotDecisionForWriter.emphasis).map(([k, v]) => [
+          `slot_emphasis_${String(k).toLowerCase()}`,
+          String(v),
+        ])
+      )
+    : {}),
+
+  ...(slotDecisionForWriter?.weights
+    ? Object.fromEntries(
+        Object.entries(slotDecisionForWriter.weights).map(([k, v]) => [
+          `slot_weight_${String(k).toLowerCase()}`,
+          String(v),
+        ])
+      )
+    : {}),
+};
+console.log(
+  '[IROS/rephraseEngine][CALL_WRITER_ARGS]',
+  JSON.stringify({
+    traceId: debug.traceId ?? null,
+    conversationId: debug.conversationId ?? null,
+    userCode: debug.userCode ?? null,
+    hasSlotDecisionForWriter: !!slotDecisionForWriter,
+    slotDecisionKeys:
+      slotDecisionForWriter && typeof slotDecisionForWriter === 'object'
+        ? Object.keys(slotDecisionForWriter)
+        : [],
+    slotOrder:
+      Array.isArray((slotDecisionForWriter as any)?.order)
+        ? (slotDecisionForWriter as any).order
+        : [],
+    writerDirectiveKeys: Object.keys(writerDirectivesFromSlot ?? {}),
+    writerDirectivePreview: writerDirectivesFromSlot,
+  })
+);
+
+return await callWriterLLM({
+  model: opts.model ?? 'gpt-5',
+  temperature: opts.temperature ?? 0.7,
+  messages: messagesForWriter,
+  ...({ slotDecision: slotDecisionForWriter } as any),
+  writerDirectives: {
+    ...writerDirectivesFromSlot,
+  },
 
         // ✅ 追加：冒頭オウム返しガード用（messagesには入れない。比較専用）
         echoGuardUserText: String((opts as any)?.userText ?? ''),
@@ -5842,63 +6670,107 @@ let transitionMeaning: string | null = transitionMeaningFromSeed || null;
 
 // ✅ NEW: writerCalls.ts で question / pastState / goalKind を参照できるように渡す
 extra: {
-  ...(((opts as any)?.extra && typeof (opts as any).extra === 'object') ? (opts as any).extra : {}),
+  ...(((opts as any)?.extra && typeof (opts as any).extra === 'object')
+    ? (opts as any).extra
+    : {}),
+
   question:
     ((opts as any)?.extra?.question) ??
     ((opts as any)?.userContext?.question) ??
     ((opts as any)?.userContext?.meta?.extra?.question) ??
     null,
+
   pastStateNoteText:
     ((opts as any)?.extra?.pastStateNoteText) ??
     ((opts as any)?.userContext?.pastStateNoteText) ??
     ((opts as any)?.userContext?.meta?.extra?.pastStateNoteText) ??
     null,
+
   pastStateTriggerKind:
     ((opts as any)?.extra?.pastStateTriggerKind) ??
     ((opts as any)?.userContext?.pastStateTriggerKind) ??
     ((opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind) ??
     null,
+
   pastStateKeyword:
     ((opts as any)?.extra?.pastStateKeyword) ??
     ((opts as any)?.userContext?.pastStateKeyword) ??
     ((opts as any)?.userContext?.meta?.extra?.pastStateKeyword) ??
     null,
+
   goalKind:
     (opts as any)?.goalKind ??
     (opts as any)?.userContext?.goalKind ??
     (opts as any)?.userContext?.ctxPack?.goalKind ??
     (opts as any)?.userContext?.ctxPack?.replyGoal?.kind ??
-    null,
+    (ctxPackForWriter?.goalKind ?? null),
 },
 
 userContext: {
-  ...(((opts as any)?.userContext && typeof (opts as any).userContext === 'object') ? (opts as any).userContext : {}),
+  ...(((opts as any)?.userContext && typeof (opts as any).userContext === 'object')
+    ? (opts as any).userContext
+    : {}),
 
-  ctxPack: {
-    ...((((opts as any)?.userContext?.ctxPack &&
-      typeof (opts as any).userContext.ctxPack === 'object')
-      ? (opts as any).userContext.ctxPack
-      : {})),
-    ...((((opts as any)?.ctxPack &&
-      typeof (opts as any).ctxPack === 'object')
-      ? (opts as any).ctxPack
-      : {})),
-    ...((((opts as any)?.ctxPack?.irMeta &&
-      typeof (opts as any).ctxPack.irMeta === 'object')
-      ? { irMeta: (opts as any).ctxPack.irMeta }
-      : {})),
-    ...((((opts as any)?.ctxPack?.detailMode === true) ||
-      ((opts as any)?.userContext?.ctxPack?.detailMode === true))
-      ? { detailMode: true }
-      : {}),
-  },
+    ctxPack: {
+      ...((((opts as any)?.userContext?.ctxPack &&
+        typeof (opts as any).userContext.ctxPack === 'object')
+        ? (opts as any).userContext.ctxPack
+        : {})),
+      ...((((opts as any)?.ctxPack &&
+        typeof (opts as any).ctxPack === 'object')
+        ? (opts as any).ctxPack
+        : {})),
+      ...((((opts as any)?.ctxPack?.irMeta &&
+        typeof (opts as any).ctxPack.irMeta === 'object')
+        ? { irMeta: (opts as any).ctxPack.irMeta }
+        : {})),
+      ...((((opts as any)?.ctxPack?.detailMode === true) ||
+        ((opts as any)?.userContext?.ctxPack?.detailMode === true))
+        ? { detailMode: true }
+        : {}),
+      ...((ctxPackForWriter && typeof ctxPackForWriter === 'object')
+        ? ctxPackForWriter
+        : {}),
+      ...(((((raw as any)?.meta?.extra?.ctxPack) &&
+        typeof (raw as any).meta.extra.ctxPack === 'object')
+        ? (raw as any).meta.extra.ctxPack
+        : {})),
+      slotDecision: slotDecisionForWriter,
+    },
+
+  goalKind:
+    (opts as any)?.goalKind ??
+    (opts as any)?.userContext?.goalKind ??
+    (opts as any)?.userContext?.ctxPack?.goalKind ??
+    (opts as any)?.userContext?.ctxPack?.replyGoal?.kind ??
+    (ctxPackForWriter?.goalKind ?? null),
+
+  shiftKind:
+    (opts as any)?.ctxPack?.shiftKind ??
+    (opts as any)?.userContext?.ctxPack?.shiftKind ??
+    (opts as any)?.userContext?.meta?.extra?.ctxPack?.shiftKind ??
+    (ctxPackForWriter?.shiftKind ?? null),
+
+  shiftHint:
+    (opts as any)?.ctxPack?.shiftHint ??
+    (opts as any)?.userContext?.ctxPack?.shiftHint ??
+    (opts as any)?.userContext?.meta?.extra?.ctxPack?.shiftHint ??
+    (ctxPackForWriter?.shiftHint ?? null),
+
+  shiftIntent:
+    (opts as any)?.ctxPack?.shiftIntent ??
+    (opts as any)?.userContext?.ctxPack?.shiftIntent ??
+    (opts as any)?.userContext?.meta?.extra?.ctxPack?.shiftIntent ??
+    (ctxPackForWriter?.shiftIntent ?? null),
 
   meta: {
-    ...((((opts as any)?.userContext?.meta && typeof (opts as any).userContext.meta === 'object')
+    ...((((opts as any)?.userContext?.meta &&
+      typeof (opts as any).userContext.meta === 'object')
       ? (opts as any).userContext.meta
       : {})),
     extra: {
-      ...(((((opts as any)?.userContext?.meta?.extra) && typeof (opts as any).userContext.meta.extra === 'object')
+      ...((((opts as any)?.userContext?.meta?.extra &&
+        typeof (opts as any).userContext.meta.extra === 'object')
         ? (opts as any).userContext.meta.extra
         : {})),
       question:
@@ -5921,36 +6793,15 @@ userContext: {
         ((opts as any)?.userContext?.pastStateKeyword) ??
         ((opts as any)?.userContext?.meta?.extra?.pastStateKeyword) ??
         null,
-        ctxPack: {
-          ...ctxPackForWriter,
-
-          goalKind:
-            (opts as any)?.goalKind ??
-            (opts as any)?.userContext?.goalKind ??
-            (ctxPackForWriter?.goalKind ?? null),
-
-          shiftKind:
-            (opts as any)?.ctxPack?.shiftKind ??
-            (opts as any)?.userContext?.ctxPack?.shiftKind ??
-            (opts as any)?.userContext?.meta?.extra?.ctxPack?.shiftKind ??
-            (ctxPackForWriter?.shiftKind ?? null),
-
-          shiftHint:
-            (opts as any)?.ctxPack?.shiftHint ??
-            (opts as any)?.userContext?.ctxPack?.shiftHint ??
-            (opts as any)?.userContext?.meta?.extra?.ctxPack?.shiftHint ??
-            (ctxPackForWriter?.shiftHint ?? null),
-
-          shiftIntent:
-            (opts as any)?.ctxPack?.shiftIntent ??
-            (opts as any)?.userContext?.ctxPack?.shiftIntent ??
-            (opts as any)?.userContext?.meta?.extra?.ctxPack?.shiftIntent ??
-            (ctxPackForWriter?.shiftIntent ?? null),
-        },
+      goalKind:
+        (opts as any)?.goalKind ??
+        (opts as any)?.userContext?.goalKind ??
+        (opts as any)?.userContext?.ctxPack?.goalKind ??
+        (opts as any)?.userContext?.ctxPack?.replyGoal?.kind ??
+        (ctxPackForWriter?.goalKind ?? null),
     },
   },
 },
-
         // ✅ task のときだけ raw user を許可（writerCalls.ts 側で判定に使う）
         // - directTask が true なら許可
         // - inputKind が task なら許可
@@ -7685,10 +8536,79 @@ userContext: {
     if (preferSeedDraft) return a || c || b || '';
     return b || a || c || '';
   })();
+  const retrySlotDecisionForWriter = computeSlotDecisionFromEngine({
+    depthStage:
+      String((ctxPackForWriter as any)?.depthStage ?? '').trim() || null,
 
+    questionType: (() => {
+      const s = String((opts as any)?.userText ?? '').trim();
+      if (/構造|仕組み|関係|違い|配置|流れ|構成/u.test(s)) return 'structure';
+      if (/意味|なぜ|どういうこと|どう受け止め|どう読める/u.test(s)) return 'meaning';
+      if (/意図|どうしたい|どう進む|どこへ向かう|何のため/u.test(s)) return 'intent';
+      if (/とは|教えて|ありますか|ですか/u.test(s)) return 'truth';
+      return null;
+    })(),
+
+    goalKind:
+      String(
+        (ctxPackForWriter as any)?.goalKind ??
+          (ctxPackForWriter as any)?.targetKind ??
+          ''
+      ).trim() || null,
+
+    deltaType:
+      String(
+        (ctxPackForWriter as any)?.flow?.deltaType ??
+          (ctxPackForWriter as any)?.deltaType ??
+          ''
+      ).trim() || null,
+
+    returnStreak:
+      typeof (ctxPackForWriter as any)?.returnStreak === 'number' &&
+      Number.isFinite((ctxPackForWriter as any).returnStreak)
+        ? (ctxPackForWriter as any).returnStreak
+        : 0,
+
+    continuityKind:
+      String((ctxPackForWriter as any)?.continuityKind ?? '').trim() || null,
+  });
+
+  const retryWriterDirectivesFromSlot = {
+    slot_order: Array.isArray(retrySlotDecisionForWriter?.order)
+      ? retrySlotDecisionForWriter.order.join(',')
+      : '',
+
+    slot_opening_role: Array.isArray(retrySlotDecisionForWriter?.order)
+      ? String(retrySlotDecisionForWriter.order[0] ?? '')
+      : '',
+
+    ...(retrySlotDecisionForWriter?.emphasis
+      ? Object.fromEntries(
+          Object.entries(retrySlotDecisionForWriter.emphasis).map(([k, v]) => [
+            `slot_emphasis_${String(k).toLowerCase()}`,
+            String(v),
+          ])
+        )
+      : {}),
+
+    ...(retrySlotDecisionForWriter?.weights
+      ? Object.fromEntries(
+          Object.entries(retrySlotDecisionForWriter.weights).map(([k, v]) => [
+            `slot_weight_${String(k).toLowerCase()}`,
+            String(v),
+          ])
+        )
+      : {}),
+  };
   return await runRetryPass({
     debug,
-    opts,
+    opts: {
+      ...(opts ?? {}),
+      slotDecision: retrySlotDecisionForWriter,
+      writerDirectives: {
+        ...retryWriterDirectivesFromSlot,
+      },
+    },
     slotPlanPolicyResolved,
 
     systemPrompt,

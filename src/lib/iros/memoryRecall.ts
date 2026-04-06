@@ -222,6 +222,9 @@ type MemoryStateRow = {
   self_acceptance: number | null;
   situation_summary: string | null;
   situation_topic: string | null;
+
+  // ✅ 追加
+  is_ir_diagnosis?: boolean | null;
 };
 
 type SnapshotRow = {
@@ -235,6 +238,9 @@ type SnapshotRow = {
   self_acceptance: number | null;
   situation_summary: string | null;
   situation_topic: string | null;
+
+  // ✅ 追加
+  is_ir_diagnosis?: boolean | null;
 };
 
 /**
@@ -269,6 +275,7 @@ async function loadRecentSnapshots(args: {
     self_acceptance: row.self_acceptance,
     situation_summary: row.situation_summary,
     situation_topic: row.situation_topic,
+    is_ir_diagnosis: false,
   });
 
   const toSnapshotFromMemory = (row: MemoryStateRow): SnapshotRow => ({
@@ -279,16 +286,16 @@ async function loadRecentSnapshots(args: {
     self_acceptance: row.self_acceptance,
     situation_summary: row.situation_summary,
     situation_topic: row.situation_topic,
+    is_ir_diagnosis: row.is_ir_diagnosis ?? false,
   });
 
   const filterAndDedupeSnapshots = (rows: SnapshotRow[]): SnapshotRow[] => {
     const filtered = rows.filter((row) => {
+      // ✅ ir診断は除外
+      if (row.is_ir_diagnosis === true) return false;
+
       // ✅ situation_summary だけでなく summary も候補にする
-      const rawSummary = String(
-        row.situation_summary ??
-        row.summary ??
-        ''
-      ).trim();
+      const rawSummary = String(row.situation_summary ?? row.summary ?? '').trim();
 
       const rawTopic = String(row.situation_topic ?? '').trim();
 
@@ -334,8 +341,6 @@ async function loadRecentSnapshots(args: {
           const hitSummary = summaryNorm.includes(kwNorm);
           const hitTopic = topicNorm.includes(kwNorm);
 
-          // training fallback / memory_state fallback でも
-          // keyword と無関係なノイズ候補を落とす
           if (!hitSummary && !hitTopic) return false;
         }
       }
@@ -448,6 +453,61 @@ async function loadRecentSnapshots(args: {
   const snapshots = (memData as MemoryStateRow[]).map(toSnapshotFromMemory);
   return filterAndDedupeSnapshots(snapshots);
 }
+
+// ========================================
+// 🔶 IrDiagnosisSnapshot 型
+// ========================================
+export type IrDiagnosisSnapshot = {
+  target: string | null;
+  observation: string | null;
+  state: string | null;
+  summary: string | null;
+  createdAt: string | null;
+};
+
+// ========================================
+// 🔶 loadLatestIrDiagnosisSnapshot（枠だけ）
+// ========================================
+export async function loadLatestIrDiagnosisSnapshot(
+  supabase: any,
+  userCode: string
+): Promise<IrDiagnosisSnapshot | null> {
+  try {
+    const { data, error } = await supabase
+      .from('iros_memory_state')
+      .select(`
+        last_ir_diagnosis_target,
+        last_ir_diagnosis_observation,
+        last_ir_diagnosis_state,
+        last_ir_diagnosis_summary,
+        last_ir_diagnosis_at
+      `)
+      .eq('user_code', userCode)
+      .eq('is_ir_diagnosis', true)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[IROS][loadLatestIrDiagnosisSnapshot] query error', error);
+      return null;
+    }
+
+    if (!data) return null;
+
+    return {
+      target: data.last_ir_diagnosis_target ?? null,
+      observation: data.last_ir_diagnosis_observation ?? null,
+      state: data.last_ir_diagnosis_state ?? null,
+      summary: data.last_ir_diagnosis_summary ?? null,
+      createdAt: data.last_ir_diagnosis_at ?? null,
+    };
+  } catch (e) {
+    console.warn('[IROS][loadLatestIrDiagnosisSnapshot] failed', e);
+    return null;
+  }
+}
+
 /**
  * スナップショット配列から IROS_PAST_STATE_NOTE 文字列を組み立てる
  *
@@ -588,7 +648,7 @@ export async function preparePastStateNoteForTurn(args: {
   const forceFallback =
     typeof args.forceRecentTopicFallback === 'boolean'
       ? args.forceRecentTopicFallback
-      : false;
+      : true;
 
   // ✅ 明示指定がある場合だけ recent_topic に倒す
   // - 通常の知識質問・構造質問では pastStateRecall を混ぜない

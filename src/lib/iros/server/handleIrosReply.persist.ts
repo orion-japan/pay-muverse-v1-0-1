@@ -1452,6 +1452,40 @@ if (qCountsPicked != null || shouldWriteQCountsBecausePhase) {
     // =========================================================
     // upsert（列欠損を許容して 1回だけ再試行）
     // =========================================================
+// ✅ ir診断フラグ
+const isIrDiagnosisTurn =
+  (metaForSave as any)?.extra?.isIrDiagnosisTurn === true ||
+  (metaForSave as any)?.extra?.presentationKind === 'diagnosis' ||
+  (metaForSave as any)?.presentationKind === 'diagnosis';
+
+upsertPayload.is_ir_diagnosis = isIrDiagnosisTurn;
+
+// ========================================
+// 🔶 ir診断 snapshot 保存
+// ========================================
+if (isIrDiagnosisTurn) {
+  const diag =
+    (metaForSave as any)?.extra?.irMeta ??
+    (metaForSave as any)?.extra?.ctxPack?.irMeta ??
+    (metaForSave as any)?.irMeta ??
+    {};
+
+  upsertPayload.last_ir_diagnosis_target =
+    diag.targetLabel ?? null;
+
+  upsertPayload.last_ir_diagnosis_observation =
+    diag.observationResult ?? null;
+
+  upsertPayload.last_ir_diagnosis_state =
+    diag.awarenessText ?? null;
+
+  upsertPayload.last_ir_diagnosis_summary =
+    diag.summaryText ?? null;
+
+  upsertPayload.last_ir_diagnosis_at =
+    new Date().toISOString();
+}
+
     let { error } = await supabase.from('iros_memory_state').upsert(upsertPayload, {
       onConflict: 'user_code',
     });

@@ -4,6 +4,7 @@ export type PromptQuestionType =
   | 'meaning'
   | 'structure'
   | 'intent'
+  | 'truth'
   | null
   | undefined;
 
@@ -40,12 +41,11 @@ export function buildIdentityBlock(): string {
 export function buildBaseRuleBlock(): string {
   return joinLines([
     '【基本ルール】',
-    '前半で今回の核心が読めるようにする。',
-    '状態説明ラベルではなく、相手に返す自然文で書く。',
-    '聞かれていない方向へ飛ばない。',
-    '会話として自然で、密度は落としすぎない。',
-    '必要なときだけ一段深い意味を短く添える。',
-    '最後は一行で自然に閉じる。',
+    '入力として与えられた構造を崩さず、そのまま自然な会話文に整える。',
+    '新しい意味や解釈を追加しない。',
+    '書かれていない意図や内面を補わない。',
+    '構造の順序は変更しない。',
+    '段落ごとの役割を混ぜない。',
   ]);
 }
 
@@ -91,6 +91,15 @@ export function buildQuestionTypeBlock(
       '意図や方向を扱うときも壮大化しない。',
       '未来を広げる前に、いま成立させたい一点を返す。',
       '美しい言い換えより、生活文として通る言葉を優先する。',
+    ]);
+  }
+
+  if (questionTypeNow === 'truth') {
+    return joinLines([
+      '【TRUTHモード】',
+      '事実や真偽を扱うときは、まず問いに対する芯の答えを返す。',
+      '広げすぎず、確認できる範囲と読みを分ける。',
+      '構造化しすぎず、会話文のまま短く明瞭に返す。',
     ]);
   }
 

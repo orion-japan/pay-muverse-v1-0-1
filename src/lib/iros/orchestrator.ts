@@ -1742,7 +1742,38 @@ if (!isIrDiagnosisTurn_here && !isGreetingTurn) {
       (mergedBaseMeta as any)?.extra?.ctxPack ??
       (mergedBaseMeta as any)?.ctxPack ??
       null;
+      const diagnosisFollowup =
+      (ctxPackForQuestion as any)?.diagnosisFollowup === true;
 
+    const diagnosisFollowupKind =
+      typeof (ctxPackForQuestion as any)?.followupKind === 'string' &&
+      String((ctxPackForQuestion as any).followupKind).trim()
+        ? String((ctxPackForQuestion as any).followupKind).trim()
+        : null;
+
+    const diagnosisTopicHint =
+      typeof (ctxPackForQuestion as any)?.topicHint === 'string' &&
+      String((ctxPackForQuestion as any).topicHint).trim()
+        ? String((ctxPackForQuestion as any).topicHint).trim()
+        : typeof (ctxPackForQuestion as any)?.lastIrDiagnosis?.summary === 'string' &&
+            String((ctxPackForQuestion as any).lastIrDiagnosis.summary).trim()
+          ? String((ctxPackForQuestion as any).lastIrDiagnosis.summary).trim()
+          : typeof (ctxPackForQuestion as any)?.lastIrDiagnosis?.observation === 'string' &&
+              String((ctxPackForQuestion as any).lastIrDiagnosis.observation).trim()
+            ? String((ctxPackForQuestion as any).lastIrDiagnosis.observation).trim()
+            : typeof (ctxPackForQuestion as any)?.lastIrDiagnosis?.state === 'string' &&
+                String((ctxPackForQuestion as any).lastIrDiagnosis.state).trim()
+              ? String((ctxPackForQuestion as any).lastIrDiagnosis.state).trim()
+              : typeof (ctxPackForQuestion as any)?.lastIrDiagnosis?.target === 'string' &&
+                  String((ctxPackForQuestion as any).lastIrDiagnosis.target).trim()
+                ? String((ctxPackForQuestion as any).lastIrDiagnosis.target).trim()
+                : null;
+
+    const diagnosisTarget =
+      typeof (ctxPackForQuestion as any)?.lastIrDiagnosis?.target === 'string' &&
+      String((ctxPackForQuestion as any).lastIrDiagnosis.target).trim()
+        ? String((ctxPackForQuestion as any).lastIrDiagnosis.target).trim()
+        : null;
     const historyDigestForQuestion =
       (ctxPackForQuestion as any)?.historyDigestV1 ??
       (meta as any)?.extra?.historyDigestV1 ??
@@ -1822,9 +1853,12 @@ if (!isIrDiagnosisTurn_here && !isGreetingTurn) {
 
         return returnLike;
       })();
-    ex.question =
-      ex.question ??
-      runQuestionEngine({
+      ex.question =
+      ex.question &&
+      typeof ex.question === 'object' &&
+      String((ex.question as any)?.questionType ?? '').trim()
+        ? ex.question
+        : runQuestionEngine({
         userText: textForCounsel,
         qCode: (meta as any)?.qCode ?? null,
         eTurn: eTurnNow,
@@ -1832,30 +1866,65 @@ if (!isIrDiagnosisTurn_here && !isGreetingTurn) {
         context: {
           conversationId: args.conversationId ?? null,
           topicHint:
-            (signalsNow as any)?.topicHint ??
-            (ctxPackForQuestion as any)?.topicDigest ??
-            (ctxPackForQuestion as any)?.conversationLine ??
-            null,
-          situationSummary: typeof lastSummaryForQuestion === 'string' ? lastSummaryForQuestion : null,
+            (diagnosisFollowup
+              ? (typeof diagnosisTopicHint === 'string' && diagnosisTopicHint.trim()
+                  ? diagnosisTopicHint
+                  : typeof (ctxPackForQuestion as any)?.topicHint === 'string' &&
+                    (ctxPackForQuestion as any).topicHint.trim()
+                    ? (ctxPackForQuestion as any).topicHint
+                    : typeof (ctxPackForQuestion as any)?.topicDigest === 'string' &&
+                      (ctxPackForQuestion as any).topicDigest.trim()
+                      ? (ctxPackForQuestion as any).topicDigest
+                      : typeof (ctxPackForQuestion as any)?.conversationLine === 'string' &&
+                        (ctxPackForQuestion as any).conversationLine.trim()
+                        ? (ctxPackForQuestion as any).conversationLine
+                        : null)
+              : ((signalsNow as any)?.topicHint ??
+                  (ctxPackForQuestion as any)?.topicHint ??
+                  (ctxPackForQuestion as any)?.topicDigest ??
+                  (ctxPackForQuestion as any)?.conversationLine ??
+                  null)),
+
+          situationSummary:
+            diagnosisFollowup &&
+            typeof diagnosisTopicHint === 'string' &&
+            diagnosisTopicHint.trim()
+              ? diagnosisTopicHint
+              : typeof lastSummaryForQuestion === 'string'
+                ? lastSummaryForQuestion
+                : null,
+
           sameTopicTurns: sameTopicTurnsForQuestion,
 
           // continuity を QuestionEngine 側で使えるように渡す
           conversationLine:
-            typeof (ctxPackForQuestion as any)?.conversationLine === 'string'
-              ? (ctxPackForQuestion as any).conversationLine
-              : null,
+            diagnosisFollowup &&
+            typeof diagnosisTopicHint === 'string' &&
+            diagnosisTopicHint.trim()
+              ? diagnosisTopicHint
+              : typeof (ctxPackForQuestion as any)?.conversationLine === 'string'
+                ? (ctxPackForQuestion as any).conversationLine
+                : null,
+
           topicDigest:
-            typeof (ctxPackForQuestion as any)?.topicDigest === 'string'
-              ? (ctxPackForQuestion as any).topicDigest
-              : null,
+            diagnosisFollowup &&
+            typeof diagnosisTopicHint === 'string' &&
+            diagnosisTopicHint.trim()
+              ? diagnosisTopicHint
+              : typeof (ctxPackForQuestion as any)?.topicDigest === 'string'
+                ? (ctxPackForQuestion as any).topicDigest
+                : null,
+
           historyDigestV1:
             historyDigestForQuestion && typeof historyDigestForQuestion === 'object'
               ? historyDigestForQuestion
               : null,
+
           lastUserCore:
             typeof (historyDigestForQuestion as any)?.continuity?.last_user_core === 'string'
               ? (historyDigestForQuestion as any).continuity.last_user_core
               : null,
+
           lastAssistantCore:
             typeof (historyDigestForQuestion as any)?.continuity?.last_assistant_core === 'string'
               ? (historyDigestForQuestion as any).continuity.last_assistant_core
@@ -2188,19 +2257,35 @@ if (shouldFallbackNormalChat) {
         const existingCtxPackForNormalChat = (((meta as any)?.extra?.ctxPack ?? {}) as any);
         const questionForNormalChat =
           (existingCtxPackForNormalChat?.question &&
-          typeof existingCtxPackForNormalChat.question === 'object')
+          typeof existingCtxPackForNormalChat.question === 'object' &&
+          String((existingCtxPackForNormalChat.question as any)?.questionType ?? '').trim())
             ? existingCtxPackForNormalChat.question
             : (((meta as any)?.extra?.question &&
                 typeof (meta as any).extra.question === 'object')
                 ? (meta as any).extra.question
                 : null);
 
-        const ctxPackForNormalChat = {
-          ...existingCtxPackForNormalChat,
-          ...(questionForNormalChat ? { question: questionForNormalChat } : {}),
-          ...(earlyShiftKindForNormalChat ? { shiftKind: earlyShiftKindForNormalChat } : {}),
-          ...(earlyResolvedAskForNormalChat ? { resolvedAsk: earlyResolvedAskForNormalChat } : {}),
-        };
+                const ctxPackForNormalChat = {
+                  ...existingCtxPackForNormalChat,
+                  ...(questionForNormalChat ? { question: questionForNormalChat } : {}),
+                  ...(earlyShiftKindForNormalChat ? { shiftKind: earlyShiftKindForNormalChat } : {}),
+                  ...(earlyResolvedAskForNormalChat ? { resolvedAsk: earlyResolvedAskForNormalChat } : {}),
+
+                  ...(existingCtxPackForNormalChat?.diagnosisFollowup === true
+                    ? { diagnosisFollowup: true }
+                    : {}),
+                  ...(typeof existingCtxPackForNormalChat?.followupKind === 'string' &&
+                    String(existingCtxPackForNormalChat.followupKind).trim()
+                    ? { followupKind: String(existingCtxPackForNormalChat.followupKind).trim() }
+                    : {}),
+                  ...(typeof existingCtxPackForNormalChat?.topicHint === 'string' &&
+                    String(existingCtxPackForNormalChat.topicHint).trim()
+                    ? { topicHint: String(existingCtxPackForNormalChat.topicHint).trim() }
+                    : {}),
+                  ...(existingCtxPackForNormalChat?.diagnosisFollowup === true
+                    ? { continuityKind: 'diagnosis_followup' }
+                    : {}),
+                };
 
     const fallback = buildNormalChatSlotPlan({
       userText: textForCounsel,

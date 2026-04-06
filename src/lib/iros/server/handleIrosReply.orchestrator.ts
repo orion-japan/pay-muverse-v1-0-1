@@ -219,7 +219,105 @@ export async function runOrchestratorTurn(
   if (safeBaseMeta.intent_anchor && typeof safeBaseMeta.intent_anchor === 'object') {
     safeBaseMeta.intent_anchor = { ...(safeBaseMeta.intent_anchor as any) };
   }
+  // =========================================================
+  // ✅ diagnosis followup：通常 question より優先して診断文脈を固定
+  // - handleIrosReply.context.ts / handleIrosReply.ts で入れた
+  //   ctxPack.diagnosisFollowup / followupKind / topicHint / lastIrDiagnosis
+  //   を Orchestrator が確実に拾う
+  // =========================================================
+  const ctxPackFromArgs =
+    (args as any)?.ctxPack && typeof (args as any).ctxPack === 'object'
+      ? (args as any).ctxPack
+      : safeBaseMeta?.extra?.ctxPack && typeof safeBaseMeta.extra.ctxPack === 'object'
+        ? safeBaseMeta.extra.ctxPack
+        : safeBaseMeta?.ctxPack && typeof safeBaseMeta.ctxPack === 'object'
+          ? safeBaseMeta.ctxPack
+          : null;
 
+  const diagnosisFollowup =
+    ctxPackFromArgs?.diagnosisFollowup === true;
+
+  const diagnosisFollowupKind =
+    typeof ctxPackFromArgs?.followupKind === 'string' &&
+    ctxPackFromArgs.followupKind.trim()
+      ? String(ctxPackFromArgs.followupKind).trim()
+      : null;
+
+  const diagnosisTopicHint =
+    typeof ctxPackFromArgs?.topicHint === 'string' &&
+    ctxPackFromArgs.topicHint.trim()
+      ? String(ctxPackFromArgs.topicHint).trim()
+      : null;
+
+  const diagnosisLastIr =
+    ctxPackFromArgs?.lastIrDiagnosis &&
+    typeof ctxPackFromArgs.lastIrDiagnosis === 'object'
+      ? ctxPackFromArgs.lastIrDiagnosis
+      : null;
+
+  if (diagnosisFollowup) {
+    (safeBaseMeta as any).extra =
+      (safeBaseMeta as any).extra && typeof (safeBaseMeta as any).extra === 'object'
+        ? (safeBaseMeta as any).extra
+        : {};
+
+    (safeBaseMeta as any).extra.ctxPack =
+      (safeBaseMeta as any).extra.ctxPack &&
+      typeof (safeBaseMeta as any).extra.ctxPack === 'object'
+        ? (safeBaseMeta as any).extra.ctxPack
+        : {};
+
+    (safeBaseMeta as any).ctxPack =
+      (safeBaseMeta as any).ctxPack && typeof (safeBaseMeta as any).ctxPack === 'object'
+        ? (safeBaseMeta as any).ctxPack
+        : {};
+
+    // diagnosis line を最優先に固定
+    (safeBaseMeta as any).isIrDiagnosisTurn = true;
+    (safeBaseMeta as any).mode = 'diagnosis';
+    (safeBaseMeta as any).presentationKind = 'diagnosis';
+
+    (safeBaseMeta as any).extra.diagnosisFollowup = true;
+    (safeBaseMeta as any).extra.followupKind =
+      diagnosisFollowupKind ?? 'concretize';
+
+    (safeBaseMeta as any).extra.ctxPack.diagnosisFollowup = true;
+    (safeBaseMeta as any).extra.ctxPack.followupKind =
+      diagnosisFollowupKind ?? 'concretize';
+    (safeBaseMeta as any).extra.ctxPack.continuityKind =
+      'diagnosis_followup';
+
+    if (diagnosisTopicHint) {
+      (safeBaseMeta as any).extra.ctxPack.topicHint = diagnosisTopicHint;
+      (safeBaseMeta as any).extra.ctxPack.conversationLine = diagnosisTopicHint;
+      (safeBaseMeta as any).extra.ctxPack.situationSummary = diagnosisTopicHint;
+    }
+
+    if (diagnosisLastIr) {
+      (safeBaseMeta as any).extra.lastIrDiagnosis = diagnosisLastIr;
+      (safeBaseMeta as any).extra.ctxPack.lastIrDiagnosis = diagnosisLastIr;
+
+      const target = String((diagnosisLastIr as any)?.target ?? '').trim();
+      if (target) {
+        (safeBaseMeta as any).extra.ctxPack.situationTopic = target;
+      }
+    }
+
+    // 通常の practical / question 再分類を弱める
+    (safeBaseMeta as any).extra.ctxPack.question = null;
+    (safeBaseMeta as any).extra.ctxPack.replyGoal = {
+      kind:
+        diagnosisFollowupKind === 'action' ? 'action' : 'clarify',
+    };
+    (safeBaseMeta as any).extra.ctxPack.goalKind =
+      diagnosisFollowupKind === 'action' ? 'action' : 'clarify';
+
+    // top-level にも同期
+    (safeBaseMeta as any).ctxPack = {
+      ...(safeBaseMeta as any).ctxPack,
+      ...((safeBaseMeta as any).extra.ctxPack ?? {}),
+    };
+  }
  // =========================================================
 // ✅ ir診断：テキストでトリガー検知 → meta に “診断線路” を刻む
 // - orchestrator.ts は meta.isIrDiagnosisTurn を見て ir-diagnosis 分岐に入る

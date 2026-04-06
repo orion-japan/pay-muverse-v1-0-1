@@ -145,6 +145,13 @@ function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey | null; f
         ? '候補を増やさず、いま出ている差だけを見やすくする'
         : 'いま出ている流れを崩さず、そのまま整えて返す';
 
+  const message =
+    laneKey === 'T_CONCRETIZE'
+      ? '次は比較を広げず、どこをひとつ決めるかに絞るのが合っています。'
+      : laneKey === 'IDEA_BAND'
+        ? '次は候補を増やすより、いま出ている差だけを見やすくするのが合っています。'
+        : '次は新しい材料を足すより、いま出ている流れの中で何が芯かを見るのが合っています。';
+
   return {
     key: 'NEXT',
     role: 'assistant',
@@ -154,12 +161,25 @@ function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey | null; f
       laneKey: laneKey ?? null,
       delta,
       hint: clamp(hint, 80),
+      message: clamp(message, 120),
     })}`,
   };
 }
+
 function buildSafeSlot(args: { reason?: string | null; laneKey?: LaneKey | null; flowDelta?: string | null }): NormalChatSlot {
   const laneKey = safeLaneKey(args.laneKey);
   const delta = args.flowDelta ? String(args.flowDelta) : null;
+
+  const reasonText = args.reason ? clamp(norm(args.reason), 120) : null;
+
+  const message =
+    reasonText
+      ? reasonText
+      : delta === 'RETURN'
+        ? 'これは後退ではなく、芯を取り直すための戻りです。'
+        : delta === 'SWITCH'
+          ? '無理に前の形へ戻す必要はなく、見え方が変わること自体は自然な移行です。'
+          : 'ここで急いで結論を増やさなくても、流れそのものは崩れていません。';
 
   return {
     key: 'SAFE',
@@ -168,11 +188,11 @@ function buildSafeSlot(args: { reason?: string | null; laneKey?: LaneKey | null;
     content: m('SAFE', {
       laneKey: laneKey ?? null,
       delta,
-      reason: args.reason ? clamp(norm(args.reason), 120) : null,
+      reason: reasonText,
+      message,
     }),
   };
 }
-
 
 // --------------------------------------------------
 // minimal detectors（意味判定はしない）
@@ -474,13 +494,14 @@ function buildClarify(
       /(作った|作られた|介入)/.test(normalizedUserText)
     );
 
-  const isStructureQuestion = questionType === 'structure';
+    const isStructureQuestion = questionType === 'structure';
+    const isTruthQuestion = questionType === 'truth';
 
-  const shouldAnswerTruthStructure =
-    resolvedAskType === 'truth_structure' ||
-    isStructureQuestion ||
-    (questionSuggestsTruthStructure && hasTruthStructureLexeme);
-
+    const shouldAnswerTruthStructure =
+      resolvedAskType === 'truth_structure' ||
+      isStructureQuestion ||
+      isTruthQuestion ||
+      (questionSuggestsTruthStructure && hasTruthStructureLexeme);
   const shouldReanswerCapability =
     resolvedAskType === 'capability_reask';
 
@@ -1984,6 +2005,28 @@ function buildFlowReply(args: {
               shiftKind2 === 'decide_shift'
                 ? '最初の1文で結論を出す / 比較で終わらない / 質問しない / 最後に行動を1つ置く'
                 : shiftLine2,
+            summary:
+              shiftKind2 === 'stabilize_shift'
+                ? 'いまは、揺れている見方をいったん整え直して受け取る流れです。'
+                : shiftKind2 === 'decide_shift'
+                  ? 'ここでは、論点をひとつに絞って答えを置く流れです。'
+                  : shiftKind2 === 'narrow_shift'
+                    ? 'ここでは、話を広げすぎず一点に絞って見ます。'
+                    : shiftKind2 === 'clarify_shift'
+                      ? 'ここでは、まず言いたい芯を取り違えないように整えます。'
+                      : shiftLine2
+                        ? `${String(shiftLine2).replace(/[。]+$/u, '').trim()}。`
+                        : null,
+            message:
+              shiftKind2 === 'stabilize_shift'
+                ? '見方が揺れているまま進めず、いったん整え直して受け取るのが合っています。'
+                : shiftKind2 === 'decide_shift'
+                  ? '比較を広げるより、ここでは答えをひとつに絞って置くのが合っています。'
+                  : shiftKind2 === 'narrow_shift'
+                    ? '話を広げすぎず、いまの論点を一点で受け取るのが合っています。'
+                    : shiftKind2 === 'clarify_shift'
+                      ? 'まずは言葉の芯を取り違えないように整えてから受け取るのが合っています。'
+                      : null,
             source: 'phase2_shift',
             rules: {
               answer_user_meaning: shiftKind2 !== 'decide_shift',
@@ -2128,11 +2171,13 @@ export function buildNormalChatSlotPlan(args: {
   } else if (isEnd(userText)) {
     reason = 'end';
     slots = buildEnd();
-  } else if (shouldUseQuestionSlots(userText)) {
-    reason = 'questionSlots';
-    usedQuestionSlots = true;
-    slots = buildQuestion(userText, lastUserText ?? undefined, laneKeyArg, flowDelta);
-  } else if ((isClarify(userText) && /[?？]/.test(userText)) || resolvedAskType === 'capability_reask') {
+  } else if (
+    ((isClarify(userText) && /[?？]/.test(userText)) ||
+      resolvedAskType === 'capability_reask' ||
+      resolvedAskType === 'truth_structure' ||
+      String((question as any)?.questionType ?? '').trim() === 'truth' ||
+      String((question as any)?.questionType ?? '').trim() === 'structure')
+  ) {
     reason = 'clarify';
     usedClarify = true;
     slots = buildClarify(

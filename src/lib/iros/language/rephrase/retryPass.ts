@@ -56,9 +56,12 @@ export async function runRetryPass(params: {
     traceId: string | null;
     conversationId: string | null;
     userCode: string | null;
-    audit: any;
 
-    // ✅ NEW: writerCalls.ts が受け取る
+    slotDecision?: any;
+    writerDirectives?: any;
+    userContext?: any;
+
+    audit: any;
     historyDigestV1?: any | null;
   }) => Promise<string>;
 
@@ -269,7 +272,19 @@ if (shouldRepairBlockPlanOnly && String(baseDraftForRepair ?? '').trim().length 
     conversationId: debug?.conversationId ?? null,
     userCode: debug?.userCode ?? null,
 
-    // ✅ NEW: retry でも digest を注入（存在しない時は null）
+    // ✅ ここが本質
+    userContext: {
+      ctxPack: {
+        ...((opts as any)?.ctxPack ?? {}),
+        slotDecision: (opts as any)?.slotDecision ?? null,
+      },
+    },
+
+    writerDirectives:
+      (opts as any)?.writerDirectives && typeof (opts as any).writerDirectives === 'object'
+        ? (opts as any).writerDirectives
+        : {},
+
     historyDigestV1: historyDigestV1 ?? null,
 
     audit: {

@@ -492,34 +492,263 @@ function renderSlotPlanText(slotPlan: any[]): string {
     lines.push(t);
   };
 
+  const normText = (v: unknown) => String(v ?? '').replace(/\s+/g, ' ').trim();
+
+  const parseTaggedJson = (raw: string, tag: string): Record<string, any> | null => {
+    const t = String(raw ?? '').trim();
+    const re = new RegExp(`^@${tag}\\s+(\\{[\\s\\S]*\\})$`);
+    const m = t.match(re);
+    if (!m?.[1]) return null;
+    try {
+      const obj = JSON.parse(m[1]);
+      return obj && typeof obj === 'object' ? obj : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const pickSeedText = (obj: any): string => {
+    return normText(
+      obj?.seed_text ??
+      obj?.seedText ??
+      obj?.text ??
+      obj?.line ??
+      '',
+    );
+  };
+
+  const pickDelta = (obj: any): string => {
+    return normText(
+      obj?.delta ??
+      obj?.flowDelta ??
+      obj?.flow?.delta ??
+      '',
+    ).toUpperCase();
+  };
+
+  const buildObsLines = (obj: any): string[] => {
+    const seed = pickSeedText(obj);
+    const delta = pickDelta(obj);
+    const out: string[] = [];
+
+    if (seed) {
+      out.push(`いまは「${seed}」を取り直している状態です。`);
+    } else {
+      out.push('いまは流れの芯を取り直している状態です。');
+    }
+
+    if (delta === 'RETURN') {
+      out.push('これは戻りではなく、流れの再接続です。');
+    } else if (delta === 'ADVANCE') {
+      out.push('流れは前に出ています。');
+    } else if (delta === 'SWITCH') {
+      out.push('流れの向きが切り替わっています。');
+    } else if (delta === 'DECIDE') {
+      out.push('いまは一つに寄せる段階です。');
+    }
+
+    return out;
+  };
+  const buildShiftLines = (obj: any): string[] => {
+    const out: string[] = [];
+    const line = normText(obj?.line);
+    const kind = normText(obj?.kind);
+    const intent = normText(obj?.intent);
+    const meaningKind = normText(obj?.meaning_kind ?? obj?.meaningKind);
+    const seed = pickSeedText(obj);
+
+    if (meaningKind === 'topic_recall') {
+      if (seed) {
+        out.push(`理由は、「${seed}」という話題そのものがまだ閉じていないからです。`);
+      } else {
+        out.push('理由は、直前までの主題がまだ閉じておらず、その流れが続いているからです。');
+      }
+      out.push('ここでは新しい論点を足すより、すでに出ている芯をそのまま取り直す必要があります。');
+      out.push('つまり、話を広げる段階ではなく、いま残っている流れを見失わないことが先です。');
+      return out;
+    }
+
+    if (meaningKind === 'truth_structure') {
+      out.push('理由は、印象だけで返すと話の芯がずれる可能性があるからです。');
+      out.push('いま必要なのは、見えている事実と、そこから読める構造を混ぜずに分けることです。');
+      out.push('その線引きが曖昧なままだと、答えはあっても手応えが弱くなります。');
+      return out;
+    }
+
+    if (kind === 'stabilize_shift' || intent === 'stabilize_direction') {
+      out.push('理由は、いま無理に動きを増やすほど、基準そのものがぶれやすいからです。');
+      out.push('この場面では、新しい材料を加えることより、すでに出ている軸を保ったまま整えることが大事です。');
+      out.push('つまり前進より先に、立ち位置を崩さないことが今回の主軸です。');
+      return out;
+    }
+
+    if (kind === 'narrow_shift' || intent === 'narrow_focus') {
+      if (seed) {
+        out.push(`理由は、「${seed}」という一点に対して、まだ複数の見方が同時に立っているからです。`);
+      } else {
+        out.push('理由は、焦点がまだ散っていて、ひとつの方向に寄り切れていないからです。');
+      }
+      out.push('このまま論点を増やすと、どれも見えているのに決まらない状態が続きます。');
+      out.push('だから今は、広げることではなく、何を主軸に置くかを一段はっきりさせる必要があります。');
+      return out;
+    }
+
+    if (kind === 'clarify' && seed) {
+      out.push(`理由は、「${seed}」がまだ言い換えだけで済む段階ではないからです。`);
+      out.push('表面の言葉を整えるだけでは、どこで引っかかっているかまでは見えてきません。');
+      out.push('いま必要なのは、言葉の整理ではなく、その奥で実際に動いている構造を一段深く定めることです。');
+      return out;
+    }
+
+    if (line) {
+      out.push(line.endsWith('。') ? line : `${line}。`);
+      out.push('その背景には、まだ一本に定まりきらない流れが残っています。');
+      out.push('だから今は結論を急ぐより、何がこの動きを作っているかを一段深く見る必要があります。');
+      return out;
+    }
+
+    if (seed) {
+      out.push(`理由は、「${seed}」をただ受け取るだけでは、まだ構造が足りないからです。`);
+      out.push('この場面では、言葉そのものより、その背後で何が動いているかを見たほうが芯に近づきます。');
+      out.push('つまり、表現より先に流れの組み方を捉え直す必要があります。');
+      return out;
+    }
+
+    out.push('理由は、まだ流れの芯と周辺が分かれきっていないからです。');
+    out.push('そのまま返すと表面はまとまっても、手応えの弱い答えになりやすいです。');
+    out.push('だから今は、何がこの動きを作っているかを先に捉える必要があります。');
+    return out;
+  };
+  const buildNextLines = (obj: any): string[] => {
+    const out: string[] = [];
+    const hint = normText(obj?.hint);
+    const mode = normText(obj?.mode);
+
+    if (hint) {
+      out.push(hint.endsWith('。') ? hint : `${hint}。`);
+    }
+
+    if (mode === 'concretize_hint') {
+      out.push('次は比較のまま広げず、どこをひとつ決めるかに焦点を絞るのが自然です。');
+    } else if (mode === 'observe_hint') {
+      out.push('次は新しい材料を足すより、いま出ている流れの中でどこが芯かを見やすくするのが合っています。');
+    }
+
+    return out;
+  };
+
+  const buildSafeLines = (obj: any): string[] => {
+    const out: string[] = [];
+    const reason = normText(obj?.reason);
+    const delta = pickDelta(obj);
+
+    if (reason) {
+      out.push(reason.endsWith('。') ? reason : `${reason}。`);
+    } else if (delta === 'RETURN') {
+      out.push('これは後退ではなく、芯を取り直すための戻りです。');
+    } else if (delta === 'SWITCH') {
+      out.push('無理に前の形へ戻す必要はなく、見え方が変わること自体は自然な移行です。');
+    } else {
+      out.push('ここで急いで結論を増やさなくても、流れそのものは崩れていません。');
+    }
+
+    return out;
+  };
+
+  const obsObjs: any[] = [];
+  const shiftObjs: any[] = [];
+  const nextObjs: any[] = [];
+  const safeObjs: any[] = [];
+  const plainLines: string[] = [];
+
+  const collectTaggedSlot = (raw: string) => {
+    const obs = parseTaggedJson(raw, 'OBS');
+    if (obs) {
+      obsObjs.push(obs);
+      return true;
+    }
+
+    const shift = parseTaggedJson(raw, 'SHIFT');
+    if (shift) {
+      shiftObjs.push(shift);
+      return true;
+    }
+
+    const next = parseTaggedJson(raw, 'NEXT_HINT');
+    if (next) {
+      nextObjs.push(next);
+      return true;
+    }
+
+    const safe = parseTaggedJson(raw, 'SAFE');
+    if (safe) {
+      safeObjs.push(safe);
+      return true;
+    }
+
+    return false;
+  };
+
   for (const s of slotPlan ?? []) {
     if (s == null) continue;
 
-    // ✅ writer seed 用：@OBS/@SHIFT/@SAFE/@NEXT_HINT など “内部行も保持”
     if (typeof s === 'string') {
-      push(s);
+      const consumed = collectTaggedSlot(s);
+      if (!consumed) {
+        plainLines.push(String(s).trim());
+      }
       continue;
     }
 
     const obj: any = s;
+// ✅ blocks対応（多層slot）
+if (Array.isArray(obj.blocks) && obj.blocks.length > 0) {
+  for (const b of obj.blocks) {
+    if (!b) continue;
 
+    if (typeof b === 'string') {
+      const consumed = collectTaggedSlot(b);
+      if (!consumed) plainLines.push(String(b).trim());
+      continue;
+    }
+
+    if (typeof b === 'object') {
+      const bContent =
+        typeof b.content === 'string'
+          ? b.content.trim()
+          : typeof b.text === 'string'
+            ? b.text.trim()
+            : '';
+
+      if (bContent) {
+        const consumed = collectTaggedSlot(bContent);
+        if (!consumed) plainLines.push(bContent);
+      }
+    }
+  }
+  continue;
+}
     const content = typeof obj.content === 'string' ? obj.content.trim() : '';
     const text = typeof obj.text === 'string' ? obj.text.trim() : '';
     const lns = Array.isArray(obj.lines) ? obj.lines : null;
 
-    if (content) {
-      push(content);
-      continue;
-    }
-
-    if (text) {
-      push(text);
-      continue;
+    const taggedSource = content || text;
+    if (taggedSource) {
+      const consumed = collectTaggedSlot(taggedSource);
+      if (consumed) continue;
     }
 
     if (lns && lns.length > 0) {
-      for (const l of lns) push(l);
-      continue;
+      let consumedAny = false;
+      for (const l of lns) {
+        const consumed = collectTaggedSlot(String(l ?? ''));
+        if (consumed) {
+          consumedAny = true;
+        } else {
+          plainLines.push(String(l ?? '').trim());
+        }
+      }
+      if (consumedAny) continue;
     }
 
     const looksLikeFramePlanSlotDef =
@@ -530,16 +759,9 @@ function renderSlotPlanText(slotPlan: any[]): string {
       !text &&
       !lns;
 
-    // framePlan の “スロット定義” は混ぜない
     if (looksLikeFramePlanSlotDef) {
       continue;
     }
-
-    // ✅ IMPORTANT:
-    // hint / prompt / message は seed fallback に使わない
-    // ここを許すと clarify_meaning_v1 / clarify_truth_structure_v1 など
-    // 「ヒント名 or 説明文」へ収束して、slot の実体ではなく fallback が採用される
-    // 事故が起きるため、slotPlanText では content/text/lines のみを正本とする
 
     const seedLike =
       typeof obj.seed_text === 'string'
@@ -551,15 +773,42 @@ function renderSlotPlanText(slotPlan: any[]): string {
             : '';
 
     if (seedLike) {
-      push(seedLike);
+      plainLines.push(seedLike);
       continue;
     }
+
+    if (content) {
+      plainLines.push(content);
+      continue;
+    }
+
+    if (text) {
+      plainLines.push(text);
+    }
+  }
+
+  for (const obj of obsObjs) {
+    buildObsLines(obj).forEach(push);
+  }
+
+  for (const obj of shiftObjs) {
+    buildShiftLines(obj).forEach(push);
+  }
+
+  for (const obj of nextObjs) {
+    buildNextLines(obj).forEach(push);
+  }
+
+  for (const obj of safeObjs) {
+    buildSafeLines(obj).forEach(push);
+  }
+
+  for (const line of plainLines) {
+    push(line);
   }
 
   return lines.join('\n').trim();
 }
-
-
 /* =========================
  * writerHints injection (MIN, backup only)
  * ========================= */

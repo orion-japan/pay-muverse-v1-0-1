@@ -6,6 +6,7 @@ import type { IrosStyle } from '@/lib/iros/system';
 import type { IrosUserProfileRow } from './loadUserProfile';
 
 import { loadBaseMetaFromMemoryState } from './handleIrosReply.state';
+import { loadLatestIrDiagnosisSnapshot } from '@/lib/iros/memoryRecall';
 
 // ✅ FramePlan（器＋スロット）(Layer C/D)
 import { buildFramePlan, type InputKind, type IrosStateLite } from '@/lib/iros/language/frameSlots';
@@ -384,26 +385,156 @@ export async function buildTurnContext(
     (baseMetaForTurn as any)?.prevMeta?.extra?.ctxPack?.detailMode === true ||
     (baseMetaForTurn as any)?.prevMeta?.ctxPack?.detailMode === true;
 
+  // 🔥 診断 followup 判定
+  const followupSourceText = detailSourceText.trim();
+
+  const isFollowupRequest =
+    /具体的に|わかりやすく|つまり|どういうこと|それって|どうすれば|何をすれば|続き|言い換えて|簡単に|一言で|もう少し深く|その理由|なぜそうなる/.test(
+      followupSourceText
+    );
+
+  // 🔶 先に DB 側の最新診断 snapshot を読む
+  // いままでは isDiagnosisFollowup が true の時しか読まなかったため、
+  // prevIrMeta が null のケースで永久に発火しない循環になっていた
+  let lastIrDiagnosis: any = null;
+
+  if (!isIrDiagnosisTurn && isFollowupRequest) {
+    try {
+      lastIrDiagnosis = await loadLatestIrDiagnosisSnapshot(supabase, userCode);
+    } catch (e) {
+      console.warn('[IROS][diagnosisFollowup] load failed', e);
+    }
+  }
+
+  const hasDiagnosisSource = !!prevIrMeta || !!lastIrDiagnosis;
+
+  const isDiagnosisFollowup =
+    !isIrDiagnosisTurn &&
+    hasDiagnosisSource &&
+    isFollowupRequest;
+
+  const diagnosisFollowupKind: 'concretize' | 'action' | 'rephrase' | 'deepen' | null =
+    !isDiagnosisFollowup
+      ? null
+      : /どうすれば|何をすれば|次は|どう動く/.test(followupSourceText)
+        ? 'action'
+        : /言い換えて|簡単に|一言で/.test(followupSourceText)
+          ? 'rephrase'
+          : /もう少し深く|その理由|なぜそうなる/.test(followupSourceText)
+            ? 'deepen'
+            : 'concretize';
+
   // 🔥 履歴ベース再診断フラグ
   const isDiagnosisDetailTurn =
-    !isIrDiagnosisTurn && wantsDetail && !!prevIrMeta;
+    !isIrDiagnosisTurn &&
+    !isDiagnosisFollowup &&
+    wantsDetail &&
+    hasDiagnosisSource;
 
-  if (isDiagnosisDetailTurn) {
+  if (isDiagnosisFollowup || isDiagnosisDetailTurn) {
     (baseMetaForTurn as any).extra = (baseMetaForTurn as any).extra ?? {};
     (baseMetaForTurn as any).extra.ctxPack =
       (baseMetaForTurn as any).extra.ctxPack ?? {};
 
+      const lastIrDiagnosisResolved =
+      lastIrDiagnosis ??
+      (prevIrMeta
+        ? {
+            target:
+              String((prevIrMeta as any)?.targetLabel ?? '').trim() || null,
+            observation:
+              String((prevIrMeta as any)?.observationResult ?? '').trim() || null,
+            state:
+              String((prevIrMeta as any)?.awarenessText ?? '').trim() || null,
+            summary:
+              String((prevIrMeta as any)?.summaryText ?? '').trim() || null,
+            createdAt: null,
+          }
+        : null);
+
+    const normalizedIrMeta =
+      prevIrMeta ??
+      (lastIrDiagnosisResolved
+        ? {
+            targetLabel:
+              String((lastIrDiagnosisResolved as any)?.target ?? '').trim() || null,
+            observationResult:
+              String((lastIrDiagnosisResolved as any)?.observation ?? '').trim() || null,
+            awarenessText:
+              String((lastIrDiagnosisResolved as any)?.state ?? '').trim() || null,
+            summaryText:
+              String((lastIrDiagnosisResolved as any)?.summary ?? '').trim() || null,
+          }
+        : null);
+
     (baseMetaForTurn as any).extra.isIrDiagnosisTurn = true;
-    (baseMetaForTurn as any).extra.detailMode = true;
-    (baseMetaForTurn as any).extra.irMeta = prevIrMeta;
+    (baseMetaForTurn as any).extra.irMeta = normalizedIrMeta;
+    (baseMetaForTurn as any).extra.ctxPack.irMeta = normalizedIrMeta;
+    if (lastIrDiagnosisResolved) {
+      (baseMetaForTurn as any).extra.lastIrDiagnosis = lastIrDiagnosisResolved;
+      (baseMetaForTurn as any).extra.ctxPack.lastIrDiagnosis = lastIrDiagnosisResolved;
+    }
 
-    (baseMetaForTurn as any).extra.ctxPack.detailMode =
-      prevDetailMode || true;
-    (baseMetaForTurn as any).extra.ctxPack.irMeta = prevIrMeta;
+    if (isDiagnosisDetailTurn) {
+      (baseMetaForTurn as any).extra.detailMode = true;
+      (baseMetaForTurn as any).extra.ctxPack.detailMode =
+        prevDetailMode || true;
+    }
 
-    (baseMetaForTurn as any).presentationKind = 'diagnosis';
-    (baseMetaForTurn as any).mode = 'diagnosis';
-  }
+    if (isDiagnosisFollowup) {
+      if (lastIrDiagnosisResolved) {
+        (baseMetaForTurn as any).extra.lastIrDiagnosis = lastIrDiagnosisResolved;
+        (baseMetaForTurn as any).extra.ctxPack.lastIrDiagnosis = lastIrDiagnosisResolved;
+
+        const diagnosisText =
+          lastIrDiagnosisResolved.summary ??
+          lastIrDiagnosisResolved.observation ??
+          lastIrDiagnosisResolved.state ??
+          lastIrDiagnosisResolved.target ??
+          null;
+
+        if (diagnosisText) {
+          (baseMetaForTurn as any).extra.ctxPack.topicHint = diagnosisText;
+        }
+      }
+
+      const diagnosisTopicHint =
+        lastIrDiagnosisResolved?.summary ??
+        lastIrDiagnosisResolved?.observation ??
+        lastIrDiagnosisResolved?.state ??
+        lastIrDiagnosisResolved?.target ??
+        null;
+
+      const resolvedFollowupKind =
+        diagnosisFollowupKind ?? 'concretize';
+
+      (baseMetaForTurn as any).extra.diagnosisFollowup = true;
+      (baseMetaForTurn as any).extra.followupKind = resolvedFollowupKind;
+
+      (baseMetaForTurn as any).extra.ctxPack.diagnosisFollowup = true;
+      (baseMetaForTurn as any).extra.ctxPack.followupKind = resolvedFollowupKind;
+      (baseMetaForTurn as any).extra.ctxPack.continuityKind =
+        'diagnosis_followup';
+      (baseMetaForTurn as any).extra.ctxPack.topicHint = diagnosisTopicHint;
+      (baseMetaForTurn as any).extra.ctxPack.goalKind =
+        resolvedFollowupKind === 'action' ? 'action' : 'clarify';
+
+      // followup では「ユーザーの短文」ではなく「直前診断」を正本化する
+      (baseMetaForTurn as any).extra.ctxPack.situationSummary =
+        diagnosisTopicHint;
+      (baseMetaForTurn as any).extra.ctxPack.situationTopic =
+        lastIrDiagnosisResolved?.target ?? diagnosisTopicHint;
+
+      // 通常 question 文脈への吸い込みを弱める
+      (baseMetaForTurn as any).extra.ctxPack.question = null;
+      (baseMetaForTurn as any).extra.ctxPack.replyGoal = {
+        kind: resolvedFollowupKind === 'action' ? 'action' : 'clarify',
+      };
+    }
+
+      (baseMetaForTurn as any).presentationKind = 'diagnosis';
+      (baseMetaForTurn as any).mode = 'diagnosis';
+    }
   const framePlan =
     isIrDiagnosisTurn || isDiagnosisDetailTurn
       ? null

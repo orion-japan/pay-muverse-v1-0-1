@@ -2007,12 +2007,17 @@ try {
     rephraseHead: TRIM((meta as any)?.extra?.rephraseHead) || headSafe,
   };
 
-  console.log('[IROS/rephraseAttach][OK]', {
-    conversationId,
-    userCode,
-    blocksLen: safeBlocks.length,
-    head: String(headSafe).slice(0, 120),
-  });
+  console.log(
+    '[IROS/rephraseAttach][OK]',
+    JSON.stringify({
+      conversationId,
+      userCode,
+      blocksLen: safeBlocks.length,
+      head: String(headSafe).slice(0, 120),
+      blocksPreview: safeBlocks.slice(0, 3).map((b) => String(b).slice(0, 80)),
+    })
+  );
+
 } catch (e: any) {
   console.error('[IROS/rephraseAttach][EXCEPTION]', {
     conversationId,

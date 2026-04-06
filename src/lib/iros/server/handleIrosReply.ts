@@ -1259,17 +1259,21 @@ if (diagIrMeta) {
 const finalText = baseText;
 
 const irMeta =
-  diag.ok &&
-  diag.debug &&
-  typeof diag.debug === 'object' &&
-  (diag.debug as any).irMeta &&
-  typeof (diag.debug as any).irMeta === 'object'
-    ? (diag.debug as any).irMeta
-    : {
-        flowA: null,
-        flowB: null,
-        relation: null,
-      };
+  diagIrMeta &&
+  typeof diagIrMeta === 'object'
+    ? diagIrMeta
+    : diag.ok &&
+        diag.debug &&
+        typeof diag.debug === 'object' &&
+        (diag.debug as any).irMeta &&
+        typeof (diag.debug as any).irMeta === 'object'
+      ? (diag.debug as any).irMeta
+      : {
+          targetLabel,
+          observationResult: null,
+          awarenessText: null,
+          summaryText: null,
+        };
 
       return {
         ok: true,
@@ -1735,7 +1739,7 @@ if (!wantsMicroNow) {
           : (metaForSaveMicro.extra = {});
 
       // renderGateway が拾う“長文の元”を消す
-      delete (ex as any).rephraseBlocks;
+     // delete (ex as any).rephraseBlocks;
       delete (ex as any).rephrase_blocks;
       delete (ex as any).blockPlan;
       delete (ex as any).block_plan;
@@ -1860,7 +1864,7 @@ if (!wantsMicroNow) {
         ? metaForSaveMicroFallback.extra
         : (metaForSaveMicroFallback.extra = {});
 
-    delete (ex as any).rephraseBlocks;
+   // delete (ex as any).rephraseBlocks;
     delete (ex as any).rephrase_blocks;
     delete (ex as any).blockPlan;
     delete (ex as any).block_plan;
@@ -2416,168 +2420,271 @@ function normForRecall(v: any): string {
         preOrchCtxPack.resolvedAsk = resolvedAskEarly;
       }
       // 🧠 continuity による履歴カット
+      // 🧠 continuity による履歴カット
+      const diagnosisFollowup =
+        preOrchCtxPack?.diagnosisFollowup === true ||
+        (extra as any)?.ctxPack?.diagnosisFollowup === true ||
+        (extra as any)?.diagnosisFollowup === true;
+
+      const lastIrDiagnosis =
+        preOrchCtxPack?.lastIrDiagnosis ??
+        (extra as any)?.ctxPack?.lastIrDiagnosis ??
+        (extra as any)?.lastIrDiagnosis ??
+        null;
+
+      const diagnosisTopicHint = (() => {
+        const picked = [
+          lastIrDiagnosis?.summary,
+          lastIrDiagnosis?.observation,
+          lastIrDiagnosis?.state,
+          lastIrDiagnosis?.target,
+        ]
+          .map((v) => String(v ?? '').trim())
+          .find(Boolean);
+
+        return picked || null;
+      })();
+
+      const diagnosisFollowupKind =
+        preOrchCtxPack?.followupKind ??
+        (extra as any)?.ctxPack?.followupKind ??
+        (extra as any)?.followupKind ??
+        null;
+
       const continuityKind = String(
-        preOrchCtxPack?.continuityKind ??
-          histCtx?.continuityKind ??
-          ''
-      ).toLowerCase();
+        diagnosisFollowup
+          ? 'diagnosis_followup'
+          : preOrchCtxPack?.continuityKind ??
+              histCtx?.continuityKind ??
+              ''
+      ).trim();
 
-      const shouldResetContext =
-        continuityKind === 'new' ||
-        continuityKind === 'topic_switch' ||
-        continuityKind === 'greeting';
+      const topicChangedHard =
+        diagnosisFollowup
+          ? false
+          : continuityKind === 'new' ||
+            continuityKind === 'topic_switch' ||
+            continuityKind === 'greeting';
 
-      if (shouldResetContext) {
-        // 過去文脈を完全遮断
-        if (histCtx && typeof histCtx === 'object') {
-          delete histCtx.topicDigest;
-          delete histCtx.conversationLine;
-          delete histCtx.historyDigestV1;
-        }
-      }
-      if (
-        !preOrchCtxPack.topicDigest &&
-        typeof histCtx?.topicDigest === 'string' &&
-        histCtx.topicDigest.trim()
-      ) {
-        preOrchCtxPack.topicDigest = histCtx.topicDigest.trim();
-      }
+            if (diagnosisFollowup) {
+              preOrchCtxPack.diagnosisFollowup = true;
+              preOrchCtxPack.followupKind =
+                diagnosisFollowupKind ?? 'concretize';
+              preOrchCtxPack.lastIrDiagnosis = lastIrDiagnosis;
+              preOrchCtxPack.topicHint = diagnosisTopicHint;
+              preOrchCtxPack.continuityKind = 'diagnosis_followup';
+              preOrchCtxPack.goalKind =
+                preOrchCtxPack.followupKind === 'action' ? 'action' : 'clarify';
 
-      if (
-        !preOrchCtxPack.conversationLine &&
-        typeof histCtx?.conversationLine === 'string' &&
-        histCtx.conversationLine.trim()
-      ) {
-        preOrchCtxPack.conversationLine = histCtx.conversationLine.trim();
-      }
+              // user の短い followup 文そのものをトピック正本にしない
+              preOrchCtxPack.conversationLine = diagnosisTopicHint;
+              preOrchCtxPack.situationSummary = diagnosisTopicHint;
+              preOrchCtxPack.situationTopic =
+                lastIrDiagnosis?.target ?? diagnosisTopicHint;
 
-      if (
-        !preOrchCtxPack.observedBasedOn &&
-        typeof histCtx?.observedBasedOn === 'string' &&
-        histCtx.observedBasedOn.trim()
-      ) {
-        preOrchCtxPack.observedBasedOn = histCtx.observedBasedOn.trim();
-      }
+              // practical / future_design への再分類を止める
+              preOrchCtxPack.question = null;
+              preOrchCtxPack.replyGoal = {
+                kind:
+                  preOrchCtxPack.followupKind === 'action' ? 'action' : 'clarify',
+              };
 
-      if (
-        !preOrchCtxPack.historyDigestV1 &&
-        histCtx?.historyDigestV1 &&
-        typeof histCtx.historyDigestV1 === 'object'
-      ) {
-        preOrchCtxPack.historyDigestV1 = histCtx.historyDigestV1;
-      }
-      if (
-        !preOrchCtxPack.historyForWriter &&
-        Array.isArray(histCtx?.historyForWriter) &&
-        histCtx.historyForWriter.length > 0
-      ) {
-        preOrchCtxPack.historyForWriter = histCtx.historyForWriter
-          .map((m: any) => {
-            const role =
-              m?.role === 'assistant'
-                ? 'assistant'
-                : m?.role === 'user'
-                  ? 'user'
-                  : null;
+              if (histCtx && typeof histCtx === 'object') {
+                histCtx.topicHint = diagnosisTopicHint;
+                histCtx.situationSummary = diagnosisTopicHint;
+                histCtx.situationTopic =
+                  lastIrDiagnosis?.target ?? diagnosisTopicHint;
+                histCtx.continuityKind = 'diagnosis_followup';
+              }
+            }
 
-            const content =
-              typeof m?.content === 'string'
-                ? String(m.content).trim()
-                : typeof m?.text === 'string'
-                  ? String(m.text).trim()
-                  : '';
+            const shouldResetContext = topicChangedHard;
 
-            if (!role || !content) return null;
-            return { role, content };
-          })
-          .filter(
-            (m: any): m is { role: 'user' | 'assistant'; content: string } => Boolean(m),
-          );
-      }
+            if (shouldResetContext) {
+              // 過去文脈を完全遮断
+              if (histCtx && typeof histCtx === 'object') {
+                delete histCtx.topicDigest;
+                delete histCtx.conversationLine;
+                delete histCtx.historyDigestV1;
+              }
+            }
 
-      if (
-        !preOrchCtxPack.historyForWriterAt &&
-        typeof histCtx?.historyForWriterAt === 'string' &&
-        histCtx.historyForWriterAt.trim()
-      ) {
-        preOrchCtxPack.historyForWriterAt = histCtx.historyForWriterAt.trim();
-      }
-      if (
-        !preOrchCtxPack.flow &&
-        histCtx?.flow &&
-        typeof histCtx.flow === 'object'
-      ) {
-        preOrchCtxPack.flow = histCtx.flow;
-      }
+            if (
+              !preOrchCtxPack.topicDigest &&
+              typeof histCtx?.topicDigest === 'string' &&
+              histCtx.topicDigest.trim()
+            ) {
+              preOrchCtxPack.topicDigest = histCtx.topicDigest.trim();
+            }
 
-      if (
-        preOrchCtxPack.returnStreak == null &&
-        histCtx?.returnStreak != null
-      ) {
-        preOrchCtxPack.returnStreak = histCtx.returnStreak;
-      }
-      if (
-        !preOrchCtxPack.historyForWriter &&
-        Array.isArray(histCtx?.historyForWriter) &&
-        histCtx.historyForWriter.length > 0
-      ) {
-        preOrchCtxPack.historyForWriter = histCtx.historyForWriter;
-      }
+            if (
+              !preOrchCtxPack.conversationLine &&
+              typeof histCtx?.conversationLine === 'string' &&
+              histCtx.conversationLine.trim()
+            ) {
+              preOrchCtxPack.conversationLine = histCtx.conversationLine.trim();
+            }
 
-      if (
-        !preOrchCtxPack.historyForWriterAt &&
-        typeof histCtx?.historyForWriterAt === 'string' &&
-        histCtx.historyForWriterAt.trim()
-      ) {
-        preOrchCtxPack.historyForWriterAt = histCtx.historyForWriterAt.trim();
-      }
-      console.log('[IROS/VIEWSHIFT][pre-orch][inject]', {
-        hasSnap: Boolean(snap),
-        snapKeys: snap && typeof snap === 'object' ? Object.keys(snap).slice(0, 20) : null,
-        earlyResolvedAskType: resolvedAskEarly?.askType ?? '',
-        injectedTopicDigest: typeof preOrchCtxPack.topicDigest === 'string' ? preOrchCtxPack.topicDigest.slice(0, 80) : '',
-        injectedConversationLine: typeof preOrchCtxPack.conversationLine === 'string' ? preOrchCtxPack.conversationLine.slice(0, 80) : '',
-        injectedObservedBasedOn: typeof preOrchCtxPack.observedBasedOn === 'string' ? preOrchCtxPack.observedBasedOn.slice(0, 80) : '',
-        hasHistoryDigestV1: Boolean(preOrchCtxPack.historyDigestV1),
-        hasHistHistoryForWriter: Array.isArray(histCtx?.historyForWriter) && histCtx.historyForWriter.length > 0,
-        hasPreHistoryForWriter: Array.isArray(preOrchCtxPack?.historyForWriter) && preOrchCtxPack.historyForWriter.length > 0,
-        histHistoryForWriterLen: Array.isArray(histCtx?.historyForWriter) ? histCtx.historyForWriter.length : 0,
-        preHistoryForWriterLen: Array.isArray(preOrchCtxPack?.historyForWriter) ? preOrchCtxPack.historyForWriter.length : 0,
-        hasFlow: Boolean(preOrchCtxPack.flow),
-        returnStreak: preOrchCtxPack.returnStreak ?? null,
-        hasHistoryForWriter: Array.isArray(preOrchCtxPack.historyForWriter),
-historyForWriterLen: Array.isArray(preOrchCtxPack.historyForWriter)
-  ? preOrchCtxPack.historyForWriter.length
-  : 0,
-hasHistoryForWriterAt:
-  typeof preOrchCtxPack.historyForWriterAt === 'string',
-      });
-    } catch (e) {
-      console.log('[IROS/VIEWSHIFT][pre-orch][inject][ERR]', { err: String(e ?? '') });
-    }
+            if (
+              !preOrchCtxPack.observedBasedOn &&
+              typeof histCtx?.observedBasedOn === 'string' &&
+              histCtx.observedBasedOn.trim()
+            ) {
+              preOrchCtxPack.observedBasedOn = histCtx.observedBasedOn.trim();
+            }
 
-    // ✅ Orchestrator（V2: 判断のみ。本文生成はしない）
-    const to = nowNs();
-    const orch = await (runOrchestratorTurn as any)({
-      conversationId,
-      userCode,
-      text,
-      isFirstTurn: !!ctx.isFirstTurn,
+            if (
+              !preOrchCtxPack.historyDigestV1 &&
+              histCtx?.historyDigestV1 &&
+              typeof histCtx.historyDigestV1 === 'object'
+            ) {
+              preOrchCtxPack.historyDigestV1 = histCtx.historyDigestV1;
+            }
 
-      requestedMode: ctx.requestedMode,
-      requestedDepth: requestedDepthFinal,
-      requestedQCode: ctx.requestedQCode,
+            if (
+              !preOrchCtxPack.historyForWriter &&
+              Array.isArray(histCtx?.historyForWriter) &&
+              histCtx.historyForWriter.length > 0
+            ) {
+              preOrchCtxPack.historyForWriter = histCtx.historyForWriter
+                .map((m: any) => {
+                  const role =
+                    m?.role === 'assistant'
+                      ? 'assistant'
+                      : m?.role === 'user'
+                        ? 'user'
+                        : null;
 
-      baseMetaForTurn: baseMetaMergedForTurn,
-      userProfile: userProfile ?? null,
-      effectiveStyle: ctx.effectiveStyle,
+                  const content =
+                    typeof m?.content === 'string'
+                      ? String(m.content).trim()
+                      : typeof m?.text === 'string'
+                        ? String(m.text).trim()
+                        : '';
 
-      history: historyForTurn,
-      sb: supabase,
-    });
+                  if (!role || !content) return null;
+                  return { role, content };
+                })
+                .filter(
+                  (m: any): m is { role: 'user' | 'assistant'; content: string } =>
+                    Boolean(m),
+                );
+            }
 
-    t.orchestrator_ms = msSince(to);
+            if (
+              !preOrchCtxPack.historyForWriterAt &&
+              typeof histCtx?.historyForWriterAt === 'string' &&
+              histCtx.historyForWriterAt.trim()
+            ) {
+              preOrchCtxPack.historyForWriterAt = histCtx.historyForWriterAt.trim();
+            }
 
+            if (
+              !preOrchCtxPack.flow &&
+              histCtx?.flow &&
+              typeof histCtx.flow === 'object'
+            ) {
+              preOrchCtxPack.flow = histCtx.flow;
+            }
+
+            if (
+              preOrchCtxPack.returnStreak == null &&
+              histCtx?.returnStreak != null
+            ) {
+              preOrchCtxPack.returnStreak = histCtx.returnStreak;
+            }
+
+            if (
+              !preOrchCtxPack.historyForWriter &&
+              Array.isArray(histCtx?.historyForWriter) &&
+              histCtx.historyForWriter.length > 0
+            ) {
+              preOrchCtxPack.historyForWriter = histCtx.historyForWriter;
+            }
+
+            if (
+              !preOrchCtxPack.historyForWriterAt &&
+              typeof histCtx?.historyForWriterAt === 'string' &&
+              histCtx.historyForWriterAt.trim()
+            ) {
+              preOrchCtxPack.historyForWriterAt = histCtx.historyForWriterAt.trim();
+            }
+
+            console.log('[IROS/VIEWSHIFT][pre-orch][inject]', {
+              hasSnap: Boolean(snap),
+              snapKeys:
+                snap && typeof snap === 'object'
+                  ? Object.keys(snap).slice(0, 20)
+                  : null,
+              earlyResolvedAskType: resolvedAskEarly?.askType ?? '',
+              injectedTopicDigest:
+                typeof preOrchCtxPack.topicDigest === 'string'
+                  ? preOrchCtxPack.topicDigest.slice(0, 80)
+                  : '',
+              injectedConversationLine:
+                typeof preOrchCtxPack.conversationLine === 'string'
+                  ? preOrchCtxPack.conversationLine.slice(0, 80)
+                  : '',
+              injectedObservedBasedOn:
+                typeof preOrchCtxPack.observedBasedOn === 'string'
+                  ? preOrchCtxPack.observedBasedOn.slice(0, 80)
+                  : '',
+              hasHistoryDigestV1: Boolean(preOrchCtxPack.historyDigestV1),
+              hasHistHistoryForWriter:
+                Array.isArray(histCtx?.historyForWriter) &&
+                histCtx.historyForWriter.length > 0,
+              hasPreHistoryForWriter:
+                Array.isArray(preOrchCtxPack?.historyForWriter) &&
+                preOrchCtxPack.historyForWriter.length > 0,
+              histHistoryForWriterLen: Array.isArray(histCtx?.historyForWriter)
+                ? histCtx.historyForWriter.length
+                : 0,
+              preHistoryForWriterLen: Array.isArray(preOrchCtxPack?.historyForWriter)
+                ? preOrchCtxPack.historyForWriter.length
+                : 0,
+              hasFlow: Boolean(preOrchCtxPack.flow),
+              returnStreak: preOrchCtxPack.returnStreak ?? null,
+              hasHistoryForWriter: Array.isArray(preOrchCtxPack.historyForWriter),
+              historyForWriterLen: Array.isArray(preOrchCtxPack.historyForWriter)
+                ? preOrchCtxPack.historyForWriter.length
+                : 0,
+              hasHistoryForWriterAt:
+                typeof preOrchCtxPack.historyForWriterAt === 'string',
+            });
+          } catch (e) {
+            console.log('[IROS/VIEWSHIFT][pre-orch][inject][ERR]', {
+              err: String(e ?? ''),
+            });
+          }
+
+          // ✅ Orchestrator（V2: 判断のみ。本文生成はしない）
+          const orchCtxPackInput: Record<string, any> =
+            ((baseMetaMergedForTurn as any)?.extra?.ctxPack &&
+            typeof (baseMetaMergedForTurn as any).extra.ctxPack === 'object')
+              ? { ...((baseMetaMergedForTurn as any).extra.ctxPack) }
+              : {};
+
+          const to = nowNs();
+
+          const orch = await (runOrchestratorTurn as any)({
+            conversationId,
+            userCode,
+            text,
+            isFirstTurn: !!ctx.isFirstTurn,
+
+            requestedMode: ctx.requestedMode,
+            requestedDepth: requestedDepthFinal,
+            requestedQCode: ctx.requestedQCode,
+
+            baseMetaForTurn: baseMetaMergedForTurn,
+            ctxPack: orchCtxPackInput,
+
+            userProfile: userProfile ?? null,
+            effectiveStyle: ctx.effectiveStyle,
+
+            history: historyForTurn,
+            sb: supabase,
+          });
     const orchMeta = (orch as any)?.meta ?? {};
     const orchExtra = orchMeta?.extra ?? {};
 
@@ -2691,62 +2798,248 @@ hasHistoryForWriterAt:
                   },
                 };
       }
-    const orchCtxPack = orchExtra?.ctxPack ?? {};
-    const orchFlow = orchCtxPack?.flow ?? orchExtra?.flow ?? orchMeta?.flow ?? null;
-    const flowSeedObj = buildFlowSeedV1({
-      flow: {
-        current:
-          orchFlow?.labels?.current ??
-          orchFlow?.current ??
-          orchFlow?.currentId ??
-          null,
-        prev:
-          orchFlow?.labels?.prev ??
-          orchFlow?.prev ??
-          orchFlow?.prevId ??
-          null,
-        delta:
-          orchFlow?.flowDelta ??
-          orchFlow?.delta ??
-          null,
-        energy:
-          orchCtxPack?.emotionalTemperature ??
-          orchExtra?.emotionalTemperature ??
-          null,
-        futureRandom:
-          orchFlow?.labels?.future ??
-          orchFlow?.futureRandom ??
-          null,
-      },
-      userCore:
-        String(text ?? '').trim() || null,
-      historyLine: (() => {
-        const rawHistory = String(
-          orchCtxPack?.conversationLine ??
-            orchExtra?.conversationLine ??
-            '',
-        ).trim();
+      const orchCtxPack = orchExtra?.ctxPack ?? {};
+      const orchFlow = orchCtxPack?.flow ?? orchExtra?.flow ?? orchMeta?.flow ?? null;
 
-        const isHeavyInput =
-          String(orchCtxPack?.shiftKind ?? '').trim() === 'uncover_shift' ||
-          String(orchCtxPack?.goalKind ?? '').trim() === 'uncover';
+      // =========================
+      // ✅ diagnosis followup：Orchestrator後の正規化
+      // - flowSeed に入る前の材料を固定する
+      // - orchCtxPack / orchExtra / extraLocal.ctxPack を揃える
+      // =========================
+      const diagnosisFollowupAfterOrch =
+        orchCtxPack?.diagnosisFollowup === true ||
+        (orchExtra as any)?.diagnosisFollowup === true ||
+        (extraLocal as any)?.ctxPack?.diagnosisFollowup === true ||
+        (extraLocal as any)?.diagnosisFollowup === true;
 
-        if (!rawHistory) return null;
+      const diagnosisFollowupKindAfterOrch =
+        typeof orchCtxPack?.followupKind === 'string' && orchCtxPack.followupKind.trim()
+          ? String(orchCtxPack.followupKind).trim()
+          : typeof (orchExtra as any)?.followupKind === 'string' &&
+              String((orchExtra as any).followupKind).trim()
+            ? String((orchExtra as any).followupKind).trim()
+            : typeof (extraLocal as any)?.ctxPack?.followupKind === 'string' &&
+                String((extraLocal as any).ctxPack.followupKind).trim()
+              ? String((extraLocal as any).ctxPack.followupKind).trim()
+              : 'concretize';
 
-        // 🔥 uncoverは履歴完全遮断
-        if (isHeavyInput) return null;
+      const diagnosisTopicHintAfterOrch =
+        typeof orchCtxPack?.topicHint === 'string' && orchCtxPack.topicHint.trim()
+          ? String(orchCtxPack.topicHint).trim()
+          : typeof (orchExtra as any)?.topicHint === 'string' &&
+              String((orchExtra as any).topicHint).trim()
+            ? String((orchExtra as any).topicHint).trim()
+            : typeof (extraLocal as any)?.ctxPack?.topicHint === 'string' &&
+                String((extraLocal as any).ctxPack.topicHint).trim()
+              ? String((extraLocal as any).ctxPack.topicHint).trim()
+              : null;
 
-        return rawHistory;
-      })(),
-      memoryLine:
-        String(
-          orchCtxPack?.topicDigest ??
-            orchExtra?.topicDigest ??
-            '',
-        ).trim() || null,
-    });
+      const diagnosisLastIrAfterOrch =
+        orchCtxPack?.lastIrDiagnosis && typeof orchCtxPack.lastIrDiagnosis === 'object'
+          ? orchCtxPack.lastIrDiagnosis
+          : (orchExtra as any)?.lastIrDiagnosis &&
+              typeof (orchExtra as any).lastIrDiagnosis === 'object'
+            ? (orchExtra as any).lastIrDiagnosis
+            : (extraLocal as any)?.ctxPack?.lastIrDiagnosis &&
+                typeof (extraLocal as any).ctxPack.lastIrDiagnosis === 'object'
+              ? (extraLocal as any).ctxPack.lastIrDiagnosis
+              : null;
 
-    const flowSeed = formatFlowSeedV1(flowSeedObj).trim();
+      const diagnosisTargetAfterOrch =
+        typeof diagnosisLastIrAfterOrch?.target === 'string' &&
+        String(diagnosisLastIrAfterOrch.target).trim()
+          ? String(diagnosisLastIrAfterOrch.target).trim()
+          : null;
+
+      if (diagnosisFollowupAfterOrch) {
+        const normalizedGoalKind =
+          diagnosisFollowupKindAfterOrch === 'action' ? 'action' : 'clarify';
+        const normalizedShiftKind =
+          diagnosisFollowupKindAfterOrch === 'action'
+            ? 'diagnosis_action_shift'
+            : 'diagnosis_followup_shift';
+
+        orchCtxPack.diagnosisFollowup = true;
+        orchCtxPack.followupKind = diagnosisFollowupKindAfterOrch;
+        orchCtxPack.continuityKind = 'diagnosis_followup';
+        orchCtxPack.goalKind = normalizedGoalKind;
+        orchCtxPack.targetKind = normalizedGoalKind;
+        orchCtxPack.shiftKind = normalizedShiftKind;
+        orchCtxPack.replyGoal = { kind: normalizedGoalKind };
+        orchCtxPack.question = null;
+
+        if (diagnosisTopicHintAfterOrch) {
+          orchCtxPack.topicHint = diagnosisTopicHintAfterOrch;
+          orchCtxPack.conversationLine = diagnosisTopicHintAfterOrch;
+          orchCtxPack.topicDigest = diagnosisTopicHintAfterOrch;
+        }
+
+        if (diagnosisTargetAfterOrch) {
+          orchCtxPack.situationTopic = diagnosisTargetAfterOrch;
+        }
+
+        if (orchExtra && typeof orchExtra === 'object') {
+          (orchExtra as any).diagnosisFollowup = true;
+          (orchExtra as any).followupKind = diagnosisFollowupKindAfterOrch;
+          (orchExtra as any).goalKind = normalizedGoalKind;
+          (orchExtra as any).targetKind = normalizedGoalKind;
+          (orchExtra as any).shiftKind = normalizedShiftKind;
+          (orchExtra as any).question = null;
+
+          if (diagnosisTopicHintAfterOrch) {
+            (orchExtra as any).topicHint = diagnosisTopicHintAfterOrch;
+            (orchExtra as any).conversationLine = diagnosisTopicHintAfterOrch;
+            (orchExtra as any).topicDigest = diagnosisTopicHintAfterOrch;
+          }
+
+          if (diagnosisTargetAfterOrch) {
+            (orchExtra as any).situationTopic = diagnosisTargetAfterOrch;
+          }
+        }
+
+        (extraLocal as any).ctxPack =
+          (extraLocal as any)?.ctxPack && typeof (extraLocal as any).ctxPack === 'object'
+            ? (extraLocal as any).ctxPack
+            : {};
+
+        (extraLocal as any).ctxPack.diagnosisFollowup = true;
+        (extraLocal as any).ctxPack.followupKind = diagnosisFollowupKindAfterOrch;
+        (extraLocal as any).ctxPack.continuityKind = 'diagnosis_followup';
+        (extraLocal as any).ctxPack.goalKind = normalizedGoalKind;
+        (extraLocal as any).ctxPack.targetKind = normalizedGoalKind;
+        (extraLocal as any).ctxPack.shiftKind = normalizedShiftKind;
+        (extraLocal as any).ctxPack.replyGoal = { kind: normalizedGoalKind };
+        (extraLocal as any).ctxPack.question =
+          (extraLocal as any).ctxPack.question ?? null;
+
+        if (diagnosisTopicHintAfterOrch) {
+          (extraLocal as any).ctxPack.topicHint = diagnosisTopicHintAfterOrch;
+          (extraLocal as any).ctxPack.conversationLine = diagnosisTopicHintAfterOrch;
+          (extraLocal as any).ctxPack.topicDigest = diagnosisTopicHintAfterOrch;
+        }
+
+        if (diagnosisTargetAfterOrch) {
+          (extraLocal as any).ctxPack.situationTopic = diagnosisTargetAfterOrch;
+        }
+      }
+
+      // =========================
+      // ✅ writer専用の最終固定
+      // - forcedShiftForWriter だけをここで入れる
+      // - 前段で揃えた ctxPack を使う
+      // =========================
+      const diagnosisFollowupForWriter =
+        (extraLocal as any)?.ctxPack?.diagnosisFollowup === true ||
+        (extraLocal as any)?.diagnosisFollowup === true;
+
+      const diagnosisFollowupKindForWriter =
+        typeof (extraLocal as any)?.ctxPack?.followupKind === 'string' &&
+        String((extraLocal as any).ctxPack.followupKind).trim()
+          ? String((extraLocal as any).ctxPack.followupKind).trim()
+          : 'concretize';
+
+      const diagnosisTopicHintForWriter =
+        typeof (extraLocal as any)?.ctxPack?.topicHint === 'string' &&
+        String((extraLocal as any).ctxPack.topicHint).trim()
+          ? String((extraLocal as any).ctxPack.topicHint).trim()
+          : null;
+
+      if (diagnosisFollowupForWriter) {
+        const writerGoalKind =
+          diagnosisFollowupKindForWriter === 'action' ? 'action' : 'clarify';
+
+        (extraLocal as any).goalKind = writerGoalKind;
+        (extraLocal as any).targetKind = writerGoalKind;
+
+        (extraLocal as any).forcedShiftForWriter = {
+          kind:
+            diagnosisFollowupKindForWriter === 'action'
+              ? 'diagnosis_action_shift'
+              : 'diagnosis_followup_shift',
+          intent: 'diagnosis_followup',
+          hint:
+            diagnosisFollowupKindForWriter === 'action'
+              ? 'diagnosis_action_v1'
+              : 'diagnosis_concretize_v1',
+          line:
+            diagnosisFollowupKindForWriter === 'action'
+              ? '直前の診断から次の一手を一つ返す'
+              : '直前の診断文をそのまま具体化して返す',
+          source: 'diagnosis_followup',
+          contract: ['answer_in_one_shot', 'plain_words'],
+          rules: {
+            answer_user_meaning: false,
+            answer_truth_structure: false,
+            use_past_reframe: false,
+            no_flow_lecture: true,
+            no_meta_explain: true,
+            output_only: false,
+            no_bullets: false,
+            no_definition: true,
+            no_clarifying_question: true,
+          },
+          allow: {
+            concrete_reply: true,
+            short_reply_ok: true,
+          },
+          seed_text: diagnosisTopicHintForWriter ?? String(text ?? '').trim(),
+        };
+      }
+
+      const flowSeedObj = buildFlowSeedV1({
+        flow: {
+          current:
+            orchFlow?.labels?.current ??
+            orchFlow?.current ??
+            orchFlow?.currentId ??
+            null,
+          prev:
+            orchFlow?.labels?.prev ??
+            orchFlow?.prev ??
+            orchFlow?.prevId ??
+            null,
+          delta:
+            orchFlow?.flowDelta ??
+            orchFlow?.delta ??
+            null,
+          energy:
+            orchCtxPack?.emotionalTemperature ??
+            orchExtra?.emotionalTemperature ??
+            null,
+          futureRandom:
+            orchFlow?.labels?.future ??
+            orchFlow?.futureRandom ??
+            null,
+        },
+        userCore:
+          String(text ?? '').trim() || null,
+        historyLine: (() => {
+          const rawHistory = String(
+            orchCtxPack?.conversationLine ??
+              orchExtra?.conversationLine ??
+              '',
+          ).trim();
+
+          const isHeavyInput =
+            String(orchCtxPack?.shiftKind ?? '').trim() === 'uncover_shift' ||
+            String(orchCtxPack?.goalKind ?? '').trim() === 'uncover';
+
+          if (!rawHistory) return null;
+
+          // 🔥 uncoverは履歴完全遮断
+          if (isHeavyInput) return null;
+
+          return rawHistory;
+        })(),
+        memoryLine:
+          String(
+            orchCtxPack?.topicDigest ??
+              orchExtra?.topicDigest ??
+              '',
+          ).trim() || null,
+      });
+
+      const flowSeed = formatFlowSeedV1(flowSeedObj).trim();
     /* ---------------------------
        4) PostProcess
     ---------------------------- */
@@ -3424,16 +3717,12 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
         normalizeTargetKind(metaAny?.targetKind) ??
         normalizeTargetKind(metaAny?.target_kind);
 
-      const normalizedFinalGoalKind = normalizeGoalKind(finalGoalKind);
+        const normalizedFinalGoalKind = normalizeGoalKind(finalGoalKind);
 
-      const chosenGoalKindRaw =
-        existingStrongGoalKind ??
-        normalizedFinalGoalKind ??
-        'uncover';
-
-      const chosenTargetKind =
-        existingStrongTargetKind ??
-        (chosenGoalKindRaw === 'commit' ? 'decide' : chosenGoalKindRaw);
+        const chosenGoalKindRaw =
+          existingStrongGoalKind ??
+          normalizedFinalGoalKind ??
+          'uncover';
 
         const seedTextForGoal = String(
           exAny?.slotPlanSeed ??
@@ -3455,36 +3744,50 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
               ? 'uncover'
               : chosenGoalKindRaw;
 
-      console.log(
-        '[IROS/GOALKIND_SOURCE][CHOOSE]',
-        JSON.stringify({
-          existingStrongGoalKind,
-          existingStrongTargetKind,
-          normalizedFinalGoalKind,
-          chosenGoalKindRaw,
-          chosenGoalKind,
-          chosenTargetKind,
-          finalGoalKind,
-          shiftKindNow,
-          cp_goalKind: cpAny?.goalKind ?? null,
-          cp_targetKind: cpAny?.targetKind ?? null,
-          cp_replyGoalKind:
-            typeof cpAny?.replyGoal?.kind === 'string' ? cpAny.replyGoal.kind : null,
-          meta_targetKind: metaAny?.targetKind ?? null,
-          meta_target_kind: metaAny?.target_kind ?? null,
-        })
-      );
+        const chosenTargetKindRaw =
+          existingStrongTargetKind ??
+          (chosenGoalKindRaw === 'commit' ? 'decide' : chosenGoalKindRaw);
 
-      cpAny.goalKind = chosenGoalKind;
-      cpAny.targetKind = chosenTargetKind;
-      cpAny.replyGoal = { kind: chosenGoalKind };
+        const chosenTargetKind =
+          chosenTargetKindRaw === 'resonate'
+            ? chosenGoalKind
+            : chosenTargetKindRaw === 'commit'
+              ? 'decide'
+              : chosenTargetKindRaw;
 
-      metaAny.targetKind = chosenTargetKind;
-      metaAny.target_kind = chosenTargetKind;
+        console.log(
+          '[IROS/GOALKIND_SOURCE][CHOOSE]',
+          JSON.stringify({
+            existingStrongGoalKind,
+            existingStrongTargetKind,
+            normalizedFinalGoalKind,
+            chosenGoalKindRaw,
+            chosenGoalKind,
+            chosenTargetKindRaw,
+            chosenTargetKind,
+            finalGoalKind,
+            shiftKindNow,
+            cp_goalKind: cpAny?.goalKind ?? null,
+            cp_targetKind: cpAny?.targetKind ?? null,
+            cp_replyGoalKind:
+              typeof cpAny?.replyGoal?.kind === 'string' ? cpAny.replyGoal.kind : null,
+            meta_goalKind: metaAny?.goalKind ?? null,
+            meta_targetKind: metaAny?.targetKind ?? null,
+            meta_target_kind: metaAny?.target_kind ?? null,
+          })
+        );
 
-      exAny.goalKind = chosenGoalKind;
-      exAny.targetKind = chosenTargetKind;
-      exAny.target_kind = chosenTargetKind;
+        cpAny.goalKind = chosenGoalKind;
+        cpAny.targetKind = chosenTargetKind;
+        cpAny.replyGoal = { kind: chosenGoalKind };
+
+        metaAny.goalKind = chosenGoalKind;
+        metaAny.targetKind = chosenTargetKind;
+        metaAny.target_kind = chosenTargetKind;
+
+        exAny.goalKind = chosenGoalKind;
+        exAny.targetKind = chosenTargetKind;
+        exAny.target_kind = chosenTargetKind;
     }
 
 
@@ -3656,9 +3959,9 @@ if (true) {
       const fallbackSummary = String((ctx as any)?.situationSummary ?? '').trim().slice(0, 120);
       const situationSummaryForDigest = latestSummary || fallbackSummary;
 
-      // ✅ topic を雑に「その他・ライフ全般」へ潰さない
-      // - rawTopic が具体的ならそれを残す
-      // - rawTopic が空 / 汎用ラベルなら latestSummary から短く起こす
+      // ✅ topic は「古い具体 topic を残す」より、「今の話題へ追従」を優先する
+      // - rawTopic が汎用ラベルなら latestSummary から起こす
+      // - rawTopic が具体でも、latestSummary と明らかに別話題なら latestSummary を採用する
       const rawTopic = String((ctx as any)?.situationTopic ?? '').trim();
 
       const isGenericTopic =
@@ -3680,9 +3983,26 @@ if (true) {
         String((ctx as any)?.latestUserText ?? '').trim() ||
         '';
 
+      const normalizeTopicKey = (v: string): string =>
+        String(v ?? '')
+          .replace(/\s+/g, '')
+          .replace(/[「」『』（）()［］\[\]{}｛｝、。,.!！?？:：・\-—―_]/g, '')
+          .trim();
+
+      const latestTopicCandidate = summaryTopicSeed.slice(0, 40);
+      const rawTopicKey = normalizeTopicKey(rawTopic);
+      const latestTopicKey = normalizeTopicKey(latestTopicCandidate);
+
+      const shouldReplaceSpecificTopic =
+        !isGenericTopic &&
+        Boolean(rawTopicKey) &&
+        Boolean(latestTopicKey) &&
+        !rawTopicKey.includes(latestTopicKey) &&
+        !latestTopicKey.includes(rawTopicKey);
+
       const situationTopicForDigest = (
-        isGenericTopic
-          ? (summaryTopicSeed.slice(0, 32) || 'その他・ライフ全般')
+        isGenericTopic || shouldReplaceSpecificTopic
+          ? (latestTopicCandidate || 'その他・ライフ全般')
           : rawTopic
       ).slice(0, 40);
 
@@ -3937,7 +4257,89 @@ const restoreCtxPackFromHistory = (historyForTurn: any[]): any | null => {
         stingLevel:
           typeof (ctx as any).stingLevel === 'string' ? (ctx as any).stingLevel : null,
         depthHistoryLite: restoredDepthHistoryLite,
-        historyDigestV1: restoredHistoryDigestV1,
+        historyDigestV1: (() => {
+          const restoredRepeatSignal =
+            !!(restoredHistoryDigestV1 as any)?.continuity?.repeat_signal ||
+            !!(ctx as any)?.repeatSignalSame ||
+            !!(ctx as any)?.repeat_signal ||
+            false;
+
+          const restoredLastUserCore =
+            String((ctx as any)?.continuity?.last_user_core ?? (ctx as any)?.lastUserCore ?? '').trim() || '';
+
+          const restoredLastAssistantCore =
+            String((ctx as any)?.continuity?.last_assistant_core ?? (ctx as any)?.lastAssistantCore ?? '').trim() || '';
+
+          const restoredLatestSummary = restoredLastUserCore.slice(0, 120);
+          const restoredFallbackSummary = String((ctx as any)?.situationSummary ?? '').trim().slice(0, 120);
+          const restoredSituationSummary =
+            restoredLatestSummary || restoredFallbackSummary;
+
+          const restoredRawTopic = String((ctx as any)?.situationTopic ?? '').trim();
+
+          const restoredIsGenericTopic =
+            !restoredRawTopic ||
+            restoredRawTopic === 'その他・ライフ全般' ||
+            restoredRawTopic === 'その他ライフ全般' ||
+            restoredRawTopic === 'ライフ全般' ||
+            restoredRawTopic === 'その他' ||
+            restoredRawTopic === 'よくわからない' ||
+            restoredRawTopic === '分からない' ||
+            restoredRawTopic === 'わからない' ||
+            restoredRawTopic === '不明' ||
+            restoredRawTopic === '未整理' ||
+            restoredRawTopic === '整理中';
+
+          const restoredSummaryTopicSeed =
+            restoredLatestSummary ||
+            restoredFallbackSummary ||
+            String((ctx as any)?.latestUserText ?? '').trim() ||
+            '';
+
+          const normalizeTopicKey = (v: string): string =>
+            String(v ?? '')
+              .replace(/\s+/g, '')
+              .replace(/[「」『』（）()［］\[\]{}｛｝、。,.!！?？:：・\-—―_]/g, '')
+              .trim();
+
+          const restoredLatestTopicCandidate = restoredSummaryTopicSeed.slice(0, 40);
+          const restoredRawTopicKey = normalizeTopicKey(restoredRawTopic);
+          const restoredLatestTopicKey = normalizeTopicKey(restoredLatestTopicCandidate);
+
+          const restoredShouldReplaceSpecificTopic =
+            !restoredIsGenericTopic &&
+            Boolean(restoredRawTopicKey) &&
+            Boolean(restoredLatestTopicKey) &&
+            !restoredRawTopicKey.includes(restoredLatestTopicKey) &&
+            !restoredLatestTopicKey.includes(restoredRawTopicKey);
+
+          const restoredSituationTopic = (
+            restoredIsGenericTopic || restoredShouldReplaceSpecificTopic
+              ? (restoredLatestTopicCandidate || 'その他・ライフ全般')
+              : restoredRawTopic
+          ).slice(0, 40);
+
+          return buildHistoryDigestV1({
+            fixedNorth: { key: 'SUN', phrase: '成長 / 進化 / 希望 / 歓喜' },
+            metaAnchorKey:
+              String((ctx as any)?.baseMetaForTurn?.intent_anchor_key ?? '').trim() || null,
+            memoryAnchorKey:
+              String(
+                (ctx as any)?.memoryState?.intentAnchor ??
+                  (ctx as any)?.intentAnchor ??
+                  '',
+              ).trim() || null,
+            qPrimary: (ctx as any)?.memoryState?.qPrimary ?? (ctx as any)?.qPrimary ?? 'Q3',
+            depthStage:
+              (ctx as any)?.memoryState?.depthStage ?? (ctx as any)?.depthStage ?? 'F1',
+            phase: (ctx as any)?.memoryState?.phase ?? (ctx as any)?.phase ?? 'Inner',
+            situationTopic: restoredSituationTopic,
+            situationSummary: restoredSituationSummary,
+            lastUserCore: restoredLastUserCore.slice(0, 120),
+            lastAssistantCore: restoredLastAssistantCore.slice(0, 120),
+            repeatSignal: restoredRepeatSignal,
+          });
+        })(),
         historyForWriter: restoredHistoryForWriter,
         historyForWriterAt: restoredHistoryForWriterAt,
         irMeta: restoredIrMeta,
@@ -6073,9 +6475,17 @@ if (remake?.detected) {
   // targetKind はそのまま活かすが、
   // goalKind / replyGoal は既存の行為を保持する
   const currentGoalKind = String(
-    cp.goalKind ??
-      cp.replyGoal?.kind ??
+    cp.replyGoal?.kind ??
       (out.metaForSave as any).goalKind ??
+      ''
+  )
+    .trim()
+    .toLowerCase();
+
+  const currentTargetKind = String(
+    cp.targetKind ??
+      (out.metaForSave as any).targetKind ??
+      (out.metaForSave as any).target_kind ??
       ''
   )
     .trim()
@@ -6090,9 +6500,21 @@ if (remake?.detected) {
       ? currentGoalKind
       : 'uncover';
 
+  const normalizedTargetKind =
+    currentTargetKind === 'clarify' ||
+    currentTargetKind === 'stabilize' ||
+    currentTargetKind === 'decide' ||
+    currentTargetKind === 'commit' ||
+    currentTargetKind === 'uncover'
+      ? currentTargetKind
+      : normalizedGoalKind;
+
   cp.goalKind = normalizedGoalKind;
+  cp.targetKind = normalizedTargetKind;
   cp.replyGoal = { kind: normalizedGoalKind };
   (out.metaForSave as any).goalKind = normalizedGoalKind;
+  (out.metaForSave as any).targetKind = normalizedTargetKind;
+  (out.metaForSave as any).target_kind = normalizedTargetKind;
 }
 // ✅ traceId をこの場で一回だけ正規化（alreadyHasBlocks 判定にも使う）
 const traceIdNow: string | null = (() => {
@@ -6165,8 +6587,8 @@ if ((policy === 'SCAFFOLD' || policy === 'FINAL') && (seedOnlyNow || emptyLikeNo
   });
 
   // renderGateway の復旧素材にもならないように “実体” を落とす
-  delete (ex as any).rephraseBlocks;
-  delete (ex as any).rephraseBlocksTraceId;
+// delete (ex as any).rephraseBlocks;
+// delete (ex as any).rephraseBlocksTraceId;
   (ex as any).rephraseBlocksCleared = true;
   (ex as any).rephraseBlocksClearedReason = 'trace_mismatch_or_missing';
   (ex as any).rephraseBlocksClearedAt = new Date().toISOString();
@@ -7123,14 +7545,100 @@ try {
 
     const exAny: any = (out.metaForSave as any).extra;
 
+    const isGenericSituationTopic = (v: string): boolean => {
+      const s = String(v ?? '').trim();
+      return (
+        !s ||
+        s === 'その他・ライフ全般' ||
+        s === 'その他ライフ全般' ||
+        s === 'ライフ全般' ||
+        s === 'その他' ||
+        s === 'よくわからない' ||
+        s === '分からない' ||
+        s === 'わからない' ||
+        s === '不明' ||
+        s === '未整理' ||
+        s === '整理中'
+      );
+    };
+
+    const normalizedMemorySituationSummary =
+      typeof memoryStateSnapshot?.situationSummary === 'string' &&
+      memoryStateSnapshot.situationSummary.trim().length > 0
+        ? String(memoryStateSnapshot.situationSummary).trim().slice(0, 180)
+        : typeof text === 'string' && text.trim().length > 0
+          ? String(text).trim().slice(0, 180)
+          : null;
+
+    const normalizedMemorySituationTopic = (() => {
+      const raw = String(memoryStateSnapshot?.situationTopic ?? '').trim();
+      if (raw && !isGenericSituationTopic(raw)) {
+        return raw.slice(0, 120);
+      }
+
+      const fromSummary =
+        typeof normalizedMemorySituationSummary === 'string' &&
+        normalizedMemorySituationSummary.trim().length > 0
+          ? normalizedMemorySituationSummary
+          : typeof text === 'string' && text.trim().length > 0
+            ? String(text).trim()
+            : '';
+
+      return fromSummary ? fromSummary.slice(0, 120) : raw || null;
+    })();
+
+    const normalizedMemoryStateSnapshot = memoryStateSnapshot
+      ? {
+          ...memoryStateSnapshot,
+          situationSummary: normalizedMemorySituationSummary,
+          situationTopic: normalizedMemorySituationTopic,
+        }
+      : null;
+
+    const normalizedMemoryStateNoteText = normalizedMemoryStateSnapshot
+      ? [
+          'MEMORY_STATE:',
+          normalizedMemoryStateSnapshot.summary
+            ? `- summary: ${String(normalizedMemoryStateSnapshot.summary).slice(0, 180)}`
+            : null,
+          normalizedMemoryStateSnapshot.situationSummary
+            ? `- situation_summary: ${String(normalizedMemoryStateSnapshot.situationSummary).slice(0, 180)}`
+            : null,
+          normalizedMemoryStateSnapshot.situationTopic
+            ? `- situation_topic: ${String(normalizedMemoryStateSnapshot.situationTopic).slice(0, 120)}`
+            : null,
+          normalizedMemoryStateSnapshot.qPrimary
+            ? `- q_primary: ${normalizedMemoryStateSnapshot.qPrimary}`
+            : null,
+          normalizedMemoryStateSnapshot.depthStage
+            ? `- depth_stage: ${normalizedMemoryStateSnapshot.depthStage}`
+            : null,
+          normalizedMemoryStateSnapshot.phase
+            ? `- phase: ${normalizedMemoryStateSnapshot.phase}`
+            : null,
+          normalizedMemoryStateSnapshot.intentLayer
+            ? `- intent_layer: ${normalizedMemoryStateSnapshot.intentLayer}`
+            : null,
+          normalizedMemoryStateSnapshot.sentimentLevel
+            ? `- sentiment_level: ${normalizedMemoryStateSnapshot.sentimentLevel}`
+            : null,
+        ]
+          .filter((v) => typeof v === 'string' && v.trim().length > 0)
+          .join('\n')
+      : memoryStateNoteText;
+
     exAny.longTermMemoryNoteText = longTermMemoryNoteText;
-    exAny.memoryStateNoteText = memoryStateNoteText;
-    exAny.memoryStateSnapshot = memoryStateSnapshot;
+    exAny.memoryStateNoteText = normalizedMemoryStateNoteText;
+    exAny.memoryStateSnapshot = normalizedMemoryStateSnapshot;
+    exAny.situationSummary = normalizedMemorySituationSummary;
+    exAny.situationTopic = normalizedMemorySituationTopic;
 
     exAny.ctxPack = exAny.ctxPack && typeof exAny.ctxPack === 'object' ? exAny.ctxPack : {};
     exAny.ctxPack.longTermMemoryNoteText = longTermMemoryNoteText;
-    exAny.ctxPack.memoryStateNoteText = memoryStateNoteText;
-    exAny.ctxPack.memoryStateSnapshot = memoryStateSnapshot;
+    exAny.ctxPack.memoryStateNoteText = normalizedMemoryStateNoteText;
+    exAny.ctxPack.memoryStateSnapshot = normalizedMemoryStateSnapshot;
+    exAny.ctxPack.situationSummary = normalizedMemorySituationSummary;
+    exAny.ctxPack.situationTopic = normalizedMemorySituationTopic;
 
     console.log('[IROS/LTM][STAMPED_FOR_ROUTE]', {
       traceId: traceIdCanon,
@@ -7970,6 +8478,91 @@ if (!resultForReturn.meta.extra || typeof resultForReturn.meta.extra !== 'object
 
 resultForReturn.meta.extra.ctxPack_willRotation = willRotationForReturn;
 resultForReturn.ctxPack_willRotation = willRotationForReturn;
+
+// ✅ 返却 payload 側にも latest ctxPack を同期
+try {
+  const latestExtra: any =
+    (out.metaForSave as any)?.extra && typeof (out.metaForSave as any).extra === 'object'
+      ? (out.metaForSave as any).extra
+      : null;
+
+  const latestCtxPack: any =
+    latestExtra?.ctxPack && typeof latestExtra.ctxPack === 'object'
+      ? latestExtra.ctxPack
+      : null;
+
+  if (latestExtra) {
+    resultForReturn.meta.extra = {
+      ...(resultForReturn.meta.extra ?? {}),
+      ...latestExtra,
+    };
+  }
+
+  if (latestCtxPack) {
+    resultForReturn.meta.extra.ctxPack = {
+      ...(resultForReturn.meta.extra?.ctxPack ?? {}),
+      ...latestCtxPack,
+    };
+  }
+  if (latestCtxPack || latestExtra) {
+    const digestTopic: any =
+      latestCtxPack?.historyDigestV1 &&
+      typeof latestCtxPack.historyDigestV1 === 'object' &&
+      latestCtxPack.historyDigestV1.topic &&
+      typeof latestCtxPack.historyDigestV1.topic === 'object'
+        ? latestCtxPack.historyDigestV1.topic
+        : latestExtra?.historyDigestV1 &&
+            typeof latestExtra.historyDigestV1 === 'object' &&
+            latestExtra.historyDigestV1.topic &&
+            typeof latestExtra.historyDigestV1.topic === 'object'
+          ? latestExtra.historyDigestV1.topic
+          : null;
+
+    const latestSituationSummary =
+      typeof latestCtxPack?.situationSummary === 'string' && latestCtxPack.situationSummary.trim()
+        ? latestCtxPack.situationSummary.trim()
+        : typeof digestTopic?.situationSummary === 'string' && digestTopic.situationSummary.trim()
+          ? digestTopic.situationSummary.trim()
+          : null;
+
+    const latestSituationTopic =
+      typeof latestCtxPack?.situationTopic === 'string' && latestCtxPack.situationTopic.trim()
+        ? latestCtxPack.situationTopic.trim()
+        : typeof digestTopic?.situationTopic === 'string' && digestTopic.situationTopic.trim()
+          ? digestTopic.situationTopic.trim()
+          : null;
+
+    if (latestSituationSummary) {
+      resultForReturn.meta.extra.situationSummary = latestSituationSummary;
+      resultForReturn.meta.extra.situation_summary = latestSituationSummary;
+
+      if (
+        resultForReturn.meta.extra.ctxPack &&
+        typeof resultForReturn.meta.extra.ctxPack === 'object'
+      ) {
+        resultForReturn.meta.extra.ctxPack.situationSummary = latestSituationSummary;
+      }
+
+      resultForReturn.meta.situationSummary = latestSituationSummary;
+      resultForReturn.meta.situation_summary = latestSituationSummary;
+    }
+
+    if (latestSituationTopic) {
+      resultForReturn.meta.extra.situationTopic = latestSituationTopic;
+      resultForReturn.meta.extra.situation_topic = latestSituationTopic;
+
+      if (
+        resultForReturn.meta.extra.ctxPack &&
+        typeof resultForReturn.meta.extra.ctxPack === 'object'
+      ) {
+        resultForReturn.meta.extra.ctxPack.situationTopic = latestSituationTopic;
+      }
+
+      resultForReturn.meta.situationTopic = latestSituationTopic;
+      resultForReturn.meta.situation_topic = latestSituationTopic;
+    }
+  }
+} catch {}
 
 try {
   console.log('[IROS/Reply][FINAL_RETURN_WILLROTATION]', {
