@@ -54,6 +54,9 @@ const CHAT_CREDIT_AMOUNT = Number(process.env.IROS_CHAT_CREDIT_AMOUNT ?? 5);
 // 残高しきい値（ENVで上書き可）
 const LOW_BALANCE_THRESHOLD = Number(process.env.IROS_LOW_BALANCE_THRESHOLD ?? 10);
 
+// 1: 課金authorizeをバイパス（Preview検証用）
+const CREDITS_BYPASS = (process.env.CREDITS_BYPASS || '0') === '1';
+
 // =========================================================
 // Persist policy（single-writer）
 // =========================================================
@@ -521,7 +524,9 @@ const styleInput: string | undefined =
     // -------------------------------------------------------
     // 7) authorize
     // -------------------------------------------------------
-    const authRes = await authorizeChat(req, userCode, CREDIT_AMOUNT, creditRef, conversationId);
+    const authRes = CREDITS_BYPASS
+      ? { ok: true as const, status: 200, data: { bypass: true } }
+      : await authorizeChat(req, userCode, CREDIT_AMOUNT, creditRef, conversationId);
 
     if (!authRes.ok) {
       const errCode = (authRes as any).error ?? 'credit_authorize_failed';
