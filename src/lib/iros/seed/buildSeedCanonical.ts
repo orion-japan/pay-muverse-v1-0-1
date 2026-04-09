@@ -371,15 +371,15 @@ export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
       ? userCore.split(/でも|けど|しかし/).pop()?.trim() ?? ''
       : '';
 
-  const meaning = hasDeepCStructure
-    ? (() => {
-        const b =
-          pickB ||
-          (pickA.match(/現実.*?(?:やる|続ける|伸ばす|進める)/)?.[0] ?? '') ||
-          '現実側に寄る方向';
+      const meaning = hasDeepCStructure
+      ? (() => {
+          const b =
+            pickB ||
+            (pickA.match(/現実.*?(?:やる|続ける|伸ばす|進める)/)?.[0] ?? '') ||
+            '現実に向くほう';
 
-        return `本当は「${b}」ほうに寄っていると、もう分かっている`;
-      })()
+          return `もう${b}へ気持ちは寄っている。`;
+        })()
     : baseMeaning;
 
   const seedWithoutText: Omit<SeedCanonical, 'text'> = {

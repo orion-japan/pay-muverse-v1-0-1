@@ -46,31 +46,78 @@ function looksLikeDetailFollowup(text: string): boolean {
   return keywords.some((word) => text.includes(word));
 }
 
+function looksLikeDeclarationResonance(text: string): boolean {
+  if (!text) return false;
+
+  const declarationPatterns = [
+    /私が[^\n。]*する/,
+    /私は[^\n。]*する/,
+    /私は[^\n。]*やる/,
+    /私が[^\n。]*作る/,
+    /私が[^\n。]*創る/,
+    /私は[^\n。]*立ちます/,
+    /私は[^\n。]*変えていきます/,
+    /私は[^\n。]*動かします/,
+    /私は[^\n。]*預けません/,
+    /私は[^\n。]*前に出ます/,
+    /私は[^\n。]*見え始めます/,
+    /訪れます/,
+    /始まります/,
+    /現実を作ります/,
+  ];
+
+  const explanationPatterns = [
+    /教えて/,
+    /なぜ/,
+    /どうして/,
+    /とは/,
+    /ですか/,
+    /ますか/,
+    /詳しく/,
+    /具体的/,
+  ];
+
+  const hasDeclaration = declarationPatterns.some((pattern) => pattern.test(text));
+  const hasExplanationRequest = explanationPatterns.some((pattern) => pattern.test(text));
+
+  return hasDeclaration && !hasExplanationRequest;
+}
+
 export function selectSlotPattern(input: SelectSlotPatternInput): PatternKey {
   const line = normalizeLite(input?.line);
   const questionType = normalizeLite(input?.questionType);
-  const followupText = normalizeLite(input?.followupText);
-  const userText = normalizeLite(input?.userText);
+  const followupText = String(input?.followupText ?? '').trim();
+  const userText = String(input?.userText ?? '').trim();
   const detailMode = Boolean(input?.detailMode);
-  const hasPriorDiagnosis = Boolean(input?.hasPriorDiagnosis);
-  const hasTarget = normalizeLite(input?.targetLabel).length > 0;
 
   const irLike = isIrLikeLine(line);
   const truthLike = isTruthLikeQuestionType(questionType);
   const detailLike =
-    detailMode || looksLikeDetailFollowup(followupText) || looksLikeDetailFollowup(userText);
+    detailMode ||
+    looksLikeDetailFollowup(normalizeLite(followupText)) ||
+    looksLikeDetailFollowup(normalizeLite(userText));
 
-  if (irLike && detailLike && (hasPriorDiagnosis || hasTarget)) {
+  const declarationLike = looksLikeDeclarationResonance(followupText || userText);
+
+  // ir診断の詳細化は IR_DETAIL_V1
+  if (irLike && detailLike) {
     return 'IR_DETAIL_V1';
   }
 
+  // ir診断の初回や通常診断は IR_LIGHT_V1
   if (irLike) {
     return 'IR_LIGHT_V1';
   }
 
-  if (truthLike) {
-    return 'TRUTH_V1';
+  // 宣言文・共鳴文は DECLARATION_RESONANCE_V1
+  if (!truthLike && declarationLike) {
+    return 'DECLARATION_RESONANCE_V1';
   }
 
-  return 'NORMAL_V1';
+  // 通常会話は NORMAL_DETAIL_V1
+  if (!truthLike) {
+    return 'NORMAL_DETAIL_V1';
+  }
+
+  return 'TRUTH_V1';
 }

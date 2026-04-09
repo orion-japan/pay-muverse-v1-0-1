@@ -157,11 +157,11 @@ function buildFocusCandidate(domain: DomainType, questionType: QuestionType, tex
   }
 
   if (questionType === 'meaning') {
-    out.push('意味', '受け取り方', '位置づけ');
+    out.push('意味', '受け取り方', 'どう見るか');
   }
 
   if (questionType === 'future_design') {
-    out.push('次の一手', '設計方針', '進行順');
+    out.push('次の一歩', '進め方', '順番');
   }
 
   if (questionType === 'unresolved_release') {

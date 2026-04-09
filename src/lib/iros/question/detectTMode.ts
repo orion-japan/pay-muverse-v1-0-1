@@ -19,8 +19,8 @@ function pickFocus(input: DetectTModeInput): string | null {
     return input.iframe.focusCandidate[0] ?? null;
   }
 
-  if (/未来|これから|次|今後/.test(text)) return '次の一手';
-  if (/比較|違い|どれ|どちら/.test(text)) return '比較観点';
+  if (/未来|これから|次|今後/.test(text)) return '次の一歩';
+  if (/比較|違い|どれ|どちら/.test(text)) return '比べるポイント';
   if (/なぜ|原因|どうして/.test(text)) return '原因';
   if (/意味|意義/.test(text)) return '意味';
 

@@ -1120,7 +1120,7 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                 }
 
                 if (sk === 'stabilize_shift') return '進めるより先に、戻って整える角度を優先する';
-                if (sk === 'narrow_shift') return '問題を小さく切って、いま触る一点だけを見せる';
+                if (sk === 'narrow_shift') return 'まだ今は、ひとつだけ触れれば十分';
                 if (sk === 'repair_shift') return '修復の正解探しではなく、安全な入口を1つだけ示す';
                 if (sk === 'decide_shift') return '結論を急がず、選ぶ基準を先に固定する';
                 if (sk === 'distance_shift') return '近づく/離れるの前に、いまの距離で何が苦しいかを定める';
@@ -2018,7 +2018,28 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                   (args as any)?.writerDirectives && typeof (args as any).writerDirectives === 'object'
                     ? { ...(args as any).writerDirectives }
                     : {};
-
+                    try {
+                      console.log(
+                        '[IROS/writerCalls][INCOMING_WRITER_DIRECTIVES_KEYS]',
+                        JSON.stringify({
+                          traceId: (args as any)?.traceId ?? null,
+                          conversationId: (args as any)?.conversationId ?? null,
+                          userCode: (args as any)?.userCode ?? null,
+                          keys: Object.keys(incomingWriterDirectives ?? {}),
+                          hasPatternKey:
+                            String((incomingWriterDirectives as any)?.pattern_key ?? '').trim().length > 0,
+                          hasPatternMode:
+                            String((incomingWriterDirectives as any)?.pattern_mode ?? '').trim().length > 0,
+                          hasPatternBlockOrder:
+                            String((incomingWriterDirectives as any)?.pattern_block_order ?? '').trim().length > 0,
+                          hasBlockClosingLine:
+                            String((incomingWriterDirectives as any)?.block_closing_line ?? '').trim().length > 0,
+                          writeConstraintsLen: Array.isArray((incomingWriterDirectives as any)?.writeConstraints)
+                            ? (incomingWriterDirectives as any).writeConstraints.length
+                            : 0,
+                        })
+                      );
+                    } catch {}
                 const flowLine =
                   String((args as any)?.flow180?.sentence ?? '').trim() || null;
 
@@ -2036,10 +2057,19 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                   return summary || situation || null;
                 })();
 
-                const openingMode = 'direct_core';
+                const patternKeyForDefaults = String(
+                  incomingWriterDirectives.pattern_key ?? ''
+                ).trim();
 
-                const responseLength =
-                  goalKindNow === 'resonate'
+                const isResonancePattern =
+                  patternKeyForDefaults === 'DECLARATION_RESONANCE_V1' ||
+                  patternKeyForDefaults === 'NORMAL_RESONANCE_V1';
+
+                const openingMode = isResonancePattern ? '' : 'direct_core';
+
+                const responseLength = isResonancePattern
+                  ? 'soft_long'
+                  : goalKindNow === 'resonate'
                     ? 'soft_long'
                     : goalKindNow === 'decide'
                       ? 'medium'
@@ -2077,73 +2107,114 @@ if (effectiveQuestionType === 'truth') {
   incomingWriterDirectives.forceSingleConclusion = true;
   incomingWriterDirectives.noAbstractEscape = true;
 }
-                const mergedWriteConstraints = Array.from(
-                  new Set([
-                    ...incomingWriteConstraints,
-                    '最初に相手へ触れてから核心に入る',
-                    '最初の1文は観測で始める',
-                    '共感だけで終わらない',
-                    'いまの焦点を一つに絞る',
-                    'decide時も短く切りすぎず、少し滞在感を持たせてよい',
-                    'resonate時は説明だけで終わらず、同じ意味を別角度でもう1段だけ展開してよい',
-                    '1つの結論だけで終わらず、説明→補足→余白の順で最低2段階に展開する',
-                    '2〜4文で1まとまりにし、少なくとも2まとまり以上で構成する',
-                    '1つのまとまりに理由・補足・結論を詰め込みすぎない',
-                    '話題が切り替わる時、理由に移る時、まとめに移る時は段落を分ける',
-                    'OBSは今起きていることを先に置く',
-                    'SHIFTはその理由や背景構造を次のまとまりで述べる',
-                    'NEXTは次に見る一点や分岐点を最後のまとまりで述べる',
-                  ])
-                );
+const mergedWriteConstraints = Array.from(
+  new Set([
+    ...incomingWriteConstraints,
+    '最初に相手へ触れてから核心に入る',
+    '最初の1文は観測で始める',
+    '共感だけで終わらない',
+    'いまの焦点を一つに絞る',
+    'decide時も短く切りすぎず、少し滞在感を持たせてよい',
+    'resonate時は説明だけで終わらず、同じ意味を別角度でもう1段だけ展開してよい',
+    '1つの結論だけで終わらず、説明→補足→余白の順で最低2段階に展開する',
+    '2〜4文で1まとまりにし、少なくとも2まとまり以上で構成する',
+    '1つのまとまりに理由・補足・結論を詰め込みすぎない',
+    '話題が切り替わる時、理由に移る時、まとめに移る時は段落を分ける',
+    'OBSは今起きていることを先に置く',
+    'SHIFTはその理由や背景構造を次のまとまりで述べる',
+    'NEXTは次に見る一点や分岐点を最後のまとまりで述べる',
+  ])
+);
 
-                return {
-                  ...incomingWriterDirectives,
+const preservedPatternDirectives = Object.fromEntries(
+  Object.entries(incomingWriterDirectives).filter(([key, value]) => {
+    if (!/^(pattern_|block_)/.test(String(key))) return false;
+    return String(value ?? '').trim().length > 0;
+  })
+);
 
-                  mode: incomingWriterDirectives.mode ?? null, // ← これ追加
+return {
+  ...incomingWriterDirectives,
+  ...preservedPatternDirectives,
 
-                  openingMode,
-                  responseLength,
+  mode: incomingWriterDirectives.mode ?? null,
 
-                  firstTouch: {
-                    ...incomingFirstTouch,
-                    enabled: goalKindNow === 'resonate',
-                    hint: touchHint,
-                    rules: [
-                      '最初の1文は観測のみ。理由・解釈・結論・一般化は禁止。',
-                      '最初の1文は、相手の変化・気づき・違和感・届いた感じのいずれかに触れる',
-                      'ユーザーの言い回し・断定・温度をそのまま受けて返す',
-                      '構造説明から入らない',
-                      '一般論から入らない',
-                      '問い返しから入らない',
-                      '入力の意味を言い換える前に、まず相手に触れる',
-                      '受け取りの一言を先に置いてよい',
-                      '一緒に見ている感じを含めてよい',
-                      '2〜3文で自然に広げてよい（1文で終わらせない）',
-                    ],
-                  },
+  openingMode,
+  responseLength,
 
-                  bodyStyle: {
-                    ...incomingBodyStyle,
-                    coreFirst: true,
-                    allowSoftExpand: true,
-                    minSentences: goalKindNow === 'decide' ? 4 : 3,
-                    maxSentences: goalKindNow === 'decide' ? 7 : 6,
-                    allowEmpathicBridge: true,
-                    allowGentleRephrase: true,
-                    forbidTopicExpansion: true,
-                    delayClosure: true,
-                    preferBlockSplit: true,
-                    maxSentencesPerBlock: 2,
-                    minBlocks: 2,
-                  },
+  firstTouch: {
+    ...incomingFirstTouch,
+    enabled: goalKindNow === 'resonate',
+    hint: touchHint,
+    rules: [
+      '最初の1文は観測のみ。理由・解釈・結論・一般化は禁止。',
+      '最初の1文は、相手の変化・気づき・違和感・届いた感じのいずれかに触れる',
+      'ユーザーの言い回し・断定・温度をそのまま受けて返す',
+      '構造説明から入らない',
+      '一般論から入らない',
+      '問い返しから入らない',
+      '入力の意味を言い換える前に、まず相手に触れる',
+      '受け取りの一言を先に置いてよい',
+      '一緒に見ている感じを含めてよい',
+      '2〜3文で自然に広げてよい（1文で終わらせない）',
+    ],
+  },
 
-                  flowLine,
-                  deltaLine: bestShiftDirection || null,
-                  flowFrom: String((args as any)?.flow180?.from ?? '').trim() || null,
-                  flowTo: String((args as any)?.flow180?.to ?? '').trim() || null,
+  bodyStyle: {
+    ...incomingBodyStyle,
+    coreFirst: true,
+    allowSoftExpand: true,
+    minSentences:
+      typeof incomingBodyStyle.minSentences === 'number'
+        ? incomingBodyStyle.minSentences
+        : goalKindNow === 'decide'
+          ? 4
+          : 3,
+    maxSentences:
+      typeof incomingBodyStyle.maxSentences === 'number'
+        ? incomingBodyStyle.maxSentences
+        : goalKindNow === 'decide'
+          ? 7
+          : 6,
+    allowEmpathicBridge:
+      typeof incomingBodyStyle.allowEmpathicBridge === 'boolean'
+        ? incomingBodyStyle.allowEmpathicBridge
+        : true,
+    allowGentleRephrase:
+      typeof incomingBodyStyle.allowGentleRephrase === 'boolean'
+        ? incomingBodyStyle.allowGentleRephrase
+        : isResonancePattern
+          ? false
+          : true,
+    forbidTopicExpansion:
+      typeof incomingBodyStyle.forbidTopicExpansion === 'boolean'
+        ? incomingBodyStyle.forbidTopicExpansion
+        : true,
+    delayClosure:
+      typeof incomingBodyStyle.delayClosure === 'boolean'
+        ? incomingBodyStyle.delayClosure
+        : true,
+    preferBlockSplit:
+      typeof incomingBodyStyle.preferBlockSplit === 'boolean'
+        ? incomingBodyStyle.preferBlockSplit
+        : true,
+    maxSentencesPerBlock:
+      typeof incomingBodyStyle.maxSentencesPerBlock === 'number'
+        ? incomingBodyStyle.maxSentencesPerBlock
+        : 2,
+    minBlocks:
+      typeof incomingBodyStyle.minBlocks === 'number'
+        ? incomingBodyStyle.minBlocks
+        : 2,
+  },
 
-                  writeConstraints: mergedWriteConstraints,
-                };
+  flowLine,
+  deltaLine: bestShiftDirection || null,
+  flowFrom: String((args as any)?.flow180?.from ?? '').trim() || null,
+  flowTo: String((args as any)?.flow180?.to ?? '').trim() || null,
+
+  writeConstraints: mergedWriteConstraints,
+};
               })();
 
                 const flowSeedV1 = buildFlowSeedV1({
@@ -2281,11 +2352,11 @@ const internalPackRawCleaned =
 
                       const deltaReason =
                         deltaType === 'stage_energy'
-                          ? '状態が動いているため、次の方向を一つに絞る必要がある'
+                          ? 'まだどこまでを今ここで言い切るかは決まりきっていない。'
                           : deltaType === 'energy_shift'
-                            ? '感情の揺れがあるため、進み方を整理する必要がある'
+                            ? 'まだ気持ちの揺れが残っている。'
                             : deltaType === 'stage_shift'
-                              ? '段階が変わっているため、次の一歩を明確にする必要がある'
+                              ? 'まだ次の一歩をひとつに決めきらずに残っている。'
                               : null;
 
                       if (!deltaReason) return raw;
@@ -2325,6 +2396,13 @@ const internalPackRawCleaned =
                       const lines: string[] = ['WRITER_DIRECTIVES (DO NOT OUTPUT):'];
                       const slotDecision = (args as any)?.slotDecision ?? (args as any)?.userContext?.ctxPack?.slotDecision;
 
+                      const patternKeyForSlotGate = String((wd as any)?.pattern_key ?? '').trim();
+                      const isDetailPatternWriter =
+                        patternKeyForSlotGate === 'IR_DETAIL_V1' ||
+                        patternKeyForSlotGate === 'NORMAL_DETAIL_V1' ||
+                        patternKeyForSlotGate === 'NORMAL_RESONANCE_V1' ||
+                        patternKeyForSlotGate === 'DECLARATION_RESONANCE_V1';
+
                       try {
                         const topSd = (args as any)?.slotDecision;
                         const uc = (args as any)?.userContext;
@@ -2358,11 +2436,13 @@ const internalPackRawCleaned =
                               typeof (args as any).writerDirectives === 'object'
                                 ? Object.keys((args as any).writerDirectives)
                                 : [],
+                            patternKeyForSlotGate,
+                            isDetailPatternWriter,
                           })
                         );
                       } catch {}
 
-                      if (slotDecision && typeof slotDecision === 'object') {
+                      if (!isDetailPatternWriter && slotDecision && typeof slotDecision === 'object') {
                         const slotOrder = Array.isArray(slotDecision?.order)
                           ? slotDecision.order
                               .map((v: unknown) => String(v ?? '').trim())
@@ -2519,6 +2599,37 @@ const internalPackRawCleaned =
                       if (deltaLine) lines.push(`deltaLine=${deltaLine}`);
                       if (flowFrom) lines.push(`flowFrom=${flowFrom}`);
                       if (flowTo) lines.push(`flowTo=${flowTo}`);
+
+                      const patternKey = String(wd?.pattern_key ?? '').trim();
+                      const patternMode = String(wd?.pattern_mode ?? '').trim();
+                      const patternBlockOrder = String(wd?.pattern_block_order ?? '').trim();
+
+                      if (patternKey) lines.push(`pattern_key=${patternKey}`);
+                      if (patternMode) lines.push(`pattern_mode=${patternMode}`);
+                      if (patternBlockOrder) lines.push(`pattern_block_order=${patternBlockOrder}`);
+
+                      const patternBlockKeys = [
+                        'block_current_state',
+                        'block_misrecognition_negation',
+                        'block_structural_reframe',
+                        'block_breakdown_core_gap',
+                        'block_breakdown_defense',
+                        'block_breakdown_rejection_target',
+                        'block_reading_direction',
+                        'block_concrete_sort_axis',
+                        'block_concrete_sort_boundary',
+                        'block_concrete_sort_redesign',
+                        'block_felt_acceptance_point',
+                        'block_conclusion',
+                        'block_sting_point',
+                        'block_caution',
+                        'block_closing_line',
+                      ] as const;
+
+                      for (const key of patternBlockKeys) {
+                        const value = String((wd as any)?.[key] ?? '').trim();
+                        if (value) lines.push(`${key}=${value}`);
+                      }
 
                       const writeConstraints = Array.isArray(wd?.writeConstraints) ? wd.writeConstraints : [];
                       writeConstraints
@@ -2803,68 +2914,84 @@ const internalPackForWriter = (() => {
   return base;
 })();
 
-    try {
-      const packNormFinal = norm(internalPackForWriter);
-      const hFinal = packNormFinal.slice(0, 900);
+try {
+  const packNormFinal = norm(internalPackForWriter);
+  const hFinal = packNormFinal.slice(0, 900);
 
-      const flowMatchFinal = packNormFinal.match(
-/FLOW_CONTEXT(?:\s*\(DO NOT OUTPUT\))?:|FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:|FLOW_V2(?:\s*\(DO NOT OUTPUT\))?:/
-      );
-      const flowIdxFinal = flowMatchFinal ? flowMatchFinal.index ?? -1 : -1;
-      const flowSnippetFinal =
-        flowIdxFinal >= 0
-          ? packNormFinal.slice(flowIdxFinal, Math.min(packNormFinal.length, flowIdxFinal + 520))
-          : '';
+  const flowMatchFinal = packNormFinal.match(
+    /FLOW_CONTEXT(?:\s*\(DO NOT OUTPUT\))?:|FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:|FLOW_V2(?:\s*\(DO NOT OUTPUT\))?:/
+  );
+  const flowIdxFinal = flowMatchFinal ? flowMatchFinal.index ?? -1 : -1;
+  const flowSnippetFinal =
+    flowIdxFinal >= 0
+      ? packNormFinal.slice(flowIdxFinal, Math.min(packNormFinal.length, flowIdxFinal + 520))
+      : '';
 
-      const hasOpennessFinal =
-        /(?:^|\n)OPENNESS(?:\n|$)/.test(packNormFinal) ||
-        /tLayerHint=|itOk=/.test(packNormFinal);
+  const hasOpennessFinal =
+    /(?:^|\n)OPENNESS(?:\n|$)/.test(packNormFinal) ||
+    /tLayerHint=|itOk=/.test(packNormFinal);
 
-      const hasWriterDirectivesFinal =
-        /(?:^|\n)WRITER_DIRECTIVES(?:\n|$)/.test(packNormFinal) ||
-        /tone=|maxLines=|slotPolicy=|rotationMention=/.test(packNormFinal);
+  const hasWriterDirectivesFinal =
+    /(?:^|\n)WRITER_DIRECTIVES(?:\n|$)/.test(packNormFinal) ||
+    /tone=|maxLines=|slotPolicy=|rotationMention=/.test(packNormFinal);
 
-      console.log('[IROS/writerCalls][INJECTED_PACK_HEAD_FINAL_RAW]', hFinal);
+  const hasPatternKeyFinal = /(?:^|\n)pattern_key=/.test(packNormFinal);
+  const hasPatternModeFinal = /(?:^|\n)pattern_mode=/.test(packNormFinal);
+  const hasPatternBlockOrderFinal = /(?:^|\n)pattern_block_order=/.test(packNormFinal);
+  const hasBlockClosingLineFinal = /(?:^|\n)block_closing_line=/.test(packNormFinal);
+  const hasWriteConstraint4Final = /(?:^|\n)writeConstraint4=/.test(packNormFinal);
+  const hasWriteConstraint5Final = /(?:^|\n)writeConstraint5=/.test(packNormFinal);
 
-      console.log('[IROS/writerCalls][INJECTED_PACK_HEAD_FINAL]', {
-        traceId: (args as any)?.traceId ?? null,
-        conversationId: (args as any)?.conversationId ?? null,
-        packLen: packNormFinal.length,
-        head: hFinal,
-        hasCOORD: /COORD\s*\(DO NOT OUTPUT\)/.test(packNormFinal),
-        hasPolarity: /polarity=/.test(packNormFinal),
-        hasSA: /sa=/.test(packNormFinal),
+  console.log('[IROS/writerCalls][INJECTED_PACK_HEAD_FINAL_RAW]', hFinal);
 
-        hasITX:
-          /itx_step=|itx_reason=/.test(packNormFinal) ||
-          /itOk=/.test(packNormFinal),
+  console.log(
+    '[IROS/writerCalls][INJECTED_PACK_HEAD_FINAL]',
+    JSON.stringify({
+      traceId: (args as any)?.traceId ?? null,
+      conversationId: (args as any)?.conversationId ?? null,
+      packLen: packNormFinal.length,
+      head: hFinal,
+      hasCOORD: /COORD\s*\(DO NOT OUTPUT\)/.test(packNormFinal),
+      hasPolarity: /polarity=/.test(packNormFinal),
+      hasSA: /sa=/.test(packNormFinal),
 
-        hasFuture:
-          /future=/.test(packNormFinal) ||
-          /futureRandom=/.test(packNormFinal),
+      hasITX:
+        /itx_step=|itx_reason=/.test(packNormFinal) ||
+        /itOk=/.test(packNormFinal),
 
-        hasStateCues: /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/.test(packNormFinal),
+      hasFuture:
+        /future=/.test(packNormFinal) ||
+        /futureRandom=/.test(packNormFinal),
 
-        hasFlowMeaning:
+      hasStateCues: /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/.test(packNormFinal),
+
+      hasFlowMeaning:
         /(?:^|\n)(?:FLOW_MEANING|FLOW_V2)(?:\s*\(DO NOT OUTPUT\))?:/.test(packNormFinal) ||
-          /hook=/.test(packNormFinal) ||
-          /tension=/.test(packNormFinal) ||
-          /openLoop=/.test(packNormFinal),
+        /hook=/.test(packNormFinal) ||
+        /tension=/.test(packNormFinal) ||
+        /openLoop=/.test(packNormFinal),
 
-        hasMirrorFlowSeed:
-          /FLOW_SEED_V1\b/.test(packNormFinal) ||
-          /FLOW:\s*\n/.test(packNormFinal),
+      hasMirrorFlowSeed:
+        /FLOW_SEED_V1\b/.test(packNormFinal) ||
+        /FLOW:\s*\n/.test(packNormFinal),
 
-        hasOpenness: hasOpennessFinal,
-        hasWriterDirectives: hasWriterDirectivesFinal,
-        flowSnippet: flowSnippetFinal,
-        saRhythm: saRhythm || null,
-        saTone: saTone || null,
-        saBrevity: saBrevity || null,
-        itxStep: itxStep ?? null,
-        itxReason: itxReason ?? null,
-      });
-    } catch {}
+      hasOpenness: hasOpennessFinal,
+      hasWriterDirectives: hasWriterDirectivesFinal,
+      hasPatternKeyFinal,
+      hasPatternModeFinal,
+      hasPatternBlockOrderFinal,
+      hasBlockClosingLineFinal,
+      hasWriteConstraint4Final,
+      hasWriteConstraint5Final,
+      flowSnippet: flowSnippetFinal,
+      saRhythm: saRhythm || null,
+      saTone: saTone || null,
+      saBrevity: saBrevity || null,
+      itxStep: itxStep ?? null,
+      itxReason: itxReason ?? null,
+    })
+  );
+} catch {}
   const isTopicRecallTurn =
     meaningKindRaw === 'topic_recall';
 
@@ -3117,9 +3244,10 @@ export async function callWriterLLM(args: {
   // ✅ 末尾 user を保証（念のため）
   messagesFinal = ensureEndsWithUser(messagesFinal);
 
-  // ✅ user は通す。assistant は「内部 pack / 制御用」だけ残し、通常 assistant 会話は落とす
+  // ✅ user は通す。assistant は通常 assistant 会話は落とす
   const MAX_USER = 900;
-  const MAX_ASSIST = 900;
+  const MAX_ASSIST_INTERNAL = 3200;
+  const MAX_ASSIST_PLAIN = 900;
 
   messagesFinal = messagesFinal
     .map((m) => {
@@ -3134,20 +3262,21 @@ export async function callWriterLLM(args: {
 
       if (m.role === 'assistant') {
         const a0 = norm(String(m.content ?? ''));
-        const a1 = clampStr(a0, MAX_ASSIST);
-        if (!a1) return null;
 
         const isInternalPack =
-          /^INTERNAL PACK \(DO NOT OUTPUT\):/i.test(a1) ||
-          /^COORD \(DO NOT OUTPUT\):/i.test(a1) ||
-          /^TOPIC_RECALL_NO_EVIDENCE \(DO NOT OUTPUT\):/i.test(a1) ||
-          /^FLOW_V2 \(DO NOT OUTPUT\):/i.test(a1) ||
-          /^FLOW180(?:_SEED)? \(DO NOT OUTPUT\):/i.test(a1) ||
-          /^DELTA_HINT \(DO NOT OUTPUT\):/i.test(a1) ||
-          /^SEED \(DO NOT OUTPUT\):/i.test(a1) ||
-          /(?:^|\n)WRITER_DIRECTIVES(?:\n|$)/i.test(a1) ||
-          /(?:^|\n)PAST_STATE_RECALL:\s*enabled(?:\n|$)/i.test(a1) ||
-          /(?:^|\n)PAST_STATE_NOTE:\s*/i.test(a1);
+          /^INTERNAL PACK \(DO NOT OUTPUT\):/i.test(a0) ||
+          /^COORD \(DO NOT OUTPUT\):/i.test(a0) ||
+          /^TOPIC_RECALL_NO_EVIDENCE \(DO NOT OUTPUT\):/i.test(a0) ||
+          /^FLOW_V2 \(DO NOT OUTPUT\):/i.test(a0) ||
+          /^FLOW180(?:_SEED)? \(DO NOT OUTPUT\):/i.test(a0) ||
+          /^DELTA_HINT \(DO NOT OUTPUT\):/i.test(a0) ||
+          /^SEED \(DO NOT OUTPUT\):/i.test(a0) ||
+          /^WRITER_DIRECTIVES \(DO NOT OUTPUT\):/i.test(a0) ||
+          /^PATTERN_OUTPUT_CONTRACT \(DO NOT OUTPUT\):/i.test(a0) ||
+          /(?:^|\n)PAST_STATE_RECALL:\s*enabled(?:\n|$)/i.test(a0) ||
+          /(?:^|\n)PAST_STATE_NOTE:\s*/i.test(a0);
+        const a1 = clampStr(a0, isInternalPack ? MAX_ASSIST_INTERNAL : MAX_ASSIST_PLAIN);
+        if (!a1) return null;
 
         return isInternalPack
           ? ({ role: 'assistant', content: a1 } as WriterMessage)

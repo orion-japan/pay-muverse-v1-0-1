@@ -8143,7 +8143,8 @@ try {
         (out.metaForSave as any)?.speechActDecision?.act ??
         null;
 
-      const allowIT = decidedAct === 'COMMIT';
+        const requestedModeIsIT = String(ctx.requestedMode ?? '').trim().toUpperCase() === 'IT';
+        const allowIT = decidedAct === 'COMMIT' && requestedModeIsIT;
 
       if (out.metaForSave?.renderMode === 'IT' && !allowIT) {
         out.metaForSave.renderMode = 'NORMAL';

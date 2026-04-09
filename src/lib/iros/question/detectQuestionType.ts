@@ -132,6 +132,7 @@ export function detectQuestionType(input: DetectQuestionTypeInput): QuestionType
           /構造|構造的|整理|分解|切り分け|並び|地図|枠組み/,
           /どう見える|どういう構造|どう捉える|俯瞰/,
           /背景|文脈|位置づけ|流れの中で|どういう背景|どのような背景/,
+          /共通点|違い|比較/,
         ],
         3 * contextWeight,
       );
@@ -139,10 +140,11 @@ export function detectQuestionType(input: DetectQuestionTypeInput): QuestionType
       addIfMatched(
         scores,
         text,
-        'cause',
+        'meaning',
         [
-          /なぜ|どうして|原因|きっかけ|由来|理由/,
-          /なぜ起きた|なぜそうなる|なぜそうなった/,
+          /意味|意義|どう受け取る|どう捉える|何を意味する/,
+          /自分にとって|どういう意味/,
+          /説明して|説明してください|詳しく説明|くわしく説明/,
         ],
         2 * contextWeight,
       );
@@ -241,10 +243,12 @@ export function detectQuestionType(input: DetectQuestionTypeInput): QuestionType
       !/[?？]/.test(text) &&
       /不安|こわい|怖い|つらい|苦しい|しんどい|寂しい|孤独|揺れる|迷う|モヤモヤ|落ち込む|苦手/.test(text);
 
-    const looksIntentStatement =
+      const looksIntentStatement =
       !!text &&
       !/[?？]/.test(text) &&
-      /思っている|考えている|決めた|決めたい|やめたい|進みたい|どうしよう/.test(text);
+      /思っている|考えている|決めた|決めたい|やめたい|進みたい|どうしよう|作ります|なります|訪れます|実現します|始まります|起きます/.test(
+        text
+      );
 
     const hasRuntimeStateHints =
       !!eTurn ||
@@ -254,8 +258,16 @@ export function detectQuestionType(input: DetectQuestionTypeInput): QuestionType
       !!situationSummaryText;
 
     if (looksIntentStatement) {
-      scores.choice += 2 * contextWeight;
-      scores.meaning += 2 * contextWeight;
+      scores.future_design += 3 * contextWeight;
+      scores.choice += 1 * contextWeight;
+      scores.meaning += 1 * contextWeight;
+      scores.structure = Math.max(0, scores.structure - 1 * contextWeight);
+    }
+
+    if (looksPersonalStateStatement && hasRuntimeStateHints) {
+      scores.meaning += 3 * contextWeight;
+      scores.unresolved_release += 2 * contextWeight;
+      scores.choice += 1 * contextWeight;
       scores.structure = Math.max(0, scores.structure - 2 * contextWeight);
     }
 

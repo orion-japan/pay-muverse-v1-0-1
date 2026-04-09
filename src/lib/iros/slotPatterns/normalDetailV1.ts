@@ -1,12 +1,13 @@
+// src/lib/iros/slotPatterns/normalDetailV1.ts
+
 import type { PatternSpec } from './types';
 
-export const IR_DETAIL_V1: PatternSpec = {
-  key: 'IR_DETAIL_V1',
-  mode: 'ir',
+export const NORMAL_DETAIL_V1: PatternSpec = {
+  key: 'NORMAL_DETAIL_V1',
+  mode: 'normal',
   slots: [
     {
       key: 'OBS',
-      heading: 'いま見えていること',
       blocks: [
         { key: 'current_state', required: true, minLines: 1, maxLines: 2 },
         { key: 'misrecognition_negation', required: true, minLines: 1, maxLines: 2 },
@@ -14,8 +15,7 @@ export const IR_DETAIL_V1: PatternSpec = {
       ],
     },
     {
-      key: 'STATE',
-      heading: 'いま分けて見たいこと',
+      key: 'SHIFT',
       blocks: [
         { key: 'breakdown_core_gap', required: true, minLines: 1, maxLines: 2 },
         { key: 'breakdown_defense', required: true, minLines: 1, maxLines: 2 },
@@ -23,22 +23,17 @@ export const IR_DETAIL_V1: PatternSpec = {
       ],
     },
     {
-      key: 'GUIDE',
-      heading: 'ここから整理する順番',
+      key: 'NEXT',
       blocks: [
         { key: 'reading_direction', required: true, minLines: 1, maxLines: 2 },
         { key: 'concrete_sort_axis', required: true, minLines: 1, maxLines: 2 },
         { key: 'concrete_sort_boundary', required: true, minLines: 1, maxLines: 2 },
-        { key: 'concrete_sort_redesign', required: true, minLines: 1, maxLines: 2 },
-        { key: 'felt_acceptance_point', required: true, minLines: 1, maxLines: 2 },
       ],
     },
     {
-      key: 'MESSAGE',
-      heading: 'いまのまとめ',
+      key: 'SAFE',
       blocks: [
         { key: 'conclusion', required: true, minLines: 1, maxLines: 2 },
-        { key: 'sting_point', required: true, minLines: 1, maxLines: 2 },
         { key: 'caution', required: true, minLines: 1, maxLines: 2 },
         { key: 'closing_line', required: true, minLines: 1, maxLines: 2 },
       ],

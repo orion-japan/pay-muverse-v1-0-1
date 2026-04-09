@@ -1,17 +1,30 @@
 export type PatternKey =
   | 'NORMAL_V1'
+  | 'NORMAL_DETAIL_V1'
+  | 'NORMAL_RESONANCE_V1'
+  | 'DECLARATION_RESONANCE_V1'
   | 'TRUTH_V1'
   | 'IR_LIGHT_V1'
   | 'IR_DETAIL_V1';
 
+// src/lib/iros/slotPatterns/types.ts
+// 9-39 行をこのブロックで丸ごと置換
+
 export type PatternSlotKey =
   | 'TARGET'
   | 'OBS'
+  | 'SHIFT'
+  | 'NEXT'
+  | 'SAFE'
   | 'STATE'
   | 'GUIDE'
-  | 'MESSAGE';
+  | 'MESSAGE'
+  | 'STATE_SURFACE'
+  | 'STATE_WEIGHT'
+  | 'STATE_OPEN_EDGE'
+  | 'STATE_RESIDUE';
 
-export type PatternBlockKey =
+  export type PatternBlockKey =
   | 'current_state'
   | 'misrecognition_negation'
   | 'structural_reframe'
@@ -22,9 +35,23 @@ export type PatternBlockKey =
   | 'concrete_sort_axis'
   | 'concrete_sort_boundary'
   | 'concrete_sort_redesign'
+  | 'felt_acceptance_point'
+  | 'sting_point'
   | 'conclusion'
   | 'caution'
-  | 'closing_line';
+  | 'closing_line'
+  | 'state_surface'
+  | 'state_surface_2'
+  | 'state_surface_3'
+  | 'state_weight'
+  | 'state_weight_2'
+  | 'state_weight_3'
+  | 'state_open_edge'
+  | 'state_open_edge_2'
+  | 'state_open_edge_3'
+  | 'state_residue'
+  | 'state_residue_2'
+  | 'state_residue_3';
 
 export type PatternBlockSpec = {
   key: PatternBlockKey;

@@ -1,4 +1,8 @@
+import { DECLARATION_RESONANCE_V1 } from './declarationResonanceV1';
 import { IR_DETAIL_V1 } from './irDetailV1';
+import { NORMAL_DETAIL_V1 } from './normalDetailV1';
+import { NORMAL_RESONANCE_V1 } from './normalResonanceV1';
+import { TRUTH_V1 } from './truthV1';
 import type {
   BuiltPatternBlock,
   PatternBuildInput,
@@ -13,12 +17,6 @@ const EMPTY_NORMAL_V1: PatternSpec = {
   slots: [],
 };
 
-const EMPTY_TRUTH_V1: PatternSpec = {
-  key: 'TRUTH_V1',
-  mode: 'truth',
-  slots: [],
-};
-
 const EMPTY_IR_LIGHT_V1: PatternSpec = {
   key: 'IR_LIGHT_V1',
   mode: 'ir',
@@ -27,7 +25,10 @@ const EMPTY_IR_LIGHT_V1: PatternSpec = {
 
 const PATTERN_SPECS: Record<PatternKey, PatternSpec> = {
   NORMAL_V1: EMPTY_NORMAL_V1,
-  TRUTH_V1: EMPTY_TRUTH_V1,
+  NORMAL_DETAIL_V1,
+  NORMAL_RESONANCE_V1,
+  DECLARATION_RESONANCE_V1,
+  TRUTH_V1,
   IR_LIGHT_V1: EMPTY_IR_LIGHT_V1,
   IR_DETAIL_V1,
 };

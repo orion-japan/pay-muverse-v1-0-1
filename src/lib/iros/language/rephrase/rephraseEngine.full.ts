@@ -65,12 +65,14 @@ import {
   ILINE_OPEN,
   ILINE_CLOSE,
 } from './ilineLock';
-import { computeSlotDecision } from './slotWeightEngine';
 import {
+  computeSlotDecision,
   computeSlotDecision as computeSlotDecisionFromEngine,
   type SlotName as SlotNameFromEngine,
   type SlotWeightInput as SlotWeightInputFromEngine,
 } from './slotWeightEngine';
+import { buildPatternBlocks } from '../../slotPatterns/buildPatternBlocks';
+import { selectSlotPattern } from '../../slotPatterns/selectSlotPattern';
 
 // ==============================
 // PATCH: 2-line format enforce (single retry)
@@ -2462,21 +2464,15 @@ const toRephraseBlocks = (s: string): string[] => {
   }
 
   blocks = blocks
-    .map(cleanLine)
-    .filter(Boolean)
-    .filter((v, i, arr) => i === 0 || v !== arr[i - 1]);
+  .map(cleanLine)
+  .filter(Boolean)
+  .filter((v, i, arr) => i === 0 || v !== arr[i - 1]);
 
-  if (blocks.length >= 5) {
-    const head = blocks.slice(0, 3);
-    const tail = cleanLine(blocks.slice(3).join(' '));
-    blocks = tail ? [...head, tail] : head;
-  }
+if (blocks.length === 0) {
+  return [cleanLine(text)];
+}
 
-  if (blocks.length === 0) {
-    return [cleanLine(text)];
-  }
-
-  return blocks;
+return blocks;
 };
 
 
@@ -2632,7 +2628,7 @@ const toRephraseBlocks = (s: string): string[] => {
       (opts as any)?.userContext?.ctxPackV1 ??
       null;
 
-    const primaryQuestion =
+      const primaryQuestion =
       (ctxPackForHistoryText as any)?.question ??
       (opts as any)?.userContext?.question ??
       (opts as any)?.extra?.question ??
@@ -2642,14 +2638,52 @@ const toRephraseBlocks = (s: string): string[] => {
     const questionType = String(primaryQuestion?.questionType ?? '').trim();
     const tMode = String(primaryQuestion?.tState?.mode ?? '').trim();
 
-    const hfw =
-      (ctxPackForHistoryText as any)?.historyForWriter ??
-      (opts as any)?.userContext?.historyForWriter ??
-      (opts as any)?.userContext?.ctxPack?.historyForWriter ??
-      null;
+    const pastStateNoteTextForHistory = String(
+      (opts as any)?.extra?.pastStateNoteText ??
+      (opts as any)?.userContext?.pastStateNoteText ??
+      (opts as any)?.userContext?.meta?.extra?.pastStateNoteText ??
+      ''
+    ).trim();
+
+    const pastStateTriggerKindForHistory = String(
+      (opts as any)?.extra?.pastStateTriggerKind ??
+      (opts as any)?.userContext?.pastStateTriggerKind ??
+      (opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind ??
+      ''
+    ).trim();
+
+    const shouldPreferPastStateRecallForHistory =
+      !!pastStateNoteTextForHistory &&
+      (pastStateTriggerKindForHistory === 'keyword' ||
+        pastStateTriggerKindForHistory === 'recent_topic');
+
+        const historyPatternKey = selectSlotPattern({
+          line: String(
+            (opts as any)?.meta?.extra?.presentationKind ??
+              (opts as any)?.userContext?.meta?.extra?.presentationKind ??
+              ''
+          )
+            .trim()
+            .toLowerCase(),
+          questionType,
+          detailMode:
+            (ctxPackForHistoryText as any)?.detailMode === true ||
+            (opts as any)?.userContext?.ctxPack?.detailMode === true,
+          followupText: String((opts as any)?.userText ?? '').trim(),
+          userText: String((opts as any)?.userText ?? '').trim(),
+          targetLabel: null,
+          hasPriorDiagnosis: false,
+        });
+
+        const hfw =
+          historyPatternKey === 'DECLARATION_RESONANCE_V1'
+            ? []
+            : (ctxPackForHistoryText as any)?.historyForWriter ??
+              (opts as any)?.userContext?.historyForWriter ??
+              (opts as any)?.userContext?.ctxPack?.historyForWriter ??
+              [];
 
     const hasHistoryForWriter = Array.isArray(hfw) && hfw.length > 0;
-
     // ✅ historyForWriter がある時は、HISTORY_LITE を使わない
     // - writer の正式履歴は historyForWriter
     // - HISTORY_LITE は fallback 専用
@@ -2660,6 +2694,11 @@ const toRephraseBlocks = (s: string): string[] => {
     // ✅ 旧 stopgap も維持
     // meaning + confirm では HISTORY_LITE を writer に渡さない
     if (questionType === 'meaning' && tMode === 'confirm') {
+      return '';
+    }
+
+    // ✅ pastState recall（keyword / recent_topic）では HISTORY_LITE fallback も止める
+    if (shouldPreferPastStateRecallForHistory) {
       return '';
     }
 
@@ -3829,16 +3868,37 @@ const shouldPreferPastStateRecall =
   (pastStateTriggerKindForWriter === 'keyword' ||
     pastStateTriggerKindForWriter === 'recent_topic');
 
+    const turnsPatternKeyForWriter = selectSlotPattern({
+      line: String(
+        (opts as any)?.meta?.extra?.presentationKind ??
+          (opts as any)?.userContext?.meta?.extra?.presentationKind ??
+          ''
+      )
+        .trim()
+        .toLowerCase(),
+      questionType: String(
+        (opts as any)?.extra?.question?.questionType ??
+          (opts as any)?.userContext?.question?.questionType ??
+          (opts as any)?.userContext?.meta?.extra?.question?.questionType ??
+          ''
+      ).trim(),
+      detailMode:
+        (opts as any)?.ctxPack?.detailMode === true ||
+        (opts as any)?.userContext?.ctxPack?.detailMode === true,
+      followupText: String((opts as any)?.userText ?? '').trim(),
+      userText: String((opts as any)?.userText ?? '').trim(),
+      targetLabel: null,
+      hasPriorDiagnosis: false,
+    });
+
     const rawTurnsForWriter =
-      shouldPreferPastStateRecall
+      shouldPreferPastStateRecall || turnsPatternKeyForWriter === 'DECLARATION_RESONANCE_V1'
         ? (
             (opts as any)?.turnsForWriter ??
             (opts as any)?.userContext?.turnsForWriter ??
             (opts as any)?.userContext?.ctxPack?.turnsForWriter ??
             (opts as any)?.userContext?.ctxPack?.turns ??
             (opts as any)?.userContext?.turns ??
-            (opts as any)?.userContext?.ctxPack?.historyForWriter ??
-            (opts as any)?.userContext?.historyForWriter ??
             lastTurnsSafe ??
             []
           )
@@ -4092,99 +4152,252 @@ const systemPromptForWriter = [
   continuityKind:
     String((ctxPackForWriter as any)?.continuityKind ?? '').trim() || null,
   });
+  function buildDetailPatternWriterDirectives(
+    patternKey: string
+  ): Record<string, unknown> {
+    const key = String(patternKey ?? '').trim();
 
-  const writerDirectivesFromSlotForFirstPass = {
-    slot_order: Array.isArray(slotDecisionForFirstPass?.order)
-      ? slotDecisionForFirstPass.order.join(',')
-      : '',
+    if (
+      key !== 'IR_DETAIL_V1' &&
+      key !== 'NORMAL_DETAIL_V1' &&
+      key !== 'NORMAL_RESONANCE_V1' &&
+      key !== 'DECLARATION_RESONANCE_V1'
+    ) {
+      return {};
+    }
 
-    slot_opening_role: Array.isArray(slotDecisionForFirstPass?.order)
-      ? String(slotDecisionForFirstPass.order[0] ?? '')
-      : '',
+    if (key === 'DECLARATION_RESONANCE_V1' || key === 'NORMAL_RESONANCE_V1') {
+      return {
+        pattern_key: key,
+        pattern_mode:
+          key === 'DECLARATION_RESONANCE_V1'
+            ? 'declaration_resonance'
+            : 'normal_resonance',
+        pattern_block_order:
+          'state_surface,state_weight,state_open_edge,state_residue',
+          block_state_surface:
+          '1段落目は、いま起きている状態そのものを自然文で置く。宣言によって生じた位置の変化や、もう後ろへ戻らない向きを先に置く。説明や要約ではなく本文そのものを書く。1文目でその変化を置き、2文目でその向きがどのように立っているかだけを自然に続ける。',
+        block_state_weight:
+          '2段落目は、その話がどの重さで立っているかを書く。強さや重さは書いてよいが、「だから次は」「何をするか」「どこに置くか」のような案内にしない。「この置き方には」「この言い方には」「言い方の強さ」から始めない。「固定された感じ」「全部が固定された感じ」「宣言の輪郭が先に立っています」とは書かない。',
+        block_state_open_edge:
+          '3段落目は、まだ決まりきっていない部分だけを書く。注意や整理にしない。未固定の観測に止める。「取り違えなければ」「分けて見る」「先に〜する」「ひとつ決める」「どこから動かすか」「まずは」「どう呼ぶか」「呼び名」「接地」「現実に接地」「定める」「定まる」を書かない。「言葉の端に、未確定のままの部分が残っています」「結論というより」とも書かない。',
+        block_state_residue:
+          '4段落目は、最後に残る感じだけを置く。締めない。行動提案にしない。余韻だけを残す。「それで十分」「足ります」「次の一歩」「進めます」「入口です」「始まりです」「動きます」「開けます」「見えてきます」「広がります」「余地があります」「続きを置ける」「ここで終わらずに」「余白ごと残る感じ」「残る感じです」「言葉の端に残っています」「その余白が」「まだ残っています」「その輪郭が、いま残っています」「その余白ごと、今の文は立っています」「この文は立っています」「その端ごと、この文は立っています」で終えない。言葉や文への言及をせず、状態の端に残る感じだけで閉じる。',
+          bodyStyle: {
+            preferBlockSplit: true,
+            minBlocks: 4,
+            maxSentencesPerBlock: 4,
+            minSentences: 8,
+            maxSentences: 12,
+          },
+        writeConstraints: [
+          `${
+            key === 'DECLARATION_RESONANCE_V1'
+              ? 'declaration_resonance'
+              : 'normal_resonance'
+          } では、必ず4つの段落で返す`,
+          '4つの段落は、state_surface → state_weight → state_open_edge → state_residue の順に固定する',
+          'guide を書かない',
+          '注意を書かない',
+          '次の一歩を書かない',
+          '締めの結論を書かない',
+          '観測から始める',
+          '未固定部分は未固定のまま置く',
+          '3段落目で案内や命名をしない',
+          '3段落目で接地や確定を書かない',
+          '4段落目で変化予告や締めをしない',
+          '最後は residue で終える',
+        ],
+      };
+    }
 
-    ...(slotDecisionForFirstPass?.emphasis
-      ? Object.fromEntries(
-          Object.entries(slotDecisionForFirstPass.emphasis).map(([k, v]) => [
-            `slot_emphasis_${String(k).toLowerCase()}`,
-            String(v),
-          ])
+    return {
+      pattern_key: key,
+      pattern_mode: key === 'NORMAL_DETAIL_V1' ? 'normal_detail' : 'diagnosis_detail',
+
+// src/lib/iros/language/rephrase/rephraseEngine.full.ts
+// 4215-4262 行をこのブロックで丸ごと置換
+
+pattern_block_order:
+  'current_state,misrecognition_negation,structural_reframe,breakdown_core_gap,breakdown_defense,breakdown_rejection_target,reading_direction,concrete_sort_axis,concrete_sort_boundary,conclusion,caution,closing_line',
+block_current_state:
+  '最初の1文は説明や要約ではなく、いま前に出ている状態そのものを自然文で置く。「いま言っていることは」「〜ということです」「ここで見えているのは」「いまの言葉は」「この発話は」から始めない。',
+  block_misrecognition_negation:
+  '1段落目の2文目では、「大丈夫です」「そのままでよい」「安心して」などの安心句ではなく、いま出ている状態を弱さや失敗として決めなくてよいことを、静かな観測文で短く置く。励ましにせず、OBS段落の2文目として受け止めの文に留める。「ここから先は」「〜として見ていく」「進み方」「見方を変える」「捉え方」など、方向づけや視点変更の言い方をここで出さない。',
+block_structural_reframe:
+  '抽象的な構造説明ではなく、その場で実際に起きていることの意味に言い換える。中心・構造・設計・軸・束ねる・支える・釣り合い・形を取る、などの説明語を避ける。',
+  block_breakdown_core_gap:
+  '2段落目の最初は、観測の言い換えではなく、なぜそうなっているか・何が噛み合っていないかを一文で置く。「今は」「いまは」「〜が見えています」「〜が残っています」から始めない。状態説明の続きにせず、ずれ・原因・噛み合わなさがそのまま伝わる自然文にする。',
+  block_breakdown_defense:
+  '2段落目の次の文では、安心させるための言い方ではなく、なぜ止まりや重さが出るのかを自然文で示す。「大丈夫です」「無理しなくてよい」「安心して」「そのままでよい」などの励ましで逃がさない。守ろうとして止まっている・決め切れずにいる理由が、そのまま伝わる文にする。',
+block_breakdown_rejection_target:
+  '何に違和感や拒否が出ているかを、主役を落とさず具体的に絞る。話題を広げない。',
+  block_reading_direction:
+  '3段落目の最初は、手順や進め方ではなく、いま本当に見るべき焦点そのものを一文で置く。「まずは」「先に」「今は」「次は」「〜していく」「〜すると輪郭が出る」から始めない。案内や進行説明にせず、何を見分ける段落なのかがその一文だけで立つ自然文にする。',
+block_concrete_sort_axis:
+  '整理の仕方を説明せず、いま自然に残る見方をそのまま一文で置く。「どこに置くか」「何から先に」「順番」「分けて」「何に触れさせるか」「最初の手を置くか」などの案内語で押さない。',
+block_concrete_sort_boundary:
+  '境界や優先を説明せず、いま自然に残る範囲を一文で置く。「今は」「先」「ここまでで十分」「何を現実として置くか」「ひとつ見れば十分」「ひとつ現れるところだけ」などの整理語で導かない。',
+  block_conclusion:
+  '4段落目の最初は、今回いちばん残る核をそのまま一文で置く。「結論としては」「つまり」「要するに」「言い換えると」「今いちばん大事なのは」「大事なのは」「いちばん残るのは」「ここで大事なのは」から始めない。比較や要約の言い方に逃げず、結論の本文そのものから入る。',
+block_caution:
+  '4段落目の2文目では、まだ急がなくてよい点を自然文で短く置く。何かを決めさせる言い方に寄せず、いま残してよい余白がそのまま分かる言い方にする。「何を決めるか」「一つ決める」「先に決める」などの誘導で押し切らない。',
+block_closing_line:
+  '4段落目の最後は、締めや結論の言い方を足さず、その場に残っている感じを短い自然文で置いて閉じる。「ここで大事なのは」「結論としては」「〜ということです」「〜ほうが自然です」「必要なら」「次に」「〜できます」「次の一手」「入口です」「始まりです」「そこまでで十分」「足ります」「次の一歩に入れます」で終えない。質問で終わらない。見出しだけで終えない。',
+bodyStyle: {
+  preferBlockSplit: true,
+  minBlocks: 4,
+  maxSentencesPerBlock: 3,
+  minSentences: 8,
+  maxSentences: 10,
+},
+writeConstraints: [
+  'normal_detail / diagnosis_detail では、必ず4つの段落で返す',
+  '4つの段落は、OBS → SHIFT → NEXT → SAFE の順に固定する',
+  '1段落目はちょうど2文で書く',
+  '2段落目はちょうど2文で書く',
+  '3段落目はちょうど2文で書く',
+  '3段落目は reading_direction → concrete_sort_axis → concrete_sort_boundary の順で書く',
+  '4段落目はちょうど2文で書く',
+  '4段落目は conclusion → caution → closing_line の順で書く',
+  '4段落目には必ず closing_line に相当する短い本文を最後の1文として書く',
+  '4段落目を見出しだけで終わらせない。3段落で終えることを禁止する',
+  '4段落目を次の提案や案内にしない',
+  '「必要なら」「次に」「〜できます」「整理できます」「比べられます」で4段落目を始めないし終えない',
+'4段落目は今回の答えの結論だけで閉じる',
+'「中心にある」「中心を立てる」「支える」「束ねる」「形を取る」「見る軸」「構造として」「〜に置くと整理しやすい」「強さと限界が同じ場所にある」「内側の釣り合いが問われる」などの説明語を多用しない',
+'「何が起きているか」「何が噛み合っていないか」「どこへ目を向けるか」「何が残るか」を通常の会話文で書く',
+'意味が曖昧な比喩や抽象表現を避け、読んだ人がすぐ分かる言い方を優先する',
+'OBS / SHIFT / NEXT / SAFE は、説明文ではなく観測・理由・焦点・結論がそのまま立つ自然文で書く',
+],
+    };
+  }
+  const writerPatternKeyForFirstPass = String(
+    (ctxPackForWriter as any)?.patternKey ??
+      (opts as any)?.ctxPack?.patternKey ??
+      (opts as any)?.userContext?.ctxPack?.patternKey ??
+      selectSlotPattern({
+        line: String(
+          (opts as any)?.meta?.extra?.presentationKind ??
+            (opts as any)?.userContext?.meta?.extra?.presentationKind ??
+            ''
         )
-      : {}),
+          .trim()
+          .toLowerCase(),
+        questionType: null,
+        detailMode:
+          (opts as any)?.ctxPack?.detailMode === true ||
+          (opts as any)?.userContext?.ctxPack?.detailMode === true,
+        followupText: String((opts as any)?.userText ?? '').trim(),
+        userText: String((opts as any)?.userText ?? '').trim(),
+        targetLabel: null,
+        hasPriorDiagnosis: false,
+      }) ??
+      ''
+  ).trim();
 
-    ...(slotDecisionForFirstPass?.weights
-      ? Object.fromEntries(
-          Object.entries(slotDecisionForFirstPass.weights).map(([k, v]) => [
-            `slot_weight_${String(k).toLowerCase()}`,
-            String(v),
-          ])
-        )
-      : {}),
-  };
+  const isDetailPatternWriterForFirstPass =
+  writerPatternKeyForFirstPass === 'IR_DETAIL_V1' ||
+  writerPatternKeyForFirstPass === 'NORMAL_DETAIL_V1';
+
+const writerDirectivesFromSlotForFirstPass = isDetailPatternWriterForFirstPass
+  ? {
+      ...buildDetailPatternWriterDirectives(writerPatternKeyForFirstPass),
+    }
+  : {
+      slot_order: Array.isArray(slotDecisionForFirstPass?.order)
+        ? slotDecisionForFirstPass.order.join(',')
+        : '',
+      slot_opening_role:
+        Array.isArray(slotDecisionForFirstPass?.order) && slotDecisionForFirstPass.order.length > 0
+          ? String(slotDecisionForFirstPass.order[0] ?? '')
+          : '',
+
+      ...(slotDecisionForFirstPass?.emphasis
+        ? Object.fromEntries(
+            Object.entries(slotDecisionForFirstPass.emphasis).map(([k, v]) => [
+              `slot_emphasis_${String(k).toLowerCase()}`,
+              String(v),
+            ])
+          )
+        : {}),
+
+      ...(slotDecisionForFirstPass?.weights
+        ? Object.fromEntries(
+            Object.entries(slotDecisionForFirstPass.weights).map(([k, v]) => [
+              `slot_weight_${String(k).toLowerCase()}`,
+              String(v),
+            ])
+          )
+        : {}),
+
+      ...buildDetailPatternWriterDirectives(writerPatternKeyForFirstPass),
+    };
 
   let messages = buildFirstPassMessages({
-  systemPrompt: systemPromptForWriter,
-  internalPack,
-  turns: turnsForWriter,
-  seedDraft,
-  topicDigest: topicDigestForWriter,
-  topicDigestV2: topicDigestV2ForWriter,
-  conversationLine: conversationLineForWriter,
-  outputPolicy:
-    primaryQuestionForWriter?.outputPolicy &&
-    typeof primaryQuestionForWriter.outputPolicy === 'object'
-      ? primaryQuestionForWriter.outputPolicy
-      : null,
+    systemPrompt: systemPromptForWriter,
+    internalPack,
+    turns: turnsForWriter,
+    seedDraft,
+    topicDigest: topicDigestForWriter,
+    topicDigestV2: topicDigestV2ForWriter,
+    conversationLine: conversationLineForWriter,
+    outputPolicy:
+      primaryQuestionForWriter?.outputPolicy &&
+      typeof primaryQuestionForWriter.outputPolicy === 'object'
+        ? primaryQuestionForWriter.outputPolicy
+        : null,
 
-  qCode: pickedQCode ?? null,
-  depthStage: pickedDepthStage ?? null,
-  phase: pickedPhase ?? null,
-  e_turn: pickedETurn ?? null,
+    qCode: pickedQCode ?? null,
+    depthStage: pickedDepthStage ?? null,
+    phase: pickedPhase ?? null,
+    e_turn: pickedETurn ?? null,
 
-  userText: String((opts as any)?.userText ?? ''),
+    userText: String((opts as any)?.userText ?? ''),
 
-  slotDecision: slotDecisionForFirstPass,
-  writerDirectives: {
-    ...writerDirectivesFromSlotForFirstPass,
-  },
-  traceId: debug.traceId ?? null,
-  conversationId: debug.conversationId ?? null,
-  userCode: debug.userCode ?? null,
+    slotDecision: slotDecisionForFirstPass,
+    writerDirectives: {
+      ...writerDirectivesFromSlotForFirstPass,
+    },
+    traceId: debug.traceId ?? null,
+    conversationId: debug.conversationId ?? null,
+    userCode: debug.userCode ?? null,
 
-  extra: {
-    question:
-      ((opts as any)?.ctxPack?.question &&
-      typeof (opts as any).ctxPack.question === 'object')
-        ? (opts as any).ctxPack.question
-        : ((opts as any)?.userContext?.ctxPack?.question &&
-            typeof (opts as any).userContext.ctxPack.question === 'object')
-          ? (opts as any).userContext.ctxPack.question
-          : (opts as any)?.extra?.question ??
-            (opts as any)?.userContext?.question ??
-            (opts as any)?.userContext?.meta?.extra?.question ??
-            null,
-    pastStateNoteText:
-      (opts as any)?.extra?.pastStateNoteText ??
-      (opts as any)?.userContext?.pastStateNoteText ??
-      (opts as any)?.userContext?.meta?.extra?.pastStateNoteText ??
-      null,
-    pastStateTriggerKind:
-      (opts as any)?.extra?.pastStateTriggerKind ??
-      (opts as any)?.userContext?.pastStateTriggerKind ??
-      (opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind ??
-      null,
-    pastStateKeyword:
-      (opts as any)?.extra?.pastStateKeyword ??
-      (opts as any)?.userContext?.pastStateKeyword ??
-      (opts as any)?.userContext?.meta?.extra?.pastStateKeyword ??
-      null,
-    goalKind:
-      (opts as any)?.goalKind ??
-      (opts as any)?.userContext?.goalKind ??
-      (opts as any)?.userContext?.ctxPack?.goalKind ??
-      (opts as any)?.userContext?.ctxPack?.replyGoal?.kind ??
-      null,
-  },
-});
+    extra: {
+      question:
+        ((opts as any)?.ctxPack?.question &&
+        typeof (opts as any).ctxPack.question === 'object')
+          ? (opts as any).ctxPack.question
+          : ((opts as any)?.userContext?.ctxPack?.question &&
+              typeof (opts as any).userContext.ctxPack.question === 'object')
+            ? (opts as any).userContext.ctxPack.question
+            : (opts as any)?.extra?.question ??
+              (opts as any)?.userContext?.question ??
+              (opts as any)?.userContext?.meta?.extra?.question ??
+              null,
+      pastStateNoteText:
+        (opts as any)?.extra?.pastStateNoteText ??
+        (opts as any)?.userContext?.pastStateNoteText ??
+        (opts as any)?.userContext?.meta?.extra?.pastStateNoteText ??
+        null,
+      pastStateTriggerKind:
+        (opts as any)?.extra?.pastStateTriggerKind ??
+        (opts as any)?.userContext?.pastStateTriggerKind ??
+        (opts as any)?.userContext?.meta?.extra?.pastStateTriggerKind ??
+        null,
+      pastStateKeyword:
+        (opts as any)?.extra?.pastStateKeyword ??
+        (opts as any)?.userContext?.pastStateKeyword ??
+        (opts as any)?.userContext?.meta?.extra?.pastStateKeyword ??
+        null,
+      goalKind:
+        (opts as any)?.goalKind ??
+        (opts as any)?.userContext?.goalKind ??
+        (opts as any)?.userContext?.ctxPack?.goalKind ??
+        (opts as any)?.userContext?.ctxPack?.replyGoal?.kind ??
+        null,
+    },
+  });
 
   // ✅ HistoryDigest v1（外から渡された場合のみ注入）
   // - 生成はここではしない（生成元は本線側に固定）
@@ -5135,17 +5348,31 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
     // ここでは display 用 block の正本には採用しない。
     const normalizedText = String(text ?? '').trim();
 
-    // control-plane の slot は display block に昇格させない。
-    // slotDecision は後段の text_blocks 再配置だけに使う。
-    const slotBlocksText: string[] = [];
-
-    let blocksText = isIdeaBand
-      ? makeIdeaBandCandidateBlocks(normalizedText)
-      : toRephraseBlocks(normalizedText);
+    let blocksText = toRephraseBlocks(normalizedText);
 
     if (!Array.isArray(blocksText) || blocksText.length === 0) {
       blocksText = toRephraseBlocks(normalizedText);
     }
+
+    console.log(
+      '[IROS/rephraseEngine][NORMALIZED_TEXT_BLOCKS]',
+      JSON.stringify({
+        traceId: (debug as any)?.traceId ?? null,
+        conversationId: (debug as any)?.conversationId ?? null,
+        userCode: (debug as any)?.userCode ?? null,
+        normalizedTextLen: normalizedText.length,
+        normalizedTextHead: safeHead(normalizedText, 200),
+        normalizedParagraphs: normalizedText
+          .split(/\n{2,}/)
+          .map((x) => String(x ?? '').trim())
+          .filter(Boolean)
+          .map((x) => safeHead(x, 120)),
+        blocksTextLenBeforePattern: Array.isArray(blocksText) ? blocksText.length : 0,
+        blocksTextHeadBeforePattern: Array.isArray(blocksText)
+          ? blocksText.slice(0, 6).map((x) => safeHead(String(x), 80))
+          : [],
+      })
+    );
 
     const questionTypeFromContext = String(
       (
@@ -5184,7 +5411,7 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
 
       const s = String(v ?? '').trim();
 
-      if (/構造|仕組み|関係|違い|配置|流れ|構成|背景|文脈|位置づけ/u.test(s)) return 'structure';
+      if (/構造|仕組み|関係|違い|配置|流れ|構成|背景|文脈|位置づけ|相談|悩み|迷い|転職/u.test(s)) return 'structure';
       if (/意味|なぜ|どういうこと|どう受け止め|どう読める/u.test(s)) return 'meaning';
       if (/意図|どうしたい|どう進む|どこへ向かう|何のため/u.test(s)) return 'intent';
       if (
@@ -5202,46 +5429,484 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
       questionTypeSourceText || normalizedText
     );
 
-    const slotDecision =
-      (ctxPackForWriter &&
-      typeof ctxPackForWriter === 'object' &&
-      (ctxPackForWriter as any).slotDecision &&
-      typeof (ctxPackForWriter as any).slotDecision === 'object' &&
-      Array.isArray((ctxPackForWriter as any).slotDecision.order))
-        ? ((ctxPackForWriter as any).slotDecision as {
-            weights: Record<'OBS' | 'SHIFT' | 'NEXT' | 'SAFE', number>;
-            order: Array<'OBS' | 'SHIFT' | 'NEXT' | 'SAFE'>;
-            emphasis: Record<'OBS' | 'SHIFT' | 'NEXT' | 'SAFE', 1 | 2>;
-          })
-        : computeSlotDecisionFromEngine({
-            depthStage:
-              String((ctxPackForWriter as any)?.depthStage ?? '').trim() || null,
+    const patternDetailMode =
+      (opts as any)?.ctxPack?.detailMode === true ||
+      (opts as any)?.userContext?.ctxPack?.detailMode === true;
 
-            questionType: resolvedQuestionType,
+    const patternPresentationKind = String(
+      (opts as any)?.meta?.extra?.presentationKind ??
+        (opts as any)?.userContext?.meta?.extra?.presentationKind ??
+        ''
+    )
+      .trim()
+      .toLowerCase();
 
-            goalKind:
-              String(
-                (ctxPackForWriter as any)?.goalKind ??
-                  (ctxPackForWriter as any)?.targetKind ??
-                  ''
-              ).trim() || null,
+    const patternTargetLabel =
+      String(
+        (metaExtra as any)?.targetLabel ??
+          (opts as any)?.userContext?.targetLabel ??
+          ''
+      ).trim() || null;
 
-            deltaType:
-              String(
-                (ctxPackForWriter as any)?.flow?.deltaType ??
-                  (ctxPackForWriter as any)?.deltaType ??
-                  ''
-              ).trim() || null,
+    const patternFollowupText = String(
+      userText ??
+        (opts as any)?.userText ??
+        ''
+    ).trim();
 
-            returnStreak:
-              typeof (ctxPackForWriter as any)?.returnStreak === 'number' &&
-              Number.isFinite((ctxPackForWriter as any).returnStreak)
-                ? (ctxPackForWriter as any).returnStreak
-                : 0,
+    const patternSelectInput = {
+      line: patternPresentationKind === 'diagnosis' ? 'diagnosis' : patternPresentationKind,
+      questionType: resolvedQuestionType,
+      detailMode: patternDetailMode,
+      followupText: patternFollowupText,
+      userText: patternFollowupText,
+      targetLabel: patternTargetLabel,
+      hasPriorDiagnosis: patternPresentationKind === 'diagnosis',
+    };
 
-            continuityKind:
-              String((ctxPackForWriter as any)?.continuityKind ?? '').trim() || null,
+    const patternKey = selectSlotPattern(patternSelectInput);
+
+    console.log(
+      '[IROS/rephraseEngine][PATTERN_SELECT_INPUT]',
+      JSON.stringify({
+        traceId: debug.traceId ?? null,
+        conversationId: debug.conversationId ?? null,
+        userCode: debug.userCode ?? null,
+        input: patternSelectInput,
+        result: patternKey,
+      })
+    );
+    const patternBlocksResult = buildPatternBlocks({
+      patternKey,
+      targetLabel: patternTargetLabel,
+      questionType: resolvedQuestionType,
+      goalKind: goalKind ?? null,
+      detailMode: patternDetailMode,
+    });
+
+// src/lib/iros/language/rephrase/rephraseEngine.full.ts
+// 5469-5519 行をこのブロックで丸ごと置換
+
+let materializedBlocks: Array<{
+  text: string;
+  kind: 'p';
+  slotKey?:
+    | 'OBS'
+    | 'SHIFT'
+    | 'NEXT'
+    | 'SAFE'
+    | 'STATE'
+    | 'GUIDE'
+    | 'MESSAGE'
+    | 'STATE_SURFACE'
+    | 'STATE_WEIGHT'
+    | 'STATE_OPEN_EDGE'
+    | 'STATE_RESIDUE';
+  heading?: string;
+}> = [];
+let materializeSourceUnitsLog: string[] = [];
+let materializeUnitIndexFinal = 0;
+const slotBlocksText: string[] = [];
+
+if (
+  (patternKey === 'IR_DETAIL_V1' ||
+    patternKey === 'NORMAL_DETAIL_V1' ||
+    patternKey === 'NORMAL_RESONANCE_V1' ||
+    patternKey === 'DECLARATION_RESONANCE_V1') &&
+  Array.isArray(patternBlocksResult.blocks) &&
+  patternBlocksResult.blocks.length > 0
+) {
+  const sourceBlocksRaw = (Array.isArray(blocksText) ? blocksText : [])
+    .map((x) => String(x ?? '').trim())
+    .filter(Boolean);
+
+  const shouldExpandSourceUnits =
+    patternKey === 'NORMAL_DETAIL_V1' ||
+    patternKey === 'NORMAL_RESONANCE_V1' ||
+    patternKey === 'IR_DETAIL_V1' ||
+    patternKey === 'DECLARATION_RESONANCE_V1';
+  const sourceUnits = shouldExpandSourceUnits
+    ? sourceBlocksRaw.flatMap((block) =>
+        String(block ?? '')
+          .split(/(?<=[。！？!?])\s*/u)
+          .map((x) => String(x ?? '').trim())
+          .filter(Boolean)
+      )
+    : sourceBlocksRaw;
+  materializeSourceUnitsLog = [...sourceUnits];
+
+  const slotOrderForMaterialize: Array<
+    | 'OBS'
+    | 'SHIFT'
+    | 'NEXT'
+    | 'SAFE'
+    | 'STATE'
+    | 'GUIDE'
+    | 'MESSAGE'
+    | 'STATE_SURFACE'
+    | 'STATE_WEIGHT'
+    | 'STATE_OPEN_EDGE'
+    | 'STATE_RESIDUE'
+  > =
+  patternKey === 'DECLARATION_RESONANCE_V1' ||
+  patternKey === 'NORMAL_RESONANCE_V1'
+    ? ['STATE_SURFACE', 'STATE_WEIGHT', 'STATE_OPEN_EDGE', 'STATE_RESIDUE']
+    : patternKey === 'NORMAL_DETAIL_V1'
+      ? ['OBS', 'SHIFT', 'NEXT', 'SAFE']
+      : ['OBS', 'STATE', 'GUIDE', 'MESSAGE'];
+
+    const firstBlockBySlot = new Map<string, { heading?: string }>();
+    const slotBlockCounts = new Map<string, number>();
+
+    for (const block of patternBlocksResult.blocks) {
+      const slotKey = String(block.slotKey);
+      if (!firstBlockBySlot.has(slotKey)) {
+        firstBlockBySlot.set(slotKey, { heading: block.heading });
+      }
+      slotBlockCounts.set(slotKey, Number(slotBlockCounts.get(slotKey) ?? 0) + 1);
+    }
+
+    materializedBlocks = [];
+    let unitIndex = 0;
+    let consumedAllSourceUnits = false;
+
+    const splitIntoMicroUnits = (raw: string): string[] => {
+      const text = String(raw ?? '').trim();
+      if (!text) return [];
+
+      return text
+        .split(/(?<=[。！？!?])\s*/u)
+        .map((x) => String(x ?? '').trim())
+        .filter(Boolean);
+    };
+
+    const declarationTakePlan =
+      patternKey === 'DECLARATION_RESONANCE_V1' ||
+      patternKey === 'NORMAL_RESONANCE_V1'
+        ? (() => {
+            const total = sourceUnits.length;
+
+            if (total <= 0) return [0, 0, 0, 0];
+            if (total === 1) return [1, 0, 0, 0];
+            if (total === 2) return [1, 1, 0, 0];
+            if (total === 3) return [1, 1, 1, 0];
+
+            const residueCount = 1;
+            const openEdgeCount = Math.min(2, Math.max(1, total - 3));
+            const headRemaining = Math.max(2, total - residueCount - openEdgeCount);
+            const stateSurfaceCount = Math.min(2, Math.max(1, headRemaining - 1));
+            const stateWeightCount = Math.max(1, headRemaining - stateSurfaceCount);
+
+            return [stateSurfaceCount, stateWeightCount, openEdgeCount, residueCount];
+          })()
+        : null;
+
+    for (const [slotIndex, slotKey] of slotOrderForMaterialize.entries()) {
+      const heading = String(firstBlockBySlot.get(slotKey)?.heading ?? '').trim();
+      const desiredCount = Number(slotBlockCounts.get(slotKey) ?? 0);
+      if (desiredCount <= 0) continue;
+
+      const slotDecisionForMaterialize =
+        patternKey === 'NORMAL_DETAIL_V1'
+          ? computeSlotDecisionFromEngine({
+              depthStage:
+                String((ctxPackForWriter as any)?.depthStage ?? '').trim() || null,
+              questionType: resolvedQuestionType,
+              goalKind:
+                String(
+                  (ctxPackForWriter as any)?.goalKind ??
+                    (ctxPackForWriter as any)?.targetKind ??
+                    goalKind ??
+                    '',
+                ).trim() || null,
+            })
+          : null;
+
+            const useSingleParagraphPerSlot =
+            patternKey === 'NORMAL_DETAIL_V1';
+
+        let slotUnits: string[] = [];
+        if (useSingleParagraphPerSlot) {
+          const emphasisNow =
+            slotKey === 'OBS' || slotKey === 'SHIFT' || slotKey === 'NEXT' || slotKey === 'SAFE'
+              ? ((slotDecisionForMaterialize?.emphasis?.[slotKey] ?? 1) as 1 | 2 | 3)
+              : 1;
+
+          const remainingUnitsNow = Math.max(0, sourceUnits.length - unitIndex);
+          const remainingSlotsAfterThis = Math.max(
+            0,
+            slotOrderForMaterialize.length - (slotIndex + 1),
+          );
+          const minReserveForLater = Math.min(
+            remainingSlotsAfterThis,
+            Math.max(0, remainingUnitsNow - 1),
+          );
+          const maxTakeNow = Math.max(0, remainingUnitsNow - minReserveForLater);
+          const desiredTakeCount = emphasisNow === 3 ? 3 : emphasisNow === 2 ? 2 : 1;
+          const takeCount = Math.max(0, Math.min(desiredTakeCount, maxTakeNow));
+
+              slotUnits = sourceUnits
+                .slice(unitIndex, unitIndex + takeCount)
+                .map((x) => String(x ?? '').trim())
+                .filter(Boolean);
+
+              unitIndex += takeCount;
+        } else {
+          const remainingUnits = Math.max(0, sourceUnits.length - unitIndex);
+          const remainingSlots = Math.max(1, slotOrderForMaterialize.length - slotIndex);
+
+          const actualTakeCount =
+          Array.isArray(declarationTakePlan) &&
+          declarationTakePlan.length === slotOrderForMaterialize.length
+            ? Math.max(
+                1,
+                Math.min(remainingUnits, Number(declarationTakePlan[slotIndex] ?? 1)),
+              )
+            : Math.max(1, Math.ceil(remainingUnits / remainingSlots));
+
+          slotUnits = sourceUnits
+            .slice(unitIndex, unitIndex + actualTakeCount)
+            .map((x) => String(x ?? '').trim())
+            .filter(Boolean);
+
+          unitIndex += actualTakeCount;
+        }
+
+        if (slotUnits.length === 0) {
+          continue;
+        }
+
+        const slotParagraphs = (() => {
+          const cleaned = slotUnits
+            .map((x) => String(x ?? '').trim())
+            .filter(Boolean);
+
+          if (cleaned.length === 0) return [];
+
+          const targetCount =
+            patternKey === 'NORMAL_DETAIL_V1'
+              ? slotKey === 'OBS' || slotKey === 'SHIFT' || slotKey === 'NEXT' || slotKey === 'SAFE'
+                ? ((slotDecisionForMaterialize?.emphasis?.[slotKey] ?? 1) as 1 | 2 | 3)
+                : 1
+              : Math.max(1, desiredCount);
+
+          if (cleaned.length <= targetCount) {
+            return cleaned;
+          }
+
+          const out: string[] = [];
+          let cursor = 0;
+
+          for (let i = 0; i < targetCount; i += 1) {
+            const remaining = cleaned.length - cursor;
+            const remainingBlocks = targetCount - i;
+            const takeCount = Math.max(1, Math.ceil(remaining / remainingBlocks));
+            const chunk = cleaned.slice(cursor, cursor + takeCount).join(' ').trim();
+            if (chunk) out.push(chunk);
+            cursor += takeCount;
+          }
+
+          if (cursor < cleaned.length) {
+            const tail = cleaned.slice(cursor).join(' ').trim();
+            if (tail) out.push(tail);
+          }
+
+          return out.filter(Boolean);
+        })();
+
+        if (patternKey === 'NORMAL_DETAIL_V1') {
+          materializedBlocks.push(
+            ...slotParagraphs.map((paragraph) => ({
+              text: paragraph,
+              kind: 'p' as const,
+              slotKey,
+              heading: heading || undefined,
+            }))
+          );
+          continue;
+        }
+
+        if (!heading) {
+          materializedBlocks.push(
+            ...slotParagraphs.map((paragraph) => ({
+              text: paragraph,
+              kind: 'p' as const,
+              slotKey,
+            }))
+          );
+          continue;
+        }
+
+        slotParagraphs.forEach((paragraph, paragraphIndex) => {
+          materializedBlocks.push({
+            text: paragraphIndex === 0 ? `${heading}\n${paragraph}` : paragraph,
+            kind: 'p' as const,
+            slotKey,
+            heading,
           });
+        });
+      }
+
+      if (
+        patternKey === 'NORMAL_DETAIL_V1' &&
+        sourceBlocksRaw.length <= slotOrderForMaterialize.length
+      ) {
+        consumedAllSourceUnits = true;
+        materializeUnitIndexFinal = sourceUnits.length;
+      } else {
+        materializeUnitIndexFinal = unitIndex;
+      }
+
+      if (!consumedAllSourceUnits) {
+        for (let i = unitIndex; i < sourceUnits.length; i += 1) {
+          const text = String(sourceUnits[i] ?? '').trim();
+          if (!text) continue;
+
+          materializedBlocks.push({
+            text,
+            kind: 'p' as const,
+            ...(patternKey === 'NORMAL_DETAIL_V1'
+              ? { slotKey: 'SAFE' as const }
+              : {}),
+          });
+        }
+      }
+
+      if (materializedBlocks.length > 0) {
+        blocksText = materializedBlocks.map((block) => String(block.text ?? '').trim()).filter(Boolean);
+      }}
+    console.log(
+      '[IROS/rephraseEngine][PATTERN_MATERIALIZE]',
+      JSON.stringify({
+        traceId: (debug as any)?.traceId ?? null,
+        conversationId: (debug as any)?.conversationId ?? null,
+        userCode: (debug as any)?.userCode ?? null,
+        patternKey,
+        resolvedQuestionType,
+        patternDetailMode,
+        patternPresentationKind,
+        patternFollowupText,
+        patternBlocksLen: Array.isArray(patternBlocksResult.blocks)
+          ? patternBlocksResult.blocks.length
+          : 0,
+        sourceUnitsLen: materializeSourceUnitsLog.length,
+        sourceUnitsHead: materializeSourceUnitsLog
+          .slice(0, 6)
+          .map((x) => safeHead(String(x), 80)),
+        unitIndexFinal: materializeUnitIndexFinal,
+        blocksTextLenAfterMaterialize: Array.isArray(blocksText) ? blocksText.length : 0,
+        materializedBlocksLen: Array.isArray(materializedBlocks) ? materializedBlocks.length : 0,
+        materializedSlotKeys: Array.isArray(materializedBlocks)
+          ? materializedBlocks.map((block) => String(block.slotKey ?? '(none)'))
+          : [],
+        materializedBlocksPreview: Array.isArray(materializedBlocks)
+          ? materializedBlocks.slice(0, 8).map((block) => ({
+              slotKey: String(block.slotKey ?? '(none)'),
+              text: safeHead(String(block.text ?? ''), 80),
+            }))
+          : [],
+        blocksTextHead: Array.isArray(blocksText)
+          ? blocksText.slice(0, 6).map((x) => safeHead(String(x), 80))
+          : [],
+      })
+    );
+
+// 🔽 2段落目（SHIFT）に混入した締め文だけは引き続き抑える
+if (Array.isArray(blocksText) && blocksText.length === 4) {
+  const second = String(blocksText[1] ?? '').trim();
+
+  blocksText[1] = second
+    .replace(/このまとめで、.*$/, '')
+    .replace(/「まず一つに寄せれば、.*?」/, '')
+    .trim();
+
+  if (patternKey === 'DECLARATION_RESONANCE_V1') {
+    const splitSentences = (raw: string): string[] =>
+      String(raw ?? '')
+        .split(/(?<=[。！？!?])\s*/u)
+        .map((x) => String(x ?? '').trim())
+        .filter(Boolean);
+
+    const thirdText = String(blocksText[2] ?? '').trim();
+    const fourthText = String(blocksText[3] ?? '').trim();
+
+// src/lib/iros/language/rephrase/rephraseEngine.full.ts
+// 5746-5763 行をこのブロックで丸ごと置換
+
+const thirdUnits = splitSentences(thirdText);
+const fourthLooksDirective =
+  /(?:していけ|していく|置いていけ|置いていく|置いておけ|置いておけば|含めるか|どこまで|少しずつ|追いついて|残ります|進めます|できます|動きます|定まると|ではなくなります|へ変わります|に変わります|見えてきます|見えてくる|広がります|開けます)/.test(
+    fourthText
+  );
+
+const thirdLooksDirective =
+  /(?:まずは|どんな現実|輪郭で呼ぶ|どう呼ぶか|呼び名|接地|現実に接地|定める|定まる|ひとつ残っています|だけが残っています)/.test(
+    thirdText
+  );
+
+if (thirdUnits.length >= 2 && (fourthLooksDirective || thirdLooksDirective)) {
+  const residueUnit = String(thirdUnits.pop() ?? '').trim();
+  const openEdgeText = thirdUnits.join(' ').trim();
+
+  if (openEdgeText) {
+    blocksText[2] = openEdgeText;
+  }
+
+  if (residueUnit) {
+    blocksText[3] = residueUnit;
+  } else if (fourthLooksDirective) {
+    blocksText[3] = '';
+  }
+}
+  }
+}
+    if (ctxPackForWriter && typeof ctxPackForWriter === 'object') {
+      (ctxPackForWriter as any).patternKey = patternKey;
+      (ctxPackForWriter as any).patternBlocks = patternBlocksResult.blocks;
+    }
+
+    (metaExtra as any).patternKey = patternKey;
+    (metaExtra as any).patternBlocks = patternBlocksResult.blocks;
+
+    try {
+      (metaExtra as any).ctxPack = {
+        ...(metaExtra as any).ctxPack,
+        patternKey,
+        patternBlocks: patternBlocksResult.blocks,
+      };
+      (debug as any).patternKey = patternKey;
+      (debug as any).patternBlocks = patternBlocksResult.blocks;
+    } catch {}
+
+    const slotDecision = computeSlotDecisionFromEngine({
+      depthStage:
+        String((ctxPackForWriter as any)?.depthStage ?? '').trim() || null,
+
+      questionType: resolvedQuestionType,
+
+      goalKind:
+        String(
+          (ctxPackForWriter as any)?.goalKind ??
+            (ctxPackForWriter as any)?.targetKind ??
+            ''
+        ).trim() || null,
+
+      deltaType:
+        String(
+          (ctxPackForWriter as any)?.flow?.deltaType ??
+            (ctxPackForWriter as any)?.deltaType ??
+            ''
+        ).trim() || null,
+
+      returnStreak:
+        typeof (ctxPackForWriter as any)?.returnStreak === 'number' &&
+        Number.isFinite((ctxPackForWriter as any).returnStreak)
+          ? (ctxPackForWriter as any).returnStreak
+          : 0,
+
+      continuityKind:
+        String((ctxPackForWriter as any)?.continuityKind ?? '').trim() || null,
+    });
 // ▼ 追加：slotDecision を ctxPack に正本として格納
 if (slotDecision && typeof slotDecision === 'object') {
   if ((opts as any)?.ctxPack && typeof (opts as any).ctxPack === 'object') {
@@ -5364,11 +6029,11 @@ if (slotDecision && typeof slotDecision === 'object') {
         if (message) return message;
 
         if (mode === 'observe_hint' && hint) {
-          return '次は、新しい材料を足すより、いま出ている流れをそのまま見ます。';
+          return null;
         }
 
         if (hint) {
-          return '次は、この流れのまま一段だけ先を見ます。';
+          return null;
         }
 
         if (line) return line;
@@ -5401,7 +6066,6 @@ if (slotDecision && typeof slotDecision === 'object') {
           push(naturalizeSafe(payload));
         }
       }
-
       if (out.length === 0) {
         const plain = stripSlotMarkerPrefix(raw);
         if (plain && !plain.startsWith('{') && !plain.startsWith('[')) {
@@ -5463,33 +6127,57 @@ if (slotDecision && typeof slotDecision === 'object') {
 
     // 通常 slot を display 用 blocks として採用する。
     // BlockPlan は明示発動のまま維持し、ここでは通常スロットだけを blocks 化する。
-    if (slotDisplayBlocks.length > 0) {
+    const activePatternKeyForDisplay = String((metaExtra as any)?.patternKey ?? '').trim();
+    const isIRDetailPatternForDisplay =
+      activePatternKeyForDisplay === 'IR_DETAIL_V1';
+
+      const canonicalPatternBlocks = (Array.isArray(blocksText) ? blocksText : [])
+      .map((x) => String(x ?? '').trim())
+      .filter(Boolean);
+
+      const canonicalBlocksBySlot =
+      (activePatternKeyForDisplay === 'NORMAL_DETAIL_V1' ||
+        activePatternKeyForDisplay === 'DECLARATION_RESONANCE_V1')
+        ? materializedBlocks
+            .map((block) => String(block.text ?? '').trim())
+            .filter(Boolean)
+        : canonicalPatternBlocks;
+
+    const expectedDisplayBlocks =
+      Array.isArray(slotDecision?.order) && slotDecision.order.length > 0
+        ? slotDecision.order.length
+        : 4;
+
+    const shouldPreferCanonicalBlocks =
+      isIRDetailPatternForDisplay || canonicalBlocksBySlot.length >= expectedDisplayBlocks;
+
+    if (shouldPreferCanonicalBlocks) {
+      if (canonicalBlocksBySlot.length > 0) {
+        slotBlocksText.push(...canonicalBlocksBySlot);
+        blocksText = [...canonicalBlocksBySlot];
+        usedSlotBlocksForDisplay = true;
+      }
+    } else if (slotDisplayBlocks.length > 0) {
       slotBlocksText.push(...slotDisplayBlocks);
       blocksText = [...slotDisplayBlocks];
       usedSlotBlocksForDisplay = true;
     }
 
-    // writer 本文を正本として使う。
-    // ここで text_blocks を slot order で再配置すると、
-    // writer が作った段落境界や論理のつながりが崩れてしまう。
-    // display 用 block は normalizedText → toRephraseBlocks() の結果をそのまま使う。
-    // slotDecision / slotOrder は writer への指示とログ用途に限定する。
-
     const directSlotDisplayUsed =
-      slotDisplayBlocks.length > 0 &&
+      slotBlocksText.length > 0 &&
       Array.isArray(blocksText) &&
-      blocksText.length === slotDisplayBlocks.length &&
+      blocksText.length === slotBlocksText.length &&
       blocksText.every(
         (x, i) =>
           normalizeBlockKey(String(x ?? '')) ===
-          normalizeBlockKey(String(slotDisplayBlocks[i] ?? ''))
+          normalizeBlockKey(String(slotBlocksText[i] ?? ''))
       );
 
     const reorderedTextBlocksUsed =
       !directSlotDisplayUsed &&
       usedSlotBlocksForDisplay &&
-      slotBlocksText.length > 0;
-
+      slotBlocksText.length > 0 &&
+      !isIRDetailPatternForDisplay;
       console.log(
         '[IROS/rephraseEngine][SLOT_BLOCKS_DIAG_STR]',
         JSON.stringify({
@@ -5497,22 +6185,22 @@ if (slotDecision && typeof slotDecision === 'object') {
           conversationId: (debug as any)?.conversationId ?? null,
           userCode: (debug as any)?.userCode ?? null,
           slotBlocksLen: slotBlocksText.length,
-          slotBlocksHead: slotBlocksText.slice(0, 4).map((x) => safeHead(String(x), 80)),
-          pickedBlocksSource: directSlotDisplayUsed
-            ? 'slot_blocks'
-            : reorderedTextBlocksUsed
-              ? 'text_blocks_reordered'
-              : 'text_blocks',
+          slotBlocksHead: slotBlocksText.map((x) => safeHead(String(x), 80)).slice(0, 6),
+          canonicalBlocksBySlotLen: Array.isArray(canonicalBlocksBySlot)
+            ? canonicalBlocksBySlot.length
+            : 0,
+          canonicalBlocksBySlotHead: Array.isArray(canonicalBlocksBySlot)
+            ? canonicalBlocksBySlot.map((x) => safeHead(String(x), 80)).slice(0, 6)
+            : [],
+          directSlotDisplayUsed,
+          reorderedTextBlocksUsed,
+          pickedBlocksSource: usedSlotBlocksForDisplay ? 'slot_blocks' : 'raw_blocks',
           finalBlocksLen: Array.isArray(blocksText) ? blocksText.length : 0,
-          note: directSlotDisplayUsed
-            ? 'slot_blocks_used_for_display'
-            : reorderedTextBlocksUsed
-              ? 'text_blocks_reordered_for_display'
-              : 'slot_blocks_filtered_fallback_to_text_blocks',
-          slotOrder: slotDecision.order,
-          slotWeights: slotDecision.weights,
-          slotEmphasis: slotDecision.emphasis,
-          questionType: resolvedQuestionType,
+          note: usedSlotBlocksForDisplay ? 'slot_blocks_used_for_display' : 'slot_blocks_not_used',
+          slotOrder: Array.isArray(slotDecision?.order) ? slotDecision.order : [],
+          slotWeights: slotDecision?.weights ?? null,
+          slotEmphasis: slotDecision?.emphasis ?? null,
+          questionType: resolvedQuestionType ?? null,
         })
       );
 
@@ -5540,14 +6228,15 @@ if (slotDecision && typeof slotDecision === 'object') {
       return { density, charLen, newlines, punctRatio, kanjiRatio };
     };
 
-    const blocks = blocksText.map((t) => ({
-      text: String(t ?? '').trim(),
-      kind: 'p',
-    }));
+    const blocks = (Array.isArray(blocksText) ? blocksText : [])
+      .map((t) => ({
+        text: String(t ?? '').trim(),
+        kind: 'p' as const,
+      }))
+      .filter((block) => block.text.length > 0);
 
     // ✅ 1回だけ代入（重複排除）
     metaExtra.rephraseBlocks = blocks;
-
     // ✅ signals を付与（受け口）
     try {
       (metaExtra as any).llmSignals = extractLlmSignals(String(text ?? ''));
@@ -5680,7 +6369,7 @@ if (slotDecision && typeof slotDecision === 'object') {
     return v;
   };
 
-  const guardEnabled = envFlagEnabled(process.env.IROS_FLAGSHIP_GUARD_ENABLED, false);
+  const guardEnabled = envFlagEnabled(process.env.IROS_FLAGSHIP_GUARD_ENABLED, true);
 
   // ---------------------------------------------
   // LLM call (1st)
@@ -6098,95 +6787,133 @@ raw = await (async () => {
           (opts as any)?.userContext?.question ??
           (opts as any)?.userContext?.meta?.extra?.question ??
           null;
-  const questionDomainForWriter = String(
-    (questionForWriter as any)?.domain ?? ''
-  ).trim();
+          const questionDomainForWriter = String(
+            (questionForWriter as any)?.domain ?? ''
+          ).trim();
 
-  const questionTypeForWriter = String(
-    (questionForWriter as any)?.questionType ?? ''
-  ).trim();
+          const stateCuesPatternKey =
+            selectSlotPattern({
+              line: String(
+                (opts as any)?.meta?.extra?.presentationKind ??
+                  (opts as any)?.userContext?.meta?.extra?.presentationKind ??
+                  ''
+              )
+                .trim()
+                .toLowerCase(),
+              questionType: null,
+              detailMode:
+                (opts as any)?.ctxPack?.detailMode === true ||
+                (opts as any)?.userContext?.ctxPack?.detailMode === true,
+              followupText: String((opts as any)?.userText ?? '').trim(),
+              userText: String((opts as any)?.userText ?? '').trim(),
+              targetLabel: null,
+              hasPriorDiagnosis: false,
+            }) ?? '';
 
-  const questionTModeForWriter = String(
-    (questionForWriter as any)?.tState?.mode ?? ''
-  ).trim();
+          const suppressQuestionMetaForStateCues =
+            stateCuesPatternKey === 'DECLARATION_RESONANCE_V1' ||
+            stateCuesPatternKey === 'NORMAL_RESONANCE_V1';
+          const questionTypeForWriterRaw = String(
+            (questionForWriter as any)?.questionType ?? ''
+          ).trim();
 
-  const questionFocusForWriter = String(
-    ((questionForWriter as any)?.tState?.focus ??
-      (Array.isArray((questionForWriter as any)?.iframe?.focusCandidate)
-        ? (questionForWriter as any).iframe.focusCandidate[0]
-        : '')) ?? ''
-  ).trim();
+          const questionTModeForWriterRaw = String(
+            (questionForWriter as any)?.tState?.mode ?? ''
+          ).trim();
 
-  const questionPolicyForWriter = (() => {
-    const p = (questionForWriter as any)?.outputPolicy;
-    if (!p || typeof p !== 'object') return null;
-    try {
-      return safeHead(JSON.stringify(p), 280);
-    } catch {
-      return safeHead(String(p), 280);
-    }
-  })();
+          const questionFocusForWriterRaw = String(
+            ((questionForWriter as any)?.tState?.focus ??
+              (Array.isArray((questionForWriter as any)?.iframe?.focusCandidate)
+                ? (questionForWriter as any).iframe.focusCandidate[0]
+                : '')) ?? ''
+          ).trim();
 
-  const questionIFrameKeysForWriter = (() => {
-    const hs = Array.isArray((questionForWriter as any)?.iframe?.hypothesisSpace)
-      ? (questionForWriter as any).iframe.hypothesisSpace
-      : [];
-    const keys = hs
-      .map((x: any) => String(x?.key ?? '').trim())
-      .filter(Boolean)
-      .slice(0, 6);
-    return keys.length > 0 ? keys : [];
-  })();
+          const questionTypeForWriter = suppressQuestionMetaForStateCues
+            ? ''
+            : questionTypeForWriterRaw;
 
-  const stateCuesText = (() => {
-    const currentStateBits = [
-      `depthStage=${typeof pickedDepthStage !== 'undefined' ? String(pickedDepthStage) : 'null'}`,
-      `phase=${typeof pickedPhase !== 'undefined' ? String(pickedPhase) : 'null'}`,
-      `qCode=${typeof pickedQCode !== 'undefined' ? String(pickedQCode) : 'null'}`,
-    ].join(' / ');
+          const questionTModeForWriter = suppressQuestionMetaForStateCues
+            ? ''
+            : questionTModeForWriterRaw;
 
-    const digestTopic = safeHead(
-      String((historyDigestV1 as any)?.topic?.situationTopic ?? ''),
-      120
-    );
+          const questionFocusForWriter = suppressQuestionMetaForStateCues
+            ? ''
+            : questionFocusForWriterRaw;
 
-    const digestSummary = safeHead(
-      String((historyDigestV1 as any)?.topic?.situationSummary ?? ''),
-      160
-    );
+          const questionPolicyForWriter = (() => {
+            const p = (questionForWriter as any)?.outputPolicy;
+            if (!p || typeof p !== 'object') return null;
+            try {
+              return safeHead(JSON.stringify(p), 280);
+            } catch {
+              return safeHead(String(p), 280);
+            }
+          })();
 
-    const lastUserCore = safeHead(
-      String((historyDigestV1 as any)?.continuity?.last_user_core ?? ''),
-      200
-    );
+          const questionIFrameKeysForWriter = suppressQuestionMetaForStateCues
+            ? []
+            : (() => {
+                const hs = Array.isArray((questionForWriter as any)?.iframe?.hypothesisSpace)
+                  ? (questionForWriter as any).iframe.hypothesisSpace
+                  : [];
+                const keys = hs
+                  .map((x: any) => String(x?.key ?? '').trim())
+                  .filter(Boolean)
+                  .slice(0, 6);
+                return keys.length > 0 ? keys : [];
+              })();
 
-    const askBackAllowedValue = (() => {
-      const v = (questionForWriter as any)?.outputPolicy?.askBackAllowed;
-      return typeof v === 'boolean' ? v : null;
-    })();
+          const stateCuesText = (() => {
+            const currentStateBits = [
+              `depthStage=${typeof pickedDepthStage !== 'undefined' ? String(pickedDepthStage) : 'null'}`,
+              `phase=${typeof pickedPhase !== 'undefined' ? String(pickedPhase) : 'null'}`,
+              `qCode=${typeof pickedQCode !== 'undefined' ? String(pickedQCode) : 'null'}`,
+            ].join(' / ');
 
-    const answerFirstValue = (() => {
-      const v = (questionForWriter as any)?.outputPolicy?.answerFirst;
-      return typeof v === 'boolean' ? v : null;
-    })();
+            const digestTopic = safeHead(
+              String((historyDigestV1 as any)?.topic?.situationTopic ?? ''),
+              120
+            );
 
-    const avoidPrematureClosureValue = (() => {
-      const v = (questionForWriter as any)?.outputPolicy?.avoidPrematureClosure;
-      return typeof v === 'boolean' ? v : null;
-    })();
+            const digestSummary = safeHead(
+              String((historyDigestV1 as any)?.topic?.situationSummary ?? ''),
+              160
+            );
 
-    const responseGoal = (() => {
-      if (questionTypeForWriter === 'meaning' && questionTModeForWriter === 'confirm') {
-        return 'explain_then_optional_question';
-      }
-      if (questionTypeForWriter === 'meaning') {
-        return 'explain_first';
-      }
-      if (questionTypeForWriter) {
-        return `respond_for_${questionTypeForWriter}`;
-      }
-      return null;
-    })();
+            const lastUserCore = safeHead(
+              String((historyDigestV1 as any)?.continuity?.last_user_core ?? ''),
+              200
+            );
+
+            const askBackAllowedValue = (() => {
+              if (suppressQuestionMetaForStateCues) return false;
+              const v = (questionForWriter as any)?.outputPolicy?.askBackAllowed;
+              return typeof v === 'boolean' ? v : null;
+            })();
+
+            const answerFirstValue = (() => {
+              const v = (questionForWriter as any)?.outputPolicy?.answerFirst;
+              return typeof v === 'boolean' ? v : null;
+            })();
+
+            const avoidPrematureClosureValue = (() => {
+              const v = (questionForWriter as any)?.outputPolicy?.avoidPrematureClosure;
+              return typeof v === 'boolean' ? v : null;
+            })();
+
+            const responseGoal = (() => {
+              if (suppressQuestionMetaForStateCues) return null;
+              if (questionTypeForWriter === 'meaning' && questionTModeForWriter === 'confirm') {
+                return 'explain_then_optional_question';
+              }
+              if (questionTypeForWriter === 'meaning') {
+                return 'explain_first';
+              }
+              if (questionTypeForWriter) {
+                return `respond_for_${questionTypeForWriter}`;
+              }
+              return null;
+            })();
 
     const topicValue =
       lastUserCore ||
@@ -6528,7 +7255,11 @@ console.log('[IROS/rephraseEngine][STATE_SNAPSHOT_FOR_WRITER]', {
   lastAssistantHead: String(__writerAssistantLast?.content ?? '').slice(0, 300),
 });
 
-// ✅ writer直前で使う slotDecision をこの場で確定して ctxPackForWriter に注入
+// ✅ writer直前の通常本線は Slot Weight Engine 主導。
+// - 通常質問の主設計は writer本文 → toRephraseBlocks → pattern materialize → slotDecision
+// - blockPlan は明示起動の特別モード用であり、通常会話の主設計には使わない
+// - そのため、この slotDecision は通常会話での OBS / SHIFT / NEXT / SAFE の順序・濃さの正本として扱う
+// - 将来 blockPlan を使う場合も、通常ルートを置き換えず「明示時の追加レーン」として扱う
 const slotDecisionForWriter = computeSlotDecisionFromEngine({
   depthStage:
     String((ctxPackForWriter as any)?.depthStage ?? '').trim() || null,
@@ -6602,33 +7333,82 @@ const slotDecisionForWriter = computeSlotDecisionFromEngine({
 if (ctxPackForWriter && typeof ctxPackForWriter === 'object') {
   (ctxPackForWriter as any).slotDecision = slotDecisionForWriter;
 }
-const writerDirectivesFromSlot = {
-  slot_order: Array.isArray(slotDecisionForWriter?.order)
-    ? slotDecisionForWriter.order.join(',')
-    : '',
-
-  slot_opening_role: Array.isArray(slotDecisionForWriter?.order)
-    ? String(slotDecisionForWriter.order[0] ?? '')
-    : '',
-
-  ...(slotDecisionForWriter?.emphasis
-    ? Object.fromEntries(
-        Object.entries(slotDecisionForWriter.emphasis).map(([k, v]) => [
-          `slot_emphasis_${String(k).toLowerCase()}`,
-          String(v),
-        ])
+const writerPatternKey = String(
+  (ctxPackForWriter && typeof ctxPackForWriter === 'object'
+    ? (ctxPackForWriter as any).patternKey
+    : null) ??
+    selectSlotPattern({
+      line: String(
+        (opts as any)?.meta?.extra?.presentationKind ??
+          (opts as any)?.userContext?.meta?.extra?.presentationKind ??
+          ''
       )
-    : {}),
+        .trim()
+        .toLowerCase(),
+      questionType: null,
+      detailMode:
+        (opts as any)?.ctxPack?.detailMode === true ||
+        (opts as any)?.userContext?.ctxPack?.detailMode === true,
+      followupText: String((opts as any)?.userText ?? '').trim(),
+      userText: String((opts as any)?.userText ?? '').trim(),
+      targetLabel: null,
+      hasPriorDiagnosis: false,
+    }) ??
+    ''
+).trim();
 
-  ...(slotDecisionForWriter?.weights
-    ? Object.fromEntries(
-        Object.entries(slotDecisionForWriter.weights).map(([k, v]) => [
-          `slot_weight_${String(k).toLowerCase()}`,
-          String(v),
-        ])
+const isDetailPatternWriter =
+  writerPatternKey === 'IR_DETAIL_V1' ||
+  writerPatternKey === 'NORMAL_DETAIL_V1' ||
+  writerPatternKey === 'NORMAL_RESONANCE_V1' ||
+  writerPatternKey === 'DECLARATION_RESONANCE_V1';
+
+const writerDirectivesFromSlot = isDetailPatternWriter
+  ? {
+      ...buildDetailPatternWriterDirectives(
+        writerPatternKey === 'DECLARATION_RESONANCE_V1'
+          ? 'NORMAL_DETAIL_V1'
+          : writerPatternKey
+      ),
+    }
+  : {
+      slot_order: Array.isArray(slotDecisionForWriter?.order)
+        ? slotDecisionForWriter.order.join(',')
+        : '',
+
+      slot_opening_role: Array.isArray(slotDecisionForWriter?.order)
+        ? String(slotDecisionForWriter.order[0] ?? '')
+        : '',
+
+      ...(slotDecisionForWriter?.emphasis
+        ? Object.fromEntries(
+            Object.entries(slotDecisionForWriter.emphasis).map(([k, v]) => [
+              `slot_emphasis_${String(k).toLowerCase()}`,
+              String(v),
+            ])
+          )
+        : {}),
+
+      ...(slotDecisionForWriter?.weights
+        ? Object.fromEntries(
+            Object.entries(slotDecisionForWriter.weights).map(([k, v]) => [
+              `slot_weight_${String(k).toLowerCase()}`,
+              String(v),
+            ])
+          )
+        : {}),
+
+      ...buildDetailPatternWriterDirectives(writerPatternKey),
+    };
+
+const writerDirectivesForFinal = isDetailPatternWriter
+  ? Object.fromEntries(
+      Object.entries(writerDirectivesFromSlot ?? {}).filter(
+        ([key]) => !String(key).startsWith('slot_')
       )
-    : {}),
-};
+    )
+  : writerDirectivesFromSlot;
+
 console.log(
   '[IROS/rephraseEngine][CALL_WRITER_ARGS]',
   JSON.stringify({
@@ -6644,19 +7424,209 @@ console.log(
       Array.isArray((slotDecisionForWriter as any)?.order)
         ? (slotDecisionForWriter as any).order
         : [],
+    writerPatternKey,
+    ctxPackPatternKey:
+      ctxPackForWriter && typeof ctxPackForWriter === 'object'
+        ? (ctxPackForWriter as any).patternKey ?? null
+        : null,
+    optsCtxPackPatternKey:
+      (opts as any)?.ctxPack && typeof (opts as any).ctxPack === 'object'
+        ? (opts as any).ctxPack.patternKey ?? null
+        : null,
+    userContextCtxPackPatternKey:
+      (opts as any)?.userContext?.ctxPack &&
+      typeof (opts as any).userContext.ctxPack === 'object'
+        ? (opts as any).userContext.ctxPack.patternKey ?? null
+        : null,
     writerDirectiveKeys: Object.keys(writerDirectivesFromSlot ?? {}),
     writerDirectivePreview: writerDirectivesFromSlot,
   })
 );
+const finalWriterDirectivesExtraLines = (() => {
+  const lines: string[] = [];
 
-return await callWriterLLM({
-  model: opts.model ?? 'gpt-5',
-  temperature: opts.temperature ?? 0.7,
-  messages: messagesForWriter,
-  ...({ slotDecision: slotDecisionForWriter } as any),
-  writerDirectives: {
-    ...writerDirectivesFromSlot,
-  },
+  for (const [key, value] of Object.entries(writerDirectivesForFinal ?? {})) {
+    if (value == null) continue;
+
+    if (Array.isArray(value)) {
+      if (key === 'writeConstraints') {
+        value
+          .map((x) => String(x ?? '').trim())
+          .filter(Boolean)
+          .forEach((x, idx) => {
+            lines.push(`writeConstraint${idx + 1}=${x}`);
+          });
+      } else {
+        value
+          .map((x) => String(x ?? '').trim())
+          .filter(Boolean)
+          .forEach((x, idx) => {
+            lines.push(`${key}[${idx}]=${x}`);
+          });
+      }
+      continue;
+    }
+
+    if (typeof value === 'object') {
+      for (const [subKey, subValue] of Object.entries(value as Record<string, unknown>)) {
+        if (subValue == null) continue;
+        if (Array.isArray(subValue)) continue;
+        if (typeof subValue === 'object') continue;
+
+        const s = String(subValue ?? '').trim();
+        if (!s) continue;
+        lines.push(`${key}.${subKey}=${s}`);
+      }
+      continue;
+    }
+
+    const s = String(value ?? '').trim();
+    if (!s) continue;
+    lines.push(`${key}=${s}`);
+  }
+
+  return lines;
+})();
+
+const finalWriterDirectivesMsg =
+  finalWriterDirectivesExtraLines.length > 0
+    ? ({
+        role: 'assistant',
+        content: `WRITER_DIRECTIVES (DO NOT OUTPUT):\n${finalWriterDirectivesExtraLines.join('\n')}`.trim(),
+      } as const)
+    : null;
+
+const finalPatternContractMsg =
+  finalWriterDirectivesExtraLines.length > 0
+    ? ({
+        role: 'assistant',
+        content: [
+          'PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):',
+          'exact_paragraphs=4',
+          writerPatternKey === 'NORMAL_RESONANCE_V1'
+            ? 'paragraph1=state_surface'
+            : 'paragraph1=current_state',
+          writerPatternKey === 'NORMAL_RESONANCE_V1'
+            ? 'paragraph2=state_weight'
+            : 'paragraph2=breakdown_core_gap',
+          writerPatternKey === 'NORMAL_RESONANCE_V1'
+            ? 'paragraph3=state_open_edge'
+            : 'paragraph3=reading_direction',
+          writerPatternKey === 'NORMAL_RESONANCE_V1'
+            ? 'paragraph4=state_residue'
+            : 'paragraph4=conclusion',
+          'never_stop_at_paragraph3=true',
+          'never_leave_paragraph4_empty=true',
+          ...(writerPatternKey === 'NORMAL_RESONANCE_V1'
+            ? [
+                'paragraph1_must_start_from_user_core=false',
+                'paragraph1_must_not_start_with_demonstrative_subject=false',
+                'paragraph1_must_not_repeat_user_text_verbatim=true',
+                'paragraph1_must_not_begin_with_text_meta=false',
+                'paragraph1_must_begin_from_state_itself=true',
+                'paragraph1_sentence1=place_the_state_change_itself_first_as_a_real_shift_in_position_or stance_without_describing_the_wording_phrase_or_way_of_saying_it',
+                'paragraph1_sentence2=continue_only_the_same_state_shift_naturally_as_presence_direction_or irreversibility_without_explaining_the_wording_or_naming_the_phrase_itself',
+                'paragraph2_sentence1=state_the_weight_as_commitment_direction_or_irreversibility_without_evaluating_the_wording',
+                'paragraph3_must_not_be_guide=true',
+                'paragraph3_must_not_sound_closed=true',
+                'paragraph3_must_not_include_acceptance_line=true',
+                'paragraph3_sentence1=leave_only_one_unfixed_edge_between_the_clauses_without_closure',
+                'paragraph3_sentence2=keep_the_edge_observational_and_unresolved',
+                'paragraph4_must_be_one_sentence=false',
+                'paragraph4_must_not_be_closing_line=true',
+                'paragraph4_must_not_be_question=true',
+                'paragraph4_must_not_be_instruction=true',
+                'paragraph4_must_not_reference_text_or_wording_itself=true',
+                'paragraph4_must_not_use_sufficiency_or_completion_language=true',
+                'paragraph4_sentence1=leave_one_quiet_residue_in_the_state_itself_without_meta_commentary_text_reference_or_sufficiency_closure',
+              ]
+            : [
+                'paragraph1_must_follow_current_state_then_misrecognition_negation_then_structural_reframe=true',
+                'paragraph2_must_follow_breakdown_core_gap_then_breakdown_defense_then_breakdown_rejection_target=true',
+                'paragraph3_must_follow_reading_direction_then_sort_axis_then_sort_boundary=true',
+                'paragraph3_min_sentences=2',
+                'paragraph4_must_include_caution=true',
+                'paragraph4_must_end_with_closing_line=true',
+                'paragraph4_min_sentences=2',
+                'emit_fixed_section_headings=false',
+              ]),
+        ].join('\n'),
+      } as const)
+    : null;
+
+    const messagesForWriterFinal = (() => {
+      const base = [...messagesForWriter];
+      const inserts = [finalWriterDirectivesMsg, finalPatternContractMsg].filter(Boolean) as Array<{
+        role: 'assistant';
+        content: string;
+      }>;
+
+      if (inserts.length === 0) return base;
+
+      if (base.length > 0 && base[base.length - 1]?.role === 'user') {
+        return [...base.slice(0, -1), ...inserts, base[base.length - 1]];
+      }
+
+      return [...base, ...inserts];
+    })();
+
+    console.log(
+      '[IROS/rephraseEngine][FINAL_PATTERN_CONTRACT_CHECK]',
+      JSON.stringify({
+        traceId: debug?.traceId ?? null,
+        conversationId: debug?.conversationId ?? null,
+        userCode: debug?.userCode ?? null,
+        msgCount: Array.isArray(messagesForWriterFinal) ? messagesForWriterFinal.length : 0,
+        hasPatternContractMsg: Array.isArray(messagesForWriterFinal)
+          ? messagesForWriterFinal.some((m: any) =>
+              String(m?.content ?? '').includes('PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):')
+            )
+          : false,
+        hasP1CoreRule: Array.isArray(messagesForWriterFinal)
+          ? messagesForWriterFinal.some((m: any) =>
+              String(m?.content ?? '').includes('paragraph1_must_start_from_user_core=true')
+            )
+          : false,
+        hasP4ResidueRule: Array.isArray(messagesForWriterFinal)
+          ? messagesForWriterFinal.some((m: any) =>
+              String(m?.content ?? '').includes(
+                'paragraph4_must_not_reference_text_or_wording_itself=true'
+              )
+            )
+          : false,
+        assistantHeads: Array.isArray(messagesForWriterFinal)
+          ? messagesForWriterFinal
+              .filter((m: any) => String(m?.role ?? '') === 'assistant')
+              .map((m: any) => safeHead(String(m?.content ?? ''), 220))
+          : [],
+      })
+    );
+
+    return await callWriterLLM({
+      model: opts.model ?? 'gpt-5',
+      temperature: opts.temperature ?? 0.7,
+      messages: (() => {
+        console.log(
+          '[IROS/rephraseEngine][FINAL_MESSAGES_FOR_WRITER]',
+          JSON.stringify({
+            traceId: debug.traceId ?? null,
+            conversationId: debug.conversationId ?? null,
+            userCode: debug.userCode ?? null,
+            len: Array.isArray(messagesForWriterFinal) ? messagesForWriterFinal.length : 0,
+            roles: Array.isArray(messagesForWriterFinal)
+              ? messagesForWriterFinal.map((m: any) => String(m?.role ?? ''))
+              : [],
+            heads: Array.isArray(messagesForWriterFinal)
+              ? messagesForWriterFinal.map((m: any) => safeHead(String(m?.content ?? ''), 140))
+              : [],
+          })
+        );
+        return messagesForWriterFinal;
+      })(),
+      ...({ slotDecision: slotDecisionForWriter } as any),
+      writerDirectives: {
+        ...writerDirectivesForFinal,
+      },
 
         // ✅ 追加：冒頭オウム返しガード用（messagesには入れない。比較専用）
         echoGuardUserText: String((opts as any)?.userText ?? ''),
@@ -7445,16 +8415,24 @@ userContext: {
 
       const lines: string[] = [];
 
-      for (const chunk of chunks) {
-        const one = mergeBrokenPunctuation(normalizeInline(chunk));
-        if (!one) continue;
-
-        if (lines.length && isTopicShift(one)) {
-          flushLineBlock(lines);
-        }
-
-        lines.push(one);
-      }
+      console.log(
+        '[IROS/rephraseEngine][CANDIDATE_AFTER_SANITIZE]',
+        JSON.stringify({
+          traceId: debug.traceId ?? null,
+          conversationId: debug.conversationId ?? null,
+          userCode: debug.userCode ?? null,
+          beforeLen: candidateBeforeSanitize.length,
+          afterLen: String(candidate ?? '').length,
+          changed: candidateBeforeSanitize !== String(candidate ?? ''),
+          beforeHead: safeHead(candidateBeforeSanitize, 160),
+          afterHead: safeHead(String(candidate ?? ''), 160),
+          afterText: String(candidate ?? ''),
+          afterParagraphs: String(candidate ?? '')
+            .split(/\n{2,}/)
+            .map((x) => String(x ?? '').trim())
+            .filter(Boolean),
+        })
+      );
 
       if (lines.length) {
         flushLineBlock(lines);
@@ -7545,7 +8523,270 @@ userContext: {
     beforeHead: safeHead(candidateBeforeTailSoftener, 160),
     afterHead: safeHead(String(candidate ?? ''), 160),
   });
- // ---------------------------------------------
+
+  const normalizeDeclarationMetaPhrases = (src: string): string => {
+    let out = String(src ?? '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .trim();
+
+      const activePatternKeyForDeclarationMetaNormalize = String(
+        (debug as any)?.patternKey ?? ''
+      ).trim();
+      if (
+        activePatternKeyForDeclarationMetaNormalize !== 'DECLARATION_RESONANCE_V1' &&
+        activePatternKeyForDeclarationMetaNormalize !== 'NORMAL_RESONANCE_V1'
+      ) {
+        return out;
+      }
+      if (!out) return out;
+
+      out = out
+        .replace(
+          /「\s*([^「」]+?)\s*\n+\s*」/gu,
+          '「$1」'
+        )
+        .replace(
+          /(^|\n\n)その(?:言葉|宣言)は、もう前に出ています。/gu,
+          '$1もう前に出ています。'
+        )
+        .replace(
+          /(^|\n\n)その言葉は、もう動き始めています。/gu,
+          '$1もう動き始めています。'
+        )
+        .replace(
+          /(^|\n\n)その言葉は、もう誰かの許しを待っていません。/gu,
+          '$1もう誰かの許しを待っていません。'
+        )
+        .replace(
+          /(^|\n\n)その言葉は、もう曖昧さに居場所を与えない強さがあります。/gu,
+          '$1もう曖昧さに居場所を与えない強さがあります。'
+        )
+        .replace(
+          /(^|\n\n)その言葉は、もう逃げない側に立つ、ということです。/gu,
+          '$1もう逃げない側に立っています。'
+        )
+        .replace(
+          /(^|\n\n)その言葉は、もう他人の輪の外に出ています。/gu,
+          '$1もう他人の輪の外に出ています。'
+        )
+        .replace(
+          /(^|\n\n)その(?:言葉|宣言)は、もう内側で組み上がっています。/gu,
+          '$1もう内側で組み上がっています。'
+        )
+        .replace(
+          /(^|\n\n)その(?:言葉|宣言)は、もう現実をつくる側に立っています。/gu,
+          '$1もう現実をつくる側に立っています。'
+        )
+        .replace(
+          /(^|\n\n)その宣言は、もう外へ向いて立っています。/gu,
+          '$1もう外へ向いて立っています。'
+        )
+        .replace(
+          /(^|\n\n)その言い方は、もうただの願いではなく、前に出る宣言になっています。/gu,
+          '$1もうただの願いではなく、前に出る宣言になっています。'
+        )
+        .replace(
+          /(^|\n\n)現実を作る、という言い方が先に立っています。/gu,
+          '$1もう現実を作る側に立っています。'
+        )
+        .replace(
+          /(^|\n\n)現実を作る、という言い方がもう前に出ています。/gu,
+          '$1もう現実を作る側に立っています。'
+        )
+        .replace(
+          /だから、この言葉は宣言としては十分に届いています。/gu,
+          'その輪郭は、もう届いています。'
+        )
+        .replace(
+          /いまは、その宣言が立っているところまでで十分です。/gu,
+          'その宣言が立っているところまでは、もう見えています。'
+        )
+        .replace(
+          /でも、その未確定さも含めて、いまの文は立っています。/gu,
+          'その未確定さは、まだ静かに残っています。'
+        )
+        .replace(
+          /その(余白|端|未確定さ|余地)ごと、(?:いまの|今の|この)?(?:文|言葉)は立っています。/gu,
+          'その$1は、まだ静かに残っています。'
+        )
+        .replace(
+          /でもその(余白|余地)ごと、この言葉は前に出ています。/gu,
+          'その$1は、まだ静かに残っています。'
+        )
+        .replace(
+          /そのまま、少し余白を残して立っています。/gu,
+          '少し余白が、まだ残っています。'
+        )
+        .replace(
+          /その言葉は、静かに残ります。/gu,
+          '静かな残りが、まだそこにあります。'
+        );
+
+    return out.trim();
+  };
+
+  const candidateBeforeDeclarationMetaNormalize = String(candidate ?? '');
+  candidate = normalizeDeclarationMetaPhrases(candidate);
+
+  console.log('[IROS/rephraseEngine][DECLARATION_META_NORMALIZED]', {
+    traceId: debug.traceId,
+    conversationId: debug.conversationId,
+    userCode: debug.userCode,
+    applied: candidateBeforeDeclarationMetaNormalize !== String(candidate ?? ''),
+    beforeHead: safeHead(candidateBeforeDeclarationMetaNormalize, 160),
+    afterHead: safeHead(String(candidate ?? ''), 160),
+  });
+
+  // ---------------------------------------------
+  // Declaration paragraph guard（採用前ガード）
+  // - normalize 後でも残る paragraph1 / paragraph4 の契約違反をここで弾く
+  // - NG のときは writer 文を採用せず、seed 側へ戻す
+  // ---------------------------------------------
+  {
+    const patternKeyNow = String(
+      selectSlotPattern({
+        line: String(
+          (opts as any)?.meta?.extra?.presentationKind ??
+            (opts as any)?.userContext?.meta?.extra?.presentationKind ??
+            ''
+        )
+          .trim()
+          .toLowerCase(),
+        questionType: null,
+        detailMode:
+          (opts as any)?.ctxPack?.detailMode === true ||
+          (opts as any)?.userContext?.ctxPack?.detailMode === true,
+        followupText: String((opts as any)?.userText ?? '').trim(),
+        userText: String((opts as any)?.userText ?? '').trim(),
+        targetLabel: null,
+        hasPriorDiagnosis: false,
+      }) ?? ''
+    ).trim();
+    const shouldApplyDeclarationParagraphGuard =
+      patternKeyNow === 'NORMAL_RESONANCE_V1';
+
+    if (shouldApplyDeclarationParagraphGuard) {
+      const candidateTextNow = String(candidate ?? '').trim();
+      const paragraphsNow = candidateTextNow
+        .split(/\n{2,}/)
+        .map((v) => String(v ?? '').trim())
+        .filter(Boolean);
+
+      const p1 = String(paragraphsNow[0] ?? '').trim();
+      const p4 = String(paragraphsNow[3] ?? '').trim();
+
+      const p1StartsWithTextMeta =
+        /^(?:その|この)(?:言葉|文|宣言|言い方)は/u.test(p1) ||
+        /^.+?という(?:言葉|言い方)が/u.test(p1) ||
+        /^(?:文としては|言葉としては|置き方そのもの|その置き方|この置き方)/u.test(p1);
+
+      const p4HasMetaOrSufficiency =
+        /(?:言葉|文|宣言|言い方)/u.test(p4) ||
+        /(?:十分(?:です|に)|足ります|足りる|完了|完成|締め|閉じ|入口です|始まりです|進めます|動きます|開けます|見えてきます|広がります)/u.test(
+          p4
+        );
+
+        const declarationParagraphCountViolation = paragraphsNow.length !== 4;
+
+        const paragraphGuardReason =
+          declarationParagraphCountViolation
+            ? 'DECL_PG:PARAGRAPH_COUNT'
+            : p1StartsWithTextMeta
+              ? 'DECL_PG:P1_TEXT_META'
+              : p4HasMetaOrSufficiency
+                ? 'DECL_PG:P4_META_OR_SUFFICIENCY'
+                : null;
+
+              if (paragraphGuardReason) {
+                if (paragraphGuardReason === 'DECL_PG:PARAGRAPH_COUNT') {
+                  console.warn('[IROS/DECLARATION_PARAGRAPH_GUARD][PASS_TO_RETRY]', {
+                    traceId: debug.traceId,
+                    conversationId: debug.conversationId,
+                    userCode: debug.userCode,
+                    patternKey: patternKeyNow,
+                    reason: paragraphGuardReason,
+                    paragraphsLen: paragraphsNow.length,
+                    p1Head: safeHead(p1, 120),
+                    p4Head: safeHead(p4, 120),
+                    candidateHead: safeHead(candidateTextNow, 160),
+                  });
+                } else {
+                  const fallbackSeed = (() => {
+                    const shiftObjForFallback = parseShiftJson(String((shiftSlot as any)?.text ?? ''));
+                    const shiftMessage = String(
+                      shiftObjForFallback?.message ??
+                        shiftObjForFallback?.draft?.message ??
+                        ''
+                    ).trim();
+
+                    const userDecl = String((opts as any)?.userText ?? '').trim();
+
+                    const cleaned = String(seedDraft ?? '')
+                      .split('\n')
+                      .map((line) => line.trim())
+                      .filter(Boolean)
+                      .filter((line) => !line.startsWith('@'))
+                      .filter((line) => !/^(続けてください|つづけてください|続けて|つづけて)$/u.test(line))
+                      .join('\n')
+                      .trim();
+
+                    const looksInternal =
+                      !cleaned ||
+                      /"\w+"\s*:/.test(cleaned) ||
+                      cleaned.includes('","message":"') ||
+                      cleaned.includes('","source":"') ||
+                      cleaned.includes('DO NOT OUTPUT');
+
+                    const safeCleaned = !looksInternal ? cleaned : '';
+
+                    const p1 =
+                    userDecl ? `${userDecl}` : 'いま、前に出る向きが静かに立っています。';
+
+                    const p2 = userDecl
+                      ? 'その向きは、軽く置かれたものではなく、引き受ける重さを持っています。'
+                      : 'そこには、軽く流れない重さがあります。';
+
+                    const p3 =
+                      safeCleaned ||
+                      'ただ、どの場面でどこまで前に出るかは、まだ全部が固まりきっているわけではありません。';
+
+                    const p4 = userDecl
+                      ? '前に出る向きだけは、もう静かに残っています。'
+                      : 'その向きだけは、もう静かに残っています。';
+
+                    return [p1, p2, p3, p4].filter(Boolean).join('\n\n').trim();
+                  })();
+
+                  console.warn('[IROS/DECLARATION_PARAGRAPH_GUARD][REJECT_TO_SEED]', {
+                    traceId: debug.traceId,
+                    conversationId: debug.conversationId,
+                    userCode: debug.userCode,
+                    patternKey: patternKeyNow,
+                    reason: paragraphGuardReason,
+                    paragraphsLen: paragraphsNow.length,
+                    p1Head: safeHead(p1, 120),
+                    p4Head: safeHead(p4, 120),
+                    candidateHead: safeHead(candidateTextNow, 160),
+                    fallbackSeedHead: safeHead(fallbackSeed, 160),
+                  });
+
+                  if (fallbackSeed) {
+                    return adoptAsSlots(fallbackSeed, 'DECLARATION_PARAGRAPH_GUARD_REJECT_TO_SEED', {
+                      scaffoldActive,
+                      writerGuardReason: paragraphGuardReason,
+                      writerGuardDetail: {
+                        paragraphsLen: paragraphsNow.length,
+                        p1: safeHead(p1, 120),
+                        p4: safeHead(p4, 120),
+                      },
+                    });
+                  }
+                }
+              }
+  }
+  }
+  // ---------------------------------------------
   // Minimal Writer Guard（LLM逸脱の最終防波堤）
   // - systemPrompt の整形契約を “採用前” に最低限検査する
   // - NG のときは writer 文を採用せず、seed 側へ戻す
@@ -7723,9 +8964,56 @@ userContext: {
   // Flagship Guard（採用ゲート）
   // ---------------------------------------------
   if (!guardEnabled) {
+    const candidateTextNow = String(candidate ?? '').trim();
+    const paragraphCountNow = candidateTextNow
+      ? candidateTextNow.split(/\n{2,}/).map((v) => String(v ?? '').trim()).filter(Boolean).length
+      : 0;
+
+    const activePatternKeyNow = String(
+      selectSlotPattern({
+        line: String(
+          (opts as any)?.meta?.extra?.presentationKind ??
+            (opts as any)?.userContext?.meta?.extra?.presentationKind ??
+            ''
+        )
+          .trim()
+          .toLowerCase(),
+        questionType: null,
+        detailMode:
+          (opts as any)?.ctxPack?.detailMode === true ||
+          (opts as any)?.userContext?.ctxPack?.detailMode === true,
+        followupText: String((opts as any)?.userText ?? '').trim(),
+        userText: String((opts as any)?.userText ?? '').trim(),
+        targetLabel: null,
+        hasPriorDiagnosis: false,
+      }) ?? ''
+    ).trim();
+
+    const isDeclarationLike =
+      activePatternKeyNow === 'DECLARATION_RESONANCE_V1' ||
+      activePatternKeyNow === 'NORMAL_RESONANCE_V1';
+
+    if (isDeclarationLike && paragraphCountNow < 4) {
+      const fallbackSeed =
+        String(seedFromSlots ?? '').trim() ||
+        String(seedDraft ?? '').trim() ||
+        String((opts as any)?.userText ?? '').trim() ||
+        '';
+
+      if (fallbackSeed) {
+        return adoptAsSlots(fallbackSeed, 'FLAGSHIP_DISABLED_DECL_SHORT_TO_SEED', {
+          scaffoldActive,
+          writerGuardReason: 'FLAGSHIP_DISABLED_DECL_SHORT',
+          writerGuardDetail: {
+            paragraphCountNow,
+            activePatternKeyNow,
+          },
+        });
+      }
+    }
+
     return adoptAsSlots(candidate, 'FLAGSHIP_DISABLED', { scaffoldActive });
   }
-
   const raise = readShouldRaiseFlagFromContext(opts?.userContext ?? null);
   const forceIntervene = raise.on === true;
 
@@ -8089,26 +9377,11 @@ userContext: {
       const s = String(s0 ?? '').trim();
       if (!s) return '';
 
-      // 1) @NEXT_HINT の hint を優先して拾う
-      //    例: @NEXT_HINT {"mode":"advance_hint",...,"hint":"流れを保ったまま前に進める"}
-      const mNext = s.match(/@NEXT_HINT\s+(\{[\s\S]*?\})(?:\n|$)/);
-      if (mNext?.[1]) {
-        try {
-          const j = JSON.parse(mNext[1]);
-          const hint = String(j?.hint ?? '').trim();
-          if (hint) return hint;
-        } catch {}
-      }
-
-      // 2) @SHIFT の hint を拾う（auto_fill など）
-      const mShift = s.match(/@SHIFT\s+(\{[\s\S]*?\})(?:\n|$)/);
-      if (mShift?.[1]) {
-        try {
-          const j = JSON.parse(mShift[1]);
-          const hint = String(j?.hint ?? '').trim();
-          if (hint) return hint;
-        } catch {}
-      }
+      // 1) @NEXT_HINT / @SHIFT の hint は内部ディレクティブなので、
+      //    ここでは本文化に使わない。
+      //    evidence / slotPlan 側には残してよいが、scaffold から直接拾うと
+      //    「いま出ている流れを崩さず…」「結論を先に1〜2文で…」が
+      //    本文へ漏れる。
 
       // 3) 行単位で internal を捨て、自然文っぽい行だけ拾う
       const lines = s
@@ -8358,8 +9631,59 @@ userContext: {
   const hasAdvanceHint = tooShortPol.hasAdvanceHint;
   const shouldOkTooShortToRetry = tooShortPol.shouldOkTooShortToRetry;
 
+  const detailPatternKeyNow = String(
+    (ctxPackForWriter as any)?.patternKey ??
+      (opts as any)?.ctxPack?.patternKey ??
+      (opts as any)?.userContext?.ctxPack?.patternKey ??
+      ''
+  ).trim();
+  const isDetailPatternNow =
+    detailPatternKeyNow === 'NORMAL_DETAIL_V1' || detailPatternKeyNow === 'IR_DETAIL_V1';
 
-  if (shouldOkTooShortToRetry) {
+  const detailBodyStyle = isDetailPatternNow
+    ? (buildDetailPatternWriterDirectives(detailPatternKeyNow).bodyStyle ?? null)
+    : null;
+
+  const detailMinUnits =
+    detailBodyStyle && typeof (detailBodyStyle as any).minSentences === 'number'
+      ? Math.max(1, Number((detailBodyStyle as any).minSentences))
+      : 0;
+
+  const detailUnitsNow = (() => {
+    if (!isDetailPatternNow) return 0;
+
+    const parts = String(candidate ?? '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .split('\n')
+      .map((line) => String(line ?? '').trim())
+      .filter(Boolean);
+
+    const units: string[] = [];
+
+    for (const part of parts) {
+      const sliced = String(part)
+        .split(/(?<=[。！？!?])\s*/u)
+        .map((s) => String(s ?? '').trim())
+        .filter(Boolean);
+
+      if (sliced.length > 0) {
+        units.push(...sliced);
+      } else if (part) {
+        units.push(part);
+      }
+    }
+
+    return units.length;
+  })();
+
+  const shouldDetailTooShortToRetry =
+    isDetailPatternNow &&
+    detailMinUnits > 0 &&
+    detailUnitsNow > 0 &&
+    detailUnitsNow < detailMinUnits;
+
+  if (shouldOkTooShortToRetry || shouldDetailTooShortToRetry) {
     console.warn('[IROS/FLAGSHIP][OK_TOO_SHORT_TO_RETRY]', {
       traceId: debug.traceId,
       conversationId: debug.conversationId,
@@ -8368,6 +9692,10 @@ userContext: {
       len: candidateLen,
       min: MIN_OK_LEN,
       head: safeHead(candidate, 160),
+      detailPatternKey: isDetailPatternNow ? detailPatternKeyNow : null,
+      detailUnitsNow,
+      detailMinUnits,
+      via: shouldDetailTooShortToRetry ? 'detail_units' : 'min_ok_len',
     });
     console.warn('[IROS/rephraseEngine][MIN_OK_DEBUG]', {
       scaffoldActive,
@@ -8379,14 +9707,24 @@ userContext: {
       isTConcretize,
       hasAdvanceHint,
       isIdeaBand,
+      detailPatternKey: isDetailPatternNow ? detailPatternKeyNow : null,
+      detailUnitsNow,
+      detailMinUnits,
+      shouldDetailTooShortToRetry,
     });
 
-    // ✅ “短いだけ” でも chat では 1回だけ retry に落とす
     v = {
       ...(v as any),
       ok: false,
       level: 'FATAL',
-      reasons: Array.from(new Set([...(v.reasons ?? []), 'OK_TOO_SHORT_TO_RETRY'])),
+      reasons: Array.from(
+        new Set([
+          ...(v.reasons ?? []),
+          shouldDetailTooShortToRetry
+            ? 'DETAIL_PATTERN_TOO_SHORT_TO_RETRY'
+            : 'OK_TOO_SHORT_TO_RETRY',
+        ])
+      ),
     } as any;
   }
 
@@ -8421,31 +9759,86 @@ userContext: {
     scaffoldActive,
     isDirectTask,
   });
+
+  const activePatternKeyForContract = String(
+    (debug as any)?.patternKey ||
+      (ctxPackForWriter as any)?.patternKey ||
+      (opts as any)?.ctxPack?.patternKey ||
+      (opts as any)?.userContext?.ctxPack?.patternKey ||
+      ''
+  ).trim();
+
+  const detailPatternRequires4Paragraphs =
+    activePatternKeyForContract === 'NORMAL_DETAIL_V1' ||
+    activePatternKeyForContract === 'IR_DETAIL_V1' ||
+    activePatternKeyForContract === 'DECLARATION_RESONANCE_V1';
+
+  const candidateParagraphsForContract = String(candidate ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split(/\n{2,}/)
+    .map((p) => String(p ?? '').trim())
+    .filter(Boolean);
+
+  const hasExact4ParagraphsForDetailPattern =
+    !detailPatternRequires4Paragraphs || candidateParagraphsForContract.length === 4;
+
+  if (!hasExact4ParagraphsForDetailPattern) {
+    console.warn('[IROS/FLAGSHIP][DETAIL_PATTERN_PARAGRAPH_CONTRACT_VIOLATION]', {
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      patternKey: activePatternKeyForContract,
+      paragraphsLen: candidateParagraphsForContract.length,
+      paragraphsPreview: candidateParagraphsForContract.slice(0, 4),
+      head: safeHead(candidate, 220),
+    });
+
+    v = {
+      ...(v as any),
+      ok: false,
+      level: 'FATAL',
+      reasons: Array.from(
+        new Set([ ...((((v as any)?.reasons ?? []) as any[])), 'DETAIL_PATTERN_PARAGRAPH_CONTRACT' ]),
+      ),
+    } as any;
+  }
+
   // ✅ Phase 2: 最終採用直前の質問抑制
   // - WARN accept / OK no retry の return より前で必ず最終形にかける
   if (shouldSuppressQuestionByShift) {
     const beforeFinal = String(candidate ?? '');
 
-    const lines = beforeFinal
+    const paragraphs = beforeFinal
       .replace(/\r\n/g, '\n')
-      .split('\n')
-      .map((s) => String(s ?? '').trim())
-      .filter(Boolean);
+      .replace(/\r/g, '\n')
+      .split(/\n{2,}/)
+      .map((p) =>
+        String(p ?? '')
+          .split('\n')
+          .map((s) => String(s ?? '').trim())
+          .filter(Boolean)
+      )
+      .filter((p) => p.length > 0);
 
-    const keptFinal = lines.filter((line) => {
-      if (/[?？]/u.test(line)) return false;
+    const keptParagraphs = paragraphs
+      .map((para) =>
+        para.filter((line) => {
+          if (/[?？]/u.test(line)) return false;
 
-      const tail = line.replace(/[。！!]+$/u, '').trim();
-      if (/(?:どれ|なに|何|どう|どこ|どんな|どの|ありますか|でしょうか)$/u.test(tail)) {
-        return false;
-      }
+          const tail = line.replace(/[。！!]+$/u, '').trim();
+          if (/(?:どれ|なに|何|どう|どこ|どんな|どの|ありますか|でしょうか)$/u.test(tail)) {
+            return false;
+          }
 
-      return true;
-    });
+          return true;
+        })
+      )
+      .filter((para) => para.length > 0);
 
     const afterFinal =
-      keptFinal.length > 0
-        ? keptFinal.join('\n').trim()
+      keptParagraphs.length > 0
+        ? keptParagraphs.map((para) => para.join('\n')).join('\n\n').trim()
         : beforeFinal
             .replace(/\r\n/g, '\n')
             .split('\n')
@@ -8455,7 +9848,6 @@ userContext: {
             .replace(/（[^）]*$/u, '')
             .replace(/\([^)]*$/u, '')
             .trim() ?? '';
-
     if (afterFinal && afterFinal !== beforeFinal) {
       candidate = afterFinal;
     }
@@ -8469,10 +9861,11 @@ userContext: {
       afterHead: afterFinal.slice(0, 120),
     });
   }
-  if (vLevel === 'WARN' && naturalTextReady) {
+
+  if (String((v as any)?.level ?? '').toUpperCase() === 'WARN' && naturalTextReady) {
     return adoptAsSlots(candidate, 'FLAGSHIP_ACCEPT_AS_FINAL', {
       scaffoldActive,
-      flagshipLevel: vLevel,
+      flagshipLevel: String((v as any)?.level ?? '').toUpperCase(),
       retrySuppressed: true,
     });
   }

@@ -30,7 +30,7 @@ export type SlotWeights = Record<SlotName, number>;
 export type SlotDecision = {
   weights: SlotWeights;
   order: SlotName[];
-  emphasis: Record<SlotName, 1 | 2>;
+  emphasis: Record<SlotName, 1 | 2 | 3>;
 };
 
 function normalizeGoalKind(raw: unknown): string {
@@ -266,20 +266,50 @@ export function computeSlotDecision(input: SlotWeightInput): SlotDecision {
     order.splice(1, 0, 'OBS');
   }
 
-  const emphasis: Record<SlotName, 1 | 2> = {
-    OBS: weights.OBS >= (supportiveMode || truthLike ? 0.8 : 0.85) ? 2 : 1,
-    SHIFT: weights.SHIFT >= (supportiveMode ? 0.8 : 0.85) ? 2 : 1,
-    NEXT: weights.NEXT >= 0.95 ? 2 : 1,
-    SAFE: weights.SAFE >= (supportiveMode || remakeLike ? 0.8 : 0.85) ? 2 : 1,
+  const emphasis: Record<SlotName, 1 | 2 | 3> = {
+    OBS:
+      weights.OBS >= (supportiveMode || truthLike ? 1.15 : 1.2)
+        ? 3
+        : weights.OBS >= (supportiveMode || truthLike ? 0.8 : 0.85)
+          ? 2
+          : 1,
+    SHIFT:
+      weights.SHIFT >= (supportiveMode || remakeLike ? 1.1 : 1.15)
+        ? 3
+        : weights.SHIFT >= (supportiveMode ? 0.8 : 0.85)
+          ? 2
+          : 1,
+          NEXT:
+          questionType === 'structure'
+            ? weights.NEXT >= 1.1
+              ? 3
+              : weights.NEXT >= 0.25
+                ? 2
+                : 1
+            : weights.NEXT >= 1.1
+              ? 3
+              : weights.NEXT >= 0.95
+                ? 2
+                : 1,
+    SAFE:
+      weights.SAFE >= (supportiveMode || remakeLike ? 1.1 : 1.15)
+        ? 3
+        : weights.SAFE >= (supportiveMode || remakeLike ? 0.8 : 0.85)
+          ? 2
+          : 1,
   };
-
   if (remakeLike) {
     emphasis.NEXT = 1;
   }
 
-  if (truthLike) {
+  if (questionType === 'structure' && emphasis.OBS === 3 && emphasis.NEXT === 1) {
     emphasis.OBS = 2;
-    emphasis.NEXT = 1;
+    emphasis.NEXT = 2;
+  }
+
+  if (questionType === 'structure' && supportiveMode && emphasis.SHIFT === 1 && emphasis.SAFE === 3) {
+    emphasis.SHIFT = 2;
+    emphasis.SAFE = 2;
   }
 
   return { weights, order, emphasis };

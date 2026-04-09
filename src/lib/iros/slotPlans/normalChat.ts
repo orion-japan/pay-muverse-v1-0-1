@@ -145,12 +145,12 @@ function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey | null; f
         ? '候補を増やさず、いま出ている差だけを見やすくする'
         : 'いま出ている流れを崩さず、そのまま整えて返す';
 
-  const message =
-    laneKey === 'T_CONCRETIZE'
-      ? '次は比較を広げず、どこをひとつ決めるかに絞るのが合っています。'
-      : laneKey === 'IDEA_BAND'
-        ? '次は候補を増やすより、いま出ている差だけを見やすくするのが合っています。'
-        : '次は新しい材料を足すより、いま出ている流れの中で何が芯かを見るのが合っています。';
+        const message =
+        laneKey === 'T_CONCRETIZE'
+          ? '次は比較を広げず、どこをひとつ決めるかに絞るのが合っています。'
+          : laneKey === 'IDEA_BAND'
+            ? '次は候補を増やすより、いま出ている差だけを見やすくするのが合っています。'
+            : '';
 
   return {
     key: 'NEXT',
@@ -320,7 +320,7 @@ function buildClarify(
   const avoidPrematureClosure = !!outputPolicy?.avoidPrematureClosure;
 
   const questionSuggestsTruthStructure =
-    questionType === 'structure' || questionType === 'truth';
+    questionType === 'truth';
 
   const questionSuggestsPastReframe =
     questionType === 'unresolved_release' ||
@@ -402,8 +402,9 @@ function buildClarify(
 
     return {
       kind: 'reframe',
-      line: '表面の言い換えではなく、その人の中で実際に向きが変わる一点をつかむ話',
+      line: '',
       source: 'fallback',
+
     };
   };
 
@@ -457,7 +458,6 @@ function buildClarify(
     const normalizedUserText = norm(userText);
     const resolvedAskType: string = (() => {
       const stamped = String(resolvedAskTypeArg ?? '').trim();
-      if (stamped) return stamped;
 
       const looksTruthStructure =
         /(地球外生命体|宇宙人)/.test(normalizedUserText) &&
@@ -465,6 +465,11 @@ function buildClarify(
         /(作った|作られた|介入)/.test(normalizedUserText) &&
         /(構造)/.test(normalizedUserText);
 
+      if (stamped === 'truth_structure' && !looksTruthStructure) {
+        return '';
+      }
+
+      if (stamped) return stamped;
       return looksTruthStructure ? 'truth_structure' : '';
     })();
 
@@ -484,8 +489,7 @@ function buildClarify(
   });
 
   const directAnswerRequested =
-    /答え|結論|要するに|結局|真実が知りたい|本当のことが知りたい|そろそろ結論|今の未来|未来だよ/.test(seedText);
-
+    /答え|結論|要するに|真実が知りたい|本当のことが知りたい|そろそろ結論|今の未来|未来だよ/.test(seedText);
     const hasTruthStructureLexeme =
     /(真実|事実|本当|構造|論点|検証|仮説|どこまで言える|切り分け|整理)/.test(normalizedUserText) ||
     (
@@ -499,11 +503,12 @@ function buildClarify(
 
     const shouldAnswerTruthStructure =
       resolvedAskType === 'truth_structure' ||
-      isStructureQuestion ||
       isTruthQuestion ||
+      isStructureQuestion ||
       (questionSuggestsTruthStructure && hasTruthStructureLexeme);
-  const shouldReanswerCapability =
-    resolvedAskType === 'capability_reask';
+
+    const shouldReanswerCapability =
+      resolvedAskType === 'capability_reask';
 
     const shiftIntentBase =
       isT
@@ -629,17 +634,17 @@ function buildClarify(
                                     // output_only は維持しつつ、箇条書き・見出し・区切り線を許可する
                                     no_bullets: false,
                                     lines_max:
-                                      shouldAnswerTruthStructure
-                                        ? 4
-                                        : shouldReanswerCapability
+                                    shouldAnswerTruthStructure
+                                      ? 4
+                                      : shouldReanswerCapability
+                                        ? 3
+                                        : clarifyMeaning.kind === 'topic_recall'
                                           ? 3
-                                          : clarifyMeaning.kind === 'topic_recall'
-                                            ? 3
-                                            : isDefinitionQuestion
-                                              ? 3
-                                              : isMeaningConfirm
-                                                ? 6
-                                                : undefined,
+                                          : isDefinitionQuestion
+                                            ? 4
+                                            : isMeaningConfirm
+                                              ? 6
+                                              : undefined,
                       questions_max:
                         isMeaningConfirm
                           ? 0
@@ -1158,17 +1163,16 @@ function buildFlowReply(args: {
       String((args as any)?.meta?.extra?.ctxPack?.shiftKind ?? '').trim() ||
       '';
 
-    const directAnswerRequested2 = hasAny(
-      '答え',
-      '結論',
-      '要するに',
-      '結局',
-      '真実が知りたい',
-      '本当のことが知りたい',
-      'そろそろ結論',
-      '今の未来',
-      '未来だよ',
-    );
+      const directAnswerRequested2 = hasAny(
+        '答え',
+        '結論',
+        '要するに',
+        '真実が知りたい',
+        '本当のことが知りたい',
+        'そろそろ結論',
+        '今の未来',
+        '未来だよ',
+      );
 
     const resolvedAskType =
       String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
@@ -1811,63 +1815,63 @@ function buildFlowReply(args: {
       String((args as any)?.meta?.extra?.ctxPack?.secondaryStage ?? '').trim() ||
       '';
 
-    if (shiftKind2 === 'clarify_shift') {
-      const isTopicCorrection =
-        t.length <= 24 &&
-        !/[?？]/.test(t) &&
-        (hasAny('話ですよ', 'の話', 'のこと', 'について') ||
-          /.+の話(です|だ)?よ?$/.test(t));
+      if (shiftKind2 === 'clarify_shift') {
+        const isTopicCorrection =
+          t.length <= 24 &&
+          !/[?？]/.test(t) &&
+          (hasAny('話ですよ', 'の話', 'のこと', 'について') ||
+            /.+の話(です|だ)?よ?$/.test(t));
 
-      const isDefinitionQuestion2 =
-        /(?:って何|とは|意味|違い|定義)/.test(t) || /[?？]/.test(t);
+        const isDefinitionQuestion2 =
+          /(?:って何|とは|意味|違い|定義)/.test(t) || /[?？]/.test(t);
 
         if (resolvedAskType2 === 'truth_structure') {
-          return '答えの核と、そのまわりの構造を混ぜずに整理します';
+          return '答えの中心と、その理由を混ぜずに整理します';
         }
 
         if (isTopicCorrection) {
-          return '補正された話題の範囲を広げず、そのテーマの中で整理します';
+          return '直した話の範囲を広げず、その話の中で整理します';
         }
 
         if (observedStage2.startsWith('I') && primaryStage2.startsWith('R')) {
-          return '関係の繰り返しと、その受け取り方を分けて見ていきます';
+          return '同じ関係の繰り返しと、どう受け取っているかを分けて見ます';
         }
 
         if (observedStage2.startsWith('I')) {
-          return '出来事より、その流れの受け取り方に焦点を当てて整理します';
+          return '出来事そのものより、この流れをどう受け取っているかを見て整理します';
         }
 
         if (observedStage2.startsWith('R') && secondaryStage2.startsWith('I')) {
-          return '関係の繰り返しと、その背景にある意味づけを分けて見ていきます';
+          return '同じ関係の繰り返しと、その後ろでつけている意味を分けて見ます';
         }
 
         if (isDefinitionQuestion2) {
           return shiftMeaning.line;
         }
 
-        return '質問の広がりを抑え、このテーマの核に焦点を当てます';
+        return '質問を広げすぎず、この話でいちばん大事なところを見るようにします';
       }
 
       if (shiftKind2 === 'stabilize_shift') {
         if (hasAny('また同じところ', '戻ってきた')) {
-          return '同じ場所に戻っている一点を基準に整理します';
+          return 'また同じところに戻っている点を見て整理します';
         }
-        return '揺れている基準の位置を、そのまま見直す方向で整理します';
+        return 'いま揺れている見方を、そのまま見直すように整理します';
       }
 
       if (shiftKind2 === 'distance_shift') {
-        return '苦しさを強めている距離の一点に焦点を当てて整理します';
+        return '苦しさが強くなる相手との離れ方を見て整理します';
       }
 
       if (shiftKind2 === 'repair_shift') {
-        return '問題を解決に急ぐ流れから離れ、関係のほどけ方を見つける方向で示します';
+        return 'すぐ解決しようとせず、関係がどうほどけるかを見る方向で返します';
       }
 
       if (shiftKind2 === 'decide_shift') {
-        return '結論を急いでいる状態を整理し、まず一つ決めたいことの具体へ絞ります';
+        return '結論を急ぎすぎず、まず一つだけ決めたいことを見るようにします';
       }
 
-      return '焦点が散らばっている状態を、一点に収束させる方向で進めます';
+      return '話が広がっているので、いまは見るところを一つにします';
   })();
 
   const questionForFlow =

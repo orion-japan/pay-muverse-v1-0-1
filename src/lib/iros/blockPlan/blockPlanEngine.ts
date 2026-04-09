@@ -131,9 +131,10 @@ function detectDirectTaskSoft(userText: string): boolean {
   const t = String(userText ?? '').trim();
   if (!t) return false;
 
-  // ✅ 緩める：ただし「教えて」単体は雑談でも出やすいので除外し、説明依頼寄りだけ拾う
-  // ※ hardDirectTask は別で必ず落ちる。ここは “抑制” の軽いフラグ。
-  return /(説明して|解説して|紹介して|整理して|まとめて)/i.test(t);
+  // 通常の説明要求は Sofia 型の多層ブロックに乗せたいので、ここでは抑制しない。
+  // soft 側では「要約・整理・紹介」のような情報圧縮/案内寄りだけを拾う。
+  // ※ hardDirectTask は別で必ず落ちる。
+  return /(解説して|紹介して|整理して|まとめて)/i.test(t);
 }
 
 /**

@@ -27,7 +27,7 @@ import { buildExprDirectiveV1 } from '@/lib/iros/expression/exprDirectiveV1';
 import { normalizeIrosStyleFinal } from '../language/normalizeIrosStyleFinal';
 import { getShortFixedPhrase } from '../language/shortFixedPhrase';
 import { buildContinuityObserve } from '@/lib/iros/delta/continuityKind';
-
+import { selectSlotPattern } from '@/lib/iros/slotPatterns/selectSlotPattern';
 import {
   buildUnifiedAnalysis,
   saveUnifiedAnalysisInline,
@@ -527,28 +527,29 @@ function renderSlotPlanText(slotPlan: any[]): string {
   };
 
   const buildObsLines = (obj: any): string[] => {
+    const delta = normText(obj?.delta ?? obj?.deltaType ?? obj?.kind);
     const seed = pickSeedText(obj);
-    const delta = pickDelta(obj);
     const out: string[] = [];
 
     if (seed) {
-      out.push(`いまは「${seed}」を取り直している状態です。`);
+      out.push(`話の中心にあるのは「${seed}」です。`);
     } else {
-      out.push('いまは流れの芯を取り直している状態です。');
+      out.push('話の芯になっているものが、はっきり前に出ています。');
     }
 
     if (delta === 'RETURN') {
-      out.push('これは戻りではなく、流れの再接続です。');
+      out.push('同じ場所に戻っているようで、実際には前の流れをつなぎ直しています。');
     } else if (delta === 'ADVANCE') {
-      out.push('流れは前に出ています。');
+      out.push('話は前に進んでいます。');
     } else if (delta === 'SWITCH') {
-      out.push('流れの向きが切り替わっています。');
+      out.push('話の向きが切り替わっています。');
     } else if (delta === 'DECIDE') {
-      out.push('いまは一つに寄せる段階です。');
+      out.push('論点がひとつに絞られてきています。');
     }
 
     return out;
   };
+
   const buildShiftLines = (obj: any): string[] => {
     const out: string[] = [];
     const line = normText(obj?.line);
@@ -559,82 +560,70 @@ function renderSlotPlanText(slotPlan: any[]): string {
 
     if (meaningKind === 'topic_recall') {
       if (seed) {
-        out.push(`理由は、「${seed}」という話題そのものがまだ閉じていないからです。`);
+        out.push(`「${seed}」がまだ途中で終わっていないからです。`);
       } else {
-        out.push('理由は、直前までの主題がまだ閉じておらず、その流れが続いているからです。');
+        out.push('直前までの話が、まだ閉じ切っていないからです。');
       }
-      out.push('ここでは新しい論点を足すより、すでに出ている芯をそのまま取り直す必要があります。');
-      out.push('つまり、話を広げる段階ではなく、いま残っている流れを見失わないことが先です。');
+      out.push('ここで新しい論点を足すより、すでに出ている話をそのまま受け取るほうが自然です。');
+      out.push('話を広げるより、残っている流れをそのままつなぐほうが合っています。');
       return out;
     }
 
     if (meaningKind === 'truth_structure') {
-      out.push('理由は、印象だけで返すと話の芯がずれる可能性があるからです。');
-      out.push('いま必要なのは、見えている事実と、そこから読める構造を混ぜずに分けることです。');
-      out.push('その線引きが曖昧なままだと、答えはあっても手応えが弱くなります。');
+      out.push('印象だけで返すと、話の大事なところがずれやすいからです。');
+      out.push('ここで必要なのは、見えている事実と、そこから受け取った意味を混ぜないことです。');
+      out.push('ここが混ざると、言葉は合っていても手応えが弱くなります。');
       return out;
     }
 
     if (kind === 'stabilize_shift' || intent === 'stabilize_direction') {
-      out.push('理由は、いま無理に動きを増やすほど、基準そのものがぶれやすいからです。');
-      out.push('この場面では、新しい材料を加えることより、すでに出ている軸を保ったまま整えることが大事です。');
-      out.push('つまり前進より先に、立ち位置を崩さないことが今回の主軸です。');
+      out.push('無理に動かそうとするほど、基準そのものが揺れやすいからです。');
+      out.push('この場面では、新しい材料を増やすより、すでに出ている軸を崩さないことが大事です。');
+      out.push('前に出ることより、まず立ち位置を保つほうが合っています。');
       return out;
     }
 
     if (kind === 'narrow_shift' || intent === 'narrow_focus') {
       if (seed) {
-        out.push(`理由は、「${seed}」という一点に対して、まだ複数の見方が同時に立っているからです。`);
+        out.push(`「${seed}」に対して、まだ見方がいくつか並んでいるからです。`);
       } else {
-        out.push('理由は、焦点がまだ散っていて、ひとつの方向に寄り切れていないからです。');
+        out.push('まだ見方がいくつか並んでいて、ひとつに決まり切っていないからです。');
       }
-      out.push('このまま論点を増やすと、どれも見えているのに決まらない状態が続きます。');
-      out.push('だから今は、広げることではなく、何を主軸に置くかを一段はっきりさせる必要があります。');
+      out.push('このまま話を増やすと、どれも見えているのに決めにくくなります。');
+      out.push('先に決めるのは、どこから見るかです。');
       return out;
     }
 
     if (kind === 'clarify' && seed) {
-      out.push(`理由は、「${seed}」がまだ言い換えだけで済む段階ではないからです。`);
-      out.push('表面の言葉を整えるだけでは、どこで引っかかっているかまでは見えてきません。');
-      out.push('いま必要なのは、言葉の整理ではなく、その奥で実際に動いている構造を一段深く定めることです。');
+      out.push(`「${seed}」は、言い換えるだけではまだ足りないからです。`);
+      out.push('言葉を整えるだけでは、どこで引っかかっているかまでは見えません。');
+      out.push('必要なのは、表現より先に、その奥で動いていることをはっきりさせることです。');
       return out;
     }
 
     if (line) {
       out.push(line.endsWith('。') ? line : `${line}。`);
-      out.push('その背景には、まだ一本に定まりきらない流れが残っています。');
-      out.push('だから今は結論を急ぐより、何がこの動きを作っているかを一段深く見る必要があります。');
+      out.push('その背景には、まだひとつに決まりきらない流れが残っています。');
+      out.push('急いで結論に寄せるより、何がこの動きを生んでいるかをつかむほうが先です。');
       return out;
     }
 
     if (seed) {
-      out.push(`理由は、「${seed}」をただ受け取るだけでは、まだ構造が足りないからです。`);
-      out.push('この場面では、言葉そのものより、その背後で何が動いているかを見たほうが芯に近づきます。');
-      out.push('つまり、表現より先に流れの組み方を捉え直す必要があります。');
+      out.push(`「${seed}」をそのまま受け取るだけでは、まだ足りないからです。`);
+      out.push('言葉そのものより、そこで何が動いているかを押さえたほうが芯に近づきます。');
+      out.push('まず整えたいのは、表現より手前にある動き方です。');
       return out;
     }
 
-    out.push('理由は、まだ流れの芯と周辺が分かれきっていないからです。');
-    out.push('そのまま返すと表面はまとまっても、手応えの弱い答えになりやすいです。');
-    out.push('だから今は、何がこの動きを作っているかを先に捉える必要があります。');
+    out.push('まだ話の芯と周辺が重なったままだからです。');
+    out.push('そのまま返すと、表面はまとまっても手応えが弱くなりやすいです。');
+    out.push('先に押さえるのは、何がこの流れを生んでいるかです。');
     return out;
   };
-  const buildNextLines = (obj: any): string[] => {
-    const out: string[] = [];
-    const hint = normText(obj?.hint);
-    const mode = normText(obj?.mode);
-
-    if (hint) {
-      out.push(hint.endsWith('。') ? hint : `${hint}。`);
-    }
-
-    if (mode === 'concretize_hint') {
-      out.push('次は比較のまま広げず、どこをひとつ決めるかに焦点を絞るのが自然です。');
-    } else if (mode === 'observe_hint') {
-      out.push('次は新しい材料を足すより、いま出ている流れの中でどこが芯かを見やすくするのが合っています。');
-    }
-
-    return out;
+  const buildNextLines = (_obj: any): string[] => {
+    // NEXT_HINT は slotPlan 側の evidence / UI補完にだけ使う。
+    // writer seed 用の自然文には展開しない。
+    return [];
   };
 
   const buildSafeLines = (obj: any): string[] => {
@@ -3172,22 +3161,48 @@ try {
         seedForWriterRaw = diagSeed || String(seedForWriterRaw ?? '').trim();
         seedForWriterSanitized = seedForWriterRaw;
       } else {
-        // 露出OKの核1行を混ぜる（短すぎる時だけ）
-        const CLEAN_MIN = 48;
-        const cleaned0 = seedForWriterRaw
-          .split('\n')
-          .map((l) => String(l ?? '').trim())
-          .filter((l) => l.length > 0 && !l.startsWith('@'))
-          .join('\n')
-          .trim();
+        const postprocessPatternKey = selectSlotPattern({
+          line: String(
+            (metaForSave as any)?.extra?.presentationKind ??
+              (metaForSave as any)?.presentationKind ??
+              ''
+          )
+            .trim()
+            .toLowerCase(),
+          questionType: String(
+            (metaForSave as any)?.extra?.question?.questionType ??
+              (metaForSave as any)?.question?.questionType ??
+              ''
+          ).trim(),
+          detailMode:
+            (metaForSave as any)?.ctxPack?.detailMode === true ||
+            (metaForSave as any)?.extra?.ctxPack?.detailMode === true,
+          followupText: String(userText ?? '').trim(),
+          userText: String(userText ?? '').trim(),
+          targetLabel: null,
+          hasPriorDiagnosis: false,
+        });
 
-        if (coreLine && cleaned0.length < CLEAN_MIN && !seedForWriterRaw.includes(coreLine)) {
-          const seedLine = `@SEED_TEXT ${JSON.stringify({ text: coreLine })}`;
-          seedForWriterRaw = `${seedForWriterRaw}\n${coreLine}\n${seedLine}`.trim();
+        if (postprocessPatternKey === 'DECLARATION_RESONANCE_V1') {
+          seedForWriterSanitized = '';
+        } else {
+          // 露出OKの核1行を混ぜる（短すぎる時だけ）
+          const CLEAN_MIN = 48;
+          const cleaned0 = seedForWriterRaw
+            .split('\n')
+            .map((l) => String(l ?? '').trim())
+            .filter((l) => l.length > 0 && !l.startsWith('@'))
+            .join('\n')
+            .trim();
+
+          if (coreLine && cleaned0.length < CLEAN_MIN && !seedForWriterRaw.includes(coreLine)) {
+            const seedLine = `@SEED_TEXT ${JSON.stringify({ text: coreLine })}`;
+            seedForWriterRaw = `${seedForWriterRaw}\n${coreLine}\n${seedLine}`.trim();
+          }
+
+          // sanitize
+          seedForWriterSanitized = sanitizeLlmRewriteSeed(seedForWriterRaw, userText);
         }
-
-        // sanitize
-        seedForWriterSanitized = sanitizeLlmRewriteSeed(seedForWriterRaw, userText);
       }
 
       // meta肥大対策：rawはdev限定 + 長さ制限

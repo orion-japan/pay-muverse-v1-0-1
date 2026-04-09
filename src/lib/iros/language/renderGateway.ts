@@ -2102,11 +2102,23 @@ try {
       : [];
 
     if (blocksIn.length > 0) {
+      const activePatternKey = String(
+        (extraAny as any)?.patternKey ??
+          (args as any)?.meta?.extra?.patternKey ??
+          (args as any)?.extra?.patternKey ??
+          ''
+      ).trim();
+
+      const isDetailPattern =
+        activePatternKey === 'NORMAL_DETAIL_V1' ||
+        activePatternKey === 'NORMAL_RESONANCE_V1' ||
+        activePatternKey === 'IR_DETAIL_V1';
+
       const normRes = normalizeBlocksForRender(blocksIn, {
         titleScanMaxLines: 3,
         dedupeConsecutiveTitles: true,
         maxBlankRun: 1,
-        dedupeExactBlocks: true,
+        dedupeExactBlocks: !isDetailPattern,
       });
 
       if (Array.isArray(normRes?.blocks) && normRes.blocks.length > 0) {
@@ -2125,6 +2137,8 @@ try {
       if (changed || STAGE_ENABLED) {
         console.warn('[IROS/renderGateway][NORMALIZE_DIAG]', {
           rev: IROS_RENDER_GATEWAY_REV,
+          patternKey: activePatternKey,
+          isDetailPattern,
           meta: m,
           inBlocks: blocksIn.length,
           outBlocks: Array.isArray(normRes?.blocks) ? normRes.blocks.length : 0,
@@ -2301,20 +2315,20 @@ pipe('after_renderV2_empty_rescue', content);
   } catch {}
 
 
-  // ✅ picked/pickedFrom と meta の整合を “根治” する
-  // - pickedFrom='rephraseBlocks' のとき picked が "……" 等の短いダミーになることがある
-  // - meta だけ補正すると解析ログがズレ続けるので、picked 自体を content に同期する
+  // ✅ rephraseBlocks 採用時は、picked を contentRaw に戻さない
+  // - ここで contentRaw を優先すると、せっかくの multi-block 表示が長文本文で上書きされる
+  // - meta 用の pickedForMeta も rephraseBlocks 側を正本にする
   const contentRaw = String(content ?? '');
   const pickedFromStr = String(pickedFrom ?? '');
-
-  if (pickedFromStr === 'rephraseBlocks' && norm(contentRaw).length > 0) {
-    picked = contentRaw;
-  }
 
   const pickedRaw = String(picked ?? '');
 
   const pickedForMeta =
-    pickedFromStr === 'rephraseBlocks' && norm(contentRaw).length > 0 ? contentRaw : pickedRaw;
+    pickedFromStr === 'rephraseBlocks' || pickedFromStr === 'rephraseBlocks-forced'
+      ? pickedRaw
+      : norm(contentRaw).length > 0
+        ? contentRaw
+        : pickedRaw;
       const meta = {
         blocksCount: Array.isArray(blocksForRender) ? blocksForRender.length : 0,
         maxLines: maxLinesFinal,
