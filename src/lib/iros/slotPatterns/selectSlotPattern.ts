@@ -46,6 +46,63 @@ function looksLikeDetailFollowup(text: string): boolean {
   return keywords.some((word) => text.includes(word));
 }
 
+function looksLikeDecisionAxisFollowup(text: string): boolean {
+  if (!text) return false;
+
+  const keywords = [
+    '見誤りたくない',
+    '違いを知りたい',
+    '見分けたい',
+    '本当の引っかかり',
+    'どっちなのか',
+    'どちらなのか',
+    '切り替えるべきもの',
+    '続けるのか',
+    'やめるのか',
+
+    '違い',
+    '共通点',
+    '比較',
+    '比べる',
+    '相性',
+    '組み合わせ',
+    '関係性',
+    '関わり合い',
+    '問題点',
+    '協調',
+    '協調する方法',
+    '理解点',
+    '打ち解ける',
+    '打ち解けるには',
+    'どう見えやすい',
+    'どう映りやすい',
+    'ぶつかりやすい',
+    'すれ違い',
+    '誤解',
+    'なぜぶつかる',
+    '何がズレる',
+    'どこでズレる',
+    '原因',
+    '何が原因',
+    '原因になりやすい',
+    'ぶつかる原因',
+
+    'どうしたら良い',
+    'どうしたらいい',
+    'どうすれば良い',
+    'どうすればいい',
+    '良い方法はありますか',
+    'いい方法はありますか',
+    'どう進めたらいい',
+    'どう進めたら良い',
+    'どう進めればいい',
+    'どう進めれば良い',
+    '最終的にどうしたら',
+    '最終的にどうすれば',
+  ];
+
+  return keywords.some((word) => text.includes(word));
+}
 function looksLikeDeclarationResonance(text: string): boolean {
   if (!text) return false;
 
@@ -95,7 +152,9 @@ export function selectSlotPattern(input: SelectSlotPatternInput): PatternKey {
   const detailLike =
     detailMode ||
     looksLikeDetailFollowup(normalizeLite(followupText)) ||
-    looksLikeDetailFollowup(normalizeLite(userText));
+    looksLikeDetailFollowup(normalizeLite(userText)) ||
+    looksLikeDecisionAxisFollowup(normalizeLite(followupText)) ||
+    looksLikeDecisionAxisFollowup(normalizeLite(userText));
 
   const declarationLike = looksLikeDeclarationResonance(followupText || userText);
 
@@ -114,10 +173,25 @@ export function selectSlotPattern(input: SelectSlotPatternInput): PatternKey {
     return 'DECLARATION_RESONANCE_V1';
   }
 
-  // 通常会話は NORMAL_DETAIL_V1
-  if (!truthLike) {
+  // truth系でも、比較・相性・関係説明は DETAIL を優先する
+  if (
+    truthLike &&
+    (looksLikeDecisionAxisFollowup(normalizeLite(followupText)) ||
+      looksLikeDecisionAxisFollowup(normalizeLite(userText)))
+  ) {
     return 'NORMAL_DETAIL_V1';
   }
 
-  return 'TRUTH_V1';
+  // truth系は TRUTH_V1
+  if (truthLike) {
+    return 'TRUTH_V1';
+  }
+
+  // 通常会話で detail 指示があるときだけ DETAIL
+  if (detailLike) {
+    return 'NORMAL_DETAIL_V1';
+  }
+
+  // 通常会話の既定は RESONANCE
+  return 'NORMAL_RESONANCE_V1';
 }

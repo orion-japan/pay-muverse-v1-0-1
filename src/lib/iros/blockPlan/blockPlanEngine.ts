@@ -297,10 +297,8 @@ export function buildBlockPlanWithDiag(
 
   // ✅ autoMini（相談ゴール + 迷い/不安/決められなさ）→ mini3
   // - ただし、収束信号があるターンでは stabilize 系 mini を出さない
-  const autoMini =
-    !hasConvergeSignal && consultishGoal && userText
-      ? detectMiniReframeTrigger(userText)
-      : false;
+  // - 通常相談では自動発火させない
+  const autoMini = false;
 
 // =========================================================
 // gate decision
@@ -529,20 +527,45 @@ export function buildBlockPlanWithDiag(
   }
 
   // 7) autoMini → mini3（相談の節目の“軽い再配置”）
-  const plan: BlockPlan = {
-    mode: 'mini3',
-    // OBS/SHIFT/NEXT に相当（BlockKindは既存セットを再利用）
-    // - SITUATION: 観測（事実/状況の再提示）
-    // - FOCUS_SHIFT: 視点の転換（リメイク語）
-    // - INTEGRATE: 次の一歩（1つだけ）
-    blocks: ['SITUATION', 'FOCUS_SHIFT', 'INTEGRATE'],
-  };
+  if (autoMini) {
+    const plan: BlockPlan = {
+      mode: 'mini3',
+      // OBS/SHIFT/NEXT に相当（BlockKindは既存セットを再利用）
+      // - SITUATION: 観測（事実/状況の再提示）
+      // - FOCUS_SHIFT: 視点の転換（リメイク語）
+      // - INTEGRATE: 次の一歩（1つだけ）
+      blocks: ['SITUATION', 'FOCUS_SHIFT', 'INTEGRATE'],
+    };
+
+    return {
+      plan,
+      diag: {
+        enabled: true,
+        why: 'AUTO_MINI',
+        explicit: false,
+        hardDirectTask: false,
+        softDirectTask,
+        wantsDeeper: false,
+
+        depthStage,
+        itTriggered,
+        autoDeepen,
+
+        goalKind,
+        consultishGoal,
+        autoCrack,
+
+        mode: plan.mode,
+        blocksLen: plan.blocks.length,
+      },
+    };
+  }
 
   return {
-    plan,
+    plan: null,
     diag: {
-      enabled: true,
-      why: 'AUTO_MINI',
+      enabled: false,
+      why: 'NONE',
       explicit: false,
       hardDirectTask: false,
       softDirectTask,
@@ -556,8 +579,8 @@ export function buildBlockPlanWithDiag(
       consultishGoal,
       autoCrack,
 
-      mode: plan.mode,
-      blocksLen: plan.blocks.length,
+      mode: null,
+      blocksLen: 0,
     },
   };
 }

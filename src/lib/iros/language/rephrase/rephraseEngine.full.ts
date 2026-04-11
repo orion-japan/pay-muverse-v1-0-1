@@ -73,6 +73,8 @@ import {
 } from './slotWeightEngine';
 import { buildPatternBlocks } from '../../slotPatterns/buildPatternBlocks';
 import { selectSlotPattern } from '../../slotPatterns/selectSlotPattern';
+import { buildRelationshipAnalysis } from '../../relationship/relationshipAnalysisEngine';
+import { analysisToDetailPattern } from '../../relationship/mappers/analysisToDetailPattern';
 
 // ==============================
 // PATCH: 2-line format enforce (single retry)
@@ -2019,6 +2021,11 @@ function logRephraseAfterAttach(
       blockPlanBlocksLen: Array.isArray(extra?.blockPlan?.blocks) ? extra.blockPlan.blocks.length : 0,
       hasRephraseBlocks: Array.isArray(extra?.rephraseBlocks) ? true : false,
       rephraseBlocksLen: Array.isArray(extra?.rephraseBlocks) ? extra.rephraseBlocks.length : 0,
+      rephraseBlockKeysPreview: Array.isArray(extra?.rephraseBlocks)
+        ? extra.rephraseBlocks
+            .slice(0, 8)
+            .map((b: any) => String(b?.blockKey ?? '(none)'))
+        : [],
       outKeysLen: Array.isArray(outKeys) ? outKeys.length : 0,
       note: note ?? null,
       head: safeHead(String(head ?? ''), 80),
@@ -2571,7 +2578,6 @@ return blocks;
   const buildHistoryTextLite = (turns: any[]): string => {
     const lines: string[] = ['HISTORY_LITE (DO NOT OUTPUT):'];
 
-    // 「入力はありますか？」系が history 経由で増殖するのを止血
     const BANNED_ASSISTANT_PATTERNS: RegExp[] = [
       /入力はありますか/u,
       /この意味伝わりますか/u,
@@ -2603,18 +2609,50 @@ return blocks;
       return t.length > 90 ? `${t.slice(0, 90)}…` : t;
     };
 
-    for (const t of Array.isArray(turns) ? turns : []) {
-      const role = t?.role === 'assistant' ? 'assistant' : t?.role === 'user' ? 'user' : null;
+    const sanitizeUserForHistory = (raw: string): string => {
+      let t = String(raw ?? '').replace(/\r\n/g, '\n').trim();
+      if (!t) return '';
+
+      t = t
+        .split('\n')
+        .map((x) => x.trim())
+        .filter((x) => x.length > 0)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (!t) return '';
+
+      const firstSentence = t.split(/(?<=[。！？!?])/u)[0]?.trim() ?? t;
+      t = firstSentence.replace(/\s+/g, ' ').trim();
+      if (!t) return '';
+
+      return t.length > 80 ? `${t.slice(0, 80)}…` : t;
+    };
+
+    const pickedTurns = (Array.isArray(turns) ? turns : []).slice(-4);
+
+    for (const t of pickedTurns) {
+      const role =
+        t?.role === 'assistant'
+          ? 'assistant'
+          : t?.role === 'user'
+            ? 'user'
+            : null;
       if (!role) continue;
 
+      const raw = String(t?.content ?? t?.text ?? '').replace(/\r\n/g, '\n').trim();
+      if (!raw) continue;
+
       if (role === 'user') {
+        const one = sanitizeUserForHistory(raw);
+        if (!one) continue;
+        lines.push(`user: ${one}`);
         continue;
       }
 
-      const raw = String(t?.content ?? t?.text ?? '').replace(/\r\n/g, '\n').trim();
       const one = sanitizeAssistantForHistory(raw);
       if (!one) continue;
-
       lines.push(`assistant: ${one}`);
     }
 
@@ -2683,14 +2721,11 @@ return blocks;
               (opts as any)?.userContext?.ctxPack?.historyForWriter ??
               [];
 
-    const hasHistoryForWriter = Array.isArray(hfw) && hfw.length > 0;
-    // ✅ historyForWriter がある時は、HISTORY_LITE を使わない
-    // - writer の正式履歴は historyForWriter
-    // - HISTORY_LITE は fallback 専用
+              const hasHistoryForWriter = Array.isArray(hfw) && hfw.length > 0;
+    // ✅ historyForWriter がある時は、それを writer 用の履歴テキストとして使う
     if (hasHistoryForWriter) {
-      return '';
+      return buildHistoryTextLite(hfw as any[]);
     }
-
     // ✅ 旧 stopgap も維持
     // meaning + confirm では HISTORY_LITE を writer に渡さない
     if (questionType === 'meaning' && tMode === 'confirm') {
@@ -3026,9 +3061,9 @@ if (isIrDiagnosis) {
   const FALLBACK_SEED =
     'ユーザーの最後の発話に、結論を先にして短く直接答えてください。';
 
-  seedFinal =
-    canonicalOneLineSeed ||
+    seedFinal =
     chooseSeedForLLM(seedDraftSanitized, '') ||
+    canonicalOneLineSeed ||
     FALLBACK_SEED;
 }
 
@@ -3737,12 +3772,13 @@ console.log('[IROS/CANONICAL_ONE_LINE_SEED_BLOCK]', {
 });
 
 if (canonicalOneLineSeedBlock) {
-  internalPack = [
-    canonicalOneLineSeedBlock,
-    String(internalPack ?? ''),
-  ]
-    .filter((v) => String(v ?? '').trim().length > 0)
-    .join('\n\n');
+  console.log('[IROS/CANONICAL_ONE_LINE_SEED_BLOCK][SKIPPED_PREPEND]', {
+    traceId: debug.traceId,
+    conversationId: debug.conversationId,
+    userCode: debug.userCode,
+    reason: 'DISABLED_TO_PRESERVE_INTERNAL_PACK_STATE',
+    head: safeHead(canonicalOneLineSeedBlock, 160),
+  });
 }
 
 const __ip = String(internalPack ?? '');
@@ -4157,6 +4193,146 @@ const systemPromptForWriter = [
   ): Record<string, unknown> {
     const key = String(patternKey ?? '').trim();
 
+    const questionTypeForBomb = (() => {
+      const explicit = String(
+        (opts as any)?.userContext?.question?.questionType ??
+          (opts as any)?.userContext?.meta?.extra?.question?.questionType ??
+          (opts as any)?.ctxPack?.question?.questionType ??
+          (opts as any)?.meta?.extra?.question?.questionType ??
+          ''
+      )
+        .trim()
+        .toLowerCase();
+
+      if (
+        explicit === 'meaning' ||
+        explicit === 'structure' ||
+        explicit === 'intent' ||
+        explicit === 'truth'
+      ) {
+        return explicit;
+      }
+
+      const s = String(
+        (opts as any)?.userText ??
+          (opts as any)?.followupText ??
+          (opts as any)?.inputText ??
+          ''
+      ).trim();
+
+      if (
+        /どうしたら良い|どうしたらいい|どうすれば良い|どうすればいい|良い方法|いい方法|方法はありますか|どう進めたら良い|どう進めたらいい|どう進めれば良い|どう進めればいい|最終的にどうしたら|最終的にどうすれば|協調する方法|打ち解けるには/u.test(
+          s
+        )
+      ) {
+        return 'intent';
+      }
+
+      if (
+        /違い|共通点|比較|比べる|相性|組み合わせ|関係性|関わり合い|問題点|協調|理解点|打ち解ける|どう見えやすい|どう映りやすい|ぶつかりやすい|すれ違い|誤解|なぜぶつかる|何がズレる|どこでズレる/u.test(
+          s
+        )
+      ) {
+        return 'structure';
+      }
+
+      if (/意味|なぜ|どういうこと|どう受け止め|どう読める/u.test(s)) {
+        return 'meaning';
+      }
+
+      if (/とは|教えて|ありますか|ですか|あるか|ないか/u.test(s)) {
+        return 'truth';
+      }
+
+      return null;
+    })();
+
+    const goalKindForBomb = String(
+      (opts as any)?.goalKind ??
+        (opts as any)?.userContext?.goalKind ??
+        (opts as any)?.userContext?.ctxPack?.goalKind ??
+        (opts as any)?.ctxPack?.goalKind ??
+        (opts as any)?.ctxPack?.replyGoal?.kind ??
+        ''
+    ).trim();
+
+    const methodTextForBomb = String(
+      (opts as any)?.userText ??
+        (opts as any)?.followupText ??
+        (opts as any)?.inputText ??
+        ''
+    ).trim();
+
+    const compareTextForBomb = String(
+      (opts as any)?.userText ??
+        (opts as any)?.followupText ??
+        (opts as any)?.inputText ??
+        ''
+    ).trim();
+
+    const isMeaningUncoverBomb =
+      key === 'NORMAL_DETAIL_V1' &&
+      questionTypeForBomb === 'meaning' &&
+      goalKindForBomb === 'uncover';
+
+    const isIntentMethodBomb =
+      key === 'NORMAL_DETAIL_V1' &&
+      questionTypeForBomb === 'intent' &&
+      /どうしたら良い|どうしたらいい|どうすれば良い|どうすればいい|良い方法|いい方法|方法はありますか|どう進めたら良い|どう進めたらいい|どう進めれば良い|どう進めればいい|最終的にどうしたら|最終的にどうすれば/u.test(
+        methodTextForBomb
+      );
+
+      const isCompareStructureBomb =
+      key === 'NORMAL_DETAIL_V1' &&
+      (questionTypeForBomb === 'structure' ||
+        questionTypeForBomb === 'intent' ||
+        questionTypeForBomb === 'truth') &&
+      /違い|共通点|比較|比べる|相性|組み合わせ|関係性|関わり合い|問題点|協調|協調する方法|理解点|打ち解ける|打ち解けるには|どう見えやすい|どう映りやすい|ぶつかりやすい|すれ違い|誤解|なぜぶつかる|何がズレる|どこでズレる|原因|何が原因|原因になりやすい|ぶつかる原因/u.test(
+        compareTextForBomb
+      );
+
+    const relationshipDetailMaterial = (() => {
+      if (!isCompareStructureBomb) return null;
+
+      try {
+        const relationshipMemory =
+          (opts as any)?.ctxPack?.relationshipMemory ??
+          (opts as any)?.userContext?.ctxPack?.relationshipMemory ??
+          (opts as any)?.userContext?.relationshipMemory ??
+          null;
+
+        const flow =
+          (opts as any)?.ctxPack != null && typeof (opts as any)?.ctxPack === 'object'
+            ? {
+                delta: (opts as any)?.ctxPack?.flow?.delta ?? null,
+                currentStage: (opts as any)?.ctxPack?.primaryStage ?? null,
+                observedStage: (opts as any)?.ctxPack?.observedStage ?? null,
+                qCode: (opts as any)?.ctxPack?.qCode ?? null,
+                emotionalTemperature: (opts as any)?.ctxPack?.emotionalTemperature ?? null,
+                continuityKind: (opts as any)?.ctxPack?.continuityKind ?? null,
+                relationFocus: (opts as any)?.ctxPack?.relationFocus ?? null,
+                mirrorFlowV1: (opts as any)?.ctxPack?.mirrorFlowV1 ?? null,
+              }
+            : null;
+
+        const analysis = buildRelationshipAnalysis({
+          userText: compareTextForBomb,
+          relationshipMemory,
+          flow,
+        });
+
+        return analysisToDetailPattern(analysis);
+      } catch (error) {
+        console.log('[IROS/REL_ANALYSIS][BUILD_FAILED]', {
+          traceId: (opts as any)?.debug?.traceId ?? null,
+          conversationId: (opts as any)?.debug?.conversationId ?? null,
+          userCode: (opts as any)?.debug?.userCode ?? null,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      }
+    })();
+
     if (
       key !== 'IR_DETAIL_V1' &&
       key !== 'NORMAL_DETAIL_V1' &&
@@ -4175,21 +4351,21 @@ const systemPromptForWriter = [
             : 'normal_resonance',
         pattern_block_order:
           'state_surface,state_weight,state_open_edge,state_residue',
-          block_state_surface:
-          '1段落目は、いま起きている状態そのものを自然文で置く。宣言によって生じた位置の変化や、もう後ろへ戻らない向きを先に置く。説明や要約ではなく本文そのものを書く。1文目でその変化を置き、2文目でその向きがどのように立っているかだけを自然に続ける。',
+        block_state_surface:
+          '1段落目は、いま前に出ている状態そのものを書く。説明や要約ではなく、その場にもう立っている変化を自然文で置く。1文目は状態をそのまま置き、2文目はその続きとして向きや残り方を書く。逆接や説明の接続で起こさず、前の文の余韻がそのまま続く始まりを優先する。「でもそのあとに」「そのあとに」「ここで」「つまり」「言いながらも」で起こさない。',
         block_state_weight:
-          '2段落目は、その話がどの重さで立っているかを書く。強さや重さは書いてよいが、「だから次は」「何をするか」「どこに置くか」のような案内にしない。「この置き方には」「この言い方には」「言い方の強さ」から始めない。「固定された感じ」「全部が固定された感じ」「宣言の輪郭が先に立っています」とは書かない。',
+          '2段落目は、その話がどの重さで立っているかを書く。強さや重さは書いてよいが、案内や整理にしない。前段の余韻を受けて始め、重さが自然ににじむ書き方を優先する。「だから」「そのうえで」「つまり」「しかも」などの説明的な接続で起こさない。',
         block_state_open_edge:
-          '3段落目は、まだ決まりきっていない部分だけを書く。注意や整理にしない。未固定の観測に止める。「取り違えなければ」「分けて見る」「先に〜する」「ひとつ決める」「どこから動かすか」「まずは」「どう呼ぶか」「呼び名」「接地」「現実に接地」「定める」「定まる」を書かない。「言葉の端に、未確定のままの部分が残っています」「結論というより」とも書かない。',
+          '3段落目は、まだ決まりきっていない部分を書く。注意や命名や接地の案内にしない。未固定のまま残っている差や揺れだけを観測として置く。文頭は前段から静かに引き継ぎ、整理して切り分けるより、まだひとつに閉じない感じを残す。「まだ全部がはっきりしているわけではなくて」「ただ」「だから」「だから今は」など、説明してつなぐ言い方を優先しない。',
         block_state_residue:
-          '4段落目は、最後に残る感じだけを置く。締めない。行動提案にしない。余韻だけを残す。「それで十分」「足ります」「次の一歩」「進めます」「入口です」「始まりです」「動きます」「開けます」「見えてきます」「広がります」「余地があります」「続きを置ける」「ここで終わらずに」「余白ごと残る感じ」「残る感じです」「言葉の端に残っています」「その余白が」「まだ残っています」「その輪郭が、いま残っています」「その余白ごと、今の文は立っています」「この文は立っています」「その端ごと、この文は立っています」で終えない。言葉や文への言及をせず、状態の端に残る感じだけで閉じる。',
-          bodyStyle: {
-            preferBlockSplit: true,
-            minBlocks: 4,
-            maxSentencesPerBlock: 4,
-            minSentences: 8,
-            maxSentences: 12,
-          },
+          '4段落目は、最後に残る感じだけを書く。締めや行動提案や変化予告にしない。ここまでの流れを静かに受けて、状態の端に残るものだけを置いて閉じる。言葉や文そのものには触れず、少し開いたまま余韻で終える。',
+        bodyStyle: {
+          preferBlockSplit: true,
+          minBlocks: 4,
+          maxSentencesPerBlock: 4,
+          minSentences: 8,
+          maxSentences: 12,
+        },
         writeConstraints: [
           `${
             key === 'DECLARATION_RESONANCE_V1'
@@ -4202,11 +4378,15 @@ const systemPromptForWriter = [
           '次の一歩を書かない',
           '締めの結論を書かない',
           '観測から始める',
+          '各段落の文頭は、前の段落や前の文の余韻を受けて始める',
+          '説明的な接続語より、流れを引き継ぐ自然な始まりを優先する',
+          '「そのうえで」「つまり」「したがって」「要するに」「ここで」「次は」を優先して使わない',
           '未固定部分は未固定のまま置く',
           '3段落目で案内や命名をしない',
           '3段落目で接地や確定を書かない',
           '4段落目で変化予告や締めをしない',
           '最後は residue で終える',
+          '段落末だけを着地させ、各文末は次の文へ少し開いて渡す',
         ],
       };
     }
@@ -4215,61 +4395,183 @@ const systemPromptForWriter = [
       pattern_key: key,
       pattern_mode: key === 'NORMAL_DETAIL_V1' ? 'normal_detail' : 'diagnosis_detail',
 
-// src/lib/iros/language/rephrase/rephraseEngine.full.ts
-// 4215-4262 行をこのブロックで丸ごと置換
+      block_current_state:
+        relationshipDetailMaterial?.block_current_state ??
+        (isCompareStructureBomb
+          ? '1段落目の1文目は、二者それぞれの説明から入らず、この関係の核を先に置く。最初に「この二人は何がぶつかりやすい関係か」「どういう組み合わせか」が一文で立つようにする。A/Bの性格紹介ではなく、関係の輪郭が最初に見える自然文を優先する。たとえば「この二人は、強さの出しどころがぶつかりやすい関係です。」「この組み合わせは、近づき方の違いがそのままズレになりやすいです。」のように、関係の核が先に立つ書き方にする。'
+          : isIntentMethodBomb
+            ? '1段落目の1文目は、いま何が決めきれずに止まっているかをそのまま置く。説明や要約にしない。方法の話に飛ぶ前に、いま詰まっている一点を自然文で出す。'
+            : '1段落目の1文目は、今いちばん前にあるものをそのまま置く。説明や要約にしない。判断や整理より先に、その場に立っている核心を自然文で出す。見えている状態を薄めず、最初の1文で軸が立つ書き方を優先する。'),
 
-pattern_block_order:
-  'current_state,misrecognition_negation,structural_reframe,breakdown_core_gap,breakdown_defense,breakdown_rejection_target,reading_direction,concrete_sort_axis,concrete_sort_boundary,conclusion,caution,closing_line',
-block_current_state:
-  '最初の1文は説明や要約ではなく、いま前に出ている状態そのものを自然文で置く。「いま言っていることは」「〜ということです」「ここで見えているのは」「いまの言葉は」「この発話は」から始めない。',
-  block_misrecognition_negation:
-  '1段落目の2文目では、「大丈夫です」「そのままでよい」「安心して」などの安心句ではなく、いま出ている状態を弱さや失敗として決めなくてよいことを、静かな観測文で短く置く。励ましにせず、OBS段落の2文目として受け止めの文に留める。「ここから先は」「〜として見ていく」「進み方」「見方を変える」「捉え方」など、方向づけや視点変更の言い方をここで出さない。',
-block_structural_reframe:
-  '抽象的な構造説明ではなく、その場で実際に起きていることの意味に言い換える。中心・構造・設計・軸・束ねる・支える・釣り合い・形を取る、などの説明語を避ける。',
-  block_breakdown_core_gap:
-  '2段落目の最初は、観測の言い換えではなく、なぜそうなっているか・何が噛み合っていないかを一文で置く。「今は」「いまは」「〜が見えています」「〜が残っています」から始めない。状態説明の続きにせず、ずれ・原因・噛み合わなさがそのまま伝わる自然文にする。',
-  block_breakdown_defense:
-  '2段落目の次の文では、安心させるための言い方ではなく、なぜ止まりや重さが出るのかを自然文で示す。「大丈夫です」「無理しなくてよい」「安心して」「そのままでよい」などの励ましで逃がさない。守ろうとして止まっている・決め切れずにいる理由が、そのまま伝わる文にする。',
-block_breakdown_rejection_target:
-  '何に違和感や拒否が出ているかを、主役を落とさず具体的に絞る。話題を広げない。',
-  block_reading_direction:
-  '3段落目の最初は、手順や進め方ではなく、いま本当に見るべき焦点そのものを一文で置く。「まずは」「先に」「今は」「次は」「〜していく」「〜すると輪郭が出る」から始めない。案内や進行説明にせず、何を見分ける段落なのかがその一文だけで立つ自然文にする。',
-block_concrete_sort_axis:
-  '整理の仕方を説明せず、いま自然に残る見方をそのまま一文で置く。「どこに置くか」「何から先に」「順番」「分けて」「何に触れさせるか」「最初の手を置くか」などの案内語で押さない。',
-block_concrete_sort_boundary:
-  '境界や優先を説明せず、いま自然に残る範囲を一文で置く。「今は」「先」「ここまでで十分」「何を現実として置くか」「ひとつ見れば十分」「ひとつ現れるところだけ」などの整理語で導かない。',
-  block_conclusion:
-  '4段落目の最初は、今回いちばん残る核をそのまま一文で置く。「結論としては」「つまり」「要するに」「言い換えると」「今いちばん大事なのは」「大事なのは」「いちばん残るのは」「ここで大事なのは」から始めない。比較や要約の言い方に逃げず、結論の本文そのものから入る。',
-block_caution:
-  '4段落目の2文目では、まだ急がなくてよい点を自然文で短く置く。何かを決めさせる言い方に寄せず、いま残してよい余白がそのまま分かる言い方にする。「何を決めるか」「一つ決める」「先に決める」などの誘導で押し切らない。',
-block_closing_line:
-  '4段落目の最後は、締めや結論の言い方を足さず、その場に残っている感じを短い自然文で置いて閉じる。「ここで大事なのは」「結論としては」「〜ということです」「〜ほうが自然です」「必要なら」「次に」「〜できます」「次の一手」「入口です」「始まりです」「そこまでで十分」「足ります」「次の一歩に入れます」で終えない。質問で終わらない。見出しだけで終えない。',
-bodyStyle: {
-  preferBlockSplit: true,
-  minBlocks: 4,
-  maxSentencesPerBlock: 3,
-  minSentences: 8,
-  maxSentences: 10,
-},
-writeConstraints: [
-  'normal_detail / diagnosis_detail では、必ず4つの段落で返す',
-  '4つの段落は、OBS → SHIFT → NEXT → SAFE の順に固定する',
-  '1段落目はちょうど2文で書く',
-  '2段落目はちょうど2文で書く',
-  '3段落目はちょうど2文で書く',
-  '3段落目は reading_direction → concrete_sort_axis → concrete_sort_boundary の順で書く',
-  '4段落目はちょうど2文で書く',
-  '4段落目は conclusion → caution → closing_line の順で書く',
-  '4段落目には必ず closing_line に相当する短い本文を最後の1文として書く',
-  '4段落目を見出しだけで終わらせない。3段落で終えることを禁止する',
-  '4段落目を次の提案や案内にしない',
-  '「必要なら」「次に」「〜できます」「整理できます」「比べられます」で4段落目を始めないし終えない',
-'4段落目は今回の答えの結論だけで閉じる',
-'「中心にある」「中心を立てる」「支える」「束ねる」「形を取る」「見る軸」「構造として」「〜に置くと整理しやすい」「強さと限界が同じ場所にある」「内側の釣り合いが問われる」などの説明語を多用しない',
-'「何が起きているか」「何が噛み合っていないか」「どこへ目を向けるか」「何が残るか」を通常の会話文で書く',
-'意味が曖昧な比喩や抽象表現を避け、読んだ人がすぐ分かる言い方を優先する',
-'OBS / SHIFT / NEXT / SAFE は、説明文ではなく観測・理由・焦点・結論がそのまま立つ自然文で書く',
-],
+      block_misrecognition_negation:
+        relationshipDetailMaterial?.block_misrecognition_negation ??
+        (isCompareStructureBomb
+          ? '1段落目の2文目は、そのズレを未熟さや配慮不足として片づけない。説明や弁護にしない。欠点ではなく、力を出すタイミングと向ける先が噛み合いにくいだけだと自然に伝わる一文にする。たとえば「遠慮がないというより、引く場所が重なりにくいです。」「冷たいというより、見ている場所がずれているだけです。」のように、誤読を一段読み替える強さを優先する。'
+          : isIntentMethodBomb
+            ? '1段落目の2文目は、その詰まりを弱さや迷いとして片づけない。説得や慰めにしない。決めたいのに決めきれないことを、そのまま受けてよい形で置く。'
+            : '1段落目の2文目は、その状態を弱さや迷いとして片づけない。訂正や解説にしない。ひとつに決めきれない感じを、そのままやわらかく受け取る。文頭は前の文を受ける流れの語で始め、言い聞かせる調子にしない。'),
+
+      block_structural_reframe:
+        relationshipDetailMaterial?.block_structural_reframe ??
+        (isCompareStructureBomb
+          ? '1段落目の3文目は、魅力や可能性へ早く着地しない。一般論にしない。この関係で本当にぶつかっているものを、一段深い対比として固定する。たとえば「強さの有無ではなく、強さの出しどころがぶつかっています。」「どちらが正しいかではなく、どちらが前に立つかがぶつかっています。」のように、争点の芯が一文で残る書き方を優先する。'
+          : isIntentMethodBomb
+            ? '1段落目の3文目は、今回の方法質問の芯を仮置きする。案内文や一般論にしない。何を決める前に何を先に定めるべきかを、一文で静かに言い切る。'
+            : '1段落目の3文目は、今回の核を仮置きしてよい。案内文や説明文にしない。何がこの迷いの中心にあるのかを、やわらかい断定で一文に置く。言い切りすぎず、でも主題が一段深く見える強さを優先する。'),
+
+      block_breakdown_core_gap:
+        relationshipDetailMaterial?.block_breakdown_core_gap ??
+        (isCompareStructureBomb
+          ? '2段落目の1文目は、まずこの関係で何がぶつかっているかを一文で固定する。A/Bの説明から入らない。性格紹介や一般論にしない。「意見の違いがそのまま対立に見えやすいです。」「どちらも引きたくないので、正しさの押し合いになりやすいです。」のように、争点の芯が最初に見える自然文を優先する。'
+          : isIntentMethodBomb
+            ? '2段落目の1文目は、いま噛み合っていない二つを名指しする。整理や分析にしない。決めたい気持ちと、決める対象がまだ曖昧なことの差が一文で見えるようにする。'
+            : '2段落目の1文目は、噛み合っていないところをそのまま名指ししてよい。整理や分析にしない。何と何が同時に残っているのか、どの二つが引っぱり合っているのかを、平明な自然文で一文に置く。ここでは差が分かる強さを優先する。'),
+
+      block_breakdown_defense:
+        relationshipDetailMaterial?.block_breakdown_defense ??
+        (isCompareStructureBomb
+          ? '2段落目の2文目は、そこで何を守ろうとして強く出るのかを書く。A/Bの性格説明にしない。たとえば「自分のやり方を崩したくないので、相手の出方を待つより先に動きたくなります。」「主導権を渡したくないので、譲るより先に押し返したくなります。」のように、反応の裏で守っているものが見える自然文を優先する。'
+          : isIntentMethodBomb
+            ? '2段落目の2文目は、そこで守ろうとしているものを書く。一般論にしない。雑に決めて後悔したくないことや、見誤りたくないことがにじむように置く。'
+            : '2段落目の2文目は、そこで守ろうとしているものを書く。一般論にしない。大事にしているものがにじむように置く。断定しすぎず、でも曖昧に逃がさない。前文から自然につながる言い方にする。'),
+
+      block_breakdown_rejection_target:
+        relationshipDetailMaterial?.block_breakdown_rejection_target ??
+        (isCompareStructureBomb
+          ? '2段落目の3文目は、起きやすい誤解を場面として見せる。説明順に並べすぎない。相手がどう見えてしまうかが、そのまま浮かぶ一文にする。たとえば「一方には相手が押してくるように見え、もう一方には相手が引かずに重たく見えやすいです。」「こちらには強くかぶせてくるように見え、向こうには譲る気がないように見えやすいです。」のように、その場で起きる誤読の像が一歩具体に立つ強さを優先する。'
+          : isIntentMethodBomb
+            ? '2段落目の3文目は、外したくないものをひとつに寄せる。説明ではなく、その輪郭だけが残る書き方にする。次段で方法が狭まる終わり方にする。'
+            : '2段落目の3文目は、外したくないもの、避けたいものを書く。列挙せず、ひとつに寄せる。説明ではなく、その輪郭だけが残る書き方にする。3段落目の方向が静かに開く終わり方にする。'),
+
+      block_reading_direction:
+        relationshipDetailMaterial?.block_reading_direction ??
+        (isCompareStructureBomb
+          ? '3段落目の1文目は、打ち解ける理解点を説明ではなく読み替えとして置く。どちらも相手を雑に扱っているのではなく、見ている場所が違うだけだと自然にわかる一文にする。'
+          : isMeaningUncoverBomb
+            ? '3段落目の1文目は、I層の爆心として書く。今回はどちら寄りかを仮置きするだけでなく、何がこの迷いの主因として前に出ているのかを一文で言い当てる。ただし断定の押しつけにはしない。いま主に残っている本音と、まだ切れずに残っているもののどちらが核なのかが、静かに深く伝わる書き方を優先する。'
+            : isIntentMethodBomb
+              ? '3段落目の1文目は、先にやる一手を短く置く。観測へ戻さず、方法を1つに絞る。結論を濁さず、いま最初に定めるべき対象や基準を一文で言う。'
+              : '3段落目の1文目は、今回はどちら寄りかを仮置きしてよい。ただし先に結論だけを置かず、なぜそちらに見えるのかが一緒に伝わる一文にする。「見るなら」「次は」などの案内語にしない。結論確定ではなく、いま主にどちらの力が前に出ていて、どちらがまだ残っているのかが同時にわかる書き方を優先する。'),
+
+      block_concrete_sort_axis:
+        relationshipDetailMaterial?.block_concrete_sort_axis ??
+        (isCompareStructureBomb
+          ? '3段落目の2文目は、AがBをどう読むと関係の見え方が変わるかを書く。説明口調にしない。Aの目に見えていた欠点が、別の力として見え直す感じを自然文で置く。'
+          : isIntentMethodBomb
+            ? '3段落目の2文目は、その一手をどう具体化するかを書く。比較説明ではなく、選択肢を増やさずに軸を細める。たとえば「やる・やめる・保留」のどれに近いかを見る、など一段狭い見方を置く。'
+            : '3段落目の2文目は、比べている二つの違いを書く。比較を説明しない。その差が読めば分かる形で、そのまま置く。整理語を使わず、前文の見立てをそのまま細める。'),
+
+      block_concrete_sort_boundary:
+        relationshipDetailMaterial?.block_concrete_sort_boundary ??
+        (isCompareStructureBomb
+          ? '3段落目の3文目は、BがAをどう読むと関係の見え方が変わるかを書く。受け止める、認める、敵にしない、は使わない。Bの目に見えていた欠点が、別の力として見え直す感じを自然文で置く。'
+          : isIntentMethodBomb
+            ? '3段落目の3文目は、全部を一度に決めない境界を書く。ただし保留に逃がさず、どこまでを今ここで決めるかを残す。方法の範囲を狭めて4段落目へつなぐ。'
+            : '3段落目の3文目は、まだ決めきらなくていい範囲を書く。助言や指示にしない。ただし未確定で閉じるだけにせず、どこまでは仮置きできていて、どこから先がまだ未確定なのかが残る書き方にする。4段落目へ静かに着地できるよう閉じすぎない。'),
+
+      block_conclusion:
+        relationshipDetailMaterial?.block_conclusion ??
+        (isCompareStructureBomb
+          ? '4段落目の1文目は、二者の違いを役割として置く。Aが関係に何を入れ、Bが関係に何を入れるかが一読で見える形にする。'
+          : isMeaningUncoverBomb
+            ? '4段落目の1文目は、最後に残る核を短く深く置く。まとめにしない。何が実際にはまだ残っていて、その残りをどこで見誤りやすいのかを、少しだけ言い切る。意味を早く決めたいことより、まだ残したいものともう手放していいものの境目を見誤りたくないことを核として置く。ここで整えすぎず、爆心の残響をそのまま前に置く。'
+            : isIntentMethodBomb
+              ? '4段落目の1文目は、結論だけ言うならの形で短く置く。一般論にしない。先に決めるべき基準や対象をひとつに絞ることを、そのまま前に出す。'
+              : '4段落目の1文目は、最後に残る核を書く。まとめにしない。いちばん残るものが、静かに前にある形で置く。ここまでの流れを回収するが、総括の言い方にはしない。'),
+
+      block_caution:
+        relationshipDetailMaterial?.block_caution ??
+        (isCompareStructureBomb
+          ? '4段落目の2文目は、二者がそろうと関係に何が立ち上がるかを書く。安全方向に戻さず、深さと広さ、温度と風通し、推進力と視点の変化のように、組み合わさったときの魅力が見える文にする。'
+          : isMeaningUncoverBomb
+            ? '4段落目の2文目は、SAFEを極限まで弱める。励ましや保留理由にしない。いま一つに決めきれないこと自体が自然であることだけを、ごく薄く残す。核を弱めず、未完了の余白だけを最小限に置く。'
+            : isIntentMethodBomb
+              ? '4段落目の2文目は、方法を広げすぎない注意だけを残す。慰めにしない。全部を片づけようとするとまたぼやけることを、短く置く。'
+              : '4段落目の2文目は、まだ固めきらなくていいことを書く。理由説明にしない。単に余白を足すのではなく、いま一つに決めきれないこと自体が自然であると伝わる文にする。前文の核を弱めず、未完了のまま置いてよい感覚だけを残す。'),
+
+      block_closing_line:
+        relationshipDetailMaterial?.block_closing_line ??
+        (isCompareStructureBomb
+          ? '4段落目の3文目は、説明ではなく一撃で閉じる。最後に、この関係の本質が一文で残るようにする。例はその比較対象に合うものだけを使う。たとえば「この関係は、同じ強さを競わせるより、力の置き場を分けたときに一番まとまります。」「強さがぶつかる関係ではなく、強さの向きを分けたときに大きく動ける組み合わせです。」のように、関係の核がそのまま覚えられる一文を優先する。'
+          : isIntentMethodBomb
+            ? '4段落目の3文目は、余韻で逃がさず最初の行動で閉じる。励ましや余白にしない。今ここで着手する一手がそのまま残るように、短く具体的に終える。たとえば「まずは、外したくないものを一つ決めてください」のように閉じる。'
+            : '4段落目の3文目は、余韻だけで閉じる。文や言葉への言及をしない。強く締めず、静けさと少しの残りだけが場に残る形で終える。完全に閉じ切らず、呼吸が残る終わり方にする。'),
+      bodyStyle: isCompareStructureBomb
+        ? {
+            preferBlockSplit: true,
+            minBlocks: 4,
+            maxSentencesPerBlock: 4,
+            minSentences: 15,
+            maxSentences: 15,
+          }
+        : {
+            preferBlockSplit: true,
+            minBlocks: 4,
+            maxSentencesPerBlock: 4,
+            minSentences: 15,
+            maxSentences: 16,
+          },
+
+          writeConstraints: isCompareStructureBomb
+          ? [
+              'normal_detail / diagnosis_detail では、必ず4つの段落で返す',
+              '4つの段落は、OBS → SHIFT → NEXT → SAFE の順に固定する',
+              '比較説明型では合計15文ちょうどで返す',
+
+              '1段落目はちょうど4文で書く',
+              '1段落目は Aの核 → Bの核 → 違いを優劣にしない補正 → 差の芯 の順に置く',
+
+              '2段落目はちょうど4文で書く',
+              '2段落目は Aの基準 → Bの基準 → Aから見た違和感 → Bから見た違和感 の順に置く',
+
+              '3段落目はちょうど4文で書く',
+              '3段落目は 理解点の核 → A側の受け取り直し → B側の受け取り直し → 打ち解ける鍵 の順に置く',
+
+              '4段落目はちょうど3文で書く',
+              '4段落目は Aの居心地 → Bの居心地 → 関係の着地 の順に置く',
+
+              '比較説明では、違いの発生、A側の核、B側の核、ぶつかる点、相互の誤解、相互理解の鍵、最後の着地が読めるだけの材料を先に出す',
+              '特徴説明と理解点を同じ責務に混在させない',
+              '誤解と結論を同じ責務に混在させない',
+              'OBS / SHIFT / NEXT / SAFE は説明文ではなく自然文で書く',
+              'closing_line は現在地の結論で静かに閉じる',
+            ]
+        : [
+            'normal_detail / diagnosis_detail では、必ず4つの段落で返す',
+            '4つの段落は、OBS → SHIFT → NEXT → SAFE の順に固定する',
+            '1段落目は3〜4文で書く',
+            '1段落目は current_state → misrecognition_negation → structural_reframe の順を守る',
+            '1段落目の前半で違いの発生や現在地を置き、後半で今回の核を仮置きしてよい',
+            '2段落目は3〜4文で書く',
+            '2段落目は breakdown_core_gap → breakdown_defense → breakdown_rejection_target の順を守る',
+            '2段落目では、なぜズレるか、何を守ろうとしているか、どこに拒否が出ているかを分けて置く',
+            '3段落目は3〜4文で書く',
+            '3段落目は reading_direction → concrete_sort_axis → concrete_sort_boundary の順を守る',
+            '3段落目では、次に見る焦点、比べる軸、どこまでを今回扱うかを分けて置く',
+            '4段落目は3〜4文で書く',
+            '4段落目は conclusion → caution → closing_line の順を守る',
+            '4段落目には必ず closing_line に相当する短い本文を最後の1文として書く',
+            '4段落目を見出しだけで終わらせない。3段落で終えることを禁止する',
+            '4段落目を次の提案や案内にしない',
+            'NORMAL_DETAIL_V1 では、説明を4段落に分ける前に、比較説明に必要な素材を15ユニット前後まで十分に出す',
+            '比較説明では、違いの発生、A側の核、B側の核、ぶつかる点、相互の誤解、相互理解の鍵、最後の着地が読めるだけの材料を先に出す',
+            '一つの文に複数責務を詰め込みすぎない',
+            '特徴説明と理解点を同じ責務に混在させない',
+            '誤解と結論を同じ責務に混在させない',
+            'OBS / SHIFT / NEXT / SAFE は説明文ではなく自然文で書く',
+            'current_state は今ある状態を書く',
+            'misrecognition_negation はその状態を弱さと決めない',
+            'structural_reframe は今回の核を一段仮置きする',
+            'breakdown_core_gap は混在している二つを名指しする',
+            'breakdown_defense は守ろうとしているものを書く',
+            'breakdown_rejection_target は避けたいものを書く',
+            'reading_direction は次に見る焦点を書く',
+            'concrete_sort_axis は比較の軸を書く',
+            'concrete_sort_boundary は今回どこまで扱うかを書く',
+            'conclusion は最後に残る核を書く',
+            'caution は急ぎすぎると何を見失うかを書く',
+            'closing_line は現在地の結論で静かに閉じる',
+          ],
     };
   }
   const writerPatternKeyForFirstPass = String(
@@ -4334,14 +4636,15 @@ const writerDirectivesFromSlotForFirstPass = isDetailPatternWriterForFirstPass
       ...buildDetailPatternWriterDirectives(writerPatternKeyForFirstPass),
     };
 
-  let messages = buildFirstPassMessages({
-    systemPrompt: systemPromptForWriter,
-    internalPack,
-    turns: turnsForWriter,
-    seedDraft,
-    topicDigest: topicDigestForWriter,
-    topicDigestV2: topicDigestV2ForWriter,
-    conversationLine: conversationLineForWriter,
+    let messages = buildFirstPassMessages({
+      systemPrompt: systemPromptForWriter,
+      internalPack,
+      historyText,
+      turns: turnsForWriter,
+      seedDraft,
+      topicDigest: topicDigestForWriter,
+      topicDigestV2: topicDigestV2ForWriter,
+      conversationLine: conversationLineForWriter,
     outputPolicy:
       primaryQuestionForWriter?.outputPolicy &&
       typeof primaryQuestionForWriter.outputPolicy === 'object'
@@ -4362,6 +4665,37 @@ const writerDirectivesFromSlotForFirstPass = isDetailPatternWriterForFirstPass
     traceId: debug.traceId ?? null,
     conversationId: debug.conversationId ?? null,
     userCode: debug.userCode ?? null,
+
+    userContext: (opts as any)?.userContext ?? null,
+    ctxPack: ctxPackForWriter ?? null,
+
+    mirrorFlowV1: (() => {
+      const candidate =
+        (ctxPackForWriter as any)?.mirrorFlowV1 ??
+        (opts as any)?.userContext?.ctxPack?.mirrorFlowV1 ??
+        (opts as any)?.userContext?.meta?.extra?.ctxPack?.mirrorFlowV1 ??
+        (opts as any)?.userContext?.meta?.extra?.mirrorFlowV1 ??
+        null;
+
+      try {
+        console.log(
+          '[IROS/rephraseEngine][MIRROR_FLOW_V1_BEFORE_WRITER]',
+          JSON.stringify({
+            type: typeof candidate,
+            isObject: !!candidate && typeof candidate === 'object',
+            isString: typeof candidate === 'string',
+            head:
+              typeof candidate === 'string'
+                ? candidate.slice(0, 200)
+                : candidate && typeof candidate === 'object'
+                  ? JSON.stringify(candidate).slice(0, 200)
+                  : null,
+          }),
+        );
+      } catch {}
+
+      return candidate;
+    })(),
 
     extra: {
       question:
@@ -4601,7 +4935,27 @@ const writerDirectivesFromSlotForFirstPass = isDetailPatternWriterForFirstPass
       const hasHookForAllow =
         (opts as any)?.userContext?.ctxPack?.hasFlowMeaningForAllow === true;
 
-      if (hasHookForAllow) {
+      const goalKindNow = String(
+        (opts as any)?.userContext?.ctxPack?.goalKind ??
+          (opts as any)?.ctxPack?.goalKind ??
+          ''
+      ).trim();
+
+      const questionTypeNow = String(
+        (opts as any)?.userContext?.ctxPack?.question?.questionType ??
+          (opts as any)?.ctxPack?.question?.questionType ??
+          ''
+      ).trim();
+
+      const shouldOpenAssertForDeepRead =
+        hasHookForAllow ||
+        (
+          goalKindNow === 'uncover' &&
+          questionTypeNow === 'meaning' &&
+          (flowDeltaNow === 'RETURN' || stingLevelNow === 'HIGH')
+        );
+
+      if (shouldOpenAssertForDeepRead) {
         (allowObj as any).assert = true;
       }
 
@@ -5411,9 +5765,14 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
 
       const s = String(v ?? '').trim();
 
-      if (/構造|仕組み|関係|違い|配置|流れ|構成|背景|文脈|位置づけ|相談|悩み|迷い|転職/u.test(s)) return 'structure';
-      if (/意味|なぜ|どういうこと|どう受け止め|どう読める/u.test(s)) return 'meaning';
-      if (/意図|どうしたい|どう進む|どこへ向かう|何のため/u.test(s)) return 'intent';
+      if (
+        /どうしたら良い|どうしたらいい|どうすれば良い|どうすればいい|良い方法|いい方法|方法はありますか|どう進めたら良い|どう進めたらいい|どう進めれば良い|どう進めればいい|最終的にどうしたら|最終的にどうすれば|協調する方法|打ち解けるには/u.test(
+          s
+        )
+      ) {
+        return 'intent';
+      }
+
       if (
         /とは|教えて|ありますか|ですか|登場しますか|出てきますか|書かれていますか|記されていますか|載っていますか|あるか|ないか/u.test(
           s
@@ -5421,6 +5780,10 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
       ) {
         return 'truth';
       }
+
+      if (/意図|どうしたい|どこへ向かう|何のため/u.test(s)) return 'intent';
+      if (/意味|なぜ|どういうこと|どう受け止め|どう読める/u.test(s)) return 'meaning';
+      if (/構造|仕組み|関係|違い|配置|流れ|構成|背景|文脈|位置づけ/u.test(s)) return 'structure';
 
       return null;
     };
@@ -5464,7 +5827,28 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
       hasPriorDiagnosis: patternPresentationKind === 'diagnosis',
     };
 
-    const patternKey = selectSlotPattern(patternSelectInput);
+    const preSelectedPatternKey = String((opts as any)?.meta?.extra?.patternKey ?? '').trim();
+    const selectedByFunction = selectSlotPattern(patternSelectInput);
+
+    console.log(
+      '[IROS/rephraseEngine][PATTERN_SELECT_SOURCE]',
+      JSON.stringify({
+        traceId: debug.traceId ?? null,
+        conversationId: debug.conversationId ?? null,
+        userCode: debug.userCode ?? null,
+        preSelectedPatternKey,
+        selectedByFunction,
+        questionType: patternSelectInput.questionType ?? null,
+        detailMode: patternSelectInput.detailMode ?? null,
+        followupText: patternSelectInput.followupText ?? null,
+      })
+    );
+
+    const patternKey = (
+      selectedByFunction ||
+      preSelectedPatternKey ||
+      'NORMAL_RESONANCE_V1'
+    ) as any;
 
     console.log(
       '[IROS/rephraseEngine][PATTERN_SELECT_INPUT]',
@@ -5473,6 +5857,8 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
         conversationId: debug.conversationId ?? null,
         userCode: debug.userCode ?? null,
         input: patternSelectInput,
+        preSelectedPatternKey,
+        selectedByFunction,
         result: patternKey,
       })
     );
@@ -5483,7 +5869,6 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
       goalKind: goalKind ?? null,
       detailMode: patternDetailMode,
     });
-
 // src/lib/iros/language/rephrase/rephraseEngine.full.ts
 // 5469-5519 行をこのブロックで丸ごと置換
 
@@ -5502,6 +5887,7 @@ let materializedBlocks: Array<{
     | 'STATE_WEIGHT'
     | 'STATE_OPEN_EDGE'
     | 'STATE_RESIDUE';
+  blockKey?: string;
   heading?: string;
 }> = [];
 let materializeSourceUnitsLog: string[] = [];
@@ -5555,16 +5941,18 @@ if (
       ? ['OBS', 'SHIFT', 'NEXT', 'SAFE']
       : ['OBS', 'STATE', 'GUIDE', 'MESSAGE'];
 
-    const firstBlockBySlot = new Map<string, { heading?: string }>();
-    const slotBlockCounts = new Map<string, number>();
+      const firstBlockBySlot = new Map<string, { heading?: string }>();
+      const slotBlockCounts = new Map<string, number>();
+      const slotBlockKeys = new Map<string, string[]>();
 
-    for (const block of patternBlocksResult.blocks) {
-      const slotKey = String(block.slotKey);
-      if (!firstBlockBySlot.has(slotKey)) {
-        firstBlockBySlot.set(slotKey, { heading: block.heading });
+      for (const block of patternBlocksResult.blocks) {
+        const slotKey = String(block.slotKey);
+        if (!firstBlockBySlot.has(slotKey)) {
+          firstBlockBySlot.set(slotKey, { heading: block.heading });
+        }
+        slotBlockCounts.set(slotKey, Number(slotBlockCounts.get(slotKey) ?? 0) + 1);
+        slotBlockKeys.set(slotKey, [...(slotBlockKeys.get(slotKey) ?? []), String(block.blockKey)]);
       }
-      slotBlockCounts.set(slotKey, Number(slotBlockCounts.get(slotKey) ?? 0) + 1);
-    }
 
     materializedBlocks = [];
     let unitIndex = 0;
@@ -5622,8 +6010,7 @@ if (
             })
           : null;
 
-            const useSingleParagraphPerSlot =
-            patternKey === 'NORMAL_DETAIL_V1';
+          const useSingleParagraphPerSlot = false;
 
         let slotUnits: string[] = [];
         if (useSingleParagraphPerSlot) {
@@ -5678,17 +6065,37 @@ if (
 
         const slotParagraphs = (() => {
           const cleaned = slotUnits
-            .map((x) => String(x ?? '').trim())
+            .map((x, unitLocalIndex) => {
+              let text = String(x ?? '').trim();
+              if (!text) return '';
+
+              if (
+                patternKey === 'NORMAL_RESONANCE_V1' ||
+                patternKey === 'DECLARATION_RESONANCE_V1'
+              ) {
+                const shouldNormalizeLead = slotIndex > 0 || unitLocalIndex > 0;
+
+                if (shouldNormalizeLead) {
+                  text = text
+                    .replace(/^でも、そのあとに/u, '')
+                    .replace(/^でもそのあとに/u, '')
+                    .replace(/^そのあとに/u, '')
+                    .replace(/^しかも、?/u, '')
+                    .replace(/^だから今は、?/u, '今は、')
+                    .replace(/^だから、?/u, '')
+                    .replace(/^ただ、?/u, '');
+                }
+
+                text = text.trim();
+              }
+
+              return text;
+            })
             .filter(Boolean);
 
           if (cleaned.length === 0) return [];
 
-          const targetCount =
-            patternKey === 'NORMAL_DETAIL_V1'
-              ? slotKey === 'OBS' || slotKey === 'SHIFT' || slotKey === 'NEXT' || slotKey === 'SAFE'
-                ? ((slotDecisionForMaterialize?.emphasis?.[slotKey] ?? 1) as 1 | 2 | 3)
-                : 1
-              : Math.max(1, desiredCount);
+          const targetCount = Math.max(1, desiredCount);
 
           if (cleaned.length <= targetCount) {
             return cleaned;
@@ -5716,10 +6123,11 @@ if (
 
         if (patternKey === 'NORMAL_DETAIL_V1') {
           materializedBlocks.push(
-            ...slotParagraphs.map((paragraph) => ({
+            ...slotParagraphs.map((paragraph, paragraphIndex) => ({
               text: paragraph,
               kind: 'p' as const,
               slotKey,
+              blockKey: slotBlockKeys.get(String(slotKey))?.[paragraphIndex] ?? undefined,
               heading: heading || undefined,
             }))
           );
@@ -5728,10 +6136,11 @@ if (
 
         if (!heading) {
           materializedBlocks.push(
-            ...slotParagraphs.map((paragraph) => ({
+            ...slotParagraphs.map((paragraph, paragraphIndex) => ({
               text: paragraph,
               kind: 'p' as const,
               slotKey,
+              blockKey: slotBlockKeys.get(String(slotKey))?.[paragraphIndex] ?? undefined,
             }))
           );
           continue;
@@ -5742,6 +6151,7 @@ if (
             text: paragraphIndex === 0 ? `${heading}\n${paragraph}` : paragraph,
             kind: 'p' as const,
             slotKey,
+            blockKey: slotBlockKeys.get(String(slotKey))?.[paragraphIndex] ?? undefined,
             heading,
           });
         });
@@ -5766,7 +6176,7 @@ if (
             text,
             kind: 'p' as const,
             ...(patternKey === 'NORMAL_DETAIL_V1'
-              ? { slotKey: 'SAFE' as const }
+              ? { slotKey: 'SAFE' as const, blockKey: 'closing_line' as const }
               : {}),
           });
         }
@@ -5860,13 +6270,30 @@ if (thirdUnits.length >= 2 && (fourthLooksDirective || thirdLooksDirective)) {
 }
   }
 }
-    if (ctxPackForWriter && typeof ctxPackForWriter === 'object') {
-      (ctxPackForWriter as any).patternKey = patternKey;
-      (ctxPackForWriter as any).patternBlocks = patternBlocksResult.blocks;
-    }
+if (ctxPackForWriter && typeof ctxPackForWriter === 'object') {
+  (ctxPackForWriter as any).patternKey = patternKey;
+  (ctxPackForWriter as any).patternBlocks = patternBlocksResult.blocks;
+}
 
-    (metaExtra as any).patternKey = patternKey;
-    (metaExtra as any).patternBlocks = patternBlocksResult.blocks;
+console.log(
+  '[IROS/rephraseEngine][PATTERN_KEY_SAVE_TRACE]',
+  JSON.stringify({
+    traceId: (debug as any)?.traceId ?? null,
+    conversationId: (debug as any)?.conversationId ?? null,
+    userCode: (debug as any)?.userCode ?? null,
+    patternKey,
+    ctxPackPatternKeyAfterSave:
+      ctxPackForWriter && typeof ctxPackForWriter === 'object'
+        ? String((ctxPackForWriter as any).patternKey ?? '').trim() || null
+        : null,
+    metaExtraPatternKeyBeforeSave: String((metaExtra as any)?.patternKey ?? '').trim() || null,
+    metaExtraCtxPackPatternKeyBeforeSave:
+      String((metaExtra as any)?.ctxPack?.patternKey ?? '').trim() || null,
+  })
+);
+
+(metaExtra as any).patternKey = patternKey;
+(metaExtra as any).patternBlocks = patternBlocksResult.blocks;
 
     try {
       (metaExtra as any).ctxPack = {
@@ -6194,9 +6621,13 @@ if (slotDecision && typeof slotDecision === 'object') {
             : [],
           directSlotDisplayUsed,
           reorderedTextBlocksUsed,
-          pickedBlocksSource: usedSlotBlocksForDisplay ? 'slot_blocks' : 'raw_blocks',
+          pickedBlocksSource: usedSlotBlocksForDisplay
+            ? 'rephraseBlocks_display'
+            : 'raw_blocks',
           finalBlocksLen: Array.isArray(blocksText) ? blocksText.length : 0,
-          note: usedSlotBlocksForDisplay ? 'slot_blocks_used_for_display' : 'slot_blocks_not_used',
+          note: usedSlotBlocksForDisplay
+            ? 'rephraseBlocks_display_used'
+            : 'slot_blocks_not_used',
           slotOrder: Array.isArray(slotDecision?.order) ? slotDecision.order : [],
           slotWeights: slotDecision?.weights ?? null,
           slotEmphasis: slotDecision?.emphasis ?? null,
@@ -6228,12 +6659,27 @@ if (slotDecision && typeof slotDecision === 'object') {
       return { density, charLen, newlines, punctRatio, kanjiRatio };
     };
 
-    const blocks = (Array.isArray(blocksText) ? blocksText : [])
-      .map((t) => ({
-        text: String(t ?? '').trim(),
-        kind: 'p' as const,
-      }))
-      .filter((block) => block.text.length > 0);
+    const blocks =
+    (activePatternKeyForDisplay === 'NORMAL_DETAIL_V1' ||
+      activePatternKeyForDisplay === 'DECLARATION_RESONANCE_V1' ||
+      activePatternKeyForDisplay === 'NORMAL_RESONANCE_V1') &&
+      Array.isArray(materializedBlocks) &&
+      materializedBlocks.length > 0
+        ? materializedBlocks
+            .map((block) => ({
+              text: String(block.text ?? '').trim(),
+              kind: 'p' as const,
+              slotKey: block.slotKey,
+              blockKey: block.blockKey,
+              heading: block.heading,
+            }))
+            .filter((block) => block.text.length > 0)
+        : (Array.isArray(blocksText) ? blocksText : [])
+            .map((t) => ({
+              text: String(t ?? '').trim(),
+              kind: 'p' as const,
+            }))
+            .filter((block) => block.text.length > 0);
 
     // ✅ 1回だけ代入（重複排除）
     metaExtra.rephraseBlocks = blocks;
@@ -7333,10 +7779,14 @@ const slotDecisionForWriter = computeSlotDecisionFromEngine({
 if (ctxPackForWriter && typeof ctxPackForWriter === 'object') {
   (ctxPackForWriter as any).slotDecision = slotDecisionForWriter;
 }
-const writerPatternKey = String(
-  (ctxPackForWriter && typeof ctxPackForWriter === 'object'
-    ? (ctxPackForWriter as any).patternKey
-    : null) ??
+const selectedPatternKey = String(
+  (opts as any)?.meta?.extra?.ctxPack?.patternKey ??
+    (opts as any)?.meta?.extra?.patternKey ??
+    (ctxPackForWriter && typeof ctxPackForWriter === 'object'
+      ? (ctxPackForWriter as any).patternKey
+      : null) ??
+    (opts as any)?.ctxPack?.patternKey ??
+    (opts as any)?.userContext?.ctxPack?.patternKey ??
     selectSlotPattern({
       line: String(
         (opts as any)?.meta?.extra?.presentationKind ??
@@ -7345,7 +7795,15 @@ const writerPatternKey = String(
       )
         .trim()
         .toLowerCase(),
-      questionType: null,
+      questionType:
+        String(
+          (opts as any)?.userContext?.question?.questionType ??
+            (opts as any)?.userContext?.meta?.extra?.question?.questionType ??
+            (opts as any)?.ctxPack?.question?.questionType ??
+            (opts as any)?.meta?.extra?.question?.questionType ??
+            (opts as any)?.meta?.extra?.ctxPack?.question?.questionType ??
+            ''
+        ).trim() || null,
       detailMode:
         (opts as any)?.ctxPack?.detailMode === true ||
         (opts as any)?.userContext?.ctxPack?.detailMode === true,
@@ -7356,6 +7814,78 @@ const writerPatternKey = String(
     }) ??
     ''
 ).trim();
+const goalKindForPattern = String(
+  (ctxPackForWriter && typeof ctxPackForWriter === 'object'
+    ? (ctxPackForWriter as any).goalKind
+    : null) ??
+    (ctxPackForWriter && typeof ctxPackForWriter === 'object'
+      ? (ctxPackForWriter as any).replyGoal?.kind
+      : null) ??
+    ''
+).trim();
+
+const laneKeyForPattern = String(
+  (ctxPackForWriter && typeof ctxPackForWriter === 'object'
+    ? (ctxPackForWriter as any).laneKey
+    : null) ??
+    ''
+).trim();
+
+const shouldForceDecidePattern =
+  goalKindForPattern === 'decide' || laneKeyForPattern === 'T_CONCRETIZE';
+
+const writerPatternKey = (
+  shouldForceDecidePattern &&
+  selectedPatternKey === 'NORMAL_RESONANCE_V1'
+    ? 'NORMAL_DETAIL_V1'
+    : selectedPatternKey
+) as any;
+
+console.log(
+  '[IROS/rephraseEngine][WRITER_PATTERN_KEY_TRACE]',
+  JSON.stringify({
+    traceId: debug.traceId ?? null,
+    conversationId: debug.conversationId ?? null,
+    userCode: debug.userCode ?? null,
+    selectedPatternKey,
+    goalKindForPattern,
+    laneKeyForPattern,
+    shouldForceDecidePattern,
+    writerPatternKey,
+    metaExtraPatternKey: String((opts as any)?.meta?.extra?.patternKey ?? '').trim() || null,
+    metaExtraCtxPackPatternKey:
+      String((opts as any)?.meta?.extra?.ctxPack?.patternKey ?? '').trim() || null,
+    ctxPackPatternKey:
+      ctxPackForWriter && typeof ctxPackForWriter === 'object'
+        ? String((ctxPackForWriter as any).patternKey ?? '').trim() || null
+        : null,
+    userContextQuestionType:
+      String((opts as any)?.userContext?.question?.questionType ?? '').trim() || null,
+    userContextMetaQuestionType:
+      String((opts as any)?.userContext?.meta?.extra?.question?.questionType ?? '').trim() || null,
+    ctxPackQuestionType:
+      String((opts as any)?.ctxPack?.question?.questionType ?? '').trim() || null,
+    metaExtraQuestionType:
+      String((opts as any)?.meta?.extra?.question?.questionType ?? '').trim() || null,
+    metaExtraCtxPackQuestionType:
+      String((opts as any)?.meta?.extra?.ctxPack?.question?.questionType ?? '').trim() || null,
+    userText: String((opts as any)?.userText ?? '').trim() || null,
+  })
+);
+
+try {
+  const metaObj =
+    (opts as any)?.meta && typeof (opts as any).meta === 'object'
+      ? (opts as any).meta
+      : (((opts as any).meta = {}), (opts as any).meta);
+
+  const extraObj =
+    metaObj?.extra && typeof metaObj.extra === 'object'
+      ? metaObj.extra
+      : ((metaObj.extra = {}), metaObj.extra);
+
+  extraObj.patternKey = writerPatternKey;
+} catch {}
 
 const isDetailPatternWriter =
   writerPatternKey === 'IR_DETAIL_V1' ||
@@ -7541,14 +8071,19 @@ const finalPatternContractMsg =
                 'paragraph4_sentence1=leave_one_quiet_residue_in_the_state_itself_without_meta_commentary_text_reference_or_sufficiency_closure',
               ]
             : [
-                'paragraph1_must_follow_current_state_then_misrecognition_negation_then_structural_reframe=true',
-                'paragraph2_must_follow_breakdown_core_gap_then_breakdown_defense_then_breakdown_rejection_target=true',
-                'paragraph3_must_follow_reading_direction_then_sort_axis_then_sort_boundary=true',
-                'paragraph3_min_sentences=2',
-                'paragraph4_must_include_caution=true',
-                'paragraph4_must_end_with_closing_line=true',
-                'paragraph4_min_sentences=2',
-                'emit_fixed_section_headings=false',
+              'paragraph1_must_follow_current_state_then_misrecognition_negation_then_structural_reframe=true',
+              'paragraph1_min_sentences=3',
+              'paragraph1_sentence3=place_one_soft_assertion_of_the_core_without_overexplaining_or_hard_closure',
+              'paragraph2_must_follow_breakdown_core_gap_then_breakdown_defense_then_breakdown_rejection_target=true',
+              'paragraph2_min_sentences=3',
+              'paragraph2_sentence1=name_what_two_forces_or_needs_are_coexisting_in_plain_language_without_meta_explanation',
+              'paragraph3_must_follow_reading_direction_then_sort_axis_then_sort_boundary=true',
+              'paragraph3_min_sentences=3',
+              'paragraph3_sentence1=place_a_tentative_direction_of_which_side_is_more_central_now_without_finalizing_the_conclusion',
+              'paragraph4_must_include_caution=true',
+              'paragraph4_must_end_with_closing_line=true',
+              'paragraph4_min_sentences=3',
+              'emit_fixed_section_headings=false',
               ]),
         ].join('\n'),
       } as const)
@@ -7582,9 +8117,11 @@ const finalPatternContractMsg =
               String(m?.content ?? '').includes('PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):')
             )
           : false,
-        hasP1CoreRule: Array.isArray(messagesForWriterFinal)
+          hasP1CoreRule: Array.isArray(messagesForWriterFinal)
           ? messagesForWriterFinal.some((m: any) =>
-              String(m?.content ?? '').includes('paragraph1_must_start_from_user_core=true')
+              String(m?.content ?? '').includes(
+                'paragraph1_must_begin_from_state_itself=true'
+              )
             )
           : false,
         hasP4ResidueRule: Array.isArray(messagesForWriterFinal)
@@ -8645,26 +9182,28 @@ userContext: {
   // ---------------------------------------------
   {
     const patternKeyNow = String(
-      selectSlotPattern({
-        line: String(
-          (opts as any)?.meta?.extra?.presentationKind ??
-            (opts as any)?.userContext?.meta?.extra?.presentationKind ??
-            ''
-        )
-          .trim()
-          .toLowerCase(),
-        questionType: null,
-        detailMode:
-          (opts as any)?.ctxPack?.detailMode === true ||
-          (opts as any)?.userContext?.ctxPack?.detailMode === true,
-        followupText: String((opts as any)?.userText ?? '').trim(),
-        userText: String((opts as any)?.userText ?? '').trim(),
-        targetLabel: null,
-        hasPriorDiagnosis: false,
-      }) ?? ''
+      (opts as any)?.meta?.extra?.patternKey ??
+        selectSlotPattern({
+          line: String(
+            (opts as any)?.meta?.extra?.presentationKind ??
+              (opts as any)?.userContext?.meta?.extra?.presentationKind ??
+              ''
+          )
+            .trim()
+            .toLowerCase(),
+          questionType: null,
+          detailMode:
+            (opts as any)?.ctxPack?.detailMode === true ||
+            (opts as any)?.userContext?.ctxPack?.detailMode === true,
+          followupText: String((opts as any)?.userText ?? '').trim(),
+          userText: String((opts as any)?.userText ?? '').trim(),
+          targetLabel: null,
+          hasPriorDiagnosis: false,
+        }) ??
+        ''
     ).trim();
     const shouldApplyDeclarationParagraphGuard =
-      patternKeyNow === 'NORMAL_RESONANCE_V1';
+      patternKeyNow === 'DECLARATION_RESONANCE_V1';
 
     if (shouldApplyDeclarationParagraphGuard) {
       const candidateTextNow = String(candidate ?? '').trim();
@@ -8969,29 +9508,30 @@ userContext: {
       ? candidateTextNow.split(/\n{2,}/).map((v) => String(v ?? '').trim()).filter(Boolean).length
       : 0;
 
-    const activePatternKeyNow = String(
-      selectSlotPattern({
-        line: String(
-          (opts as any)?.meta?.extra?.presentationKind ??
-            (opts as any)?.userContext?.meta?.extra?.presentationKind ??
-            ''
-        )
-          .trim()
-          .toLowerCase(),
-        questionType: null,
-        detailMode:
-          (opts as any)?.ctxPack?.detailMode === true ||
-          (opts as any)?.userContext?.ctxPack?.detailMode === true,
-        followupText: String((opts as any)?.userText ?? '').trim(),
-        userText: String((opts as any)?.userText ?? '').trim(),
-        targetLabel: null,
-        hasPriorDiagnosis: false,
-      }) ?? ''
-    ).trim();
+      const activePatternKeyNow = String(
+        (opts as any)?.meta?.extra?.patternKey ??
+          selectSlotPattern({
+            line: String(
+              (opts as any)?.meta?.extra?.presentationKind ??
+                (opts as any)?.userContext?.meta?.extra?.presentationKind ??
+                ''
+            )
+              .trim()
+              .toLowerCase(),
+            questionType: null,
+            detailMode:
+              (opts as any)?.ctxPack?.detailMode === true ||
+              (opts as any)?.userContext?.ctxPack?.detailMode === true,
+            followupText: String((opts as any)?.userText ?? '').trim(),
+            userText: String((opts as any)?.userText ?? '').trim(),
+            targetLabel: null,
+            hasPriorDiagnosis: false,
+          }) ??
+          ''
+      ).trim();
 
     const isDeclarationLike =
-      activePatternKeyNow === 'DECLARATION_RESONANCE_V1' ||
-      activePatternKeyNow === 'NORMAL_RESONANCE_V1';
+    activePatternKeyNow === 'DECLARATION_RESONANCE_V1';
 
     if (isDeclarationLike && paragraphCountNow < 4) {
       const fallbackSeed =
@@ -9632,11 +10172,13 @@ userContext: {
   const shouldOkTooShortToRetry = tooShortPol.shouldOkTooShortToRetry;
 
   const detailPatternKeyNow = String(
-    (ctxPackForWriter as any)?.patternKey ??
+    (debug as any)?.patternKey ??
+      (ctxPackForWriter as any)?.patternKey ??
       (opts as any)?.ctxPack?.patternKey ??
       (opts as any)?.userContext?.ctxPack?.patternKey ??
       ''
   ).trim();
+
   const isDetailPatternNow =
     detailPatternKeyNow === 'NORMAL_DETAIL_V1' || detailPatternKeyNow === 'IR_DETAIL_V1';
 
@@ -9920,10 +10462,16 @@ userContext: {
     const c = seedDraft && seedDraft.trim() ? seedDraft.trim() : '';
 
     const reasons = new Set((((v as any)?.reasons ?? []) as any[]).map((x) => String(x)));
-    const preferCandidateBecauseTooShort = reasons.has('OK_TOO_SHORT_TO_RETRY');
-    const preferSeedDraft = reasons.has('NORMAL_SHORT_GENERIC_NO_QUESTION') || reasons.has('WARN_TO_RETRY');
+    const preferCandidateBecauseTooShort =
+      reasons.has('OK_TOO_SHORT_TO_RETRY') ||
+      reasons.has('DETAIL_PATTERN_TOO_SHORT_TO_RETRY') ||
+      reasons.has('DETAIL_PATTERN_PARAGRAPH_CONTRACT');
 
-    if (isDirectTask) return a || b || '';
+    const preferSeedDraft =
+      reasons.has('NORMAL_SHORT_GENERIC_NO_QUESTION') || reasons.has('WARN_TO_RETRY');
+
+    if (isDirectTask && preferCandidateBecauseTooShort) return b || a || c || '';
+    if (isDirectTask) return a || b || c || '';
 
     if (preferCandidateBecauseTooShort) return b || a || c || '';
     if (preferSeedDraft) return a || c || b || '';
@@ -9966,6 +10514,17 @@ userContext: {
       String((ctxPackForWriter as any)?.continuityKind ?? '').trim() || null,
   });
 
+  const retryPatternKey = String(
+    (ctxPackForWriter as any)?.patternKey ??
+      (opts as any)?.ctxPack?.patternKey ??
+      (opts as any)?.userContext?.ctxPack?.patternKey ??
+      activePatternKeyForContract ??
+      ''
+  ).trim();
+
+  const retryIsDetailPattern =
+    retryPatternKey === 'NORMAL_DETAIL_V1' || retryPatternKey === 'IR_DETAIL_V1';
+
   const retryWriterDirectivesFromSlot = {
     slot_order: Array.isArray(retrySlotDecisionForWriter?.order)
       ? retrySlotDecisionForWriter.order.join(',')
@@ -9991,6 +10550,10 @@ userContext: {
             String(v),
           ])
         )
+      : {}),
+
+    ...(retryIsDetailPattern
+      ? buildDetailPatternWriterDirectives(retryPatternKey)
       : {}),
   };
   return await runRetryPass({

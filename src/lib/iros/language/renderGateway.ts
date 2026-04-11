@@ -2408,13 +2408,26 @@ pickedFrom = pickedFrom === 'text' ? 'rephraseBlocks-forced' : pickedFrom;
               ? blocksForRender.length
               : 0;
 
-    // ✅ rephraseBlocks 系が最終採用に絡んでいるなら short-path 診断はスキップ
+    // ✅ rephraseBlocks 系が最終採用に絡んでいるなら通常は short-path 診断をスキップ
+    // ただし NORMAL_RESONANCE_V1 は 4段責務が契約なので、短すぎる本文は診断対象に残す
+    const activePatternKeyForShortOut = String(
+      (extra as any)?.writerDirectives?.pattern_key ??
+      (extra as any)?.patternKey ??
+      (extra as any)?.ctxPack?.patternKey ??
+      (args as any)?.meta?.extra?.patternKey ??
+      (args as any)?.extra?.patternKey ??
+      ''
+    ).trim();
+
     const usesRephraseBlocks =
       pickedFromStr === 'rephraseBlocks' ||
       pickedFromStr === 'rephraseBlocks-forced' ||
       fallbackFromStr === 'rephraseBlocks' ||
       fallbackFromStr === 'rephraseBlocks-forced' ||
       rephraseBlocksLen > 0;
+
+    const skipShortOutDiag =
+      usesRephraseBlocks && activePatternKeyForShortOut !== 'NORMAL_RESONANCE_V1';
 
     // ✅ blocksCount は「最終的に render に渡す blocks（= blocksForRender）」で数える
     const blocksCountForMeta = Array.isArray(blocksForRender) ? blocksForRender.length : 0;
@@ -2423,7 +2436,7 @@ pickedFrom = pickedFrom === 'text' ? 'rephraseBlocks-forced' : pickedFrom;
     const isShortOut =
       !isIR &&
       !shortException &&
-      !usesRephraseBlocks &&
+      !skipShortOutDiag &&
       Number.isFinite(meta.outLen) &&
       meta.outLen > 0 &&
       meta.outLen < 160;

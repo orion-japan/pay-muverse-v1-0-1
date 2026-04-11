@@ -2052,7 +2052,7 @@ function buildFlowReply(args: {
             },
             allow: {
               concrete_reply: true,
-              short_reply_ok: true,
+              short_reply_ok: false,
             },
             seed_text: seedText,
           });

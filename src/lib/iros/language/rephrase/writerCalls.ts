@@ -189,6 +189,7 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
   // ✅ 会話の線（topicDigest / conversationLine）を拾う（短く system 側に固定）
   const topicDigest = clampStr(norm(args.topicDigest ?? ''), 260);
   const conversationLine = clampStr(norm(args.conversationLine ?? ''), 260);
+  const historyText = clampStr(norm(args.historyText ?? ''), 800);
   const internalPackRaw = norm(args.internalPack ?? '');
   const topicDigestV2Raw =
     args.topicDigestV2 && typeof args.topicDigestV2 === 'object'
@@ -258,6 +259,9 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     systemPrompt,
     conversationLineBlockClamped
       ? `CONVERSATION_LINE (DO NOT OUTPUT):\n${conversationLineBlockClamped}`
+      : '',
+    historyText
+      ? historyText
       : '',
     topicDigestV2Block
       ? `TOPIC_DIGEST_V2 (DO NOT OUTPUT):\n${topicDigestV2Block}`
@@ -476,12 +480,26 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
   futureFlowRaw,
 });
 
-  const mirrorFlowV1ForSeed: any =
-    pick(
-      (args as any)?.mirrorFlowV1,
-      (ctxPack as any)?.mirrorFlowV1,
-      (extra as any)?.mirrorFlowV1,
-    ) ?? null;
+const userContextExtraForSeed: any =
+(args as any)?.userContext?.meta?.extra ??
+(args as any)?.userContext?.extra ??
+null;
+
+const mirrorFlowV1ForSeed: any =
+  firstNonNull(
+    (args as any)?.mirrorFlowV1,
+    (args as any)?.userContext?.ctxPack?.mirrorFlowV1,
+    (args as any)?.userContext?.meta?.extra?.ctxPack?.mirrorFlowV1,
+    (args as any)?.userContext?.meta?.extra?.mirrorFlowV1,
+    (args as any)?.userContext?.extra?.ctxPack?.mirrorFlowV1,
+    (args as any)?.userContext?.extra?.mirrorFlowV1,
+    (ctxPack as any)?.mirrorFlowV1,
+    (extra as any)?.mirrorFlowV1,
+    (extra as any)?.ctxPack?.mirrorFlowV1,
+    userContextExtraForSeed?.ctxPack?.mirrorFlowV1,
+    userContextExtraForSeed?.mirrorFlowV1,
+    null,
+  ) ?? null;
 
   const qCountsForSeed: any =
     pick(
@@ -621,7 +639,226 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
     .trim()
     .toLowerCase();
 
-    const seedTextRaw = String(
+    const mirrorFlowSeedText = (() => {
+      const mf: any = mirrorFlowV1ForSeed;
+
+      const mirror: any =
+        mf?.mirror ??
+        mf?.mirrorFlow ??
+        mf?.mirror_flow ??
+        mf?.meta?.mirror ??
+        (ctxPack as any)?.mirror ??
+        (extra as any)?.mirror ??
+        null;
+
+      const flowMf: any =
+        mf?.flow ??
+        mf?.flowMeta ??
+        mf?.flow_meta ??
+        mf?.meta?.flow ??
+        (ctxPack as any)?.flow ??
+        (extra as any)?.flow ??
+        null;
+
+      const coordMf: any =
+        mf?.coord ??
+        mf?.coordinate ??
+        mf?.coords ??
+        mf?.meta?.coord ??
+        null;
+
+      const basedOnMf: any =
+        mf?.basedOn ??
+        mf?.based_on ??
+        mf?.source ??
+        mf?.meta?.basedOn ??
+        null;
+
+      const currentFlowSeed = String(
+        pick(
+          typeof currentFlowAny === 'string' ? currentFlowAny : '',
+          typeof internalPackRaw === 'string'
+            ? (internalPackRaw.match(/current=([^\n]+)/)?.[1] ?? '')
+            : '',
+          '',
+        ) ?? '',
+      ).trim();
+
+      const eTurnSeed = String(
+        pick(
+          mirror?.e_turn,
+          mirror?.eTurn,
+          mf?.e_turn,
+          mf?.eTurn,
+          (ctxPack as any)?.mirror?.e_turn,
+          (ctxPack as any)?.mirror?.eTurn,
+          (extra as any)?.mirror?.e_turn,
+          (extra as any)?.mirror?.eTurn,
+          eTurn,
+          typeof internalPackRaw === 'string'
+            ? (internalPackRaw.match(/e_turn=([^\n]+)/)?.[1] ?? '')
+            : '',
+          '',
+        ) ?? '',
+      ).trim();
+
+      const polarityObj = pick(
+        mirror?.polarity,
+        mf?.polarity,
+        (ctxPack as any)?.mirror?.polarity,
+        (extra as any)?.mirror?.polarity,
+        null,
+      ) as any;
+
+      const polaritySeed = String(
+        pick(
+          typeof polarityObj === 'string' ? polarityObj : '',
+          polarityObj?.out,
+          polarityObj?.metaBand,
+          polarityObj?.in,
+          mirror?.polarity_out,
+          mirror?.polarityBand,
+          mf?.polarity_out,
+          mf?.polarityBand,
+          polarity,
+          currentFlowSeed.endsWith('-pos') ? 'pos' : '',
+          currentFlowSeed.endsWith('-neg') ? 'neg' : '',
+          '',
+        ) ?? '',
+      ).trim();
+
+      const intensitySeed = String(
+        pick(
+          mirror?.intensity,
+          mirror?.strength,
+          mf?.intensity,
+          mf?.strength,
+          (ctxPack as any)?.mirror?.intensity,
+          (extra as any)?.mirror?.intensity,
+          '',
+        ) ?? '',
+      ).trim();
+
+      const confidenceSeed = String(
+        pick(
+          mirror?.confidence,
+          mf?.confidence,
+          mirror?.mirrorConfidence,
+          mf?.mirrorConfidence,
+          '',
+        ) ?? '',
+      ).trim();
+
+      const deltaSeed = String(
+        pick(
+          flowMf?.delta,
+          flowMf?.type,
+          flowMf?.returnType,
+          mf?.delta,
+          mf?.type,
+          mf?.returnType,
+          typeof internalPackRaw === 'string'
+            ? (internalPackRaw.match(/delta=([^\n]+)/)?.[1] ?? '')
+            : '',
+          '',
+        ) ?? '',
+      ).trim();
+
+      const returnStreakSeed = String(
+        pick(
+          flowMf?.returnStreak,
+          flowMf?.return_streak,
+          mf?.returnStreak,
+          mf?.return_streak,
+          '',
+        ) ?? '',
+      ).trim();
+
+      const microSeed = String(
+        pick(
+          typeof flowMf?.micro === 'boolean' ? String(flowMf.micro) : '',
+          typeof mf?.micro === 'boolean' ? String(mf.micro) : '',
+          '',
+        ) ?? '',
+      ).trim();
+
+      const coordStageSeed = String(
+        pick(
+          coordMf?.stage,
+          coordMf?.depth,
+          mf?.stage,
+          mf?.depth,
+          '',
+        ) ?? '',
+      ).trim();
+
+      const coordBandSeed = String(
+        pick(
+          coordMf?.band,
+          coordMf?.phase,
+          mf?.band,
+          mf?.phase,
+          '',
+        ) ?? '',
+      ).trim();
+
+      const basedOnKeySeed = String(
+        pick(
+          basedOnMf?.key,
+          basedOnMf?.type,
+          mf?.basedOnKey,
+          mf?.sourceKey,
+          '',
+        ) ?? '',
+      ).trim();
+
+      const basedOnValueSeed = String(
+        pick(
+          basedOnMf?.value,
+          basedOnMf?.label,
+          basedOnMf?.text,
+          mf?.basedOnValue,
+          mf?.sourceValue,
+          '',
+        ) ?? '',
+      ).trim();
+
+      const lines: string[] = ['MIRROR_FLOW_SEED_V1:'];
+      if (currentFlowSeed) lines.push(`current=${currentFlowSeed}`);
+      if (eTurnSeed) lines.push(`e_turn=${eTurnSeed}`);
+      if (polaritySeed) lines.push(`polarity=${polaritySeed}`);
+      if (intensitySeed) lines.push(`intensity=${intensitySeed}`);
+      if (confidenceSeed) lines.push(`confidence=${confidenceSeed}`);
+      if (deltaSeed) lines.push(`flowDelta=${deltaSeed}`);
+      if (returnStreakSeed) lines.push(`returnStreak=${returnStreakSeed}`);
+      if (microSeed) lines.push(`micro=${microSeed}`);
+      if (coordStageSeed) lines.push(`coordStage=${coordStageSeed}`);
+      if (coordBandSeed) lines.push(`coordBand=${coordBandSeed}`);
+      if (basedOnKeySeed) lines.push(`basedOnKey=${basedOnKeySeed}`);
+      if (basedOnValueSeed) lines.push(`basedOnValue=${basedOnValueSeed}`);
+
+      try {
+        console.log(
+          '[IROS/writerCalls][MIRROR_FLOW_SEED_ENTER]',
+          JSON.stringify({
+            hasMf: !!mf,
+            mfType: typeof mf,
+            currentFlowSeed,
+            eTurnSeed,
+            polaritySeed,
+            deltaSeed,
+            lineCount: lines.length,
+            ctxPackHasMirrorFlowV1: !!((ctxPack as any)?.mirrorFlowV1),
+            extraHasMirrorFlowV1: !!((extra as any)?.mirrorFlowV1),
+          }),
+        );
+      } catch {}
+
+      if (lines.length <= 1) return '';
+      return lines.join('\n').trim();
+    })();
+
+    const seedTextRawBase = String(
       pick(
         // 🔥 ここを最優先に追加
         args?.internalPack,
@@ -642,6 +879,22 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
       ) ?? '',
     ).trim();
 
+    const seedTextRaw = (() => {
+      if (!mirrorFlowSeedText) return seedTextRawBase;
+      if (/MIRROR_FLOW_SEED_V1\b/.test(seedTextRawBase)) return seedTextRawBase;
+      return [mirrorFlowSeedText, seedTextRawBase].filter(Boolean).join('\n\n').trim();
+    })();
+    console.log(
+      '[IROS/writerCalls][SEED_TEXT_RAW_DIAG]',
+      JSON.stringify({
+        hasMirrorFlowSeedText: !!mirrorFlowSeedText,
+        mirrorFlowSeedTextHead: String(mirrorFlowSeedText ?? '').slice(0, 200),
+        seedTextRawBaseHead: String(seedTextRawBase ?? '').slice(0, 200),
+        seedTextRawHead: String(seedTextRaw ?? '').slice(0, 260),
+        seedTextRawHasMirrorFlowSeed: /MIRROR_FLOW_SEED_V1\b/.test(String(seedTextRaw ?? '')),
+        seedTextRawBaseHasMirrorFlowSeed: /MIRROR_FLOW_SEED_V1\b/.test(String(seedTextRawBase ?? '')),
+      })
+    );
   const flowDelta2 = String(pick(flow?.delta, (flow as any)?.flowDelta) ?? '').trim();
   const returnStreak2 = String(
     pick((flow as any)?.returnStreak, (flow as any)?.return_streak) ?? '',
@@ -1211,17 +1464,30 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                     const flowIdRe =
                       /^(e[1-5])-(S[1-3]|F[1-3]|R[1-3]|C[1-3]|I[1-3]|T[1-3])-(pos|neg)$/;
 
-                    const currentFlowText = String(
-                      firstNonNull(
-                        (flowAny as any)?.currentFlow,
-                        (flowAny as any)?.current,
-                        currentFlowAny,
-                        typeof internalPackRaw === 'string'
-                          ? (internalPackRaw.match(/current=([^\n]+)/)?.[1] ?? '')
-                          : '',
-                        '',
-                      ) ?? '',
-                    ).trim();
+                      const currentFlowText = (() => {
+                        const fromPack =
+                          typeof internalPackRaw === 'string'
+                            ? String(
+                                internalPackRaw.match(/current=([^\n]+)/)?.[1] ?? '',
+                              ).trim()
+                            : '';
+
+                        if (flowIdRe.test(fromPack)) return fromPack;
+
+                        const raw = firstNonNull(
+                          typeof (flowAny as any)?.currentFlow === 'string'
+                            ? (flowAny as any).currentFlow
+                            : null,
+                          typeof (flowAny as any)?.current === 'string'
+                            ? (flowAny as any).current
+                            : null,
+                          typeof currentFlowAny === 'string' ? currentFlowAny : null,
+                          '',
+                        );
+
+                        const s = String(raw ?? '').trim();
+                        return flowIdRe.test(s) ? s : '';
+                      })();
 
                     const previousFlowText = String(
                       firstNonNull(
@@ -1286,7 +1552,18 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                       previousStateId,
                       futureStateId,
                     });
-
+                    try {
+                      console.log(
+                        '[IROS/writerCalls][FLOW180_BLOCK_DIAG]',
+                        JSON.stringify({
+                          currentFlowText,
+                          previousFlowText,
+                          currentStateId,
+                          previousStateId,
+                          futureStateId,
+                        })
+                      );
+                    } catch {}
                     if (!currentStateId) return null;
 
                     const candidates = buildTransition180Candidates(currentStateId);
@@ -1308,6 +1585,7 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                     return null;
                   }
                 })();
+
                 const deltaHint = (() => {
                   try {
                     if (!questionMeta) return null;
@@ -1986,16 +2264,7 @@ console.log('[IROS/FLOW_V2_RECOVERY]', {
                 })();
 
                 const futureHintLine = (() => {
-                  if (!futureFlowAny) return null;
-
-                  const stage = String(futureFlowAny?.stage ?? '').trim();
-                  const eTurn = String(futureFlowAny?.energy ?? '').trim();
-                  const polarity = String(futureFlowAny?.polarity ?? '').trim();
-
-                  const parts = [stage, eTurn, polarity].filter((v) => v.length > 0);
-                  if (!parts.length) return null;
-
-                  return `future:${parts.join('/')}`;
+                  return null;
                 })();
 
               (args as any).flow180 = (() => {
@@ -2142,78 +2411,96 @@ return {
   openingMode,
   responseLength,
 
-  firstTouch: {
-    ...incomingFirstTouch,
-    enabled: goalKindNow === 'resonate',
-    hint: touchHint,
-    rules: [
-      '最初の1文は観測のみ。理由・解釈・結論・一般化は禁止。',
-      '最初の1文は、相手の変化・気づき・違和感・届いた感じのいずれかに触れる',
-      'ユーザーの言い回し・断定・温度をそのまま受けて返す',
-      '構造説明から入らない',
-      '一般論から入らない',
-      '問い返しから入らない',
-      '入力の意味を言い換える前に、まず相手に触れる',
-      '受け取りの一言を先に置いてよい',
-      '一緒に見ている感じを含めてよい',
-      '2〜3文で自然に広げてよい（1文で終わらせない）',
-    ],
-  },
+  firstTouch: isResonancePattern
+    ? {
+        ...incomingFirstTouch,
+        enabled:
+          typeof incomingFirstTouch.enabled === 'boolean'
+            ? incomingFirstTouch.enabled
+            : goalKindNow === 'resonate',
+        hint: incomingFirstTouch.hint ?? touchHint,
+        rules: Array.isArray(incomingFirstTouch.rules)
+          ? incomingFirstTouch.rules
+          : [],
+      }
+    : {
+        ...incomingFirstTouch,
+        enabled: goalKindNow === 'resonate',
+        hint: touchHint,
+        rules: [
+          '最初の1文は観測のみ。理由・解釈・結論・一般化は禁止。',
+          '最初の1文は、相手の変化・気づき・違和感・届いた感じのいずれかに触れる',
+          'ユーザーの言い回し・断定・温度をそのまま受けて返す',
+          '構造説明から入らない',
+          '一般論から入らない',
+          '問い返しから入らない',
+          '入力の意味を言い換える前に、まず相手に触れる',
+          '受け取りの一言を先に置いてよい',
+          '一緒に見ている感じを含めてよい',
+          '2〜3文で自然に広げてよい（1文で終わらせない）',
+        ],
+      },
 
-  bodyStyle: {
-    ...incomingBodyStyle,
-    coreFirst: true,
-    allowSoftExpand: true,
-    minSentences:
-      typeof incomingBodyStyle.minSentences === 'number'
-        ? incomingBodyStyle.minSentences
-        : goalKindNow === 'decide'
-          ? 4
-          : 3,
-    maxSentences:
-      typeof incomingBodyStyle.maxSentences === 'number'
-        ? incomingBodyStyle.maxSentences
-        : goalKindNow === 'decide'
-          ? 7
-          : 6,
-    allowEmpathicBridge:
-      typeof incomingBodyStyle.allowEmpathicBridge === 'boolean'
-        ? incomingBodyStyle.allowEmpathicBridge
-        : true,
-    allowGentleRephrase:
-      typeof incomingBodyStyle.allowGentleRephrase === 'boolean'
-        ? incomingBodyStyle.allowGentleRephrase
-        : isResonancePattern
-          ? false
-          : true,
-    forbidTopicExpansion:
-      typeof incomingBodyStyle.forbidTopicExpansion === 'boolean'
-        ? incomingBodyStyle.forbidTopicExpansion
-        : true,
-    delayClosure:
-      typeof incomingBodyStyle.delayClosure === 'boolean'
-        ? incomingBodyStyle.delayClosure
-        : true,
-    preferBlockSplit:
-      typeof incomingBodyStyle.preferBlockSplit === 'boolean'
-        ? incomingBodyStyle.preferBlockSplit
-        : true,
-    maxSentencesPerBlock:
-      typeof incomingBodyStyle.maxSentencesPerBlock === 'number'
-        ? incomingBodyStyle.maxSentencesPerBlock
-        : 2,
-    minBlocks:
-      typeof incomingBodyStyle.minBlocks === 'number'
-        ? incomingBodyStyle.minBlocks
-        : 2,
-  },
+  bodyStyle: isResonancePattern
+    ? {
+        ...incomingBodyStyle,
+      }
+    : {
+        ...incomingBodyStyle,
+        coreFirst: true,
+        allowSoftExpand: true,
+        minSentences:
+          typeof incomingBodyStyle.minSentences === 'number'
+            ? incomingBodyStyle.minSentences
+            : goalKindNow === 'decide'
+              ? 4
+              : 3,
+        maxSentences:
+          typeof incomingBodyStyle.maxSentences === 'number'
+            ? incomingBodyStyle.maxSentences
+            : goalKindNow === 'decide'
+              ? 7
+              : 6,
+        allowEmpathicBridge:
+          typeof incomingBodyStyle.allowEmpathicBridge === 'boolean'
+            ? incomingBodyStyle.allowEmpathicBridge
+            : true,
+        allowGentleRephrase:
+          typeof incomingBodyStyle.allowGentleRephrase === 'boolean'
+            ? incomingBodyStyle.allowGentleRephrase
+            : isResonancePattern
+              ? false
+              : true,
+        forbidTopicExpansion:
+          typeof incomingBodyStyle.forbidTopicExpansion === 'boolean'
+            ? incomingBodyStyle.forbidTopicExpansion
+            : true,
+        delayClosure:
+          typeof incomingBodyStyle.delayClosure === 'boolean'
+            ? incomingBodyStyle.delayClosure
+            : true,
+        preferBlockSplit:
+          typeof incomingBodyStyle.preferBlockSplit === 'boolean'
+            ? incomingBodyStyle.preferBlockSplit
+            : true,
+        maxSentencesPerBlock:
+          typeof incomingBodyStyle.maxSentencesPerBlock === 'number'
+            ? incomingBodyStyle.maxSentencesPerBlock
+            : 2,
+        minBlocks:
+          typeof incomingBodyStyle.minBlocks === 'number'
+            ? incomingBodyStyle.minBlocks
+            : 2,
+      },
 
   flowLine,
   deltaLine: bestShiftDirection || null,
   flowFrom: String((args as any)?.flow180?.from ?? '').trim() || null,
   flowTo: String((args as any)?.flow180?.to ?? '').trim() || null,
 
-  writeConstraints: mergedWriteConstraints,
+  writeConstraints: isResonancePattern
+    ? incomingWriteConstraints
+    : mergedWriteConstraints,
 };
               })();
 
@@ -2643,6 +2930,7 @@ const internalPackRawCleaned =
                     })();
 
                     const seedBlocksForWriter = [
+                      mirrorFlowSeedText,
                       canonicalSeedText,
                       flowV2Text,
                       flow180Block,
@@ -3100,8 +3388,14 @@ try {
         // ❌ MEANING_SKELETON は完全停止（SEED主導に統一）
         const systemOneWithMeaning = String(systemOne ?? '').trim();
 
+        const historyMsg =
+        String(args.historyText ?? '').trim().length > 0
+          ? ({ role: 'assistant', content: String(args.historyText).trim() } as WriterMessage)
+          : null;
+
       let messages: WriterMessage[] = [
         { role: 'system', content: systemOneWithMeaning },
+        ...(historyMsg ? [historyMsg] : []),
         ...(packMsg ? [packMsg] : []),
         ...(topicRecallNoEvidenceMsg ? [topicRecallNoEvidenceMsg] : []),
         ...turns,
@@ -3266,6 +3560,7 @@ export async function callWriterLLM(args: {
         const isInternalPack =
           /^INTERNAL PACK \(DO NOT OUTPUT\):/i.test(a0) ||
           /^COORD \(DO NOT OUTPUT\):/i.test(a0) ||
+          /^HISTORY_LITE \(DO NOT OUTPUT\):/i.test(a0) ||
           /^TOPIC_RECALL_NO_EVIDENCE \(DO NOT OUTPUT\):/i.test(a0) ||
           /^FLOW_V2 \(DO NOT OUTPUT\):/i.test(a0) ||
           /^FLOW180(?:_SEED)? \(DO NOT OUTPUT\):/i.test(a0) ||
@@ -3331,24 +3626,65 @@ export async function callWriterLLM(args: {
 
   // --- ここまで：冒頭オウム返し除去ガード ---
 
-  const out = await chatComplete({
-    purpose: 'writer',
-    model: args.model,
-    temperature: args.temperature,
-    max_tokens: 1200,
-    messages: messagesFinal,
-    extraBody: args.extraBody ?? {},
-    traceId: args.traceId ?? null,
-    conversationId: args.conversationId ?? null,
-    userCode: args.userCode ?? null,
-    audit: args.audit ?? null,
-    trace: {
+  let out = '';
+
+  try {
+    out = await chatComplete({
+      purpose: 'writer',
+      model: args.model,
+      temperature: args.temperature,
+      max_tokens: 1200,
+      messages: messagesFinal,
+      extraBody: args.extraBody ?? {},
       traceId: args.traceId ?? null,
       conversationId: args.conversationId ?? null,
       userCode: args.userCode ?? null,
-    },
-  });
+      audit: args.audit ?? null,
+      trace: {
+        traceId: args.traceId ?? null,
+        conversationId: args.conversationId ?? null,
+        userCode: args.userCode ?? null,
+      },
+    });
+  } catch (err: any) {
+    const msg = String(err?.message ?? err ?? '');
+    const shouldRetry =
+      /LLM HTTP 5\d\d/i.test(msg) ||
+      /server_error/i.test(msg) ||
+      /status:\s*5\d\d/i.test(msg);
 
+    if (!shouldRetry) {
+      throw err;
+    }
+
+    console.log(
+      '[IROS/writerCalls][WRITER_RETRY_ON_5XX]',
+      JSON.stringify({
+        traceId: args.traceId ?? null,
+        conversationId: args.conversationId ?? null,
+        userCode: args.userCode ?? null,
+        reason: msg.slice(0, 240),
+      })
+    );
+
+    out = await chatComplete({
+      purpose: 'writer',
+      model: args.model,
+      temperature: args.temperature,
+      max_tokens: 1200,
+      messages: messagesFinal,
+      extraBody: args.extraBody ?? {},
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode ?? null,
+      audit: args.audit ?? null,
+      trace: {
+        traceId: args.traceId ?? null,
+        conversationId: args.conversationId ?? null,
+        userCode: args.userCode ?? null,
+      },
+    });
+  }
   const finalText = stripLeadingEcho(out ?? '');
   let text = finalText;
 
