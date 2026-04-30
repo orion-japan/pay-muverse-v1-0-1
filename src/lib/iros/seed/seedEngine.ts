@@ -66,6 +66,17 @@ export type FlowSeedV21Input = {
   flow180?: Flow180Like | null;
   writerDirectives?: WriterDirectivesLike | null;
 
+  surfacePlan?: {
+    obsCore?: string | null;
+    shiftCore?: string | null;
+    nextCore?: string | null;
+    safeCore?: string | null;
+    obsLine?: string | null;
+    shiftLine?: string | null;
+    nextLine?: string | null;
+    safeLine?: string | null;
+  } | null;
+
   focus?: string | null;
   tone?: string | null;
   pressure?: string | null;
@@ -591,6 +602,14 @@ export function buildFlowSeedV1(input: FlowSeedV21Input): FlowSeedV21 {
     meaningSkeleton: input.meaningSkeleton ?? null,
     flow180: input.flow180 ?? null,
 
+    flow: {
+      current: flow.current,
+      prev: flow.prev,
+      delta: flow.delta,
+      energy: flow.energy,
+      futureRandom: flow.futureRandom,
+    },
+
     focus: compression.focus,
     tone: compression.tone,
     pressure: normalizedPressure,
@@ -609,6 +628,8 @@ export function buildFlowSeedV1(input: FlowSeedV21Input): FlowSeedV21 {
     phase: pickString(input.phase),
     qCode: pickString(input.qCode),
     eTurn: pickString(input.eTurn) ?? flow.energy,
+
+    surfacePlan: input.surfacePlan ?? null,
   });
 
   return {
@@ -625,8 +646,16 @@ export function buildFlowSeedV1(input: FlowSeedV21Input): FlowSeedV21 {
 }
 
 export function formatFlowSeedV1(seed: FlowSeedV21): string {
+  const canonicalText = pickString(seed.canonical?.text);
+
+  if (canonicalText) {
+    return canonicalText;
+  }
+
   const lines: string[] = [];
 
+  lines.push('SEED (DO NOT OUTPUT):');
+  lines.push('');
   lines.push('FLOW:');
   lines.push(`current=${seed.flow.current ?? '(null)'}`);
   lines.push(`prev=${seed.flow.prev ?? '(null)'}`);
@@ -636,15 +665,7 @@ export function formatFlowSeedV1(seed: FlowSeedV21): string {
 
   lines.push('');
   lines.push('CONTEXT:');
-  lines.push(`userCore=${seed.context.userCore ?? '(null)'}`);
-  lines.push(`historyLine=${seed.context.historyLine ?? '(null)'}`);
-  lines.push(`memoryLine=${seed.context.memoryLine ?? '(null)'}`);
-
-  if (seed.meaning) {
-    lines.push('');
-    lines.push('MEANING:');
-    lines.push(seed.meaning);
-  }
+  lines.push(seed.context.userCore ?? '(null)');
 
   lines.push('');
   lines.push('FOCUS:');
@@ -662,11 +683,6 @@ export function formatFlowSeedV1(seed: FlowSeedV21): string {
       seed.compression.pressure,
     ),
   );
-
-  if (seed.canonical?.text) {
-    lines.push('');
-    lines.push(seed.canonical.text);
-  }
 
   return lines.join('\n').trim();
 }

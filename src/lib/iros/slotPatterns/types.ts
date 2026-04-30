@@ -2,13 +2,12 @@ export type PatternKey =
   | 'NORMAL_V1'
   | 'NORMAL_DETAIL_V1'
   | 'NORMAL_RESONANCE_V1'
+  | 'NORMAL_COMPRESSED_V1'
   | 'DECLARATION_RESONANCE_V1'
   | 'TRUTH_V1'
+  | 'TRUTH_COMPRESSED_V1'
   | 'IR_LIGHT_V1'
   | 'IR_DETAIL_V1';
-
-// src/lib/iros/slotPatterns/types.ts
-// 9-39 行をこのブロックで丸ごと置換
 
 export type PatternSlotKey =
   | 'TARGET'

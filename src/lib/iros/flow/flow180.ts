@@ -31,6 +31,7 @@ export type FlowStateEntry = {
   stage: FlowStage;
   polarity: FlowPolarity;
   short: string;
+  resonance: string;
 };
 
 export type FlowDeltaType =
@@ -224,6 +225,19 @@ export function parseFlowStateId(id: string | null | undefined): {
   };
 }
 
+function toFlowResonanceLabel(short: string): string {
+  const s = String(short ?? '').trim();
+
+  const map: Record<string, string> = {
+    '怠さで動けない': '動きたいのに、どこかで止まっている',
+    '怒りで方向を誤る': '進みたい気持ちが強くて、方向がまだ定まらない',
+    '目的を失い怠ける': '向かう先が薄れて、動きが止まっている',
+    'いま引っかかっている一点': 'まだ言葉にならないまま、引っかかりだけが残っている',
+  };
+
+  return map[s] ?? s;
+}
+
 function buildCatalog(): Record<FlowStateId, FlowStateEntry> {
   const out = {} as Record<FlowStateId, FlowStateEntry>;
 
@@ -231,12 +245,15 @@ function buildCatalog(): Record<FlowStateId, FlowStateEntry> {
     FLOW_STAGE_ORDER.forEach((stage) => {
       (['pos', 'neg'] as const).forEach((polarity) => {
         const id = makeFlowStateId(energy, stage, polarity);
+        const short = FLOW_STATE_SOURCE[energy][stage][polarity];
+
         out[id] = {
           id,
           energy,
           stage,
           polarity,
-          short: FLOW_STATE_SOURCE[energy][stage][polarity],
+          short,
+          resonance: toFlowResonanceLabel(short),
         };
       });
     });
@@ -284,8 +301,13 @@ export function buildFlowDelta(
   }
 
   const prevParsed = parseFlowStateId(prev ?? null);
-  const prevLabel = prevParsed ? getFlowShort(prev as FlowStateId) : null;
-  const nowLabel = getFlowShort(now);
+  const prevState = prevParsed ? getFlowState(prev as FlowStateId) : null;
+  const nowState = getFlowState(now);
+
+  const prevLabel = prevState?.short ?? null;
+  const nowLabel = nowState?.short ?? '';
+  const prevResonance = prevState?.resonance ?? prevLabel ?? null;
+  const nowResonance = nowState?.resonance ?? nowLabel;
 
   if (!prevParsed) {
     return {
@@ -298,8 +320,8 @@ export function buildFlowDelta(
       energyChanged: false,
       stageChanged: false,
       polarityChanged: false,
-      short: nowLabel,
-      sentence: `${nowLabel}状態です`,
+      short: nowResonance,
+      sentence: nowResonance,
     };
   }
 
@@ -310,12 +332,12 @@ export function buildFlowDelta(
   const deltaType = pickDeltaType({ energyChanged, stageChanged, polarityChanged });
 
   const short = changed
-    ? `${prevLabel ?? prev} → ${nowLabel}`
-    : nowLabel;
+    ? `${prevResonance ?? prev} → ${nowResonance}`
+    : nowResonance;
 
   const sentence = changed
-    ? `${prevLabel ?? prev}状態から${nowLabel}状態へ移行しています`
-    : `${nowLabel}状態を維持しています`;
+    ? `${prevResonance ?? prev}から、${nowResonance}へ移っている`
+    : nowResonance;
 
   return {
     prev: prev as FlowStateId,

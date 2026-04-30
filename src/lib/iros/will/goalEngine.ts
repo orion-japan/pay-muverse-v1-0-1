@@ -7,6 +7,7 @@ import type { Depth, QCode, IrosMode } from '../system';
 
 export type IrosGoalKind =
   | 'stabilize'
+  | 'resonate'
   | 'uncover'
   | 'shiftRelation'
   | 'enableAction'
@@ -245,14 +246,14 @@ function containsSeparationDecisionWords(text: string): boolean {
     };
   }
 
-  // 6) fallback（デフォルトは stabilize）
+  // 6) fallback（デフォルトは resonate）
   {
     const targetDepth = chooseStabilizeDepth(lastDepth);
     return {
-      kind: 'stabilize',
+      kind: 'resonate',
       targetDepth,
       targetQ: lastQ ?? 'Q2',
-      reason: '明示トリガーが無いため、まずは整えて流れを保つ（uncoverはデフォルトにしない）',
+      reason: '明示トリガーが無い通常入力は、まず共鳴を既定にする',
     };
   }
 }

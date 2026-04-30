@@ -534,18 +534,18 @@ function buildClarify(
               ? 'decide_shift_v1'
               : 'clarify_meaning_v1';
 
-    const shiftLineBase =
-      isT
-        ? null
-        : questionSuggestsPastReframe
-          ? 'いま必要なのは解決を急いで断定することではなく、戻ってきた未完了の型を見つけて、未完了テーマ・反復パターン・再配置の順で見直すこと'
-          : shouldReanswerCapability
-            ? '前に聞かれた問いを短く言い直してから、「何ができるのか」をできることの形で先に直答する。型の説明や感情の意味づけには広げず、1行目で機能を言い切り、そのあと必要最小限の具体例だけを添える'
-            : directAnswerRequested
-              ? '結論を先に短く言い切り、そのあと必要最小限の具体だけを添えて閉じる'
-              : shouldAnswerTruthStructure
-              ? '結論を先に1〜2文で言い切り、そのあとでどこが未確定なのかを短い本文でそのまま続ける。見出しや箇条書きにはせず、観測→芯→具体の順を一続きの文脈で返す'
-              : clarifyMeaning.line;
+              const shiftLineBase =
+              isT
+                ? null
+                : questionSuggestsPastReframe
+                  ? '未完了の感じが、まだ戻ってきている'
+                  : shouldReanswerCapability
+                    ? 'できることの輪郭だけが、先に立っている'
+                    : directAnswerRequested
+                      ? '答えの芯だけが、先に出ている'
+                      : shouldAnswerTruthStructure
+                        ? 'まだ見えていないところだけが、静かに残っている'
+                        : clarifyMeaning.line;
                 const askBackAllowedNow =
                   !isT &&
                   !questionSuggestsPastReframe &&
@@ -1183,12 +1183,31 @@ function buildFlowReply(args: {
     const compactTextNow = rawTextNow.replace(/\s+/g, '');
     const textLenNow = compactTextNow.length;
 
+    const styleResonateOverride =
+      hasAny(
+        'もっと共鳴',
+        '共鳴して',
+        '枠を外して',
+        '枠から外れて',
+        '一般的な回答をしないで',
+        'そのまま返して',
+        '会話にして',
+        '会話語',
+        'コードからも外れて',
+        '説明になっちゃう',
+        '説明だよ'
+      ) ||
+      /(もっと共鳴|共鳴して|枠を外して|枠から外れて|一般的な回答をしないで|そのまま返して|会話にして|会話語|コードからも外れて|説明になっちゃう|説明だよ)/.test(rawTextNow);
+
     const isClarifyLike =
-      isClarify(t) ||
-      resolvedAskType === 'truth_structure' ||
-      resolvedAskType === 'meaning' ||
-      resolvedAskType === 'definition' ||
-      resolvedAskType === 'topic_clarify';
+      !styleResonateOverride &&
+      (
+        isClarify(t) ||
+        resolvedAskType === 'truth_structure' ||
+        resolvedAskType === 'meaning' ||
+        resolvedAskType === 'definition' ||
+        resolvedAskType === 'topic_clarify'
+      );
 
     const isReturnFlow = String(delta ?? '').trim().toUpperCase() === 'RETURN';
 
@@ -1231,15 +1250,20 @@ function buildFlowReply(args: {
       textLenNow >= 19;
 
     const suppressClarifyShift =
-      isReturnFlow &&
-      !isShortAmbiguousFollowup &&
-      hasConcreteContinuationSignal;
+      styleResonateOverride ||
+      (
+        isReturnFlow &&
+        !isShortAmbiguousFollowup &&
+        hasConcreteContinuationSignal
+      );
 
-      const goalKind2Raw =
-      String(replyDecisionBase?.goalKind ?? '').trim() ||
-      String((args as any)?.ctxPack?.goalKind ?? '').trim() ||
-      String((args as any)?.meta?.extra?.ctxPack?.goalKind ?? '').trim() ||
-      '';
+    const goalKind2Raw =
+      styleResonateOverride
+        ? 'resonate'
+        : String(replyDecisionBase?.goalKind ?? '').trim() ||
+          String((args as any)?.ctxPack?.goalKind ?? '').trim() ||
+          String((args as any)?.meta?.extra?.ctxPack?.goalKind ?? '').trim() ||
+          '';
 
     const goalKind2 =
       goalKind2Raw === 'clarify' ||
@@ -1365,64 +1389,48 @@ function buildFlowReply(args: {
       });
     } catch {}
 
-    // ① 収束・結論要求は最優先で decide
-    if (hasConvergeSignal2 || directAnswerRequested2) {
-      const targetKindNowRaw = String((args as any)?.targetKind ?? '').trim();
-
-      const targetKindNow:
-        | 'clarify'
-        | 'stabilize'
-        | 'decide'
-        | 'uncover'
-        | 'narrow'
-        | null =
-        targetKindNowRaw === 'clarify' ||
-        targetKindNowRaw === 'stabilize' ||
-        targetKindNowRaw === 'decide' ||
-        targetKindNowRaw === 'uncover' ||
-        targetKindNowRaw === 'narrow'
-          ? targetKindNowRaw
-          : null;
-
-      return stampShiftMeta('decide_shift', {
-        goalKind: 'decide',
-        targetKind: targetKindNow ?? 'decide',
-        laneKey: 'T_CONCRETIZE',
-        replyGoalKind: 'decide',
-      });
-    }
-
     // ② 司令塔 goalKind を最優先
-    if (goalKind2 === 'decide') {
-      const targetKindNowRaw = String((args as any)?.targetKind ?? '').trim();
-
-      const targetKindNow:
-        | 'clarify'
-        | 'stabilize'
-        | 'decide'
-        | 'uncover'
-        | 'narrow'
-        | null =
-        targetKindNowRaw === 'clarify' ||
-        targetKindNowRaw === 'stabilize' ||
-        targetKindNowRaw === 'decide' ||
-        targetKindNowRaw === 'uncover' ||
-        targetKindNowRaw === 'narrow'
-          ? targetKindNowRaw
-          : null;
-
-      return stampShiftMeta('decide_shift', {
-        goalKind: 'decide',
-        targetKind: targetKindNow ?? 'decide',
-        laneKey: 'T_CONCRETIZE',
-        replyGoalKind: 'decide',
-      });
-    }
-
     if (goalKind2 === 'resonate') {
       return stampShiftMeta('narrow_shift', {
+        goalKind: 'resonate' as any,
+        targetKind: 'resonate' as any,
+        laneKey: null,
+        replyGoalKind: 'resonate' as any,
+      });
+    }
+
+    if (goalKind2 === 'uncover') {
+      const targetKindNowRaw = String((args as any)?.targetKind ?? '').trim();
+
+      const targetKindNow:
+        | 'clarify'
+        | 'stabilize'
+        | 'decide'
+        | 'uncover'
+        | 'narrow'
+        | 'resonate'
+        | null =
+        targetKindNowRaw === 'clarify' ||
+        targetKindNowRaw === 'stabilize' ||
+        targetKindNowRaw === 'decide' ||
+        targetKindNowRaw === 'uncover' ||
+        targetKindNowRaw === 'narrow' ||
+        targetKindNowRaw === 'resonate'
+          ? targetKindNowRaw
+          : null;
+
+      if (targetKindNow === 'resonate') {
+        return stampShiftMeta('narrow_shift', {
+          goalKind: 'resonate' as any,
+          targetKind: 'resonate' as any,
+          laneKey: null,
+          replyGoalKind: 'resonate' as any,
+        });
+      }
+
+      return stampShiftMeta('narrow_shift', {
         goalKind: 'uncover',
-        targetKind: 'resonate',
+        targetKind: targetKindNow ?? 'uncover',
         laneKey: null,
         replyGoalKind: 'uncover',
       });
@@ -1458,10 +1466,10 @@ function buildFlowReply(args: {
         targetKindNowRaw === 'resonate'
       ) {
         return stampShiftMeta('narrow_shift', {
-          goalKind: 'uncover' as any,
+          goalKind: 'resonate' as any,
           targetKind: 'resonate' as any,
           laneKey: null,
-          replyGoalKind: 'uncover' as any,
+          replyGoalKind: 'resonate' as any,
         });
       }
 
@@ -1473,7 +1481,6 @@ function buildFlowReply(args: {
       });
     }
 
-
     if (goalKind2 === 'clarify') {
       const replyGoalKindNow = String(replyDecisionBase?.goalKind ?? '').trim();
       const targetKindNow = String((args as any)?.targetKind ?? '').trim();
@@ -1483,10 +1490,10 @@ function buildFlowReply(args: {
         targetKindNow === 'resonate'
       ) {
         return stampShiftMeta('narrow_shift', {
-          goalKind: 'uncover'as any,
+          goalKind: 'resonate' as any,
           targetKind: 'resonate' as any,
           laneKey: null,
-          replyGoalKind: 'uncover' as any,
+          replyGoalKind: 'resonate' as any,
         });
       }
 
@@ -1514,96 +1521,6 @@ function buildFlowReply(args: {
           laneKey: null,
           replyGoalKind: 'clarify',
         });
-      }
-    }
-
-    if (goalKind2 === 'uncover') {
-      const targetKindNowRaw = String((args as any)?.targetKind ?? '').trim();
-
-      const targetKindNow:
-        | 'clarify'
-        | 'stabilize'
-        | 'decide'
-        | 'uncover'
-        | 'narrow'
-        | 'resonate'
-        | null =
-        targetKindNowRaw === 'clarify' ||
-        targetKindNowRaw === 'stabilize' ||
-        targetKindNowRaw === 'decide' ||
-        targetKindNowRaw === 'uncover' ||
-        targetKindNowRaw === 'narrow' ||
-        targetKindNowRaw === 'resonate'
-          ? targetKindNowRaw
-          : null;
-
-      // 🔥 uncover固定をやめる
-      if (targetKindNow === 'resonate') {
-        return stampShiftMeta('narrow_shift', {
-          goalKind: 'uncover',
-          targetKind: 'resonate',
-          laneKey: null,
-          replyGoalKind: 'uncover',
-        });
-      }
-
-      // fallbackだけ残す
-      return stampShiftMeta('narrow_shift', {
-        goalKind: 'uncover',
-        targetKind: targetKindNow ?? 'uncover',
-        laneKey: null,
-        replyGoalKind: 'uncover',
-      });
-    }
-
-    // ③ replyDecision は候補として使うが、そのまま早期 return しない
-    const replyDecisionShift = String(replyDecisionBase?.shiftKind ?? '').trim();
-    if (
-      replyDecisionShift === 'clarify_shift' ||
-      replyDecisionShift === 'stabilize_shift' ||
-      replyDecisionShift === 'distance_shift' ||
-      replyDecisionShift === 'repair_shift' ||
-      replyDecisionShift === 'decide_shift' ||
-      replyDecisionShift === 'narrow_shift'
-    ) {
-      if (replyDecisionShift === 'clarify_shift' && suppressClarifyShift) {
-        try {
-          console.log('[IROS/SHIFT_DECISION][SUPPRESS_REPLY_DECISION_CLARIFY]', {
-            replyDecisionShift,
-            text: rawTextNow,
-            textLenNow,
-            isShortAmbiguousFollowup,
-            hasConcreteContinuationSignal,
-          });
-        } catch {}
-      } else if (replyDecisionShift === 'decide_shift') {
-        return stampShiftMeta('decide_shift', {
-          goalKind: 'decide',
-          targetKind: 'decide',
-          laneKey: 'T_CONCRETIZE',
-          replyGoalKind: 'decide',
-        });
-      } else if (replyDecisionShift === 'stabilize_shift') {
-        return stampShiftMeta('stabilize_shift', {
-          goalKind: 'stabilize',
-          targetKind: 'stabilize',
-          laneKey: null,
-          replyGoalKind: 'stabilize',
-        });
-      } else if (replyDecisionShift === 'clarify_shift') {
-        return stampShiftMeta('clarify_shift', {
-          goalKind: 'clarify',
-          targetKind: 'clarify',
-          laneKey: null,
-          replyGoalKind: 'clarify',
-        });
-      } else {
-        return stampShiftMeta(
-          replyDecisionShift as
-            | 'distance_shift'
-            | 'repair_shift'
-            | 'narrow_shift'
-        );
       }
     }
 
@@ -2009,17 +1926,17 @@ function buildFlowReply(args: {
               shiftKind2 === 'decide_shift'
                 ? '最初の1文で結論を出す / 比較で終わらない / 質問しない / 最後に行動を1つ置く'
                 : shiftLine2,
-            summary:
-              shiftKind2 === 'stabilize_shift'
-                ? 'いまは、揺れている見方をいったん整え直して受け取る流れです。'
-                : shiftKind2 === 'decide_shift'
-                  ? 'ここでは、論点をひとつに絞って答えを置く流れです。'
-                  : shiftKind2 === 'narrow_shift'
-                    ? 'ここでは、話を広げすぎず一点に絞って見ます。'
-                    : shiftKind2 === 'clarify_shift'
-                      ? 'ここでは、まず言いたい芯を取り違えないように整えます。'
-                      : shiftLine2
-                        ? `${String(shiftLine2).replace(/[。]+$/u, '').trim()}。`
+                summary:
+                shiftKind2 === 'stabilize_shift'
+                  ? 'いまは、何を変えるかより、どこで止まっているかをそのまま見る流れです。'
+                  : shiftKind2 === 'decide_shift'
+                    ? 'ここでは、論点をひとつに絞って答えを置く流れです。'
+                    : shiftKind2 === 'narrow_shift'
+                      ? 'ここでは、話を広げすぎず一点に絞って見ます。'
+                      : shiftKind2 === 'clarify_shift'
+                        ? 'ここでは、まず言いたい芯を取り違えないように整えます。'
+                        : shiftLine2
+                          ? `${String(shiftLine2).replace(/[。]+$/u, '').trim()}。`
                         : null,
             message:
               shiftKind2 === 'stabilize_shift'

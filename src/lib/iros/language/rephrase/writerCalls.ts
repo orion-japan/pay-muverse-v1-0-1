@@ -189,7 +189,7 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
   // ✅ 会話の線（topicDigest / conversationLine）を拾う（短く system 側に固定）
   const topicDigest = clampStr(norm(args.topicDigest ?? ''), 260);
   const conversationLine = clampStr(norm(args.conversationLine ?? ''), 260);
-  const historyText = clampStr(norm(args.historyText ?? ''), 800);
+  const rawHistoryText = clampStr(norm(args.historyText ?? ''), 800);
   const internalPackRaw = norm(args.internalPack ?? '');
   const topicDigestV2Raw =
     args.topicDigestV2 && typeof args.topicDigestV2 === 'object'
@@ -200,6 +200,28 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     args.outputPolicy && typeof args.outputPolicy === 'object'
       ? args.outputPolicy
       : null;
+
+  const earlyQuestionType = String(
+    (args as any)?.questionType ??
+      (args as any)?.extra?.question?.questionType ??
+      (args as any)?.userContext?.question?.questionType ??
+      (args as any)?.userContext?.ctxPack?.question?.questionType ??
+      ''
+  ).trim();
+
+  const earlyGoalKind = String(
+    (args as any)?.goalKind ??
+      (args as any)?.extra?.goalKind ??
+      (args as any)?.userContext?.goalKind ??
+      (args as any)?.userContext?.ctxPack?.goalKind ??
+      (args as any)?.userContext?.ctxPack?.replyGoal?.kind ??
+      ''
+  ).trim();
+
+  const shouldSuppressHistoryText =
+    earlyQuestionType === 'structure' || earlyGoalKind === 'uncover';
+
+  const historyText = shouldSuppressHistoryText ? '' : rawHistoryText;
 
   const topicDigestV2Block = topicDigestV2Raw
     ? clampStr(
@@ -860,21 +882,14 @@ const mirrorFlowV1ForSeed: any =
 
     const seedTextRawBase = String(
       pick(
-        // 🔥 ここを最優先に追加
+        // 正本
         args?.internalPack,
 
-        // 既存
+        // 現行系
         (args as any)?.flowSeed,
         (ctxPack as any)?.flowSeed,
         (extra as any)?.flowSeed,
 
-        // 後方互換
-        (args as any)?.seed_text,
-        (args as any)?.seedText,
-        (ctxPack as any)?.seed_text,
-        (ctxPack as any)?.seedText,
-        (extra as any)?.seed_text,
-        (extra as any)?.seedText,
         '',
       ) ?? '',
     ).trim();
@@ -986,10 +1001,32 @@ const mirrorFlowV1ForSeed: any =
   ).trim();
 
   const cleanMeaningLine = (v: any): string => {
-    const s = String(v ?? '').replace(/\s+/g, ' ').trim();
+    const s = String(v ?? '').trim();
+
     if (!s) return '';
-    if (s === '(null)' || s === 'null' || s === 'undefined') return '';
-    return s.slice(0, 120);
+
+    // ❌ 説明・実況系を削る
+    let out = s
+      .replace(/〜?しています/g, '')
+      .replace(/〜?できています/g, '')
+      .replace(/〜?している/g, '')
+      .replace(/〜?となっている/g, '')
+      .replace(/〜?を見ると/g, '')
+      .replace(/〜?と感じられます/g, '')
+      .replace(/〜?が見えます/g, '')
+      .replace(/〜?と言えます/g, '')
+      .replace(/〜?できます/g, '');
+
+    // ❌ 主語的な説明語を削る
+    out = out
+      .replace(/^その問いは、?/g, '')
+      .replace(/^ここは、?/g, '')
+      .replace(/^いまは、?/g, '');
+
+    // 最後に整形
+    out = out.trim();
+
+    return out;
   };
 
   const meaningBits: string[] = [];
@@ -1079,22 +1116,155 @@ const mirrorFlowV1ForSeed: any =
                         '',
                       ),
                     ) || null,
-                  focus:
+                    focus:
                     cleanMeaningLine(
                       pick(
                         (ctxPack as any)?.seed?.focus,
-                        stateCore !== '(no_state_core)' ? stateCore : '',
+                        latestUserText,
                         '',
                       ),
                     ) || null,
-                    oneLineConstraint:
+                  oneLineConstraint:
+                    (() => {
+                      const raw = cleanMeaningLine(
+                        pick(
+                          (ctxPack as any)?.seed?.oneLineConstraint,
+                          '1核心 / 説明を増やさない / seedにない新しい具体軸を足さない / 同じ核を言い換えて深める / Δは1つ必ず含める / 質問しない',
+                        ),
+                      );
+
+                      const normalized = String(raw ?? '')
+                        .replace(/同一テーマ内で自然に広げることは許可/g, 'seedにない新しい具体軸を足さない')
+                        .replace(/同一テーマ内での視点の深掘りは許可/g, '同じ核を言い換えて深める')
+                        .trim();
+
+                      return normalized || '1核心 / 説明を増やさない / seedにない新しい具体軸を足さない / 同じ核を言い換えて深める / Δは1つ必ず含める / 質問しない';
+                    })(),
+                },
+
+                userCore:
+                  cleanMeaningLine(
+                    pick(
+                      (ctxPack as any)?.seed?.focus,
+                      latestUserText,
+                      '',
+                    ),
+                  ) || null,
+
+                historyLine:
+                  cleanMeaningLine(
+                    pick(
+                      (args as any)?.historyLine,
+                      (ctxPack as any)?.historyLine,
+                      latestUserText,
+                      '',
+                    ),
+                  ) || null,
+
+                flow180: (args as any)?.flow180 ?? null,
+
+                writerDirectives: {
+                  deltaLine: flowBridge !== '(bridge_unknown)' ? flowBridge : null,
+                  flowFrom: String((args as any)?.flow180?.from ?? '').trim() || null,
+                  flowTo: String((args as any)?.flow180?.to ?? '').trim() || null,
+                  writeConstraints: [
+                    '1核心',
+                    '説明を増やさない',
+                    'seedにない新しい具体軸を足さない',
+                    '同じ核を言い換えて深める',
+                    '質問しない',
+                  ],
+                },
+
+                surfacePlan: {
+                  obsCore:
+                    cleanMeaningLine(latestUserText) ||
                     cleanMeaningLine(
                       pick(
-                        (ctxPack as any)?.seed?.oneLineConstraint,
-                        '1核心 / 同一テーマ内で自然に広げることは許可 / Δは1つ必ず含める / 質問しない',
+                        (ctxPack as any)?.seed?.focus,
+                        '',
                       ),
-                    ) || '1核心 / 同一テーマ内で自然に広げることは許可 / Δは1つ必ず含める / 質問しない',
+                    ) ||
+                    null,
+
+                    shiftCore:
+                    cleanMeaningLine((args as any)?.writerDirectives?.deltaLine) ||
+                    cleanMeaningLine((args as any)?.flow180?.sentence) ||
+                    cleanMeaningLine(
+                      flowBridge !== '(bridge_unknown)'
+                        ? flowBridge
+                        : '',
+                    ) || null,
+
+                  nextCore:
+                    cleanMeaningLine(
+                      flowNextMeaning !== '(none)'
+                        ? flowNextMeaning
+                        : '',
+                    ) || null,
+
+                  safeCore: null,
+
+                  obsLine:
+                    (() => {
+                      const v =
+                        cleanMeaningLine(latestUserText) ||
+                        cleanMeaningLine(
+                          pick(
+                            (ctxPack as any)?.seed?.focus,
+                            '',
+                          ),
+                        ) ||
+                        null;
+                      if (!v) return null;
+                      return /[。！？]$/.test(v) ? v : `${v}。`;
+                    })(),
+
+                  shiftLine:
+                    (() => {
+                      const v =
+                        cleanMeaningLine((args as any)?.writerDirectives?.deltaLine) ||
+                        cleanMeaningLine((args as any)?.flow180?.sentence) ||
+                        cleanMeaningLine(
+                          flowBridge !== '(bridge_unknown)'
+                            ? flowBridge
+                            : '',
+                        ) || null;
+                      if (!v) return null;
+                      return /[。！？]$/.test(v) ? v : `${v}。`;
+                    })(),
+
+                  nextLine:
+                    (() => {
+                      const v =
+                        cleanMeaningLine(
+                          flowNextMeaning !== '(none)'
+                            ? flowNextMeaning
+                            : '',
+                        ) || null;
+                      if (!v) return null;
+                      return /[。！？]$/.test(v) ? v : `${v}。`;
+                    })(),
+
+                  safeLine: null,
                 },
+
+                askBackAllowed: false,
+                questionsMax: 0,
+
+                goalKind:
+                  String(
+                    pick(
+                      (ctxPack as any)?.goalKind,
+                      (args as any)?.goalKind,
+                      (extra as any)?.goalKind,
+                      '',
+                    ) ?? '',
+                  ).trim() || null,
+                depthStage: String(depthStage ?? '').trim() || null,
+                phase: String(phase ?? '').trim() || null,
+                qCode: String(qCode ?? '').trim() || null,
+                eTurn: String(eTurn ?? '').trim() || null,
               });
 
               const transitionSkeleton = buildTransitionSkeleton({
@@ -1352,6 +1522,12 @@ const mirrorFlowV1ForSeed: any =
 
                 if (sk === 'clarify_shift') {
                   return '説明で閉じる。広げず、意味をそのまま返す';
+                }
+
+                const goal = String((ctxPack as any)?.goalKind ?? '').trim();
+
+                if (goal === 'resonate') {
+                  return '説明を足さず、いま出ている言葉をそのまま薄めずに受け取る';
                 }
 
                 if (temp === 'volatile') {
@@ -2376,22 +2552,39 @@ if (effectiveQuestionType === 'truth') {
   incomingWriterDirectives.forceSingleConclusion = true;
   incomingWriterDirectives.noAbstractEscape = true;
 }
+const isNormalCompressedPattern =
+  patternKeyForDefaults === 'NORMAL_COMPRESSED_V1';
+
 const mergedWriteConstraints = Array.from(
   new Set([
     ...incomingWriteConstraints,
-    '最初に相手へ触れてから核心に入る',
-    '最初の1文は観測で始める',
-    '共感だけで終わらない',
-    'いまの焦点を一つに絞る',
-    'decide時も短く切りすぎず、少し滞在感を持たせてよい',
-    'resonate時は説明だけで終わらず、同じ意味を別角度でもう1段だけ展開してよい',
-    '1つの結論だけで終わらず、説明→補足→余白の順で最低2段階に展開する',
-    '2〜4文で1まとまりにし、少なくとも2まとまり以上で構成する',
-    '1つのまとまりに理由・補足・結論を詰め込みすぎない',
-    '話題が切り替わる時、理由に移る時、まとめに移る時は段落を分ける',
-    'OBSは今起きていることを先に置く',
-    'SHIFTはその理由や背景構造を次のまとまりで述べる',
-    'NEXTは次に見る一点や分岐点を最後のまとまりで述べる',
+    ...(isNormalCompressedPattern
+      ? [
+        '最初の1文を観測案内の定型で始めない',
+        '「いま見えているのは」「いま見ているのは」で始めない',
+        '「次に見るのは」「見るなら」「だから、見る場所は」で始めない',
+        'OBSは今起きている状態そのものを説明せずにそのまま置く',
+        'SHIFTは流れが細くなる一点そのものを説明せずにそのまま置く',
+        'NEXTはまだ残っている未解決の一点そのものを置く',
+        'SAFEは同じ状態の静かな残りだけを置く',
+        '状態を見ている説明文にしない',
+        '案内・観測・解説の言い方にしない',
+      ]
+      : [
+          '最初に相手へ触れてから核心に入る',
+          '最初の1文は観測で始める',
+          '共感だけで終わらない',
+          'いまの焦点を一つに絞る',
+          'decide時も短く切りすぎず、少し滞在感を持たせてよい',
+          'resonate時は説明だけで終わらず、同じ意味を別角度でもう1段だけ展開してよい',
+          '1つの結論だけで終わらず、説明→補足→余白の順で最低2段階に展開する',
+          '2〜4文で1まとまりにし、少なくとも2まとまり以上で構成する',
+          '1つのまとまりに理由・補足・結論を詰め込みすぎない',
+          '話題が切り替わる時、理由に移る時、まとめに移る時は段落を分ける',
+          'OBSは今起きていることを先に置く',
+          'SHIFTはその理由や背景構造を次のまとまりで述べる',
+          'NEXTは次に見る一点や分岐点を最後のまとまりで述べる',
+        ]),
   ])
 );
 
@@ -2427,18 +2620,27 @@ return {
         ...incomingFirstTouch,
         enabled: goalKindNow === 'resonate',
         hint: touchHint,
-        rules: [
-          '最初の1文は観測のみ。理由・解釈・結論・一般化は禁止。',
-          '最初の1文は、相手の変化・気づき・違和感・届いた感じのいずれかに触れる',
-          'ユーザーの言い回し・断定・温度をそのまま受けて返す',
-          '構造説明から入らない',
-          '一般論から入らない',
-          '問い返しから入らない',
-          '入力の意味を言い換える前に、まず相手に触れる',
-          '受け取りの一言を先に置いてよい',
-          '一緒に見ている感じを含めてよい',
-          '2〜3文で自然に広げてよい（1文で終わらせない）',
-        ],
+        rules: isNormalCompressedPattern
+          ? [
+              '最初の1文を観測案内の定型にしない',
+              '「いま見えているのは」「いま見ているのは」で始めない',
+              '「次に見るのは」「見るなら」で始めない',
+              '最初の1文は状態そのものを短く自然文で置く',
+              '説明や一般論から入らない',
+              '問い返しから入らない',
+            ]
+          : [
+              '最初の1文は観測のみ。理由・解釈・結論・一般化は禁止。',
+              '最初の1文は、相手の変化・気づき・違和感・届いた感じのいずれかに触れる',
+              'ユーザーの言い回し・断定・温度をそのまま受けて返す',
+              '構造説明から入らない',
+              '一般論から入らない',
+              '問い返しから入らない',
+              '入力の意味を言い換える前に、まず相手に触れる',
+              '受け取りの一言を先に置いてよい',
+              '一緒に見ている感じを含めてよい',
+              '2〜3文で自然に広げてよい（1文で終わらせない）',
+            ],
       },
 
   bodyStyle: isResonancePattern
@@ -2504,92 +2706,246 @@ return {
 };
               })();
 
-                const flowSeedV1 = buildFlowSeedV1({
-                  flow: flow,
+              const flowSeedV1 = buildFlowSeedV1({
+                flow: {
+                  current: (() => {
+                    const localCurrentFlowSeed = String(
+                      pick(
+                        typeof currentFlowAny === 'string' ? currentFlowAny : '',
+                        typeof internalPackRaw === 'string'
+                          ? (internalPackRaw.match(/current=([^\n]+)/)?.[1] ?? '')
+                          : '',
+                        '',
+                      ) ?? '',
+                    ).trim();
 
-                  goalKind: pick(
-                    (extra as any)?.goalKind,
-                    (args as any)?.extra?.goalKind,
+                    return localCurrentFlowSeed || null;
+                  })(),
+
+                  prev:
+                    (typeof previousFlowAny === 'string'
+                      ? String(previousFlowAny).trim()
+                      : '') ||
+                    (typeof internalPackRaw === 'string'
+                      ? String(internalPackRaw.match(/prev=([^\n]+)/)?.[1] ?? '').trim()
+                      : '') ||
                     null,
-                  ),
 
-                  memoryLine: (() => {
-                    const rawMemoryLine = String(
-                      (args as any)?.memoryLine ??
-                        (extra as any)?.memoryLine ??
-                        ''
+                  delta: (() => {
+                    const localDeltaSeed = String(
+                      pick(
+                        (flow as any)?.delta,
+                        typeof internalPackRaw === 'string'
+                          ? (internalPackRaw.match(/delta=([^\n]+)/)?.[1] ?? '')
+                          : '',
+                        '',
+                      ) ?? '',
                     ).trim();
 
-                    const isHeavyInput =
-                      (extra as any)?.goalKind === 'uncover' ||
-                      (args as any)?.extra?.goalKind === 'uncover';
-
-                    if (!rawMemoryLine) return null;
-
-                    if (isHeavyInput) {
-                      return rawMemoryLine.startsWith('recent_turn_only:')
-                        ? rawMemoryLine
-                        : null;
-                    }
-
-                    return rawMemoryLine;
+                    return localDeltaSeed || null;
                   })(),
 
-                  userCore: (() => {
-                    const latest = String(latestUserText ?? '').trim();
-                    const core = String(coreAssertionLine ?? '').trim();
+                  energy: (() => {
+                    const localETurnSeed = String(
+                      pick(
+                        eTurn,
+                        typeof internalPackRaw === 'string'
+                          ? (internalPackRaw.match(/e_turn=([^\n]+)/)?.[1] ?? '')
+                          : '',
+                        typeof internalPackRaw === 'string'
+                          ? (internalPackRaw.match(/energy=([^\n]+)/)?.[1] ?? '')
+                          : '',
+                        '',
+                      ) ?? '',
+                    ).trim();
 
-                    const isHeavyInput =
-                      (extra as any)?.goalKind === 'uncover' ||
-                      (args as any)?.extra?.goalKind === 'uncover';
+                    return localETurnSeed || null;
+                  })(),
 
-                    const base = latest || core || null;
-                    if (!base) return null;
+                  futureRandom: (() => {
+                    const fromInternalPack = String(
+                      typeof internalPackRaw === 'string'
+                        ? (internalPackRaw.match(/futureRandom=([^\n]+)/)?.[1] ?? '')
+                        : ''
+                    ).trim();
+                    if (fromInternalPack) return fromInternalPack;
 
-                    if (futureHintLine) {
-                      return `${base}\n${futureHintLine}`;
-                    }
+                    const stage = String(futureFlowAny?.stage ?? '').trim();
+                    const energy = String(futureFlowAny?.energy ?? '').trim();
+                    const polarity = String(futureFlowAny?.polarity ?? '').trim();
+                    if (stage && energy && polarity) return `${energy}-${stage}-${polarity}`;
 
-                    if (isHeavyInput) {
-                      return base;
-                    }
+                    const fromFlowObj = String((flow as any)?.futureRandom ?? '').trim();
+                    return fromFlowObj || null;
+                  })(),
+                },
 
+                goalKind: pick(
+                  (extra as any)?.goalKind,
+                  (args as any)?.extra?.goalKind,
+                  null,
+                ),
+
+                memoryLine: (() => {
+                  const rawMemoryLine = String(
+                    (args as any)?.memoryLine ??
+                      (extra as any)?.memoryLine ??
+                      ''
+                  ).trim();
+
+                  const isHeavyInput =
+                    (extra as any)?.goalKind === 'uncover' ||
+                    (args as any)?.extra?.goalKind === 'uncover';
+
+                  if (!rawMemoryLine) return null;
+
+                  if (isHeavyInput) {
+                    return rawMemoryLine.startsWith('recent_turn_only:')
+                      ? rawMemoryLine
+                      : null;
+                  }
+
+                  return rawMemoryLine;
+                })(),
+
+                userCore: (() => {
+                  const latest = String(latestUserText ?? '').trim();
+                  const core = String(coreAssertionLine ?? '').trim();
+
+                  const isHeavyInput =
+                    (extra as any)?.goalKind === 'uncover' ||
+                    (args as any)?.extra?.goalKind === 'uncover';
+
+                  const base = latest || core || null;
+                  if (!base) return null;
+
+                  if (futureHintLine) {
+                    return `${base}\n${futureHintLine}`;
+                  }
+
+                  if (isHeavyInput) {
                     return base;
-                  })(),
+                  }
 
-                  historyLine: (() => {
-                    const rawHistory = String(
-                      (args as any)?.conversationLine ??
-                        (extra as any)?.conversationLine ??
-                        (args as any)?.topicDigest ??
-                        (extra as any)?.topicDigest ??
-                        ''
-                    ).trim();
+                  return base;
+                })(),
 
-                    const isHeavyInput =
-                      (extra as any)?.goalKind === 'uncover' ||
-                      (args as any)?.extra?.goalKind === 'uncover';
+                historyLine: (() => {
+                  const rawHistory = String(
+                    (args as any)?.conversationLine ??
+                      (extra as any)?.conversationLine ??
+                      (args as any)?.topicDigest ??
+                      (extra as any)?.topicDigest ??
+                      ''
+                  ).trim();
 
-                    if (!rawHistory) return futureHintLine ?? null;
+                  const isHeavyInput =
+                    (extra as any)?.goalKind === 'uncover' ||
+                    (args as any)?.extra?.goalKind === 'uncover';
 
-                    if (isHeavyInput) return futureHintLine ?? null;
+                  if (!rawHistory) return futureHintLine ?? null;
 
-                    return [rawHistory, futureHintLine].filter(Boolean).join('\n');
-                  })(),
+                  if (isHeavyInput) return futureHintLine ?? null;
 
-                  meaningSkeleton: (args as any).meaningSkeleton ?? null,
-                  flow180: (args as any).flow180 ?? null,
-                  writerDirectives: (args as any).writerDirectives ?? null,
+                  return [rawHistory, futureHintLine].filter(Boolean).join('\n');
+                })(),
 
-                  depthStage: depthStage || null,
-                  phase: phase || null,
-                  qCode: qCode || null,
-                  eTurn: eTurn || null,
+                meaningSkeleton: (args as any).meaningSkeleton ?? null,
+                flow180: (args as any).flow180 ?? null,
+                writerDirectives: (args as any).writerDirectives ?? null,
 
-                  askBackAllowed: (args as any)?.askBackAllowed ?? null,
-                  questionsMax: (args as any)?.questionsMax ?? null,
-                });
+                surfacePlan: {
+                  obsCore:
+                    cleanMeaningLine(latestUserText) ||
+                    cleanMeaningLine(
+                      pick(
+                        (ctxPack as any)?.seed?.focus,
+                        '',
+                      ),
+                    ) ||
+                    null,
 
+                  shiftCore:
+                    cleanMeaningLine((args as any)?.writerDirectives?.deltaLine) ||
+                    cleanMeaningLine((args as any)?.flow180?.sentence) ||
+                    cleanMeaningLine(
+                      flowBridge !== '(bridge_unknown)'
+                        ? flowBridge
+                        : '',
+                    ) || null,
+
+                  nextCore:
+                    cleanMeaningLine(
+                      flowNextMeaning !== '(none)'
+                        ? flowNextMeaning
+                        : '',
+                    ) || null,
+
+                    safeCore:
+                    cleanMeaningLine((args as any)?.flow180?.sentence) ||
+                    cleanMeaningLine((args as any)?.writerDirectives?.deltaLine) ||
+                    cleanMeaningLine(latestUserText) ||
+                    null,
+                  obsLine:
+                    (() => {
+                      const v =
+                        cleanMeaningLine(latestUserText) ||
+                        cleanMeaningLine(
+                          pick(
+                            (ctxPack as any)?.seed?.focus,
+                            '',
+                          ),
+                        ) ||
+                        null;
+                      if (!v) return null;
+                      return /[。！？]$/.test(v) ? v : `${v}。`;
+                    })(),
+
+                  shiftLine:
+                    (() => {
+                      const v =
+                        cleanMeaningLine((args as any)?.writerDirectives?.deltaLine) ||
+                        cleanMeaningLine((args as any)?.flow180?.sentence) ||
+                        cleanMeaningLine(
+                          flowBridge !== '(bridge_unknown)'
+                            ? flowBridge
+                            : '',
+                        ) || null;
+                      if (!v) return null;
+                      return /[。！？]$/.test(v) ? v : `${v}。`;
+                    })(),
+
+                  nextLine:
+                    (() => {
+                      const v =
+                        cleanMeaningLine(
+                          flowNextMeaning !== '(none)'
+                            ? flowNextMeaning
+                            : '',
+                        ) || null;
+                      if (!v) return null;
+                      return /[。！？]$/.test(v) ? v : `${v}。`;
+                    })(),
+
+                    safeLine:
+                    (() => {
+                      const v =
+                        cleanMeaningLine((args as any)?.flow180?.sentence) ||
+                        cleanMeaningLine((args as any)?.writerDirectives?.deltaLine) ||
+                        cleanMeaningLine(latestUserText) ||
+                        'そこだけが、静かに残っています。';
+                      return /[。！？]$/.test(v) ? v : `${v}。`;
+                    })(),
+                },
+
+                depthStage: depthStage || null,
+                phase: phase || null,
+                qCode: qCode || null,
+                eTurn: eTurn || null,
+
+                askBackAllowed: (args as any)?.askBackAllowed ?? null,
+                questionsMax: (args as any)?.questionsMax ?? null,
+              });
                 const flowSeedTextRaw = (() => {
                   return formatFlowSeedV1(flowSeedV1).trim();
                 })();
@@ -2605,7 +2961,7 @@ return {
                   return flowOnly.trim();
                 })();
 
-                const cleanSeed = (text: string) =>
+                const cleanLegacySeed = (text: string) =>
                   text
                     .replace(/\nCONTEXT:\n[\s\S]*?(?=\n[A-Z0-9_ ]+\(DO NOT OUTPUT\):|$)/g, '')
                     .replace(/\nFLOW:\n[\s\S]*?(?=\n[A-Z0-9_ ]+\(DO NOT OUTPUT\):|$)/g, '')
@@ -2613,26 +2969,38 @@ return {
                     .replace(/memoryLine=.*\n?/g, '')
                     .replace(/\n{3,}/g, '\n\n')
                     .trim();
-// 🔥 旧FLOWブロック削除（DO NOT OUTPUTノイズ排除）
-const internalPackRawCleaned =
-  typeof internalPackRaw === 'string'
-    ? internalPackRaw.replace(/\nFLOW:\n[\s\S]*?(?=\n[A-Z_]+:|$)/g, '')
-    : internalPackRaw;
 
-                const flowV2Text =
+                const cleanCanonicalSeed = (text: string) =>
+                  text
+                    .replace(/historyLine=.*\n?/g, '')
+                    .replace(/memoryLine=.*\n?/g, '')
+                    .replace(/\n{3,}/g, '\n\n')
+                    .trim();
+
+                // 🔥 旧FLOWブロック削除（DO NOT OUTPUTノイズ排除）
+                const internalPackRawCleaned =
                   typeof internalPackRaw === 'string'
-                    ? cleanSeed(
-                      internalPackRawCleaned.match(/FLOW_V2[\s\S]*?(?=\n\n|$)/)?.[0] ?? ''
-                      )
-                    : '';
+                    ? internalPackRaw.replace(/\nFLOW:\n[\s\S]*?(?=\n[A-Z_]+:|$)/g, '')
+                    : internalPackRaw;
+
+                    const flowV2Text = '';
 
                     const canonicalSeedText = (() => {
-                      const raw =
+                      const primaryCanonicalText =
                         flowSeedV1?.canonical?.text
-                          ? cleanSeed(String(flowSeedV1.canonical.text))
+                          ? cleanCanonicalSeed(String(flowSeedV1.canonical.text))
                           : '';
 
+                      const fallbackCanonicalText =
+                        canonicalSeed?.text
+                          ? cleanCanonicalSeed(String(canonicalSeed.text))
+                          : '';
+
+                      const raw = primaryCanonicalText || fallbackCanonicalText;
                       if (!raw) return '';
+
+                      const differenceExists = /\nDIFFERENCE:\n/.test(`\n${raw}`);
+                      if (differenceExists) return raw;
 
                       const deltaType =
                         String(flow180Block?.match(/deltaType=([^\n]+)/)?.[1] ?? '').trim() || null;
@@ -2654,294 +3022,289 @@ const internalPackRawCleaned =
                         `$1\n\nDELTA:\n${deltaReason}`
                       );
                     })();
-                    const writerDirectivesBlock = (() => {
 
-                      try {
-                        console.log(
-                          '[IROS/writerCalls][WD_ENTRY_CHECK]',
-                          JSON.stringify({
-                            traceId: (args as any)?.traceId ?? null,
-                            conversationId: (args as any)?.conversationId ?? null,
-                            userCode: (args as any)?.userCode ?? null,
-                            hasWriterDirectives: !!(args as any)?.writerDirectives,
-                            writerDirectivesType: typeof (args as any)?.writerDirectives,
-                            hasTopSlotDecision: !!(args as any)?.slotDecision,
-                            topSlotDecisionKeys:
-                              (args as any)?.slotDecision && typeof (args as any).slotDecision === 'object'
-                                ? Object.keys((args as any).slotDecision)
-                                : [],
-                            hasUserContext: !!(args as any)?.userContext,
-                            hasCtxPack: !!(args as any)?.userContext?.ctxPack,
-                            hasCtxSlotDecision: !!(args as any)?.userContext?.ctxPack?.slotDecision,
-                          })
-                        );
-                      } catch {}
+                const writerDirectivesBlock = (() => {
 
-                      const wd = (args as any)?.writerDirectives;
-                      if (!wd || typeof wd !== 'object') return '';
+                  try {
+                    console.log(
+                      '[IROS/writerCalls][WD_ENTRY_CHECK]',
+                      JSON.stringify({
+                        traceId: (args as any)?.traceId ?? null,
+                        conversationId: (args as any)?.conversationId ?? null,
+                        userCode: (args as any)?.userCode ?? null,
+                        hasWriterDirectives: !!(args as any)?.writerDirectives,
+                        writerDirectivesType: typeof (args as any)?.writerDirectives,
+                        hasTopSlotDecision: !!(args as any)?.slotDecision,
+                        topSlotDecisionKeys:
+                          (args as any)?.slotDecision && typeof (args as any).slotDecision === 'object'
+                            ? Object.keys((args as any).slotDecision)
+                            : [],
+                        hasUserContext: !!(args as any)?.userContext,
+                        hasCtxPack: !!(args as any)?.userContext?.ctxPack,
+                        hasCtxSlotDecision: !!(args as any)?.userContext?.ctxPack?.slotDecision,
+                      })
+                    );
+                  } catch {}
 
-                      const lines: string[] = ['WRITER_DIRECTIVES (DO NOT OUTPUT):'];
-                      const slotDecision = (args as any)?.slotDecision ?? (args as any)?.userContext?.ctxPack?.slotDecision;
+                  const wd = (args as any)?.writerDirectives;
+                  if (!wd || typeof wd !== 'object') return '';
 
-                      const patternKeyForSlotGate = String((wd as any)?.pattern_key ?? '').trim();
-                      const isDetailPatternWriter =
-                        patternKeyForSlotGate === 'IR_DETAIL_V1' ||
-                        patternKeyForSlotGate === 'NORMAL_DETAIL_V1' ||
-                        patternKeyForSlotGate === 'NORMAL_RESONANCE_V1' ||
-                        patternKeyForSlotGate === 'DECLARATION_RESONANCE_V1';
+                  const lines: string[] = ['WRITER_DIRECTIVES (DO NOT OUTPUT):'];
+                  const slotDecision = (args as any)?.slotDecision ?? (args as any)?.userContext?.ctxPack?.slotDecision;
 
-                      try {
-                        const topSd = (args as any)?.slotDecision;
-                        const uc = (args as any)?.userContext;
-                        const cp = (args as any)?.userContext?.ctxPack;
-                        const ctxSd = (args as any)?.userContext?.ctxPack?.slotDecision;
-                        const sd = topSd ?? ctxSd;
+                  const patternKeyForSlotGate = String((wd as any)?.pattern_key ?? '').trim();
+                  const isDetailPatternWriter =
+                    patternKeyForSlotGate === 'IR_DETAIL_V1' ||
+                    patternKeyForSlotGate === 'NORMAL_DETAIL_V1' ||
+                    patternKeyForSlotGate === 'NORMAL_RESONANCE_V1' ||
+                    patternKeyForSlotGate === 'DECLARATION_RESONANCE_V1';
 
-                        console.log(
-                          '[IROS/writerCalls][SLOT_DECISION_CHECK_STR]',
-                          JSON.stringify({
-                            traceId: (args as any)?.traceId ?? null,
-                            conversationId: (args as any)?.conversationId ?? null,
-                            userCode: (args as any)?.userCode ?? null,
-                            hasTopSlotDecision: !!topSd,
-                            topSlotDecisionKeys:
-                              topSd && typeof topSd === 'object' ? Object.keys(topSd) : [],
-                            hasUserContext: !!uc,
-                            hasCtxPack: !!cp,
-                            ctxPackKeys:
-                              cp && typeof cp === 'object' ? Object.keys(cp) : [],
-                            hasCtxSlotDecision: !!ctxSd,
-                            ctxSlotDecisionKeys:
-                              ctxSd && typeof ctxSd === 'object' ? Object.keys(ctxSd) : [],
-                            hasSlotDecision: !!sd,
-                            slotDecisionKeys:
-                              sd && typeof sd === 'object' ? Object.keys(sd) : [],
-                            slotOrder:
-                              Array.isArray((sd as any)?.order) ? (sd as any).order : [],
-                            writerDirectiveKeys:
-                              (args as any)?.writerDirectives &&
-                              typeof (args as any).writerDirectives === 'object'
-                                ? Object.keys((args as any).writerDirectives)
-                                : [],
-                            patternKeyForSlotGate,
-                            isDetailPatternWriter,
-                          })
-                        );
-                      } catch {}
+                  try {
+                    const topSd = (args as any)?.slotDecision;
+                    const uc = (args as any)?.userContext;
+                    const cp = (args as any)?.userContext?.ctxPack;
+                    const ctxSd = (args as any)?.userContext?.ctxPack?.slotDecision;
+                    const sd = topSd ?? ctxSd;
 
-                      if (!isDetailPatternWriter && slotDecision && typeof slotDecision === 'object') {
-                        const slotOrder = Array.isArray(slotDecision?.order)
-                          ? slotDecision.order
-                              .map((v: unknown) => String(v ?? '').trim())
-                              .filter(Boolean)
-                          : [];
+                    console.log(
+                      '[IROS/writerCalls][SLOT_DECISION_CHECK_STR]',
+                      JSON.stringify({
+                        traceId: (args as any)?.traceId ?? null,
+                        conversationId: (args as any)?.conversationId ?? null,
+                        userCode: (args as any)?.userCode ?? null,
+                        hasTopSlotDecision: !!topSd,
+                        topSlotDecisionKeys:
+                          topSd && typeof topSd === 'object' ? Object.keys(topSd) : [],
+                        hasUserContext: !!uc,
+                        hasCtxPack: !!cp,
+                        ctxPackKeys:
+                          cp && typeof cp === 'object' ? Object.keys(cp) : [],
+                        hasCtxSlotDecision: !!ctxSd,
+                        ctxSlotDecisionKeys:
+                          ctxSd && typeof ctxSd === 'object' ? Object.keys(ctxSd) : [],
+                        hasSlotDecision: !!sd,
+                        slotDecisionKeys:
+                          sd && typeof sd === 'object' ? Object.keys(sd) : [],
+                        slotOrder:
+                          Array.isArray((sd as any)?.order) ? (sd as any).order : [],
+                        writerDirectiveKeys:
+                          (args as any)?.writerDirectives &&
+                          typeof (args as any).writerDirectives === 'object'
+                            ? Object.keys((args as any).writerDirectives)
+                            : [],
+                        patternKeyForSlotGate,
+                        isDetailPatternWriter,
+                      })
+                    );
+                  } catch {}
 
-                        const slotEmphasis =
-                          slotDecision?.emphasis && typeof slotDecision.emphasis === 'object'
-                            ? slotDecision.emphasis
-                            : null;
-
-                        const slotWeights =
-                          slotDecision?.weights && typeof slotDecision.weights === 'object'
-                            ? slotDecision.weights
-                            : null;
-
-                        if (slotOrder.length > 0) {
-                          lines.push(`slot_order=${slotOrder.join(',')}`);
-                          lines.push(`slot_opening_role=${slotOrder[0]}`);
-                          if (slotOrder[1]) lines.push(`slot_second_role=${slotOrder[1]}`);
-                          if (slotOrder[2]) lines.push(`slot_third_role=${slotOrder[2]}`);
-                          lines.push('slot_safe_last=true');
-                        }
-
-                        if (slotEmphasis) {
-                          const obs = Number((slotEmphasis as any)?.OBS ?? 1);
-                          const shift = Number((slotEmphasis as any)?.SHIFT ?? 1);
-                          const next = Number((slotEmphasis as any)?.NEXT ?? 1);
-                          const safe = Number((slotEmphasis as any)?.SAFE ?? 1);
-
-                          lines.push(`slot_emphasis_obs=${obs}`);
-                          lines.push(`slot_emphasis_shift=${shift}`);
-                          lines.push(`slot_emphasis_next=${next}`);
-                          lines.push(`slot_emphasis_safe=${safe}`);
-                        }
-
-                        if (slotWeights) {
-                          const obs = Number((slotWeights as any)?.OBS ?? 0);
-                          const shift = Number((slotWeights as any)?.SHIFT ?? 0);
-                          const next = Number((slotWeights as any)?.NEXT ?? 0);
-                          const safe = Number((slotWeights as any)?.SAFE ?? 0);
-
-                          lines.push(`slot_weight_obs=${obs}`);
-                          lines.push(`slot_weight_shift=${shift}`);
-                          lines.push(`slot_weight_next=${next}`);
-                          lines.push(`slot_weight_safe=${safe}`);
-                        }
-                      }
-                      const firstTouch = wd?.firstTouch;
-                      const firstTouchHint =
-                        firstTouch && typeof firstTouch === 'object'
-                          ? String(firstTouch?.hint ?? '').trim()
-                          : '';
-
-                      let continuationRequested = false;
-
-                      // 🔥 continuation（続き接続モード）
-                      try {
-                        const recallUsedLocal = Boolean((args as any)?.userContext?.ctxPack?.recallUsed);
-                        const sourceText =
-                          firstTouchHint ||
-                          String((args as any)?.echoGuardUserText ?? '') ||
-                          String((args as any)?.userText ?? '');
-
-                        const isExplicitRequestLocal =
-                          /この前|続き|前に言ってた|前に|前の話(?:し)?|前の流れ|つなげて|続きとして/.test(sourceText);
-
-                          continuationRequested = Boolean(isExplicitRequestLocal);
-
-                        if (continuationRequested) {
-                          lines.push('continuation_mode=true');
-                          lines.push('first_line_must_be_connection=true');
-                          lines.push('forbid_observation_opening=true');
-                          lines.push('opening_style=connect_previous_flow');
-                        }
-                      } catch {}
-
-                      const openingMode = String(wd?.openingMode ?? '').trim();
-                      const responseLength = String(wd?.responseLength ?? '').trim();
-
-                      if (openingMode) lines.push(`openingMode=${openingMode}`);
-                      if (responseLength) lines.push(`responseLength=${responseLength}`);
-
-                      if (firstTouch && typeof firstTouch === 'object') {
-                        const enabled = firstTouch?.enabled === true ? 'true' : 'false';
-                        const hint = String(firstTouch?.hint ?? '').trim();
-
-                        lines.push(`firstTouch.enabled=${enabled}`);
-                        if (hint) lines.push(`firstTouch.hint=${hint}`);
-
-                        const rules = Array.isArray(firstTouch?.rules) ? firstTouch.rules : [];
-                        const filteredRules = rules
-                          .map((x: any) => String(x ?? '').trim())
+                  if (!isDetailPatternWriter && slotDecision && typeof slotDecision === 'object') {
+                    const slotOrder = Array.isArray(slotDecision?.order)
+                      ? slotDecision.order
+                          .map((v: unknown) => String(v ?? '').trim())
                           .filter(Boolean)
-                          .filter((rule: string) => {
-                            if (!continuationRequested) return true;
-                            return (
-                              !rule.includes('最初の1文は「相手の状態を見ている観測文」にする')
-                            );
-                          });
-                      }
+                      : [];
 
-                      const bodyStyle = wd?.bodyStyle;
-                      if (bodyStyle && typeof bodyStyle === 'object') {
-                        if (typeof bodyStyle?.coreFirst === 'boolean') {
-                          lines.push(`bodyStyle.coreFirst=${bodyStyle.coreFirst ? 'true' : 'false'}`);
-                        }
-                        if (typeof bodyStyle?.allowSoftExpand === 'boolean') {
-                          lines.push(`bodyStyle.allowSoftExpand=${bodyStyle.allowSoftExpand ? 'true' : 'false'}`);
-                        }
-                        if (typeof bodyStyle?.minSentences === 'number') {
-                          lines.push(`bodyStyle.minSentences=${bodyStyle.minSentences}`);
-                        }
-                        if (typeof bodyStyle?.maxSentences === 'number') {
-                          lines.push(`bodyStyle.maxSentences=${bodyStyle.maxSentences}`);
-                        }
-                        if (typeof bodyStyle?.allowEmpathicBridge === 'boolean') {
-                          lines.push(
-                            `bodyStyle.allowEmpathicBridge=${bodyStyle.allowEmpathicBridge ? 'true' : 'false'}`
-                          );
-                        }
-                        if (typeof bodyStyle?.allowGentleRephrase === 'boolean') {
-                          lines.push(
-                            `bodyStyle.allowGentleRephrase=${bodyStyle.allowGentleRephrase ? 'true' : 'false'}`
-                          );
-                        }
-                        if (typeof bodyStyle?.forbidTopicExpansion === 'boolean') {
-                          lines.push(
-                            `bodyStyle.forbidTopicExpansion=${bodyStyle.forbidTopicExpansion ? 'true' : 'false'}`
-                          );
-                        }
-                        if (typeof bodyStyle?.delayClosure === 'boolean') {
-                          lines.push(`bodyStyle.delayClosure=${bodyStyle.delayClosure ? 'true' : 'false'}`);
-                        }
-                        if (typeof bodyStyle?.preferBlockSplit === 'boolean') {
-                          lines.push(
-                            `bodyStyle.preferBlockSplit=${bodyStyle.preferBlockSplit ? 'true' : 'false'}`
-                          );
-                        }
-                        if (typeof bodyStyle?.maxSentencesPerBlock === 'number') {
-                          lines.push(`bodyStyle.maxSentencesPerBlock=${bodyStyle.maxSentencesPerBlock}`);
-                        }
-                        if (typeof bodyStyle?.minBlocks === 'number') {
-                          lines.push(`bodyStyle.minBlocks=${bodyStyle.minBlocks}`);
-                        }
-                      }
+                    const slotEmphasis =
+                      slotDecision?.emphasis && typeof slotDecision.emphasis === 'object'
+                        ? slotDecision.emphasis
+                        : null;
 
-                      const flowLine = String(wd?.flowLine ?? '').trim();
-                      const deltaLine = String(wd?.deltaLine ?? '').trim();
-                      const flowFrom = String(wd?.flowFrom ?? '').trim();
-                      const flowTo = String(wd?.flowTo ?? '').trim();
+                    const slotWeights =
+                      slotDecision?.weights && typeof slotDecision.weights === 'object'
+                        ? slotDecision.weights
+                        : null;
 
-                      if (flowLine) lines.push(`flowLine=${flowLine}`);
-                      if (deltaLine) lines.push(`deltaLine=${deltaLine}`);
-                      if (flowFrom) lines.push(`flowFrom=${flowFrom}`);
-                      if (flowTo) lines.push(`flowTo=${flowTo}`);
+                    if (slotOrder.length > 0) {
+                      lines.push(`slot_order=${slotOrder.join(',')}`);
+                      lines.push(`slot_opening_role=${slotOrder[0]}`);
+                      if (slotOrder[1]) lines.push(`slot_second_role=${slotOrder[1]}`);
+                      if (slotOrder[2]) lines.push(`slot_third_role=${slotOrder[2]}`);
+                      lines.push('slot_safe_last=true');
+                    }
 
-                      const patternKey = String(wd?.pattern_key ?? '').trim();
-                      const patternMode = String(wd?.pattern_mode ?? '').trim();
-                      const patternBlockOrder = String(wd?.pattern_block_order ?? '').trim();
+                    if (slotEmphasis) {
+                      const obs = Number((slotEmphasis as any)?.OBS ?? 1);
+                      const shift = Number((slotEmphasis as any)?.SHIFT ?? 1);
+                      const next = Number((slotEmphasis as any)?.NEXT ?? 1);
+                      const safe = Number((slotEmphasis as any)?.SAFE ?? 1);
 
-                      if (patternKey) lines.push(`pattern_key=${patternKey}`);
-                      if (patternMode) lines.push(`pattern_mode=${patternMode}`);
-                      if (patternBlockOrder) lines.push(`pattern_block_order=${patternBlockOrder}`);
+                      lines.push(`slot_emphasis_obs=${obs}`);
+                      lines.push(`slot_emphasis_shift=${shift}`);
+                      lines.push(`slot_emphasis_next=${next}`);
+                      lines.push(`slot_emphasis_safe=${safe}`);
+                    }
 
-                      const patternBlockKeys = [
-                        'block_current_state',
-                        'block_misrecognition_negation',
-                        'block_structural_reframe',
-                        'block_breakdown_core_gap',
-                        'block_breakdown_defense',
-                        'block_breakdown_rejection_target',
-                        'block_reading_direction',
-                        'block_concrete_sort_axis',
-                        'block_concrete_sort_boundary',
-                        'block_concrete_sort_redesign',
-                        'block_felt_acceptance_point',
-                        'block_conclusion',
-                        'block_sting_point',
-                        'block_caution',
-                        'block_closing_line',
-                      ] as const;
+                    if (slotWeights) {
+                      const obs = Number((slotWeights as any)?.OBS ?? 0);
+                      const shift = Number((slotWeights as any)?.SHIFT ?? 0);
+                      const next = Number((slotWeights as any)?.NEXT ?? 0);
+                      const safe = Number((slotWeights as any)?.SAFE ?? 0);
 
-                      for (const key of patternBlockKeys) {
-                        const value = String((wd as any)?.[key] ?? '').trim();
-                        if (value) lines.push(`${key}=${value}`);
-                      }
+                      lines.push(`slot_weight_obs=${obs}`);
+                      lines.push(`slot_weight_shift=${shift}`);
+                      lines.push(`slot_weight_next=${next}`);
+                      lines.push(`slot_weight_safe=${safe}`);
+                    }
+                  }
+                  const firstTouch = wd?.firstTouch;
+                  const firstTouchHint =
+                    firstTouch && typeof firstTouch === 'object'
+                      ? String(firstTouch?.hint ?? '').trim()
+                      : '';
 
-                      const writeConstraints = Array.isArray(wd?.writeConstraints) ? wd.writeConstraints : [];
-                      writeConstraints
-                        .map((x: any) => String(x ?? '').trim())
-                        .filter(Boolean)
-                        .forEach((rule: string, i: number) => {
-                          lines.push(`writeConstraint${i + 1}=${rule}`);
-                        });
+                  let continuationRequested = false;
 
-                      return lines.join('\n').trim();
-                    })();
+                  // 🔥 continuation（続き接続モード）
+                  try {
+                    const recallUsedLocal = Boolean((args as any)?.userContext?.ctxPack?.recallUsed);
+                    const sourceText =
+                      firstTouchHint ||
+                      String((args as any)?.echoGuardUserText ?? '') ||
+                      String((args as any)?.userText ?? '');
 
-                    const seedBlocksForWriter = [
-                      mirrorFlowSeedText,
-                      canonicalSeedText,
-                      flowV2Text,
-                      flow180Block,
-                      writerDirectivesBlock,
-                    ]
-                      .filter((x) => norm(x))
-                      .map((x) =>
-                        String(x).replace(/\nFLOW:\n[\s\S]*?(?=\n[A-Z_]+:|$)/g, '')
+                    const isExplicitRequestLocal =
+                      /この前|続き|前に言ってた|前に|前の話(?:し)?|前の流れ|つなげて|続きとして/.test(sourceText);
+
+                    continuationRequested = Boolean(isExplicitRequestLocal);
+
+                    if (continuationRequested) {
+                      lines.push('continuation_mode=true');
+                      lines.push('first_line_must_be_connection=true');
+                      lines.push('forbid_observation_opening=true');
+                      lines.push('opening_style=connect_previous_flow');
+                    }
+                  } catch {}
+
+                  const openingMode = String(wd?.openingMode ?? '').trim();
+                  const responseLength = String(wd?.responseLength ?? '').trim();
+
+                  if (openingMode) lines.push(`openingMode=${openingMode}`);
+                  if (responseLength) lines.push(`responseLength=${responseLength}`);
+
+                  if (firstTouch && typeof firstTouch === 'object') {
+                    const enabled = firstTouch?.enabled === true ? 'true' : 'false';
+                    const hint = String(firstTouch?.hint ?? '').trim();
+
+                    lines.push(`firstTouch.enabled=${enabled}`);
+                    if (hint) lines.push(`firstTouch.hint=${hint}`);
+
+                    const rules = Array.isArray(firstTouch?.rules) ? firstTouch.rules : [];
+                    const filteredRules = rules
+                      .map((x: any) => String(x ?? '').trim())
+                      .filter(Boolean)
+                      .filter((rule: string) => {
+                        if (!continuationRequested) return true;
+                        return (
+                          !rule.includes('最初の1文は「相手の状態を見ている観測文」にする')
+                        );
+                      });
+                  }
+
+                  const bodyStyle = wd?.bodyStyle;
+                  if (bodyStyle && typeof bodyStyle === 'object') {
+                    if (typeof bodyStyle?.coreFirst === 'boolean') {
+                      lines.push(`bodyStyle.coreFirst=${bodyStyle.coreFirst ? 'true' : 'false'}`);
+                    }
+                    if (typeof bodyStyle?.allowSoftExpand === 'boolean') {
+                      lines.push(`bodyStyle.allowSoftExpand=${bodyStyle.allowSoftExpand ? 'true' : 'false'}`);
+                    }
+                    if (typeof bodyStyle?.minSentences === 'number') {
+                      lines.push(`bodyStyle.minSentences=${bodyStyle.minSentences}`);
+                    }
+                    if (typeof bodyStyle?.maxSentences === 'number') {
+                      lines.push(`bodyStyle.maxSentences=${bodyStyle.maxSentences}`);
+                    }
+                    if (typeof bodyStyle?.allowEmpathicBridge === 'boolean') {
+                      lines.push(
+                        `bodyStyle.allowEmpathicBridge=${bodyStyle.allowEmpathicBridge ? 'true' : 'false'}`
                       );
+                    }
+                    if (typeof bodyStyle?.allowGentleRephrase === 'boolean') {
+                      lines.push(
+                        `bodyStyle.allowGentleRephrase=${bodyStyle.allowGentleRephrase ? 'true' : 'false'}`
+                      );
+                    }
+                    if (typeof bodyStyle?.forbidTopicExpansion === 'boolean') {
+                      lines.push(
+                        `bodyStyle.forbidTopicExpansion=${bodyStyle.forbidTopicExpansion ? 'true' : 'false'}`
+                      );
+                    }
+                    if (typeof bodyStyle?.delayClosure === 'boolean') {
+                      lines.push(`bodyStyle.delayClosure=${bodyStyle.delayClosure ? 'true' : 'false'}`);
+                    }
+                    if (typeof bodyStyle?.preferBlockSplit === 'boolean') {
+                      lines.push(
+                        `bodyStyle.preferBlockSplit=${bodyStyle.preferBlockSplit ? 'true' : 'false'}`
+                      );
+                    }
+                    if (typeof bodyStyle?.maxSentencesPerBlock === 'number') {
+                      lines.push(`bodyStyle.maxSentencesPerBlock=${bodyStyle.maxSentencesPerBlock}`);
+                    }
+                    if (typeof bodyStyle?.minBlocks === 'number') {
+                      lines.push(`bodyStyle.minBlocks=${bodyStyle.minBlocks}`);
+                    }
+                  }
 
-                    const seedBlockForWriter = seedBlocksForWriter.join('\n\n');
+                  const flowLine = String(wd?.flowLine ?? '').trim();
+                  const deltaLine = String(wd?.deltaLine ?? '').trim();
+                  const flowFrom = String(wd?.flowFrom ?? '').trim();
+                  const flowTo = String(wd?.flowTo ?? '').trim();
+
+                  if (flowLine) lines.push(`flowLine=${flowLine}`);
+                  if (deltaLine) lines.push(`deltaLine=${deltaLine}`);
+                  if (flowFrom) lines.push(`flowFrom=${flowFrom}`);
+                  if (flowTo) lines.push(`flowTo=${flowTo}`);
+
+                  const patternKey = String(wd?.pattern_key ?? '').trim();
+                  const patternMode = String(wd?.pattern_mode ?? '').trim();
+                  const patternBlockOrder = String(wd?.pattern_block_order ?? '').trim();
+
+                  if (patternKey) lines.push(`pattern_key=${patternKey}`);
+                  if (patternMode) lines.push(`pattern_mode=${patternMode}`);
+                  if (patternBlockOrder) lines.push(`pattern_block_order=${patternBlockOrder}`);
+
+                  const patternBlockKeys = [
+                    'block_current_state',
+                    'block_misrecognition_negation',
+                    'block_structural_reframe',
+                    'block_breakdown_core_gap',
+                    'block_breakdown_defense',
+                    'block_breakdown_rejection_target',
+                    'block_reading_direction',
+                    'block_concrete_sort_axis',
+                    'block_concrete_sort_boundary',
+                    'block_concrete_sort_redesign',
+                    'block_felt_acceptance_point',
+                    'block_conclusion',
+                    'block_sting_point',
+                    'block_caution',
+                    'block_closing_line',
+                  ] as const;
+
+                  for (const key of patternBlockKeys) {
+                    const value = String((wd as any)?.[key] ?? '').trim();
+                    if (value) lines.push(`${key}=${value}`);
+                  }
+
+                  const writeConstraints = Array.isArray(wd?.writeConstraints) ? wd.writeConstraints : [];
+                  writeConstraints
+                    .map((x: any) => String(x ?? '').trim())
+                    .filter(Boolean)
+                    .forEach((rule: string, i: number) => {
+                      lines.push(`writeConstraint${i + 1}=${rule}`);
+                    });
+
+                  return lines.join('\n').trim();
+                })();
+
+                const seedBlocksForWriter = [
+                  canonicalSeedText,
+                  flowV2Text,
+                ]
+                  .filter((x) => norm(x));
+
+                const seedBlockForWriter = seedBlocksForWriter.join('\n\n');
 
                 const injectedHead = [seedBlockForWriter]
                 .filter((x) => norm(x))
@@ -3189,13 +3552,7 @@ const internalPackForWriter = (() => {
     .replace(/^[ \t]*@NEXT_HINT[^\n]*(?:\n|$)/gm, '')
     .replace(/(?:^|\n)@DELTA[^\n]*/g, '')
 
-    // 旧 FLOW / FLOW_V2 は writer には渡さない
-    .replace(/\nFLOW:\n[\s\S]*?(?=\n[A-Z_]+:|$)/g, '')
-    .replace(
-      /\nFLOW_V2\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ \-]+(?:\s*\(DO NOT OUTPUT\))?:|$)/g,
-      '',
-    )
-
+    // FLOW_V2 は SEED の difference / transition 観測に必要なので final pack に残す
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
@@ -3349,21 +3706,21 @@ try {
         : null;
 
         try {
+          const deltaPattern =
+            /(?:^|\n)(?:@DELTA\b|FLOW180(?:\s*\(DO NOT OUTPUT\))?:|FLOW_V2(?:\s*\(DO NOT OUTPUT\))?:[\s\S]*?(?:^|\n)delta=|FLOW:\n[\s\S]*?(?:^|\n)delta=)/m;
+
           const deltaDebug = {
             hasDeltaHint: !!deltaHint,
             deltaHint: deltaHint ?? null,
-            internalPackForWriterHasDelta:
-              /(?:^|\n)(?:@DELTA\b|FLOW180(?:\s*\(DO NOT OUTPUT\))?:)/.test(
-                String(internalPackForWriter ?? '')
-              ),
-            packMsgHasDelta:
-              /(?:^|\n)(?:@DELTA\b|FLOW180(?:\s*\(DO NOT OUTPUT\))?:)/.test(
-                String(packMsg?.content ?? '')
-              ),
+            internalPackForWriterHasDelta: deltaPattern.test(
+              String(internalPackForWriter ?? '')
+            ),
+            packMsgHasDelta: deltaPattern.test(
+              String(packMsg?.content ?? '')
+            ),
             internalPackForWriterHead: String(internalPackForWriter ?? '').slice(0, 300),
             packMsgHead: String(packMsg?.content ?? '').slice(0, 300),
           };
-
           console.log(
             '[IROS/writerCalls][PACK_MSG_DELTA_CHECK]',
             JSON.stringify(deltaDebug),
@@ -3393,16 +3750,25 @@ try {
           ? ({ role: 'assistant', content: String(args.historyText).trim() } as WriterMessage)
           : null;
 
-      let messages: WriterMessage[] = [
-        { role: 'system', content: systemOneWithMeaning },
-        ...(historyMsg ? [historyMsg] : []),
-        ...(packMsg ? [packMsg] : []),
-        ...(topicRecallNoEvidenceMsg ? [topicRecallNoEvidenceMsg] : []),
-        ...turns,
-      ];
+          let messages: WriterMessage[] = [
+            { role: 'system', content: systemOneWithMeaning },
+            ...(historyMsg ? [historyMsg] : []),
+            ...(packMsg ? [packMsg] : []),
+            ...(topicRecallNoEvidenceMsg ? [topicRecallNoEvidenceMsg] : []),
+            ...turns,
+          ];
 
-  messages = mergeConsecutiveSameRole(messages);
-  messages = ensureEndsWithUser(messages, String(args.userText ?? ''));
+          const prefixCount =
+            1 +
+            (historyMsg ? 1 : 0) +
+            (packMsg ? 1 : 0) +
+            (topicRecallNoEvidenceMsg ? 1 : 0);
+
+          const prefix = messages.slice(0, prefixCount);
+          const tailMessages = messages.slice(prefixCount);
+
+          messages = [...prefix, ...mergeConsecutiveSameRole(tailMessages)];
+          messages = ensureEndsWithUser(messages, String(args.userText ?? ''));
 
   let digest = (args.historyDigestV1 ?? null) as HistoryDigestV1 | null;
   if (digest) {

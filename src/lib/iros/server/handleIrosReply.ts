@@ -3011,8 +3011,10 @@ function normForRecall(v: any): string {
             orchFlow?.futureRandom ??
             null,
         },
+
         userCore:
           String(text ?? '').trim() || null,
+
         historyLine: (() => {
           const rawHistory = String(
             orchCtxPack?.conversationLine ??
@@ -3025,18 +3027,151 @@ function normForRecall(v: any): string {
             String(orchCtxPack?.goalKind ?? '').trim() === 'uncover';
 
           if (!rawHistory) return null;
-
-          // 🔥 uncoverは履歴完全遮断
           if (isHeavyInput) return null;
 
           return rawHistory;
         })(),
+
         memoryLine:
           String(
             orchCtxPack?.topicDigest ??
               orchExtra?.topicDigest ??
               '',
           ).trim() || null,
+
+        meaningSkeleton:
+          (orchExtra as any)?.meaningSkeleton ??
+          (orchCtxPack as any)?.meaningSkeleton ??
+          null,
+
+        flow180:
+          (orchExtra as any)?.flow180 ??
+          (orchCtxPack as any)?.flow180 ??
+          null,
+
+        writerDirectives:
+          (orchExtra as any)?.writerDirectives ??
+          (orchCtxPack as any)?.writerDirectives ??
+          null,
+
+        focus:
+          String(
+            (orchExtra as any)?.situationTopic ??
+              (orchCtxPack as any)?.situationTopic ??
+              text ??
+              '',
+          ).trim() || null,
+
+        tone:
+          String(
+            (orchExtra as any)?.tone ??
+              'normal',
+          ).trim() || null,
+
+        pressure:
+          String(
+            (orchExtra as any)?.pressure ??
+              'observe',
+          ).trim() || null,
+
+        depthStage:
+          String(
+            orchCtxPack?.depthStage ??
+              orchExtra?.depthStage ??
+              '',
+          ).trim() || null,
+
+        phase:
+          String(
+            orchCtxPack?.phase ??
+              orchExtra?.phase ??
+              '',
+          ).trim() || null,
+
+        qCode:
+          String(
+            orchCtxPack?.qCode ??
+              orchExtra?.qCode ??
+              '',
+          ).trim() || null,
+
+        eTurn:
+          String(
+            (orchExtra as any)?.e_turn ??
+              orchCtxPack?.emotionalTemperature ??
+              orchExtra?.emotionalTemperature ??
+              '',
+          ).trim() || null,
+
+        goalKind:
+          String(
+            orchCtxPack?.goalKind ??
+              orchExtra?.goalKind ??
+              '',
+          ).trim() || null,
+
+          surfacePlan:
+          (orchExtra as any)?.flowSeed
+            ? null
+            : {
+                obsCore:
+                  String(text ?? '').trim() || null,
+
+                  shiftCore:
+                  String(
+                    (orchExtra as any)?.flow180?.resonance ??
+                      (orchCtxPack as any)?.flow180?.resonance ??
+                      (orchExtra as any)?.writerDirectives?.deltaLine ??
+                      (orchCtxPack as any)?.writerDirectives?.deltaLine ??
+                      (orchCtxPack as any)?.shiftHint ??
+                      (orchExtra as any)?.shiftHint ??
+                      '',
+                  ).trim() || null,
+
+                nextCore:
+                  String(
+                    (orchCtxPack as any)?.situationTopic ??
+                      (orchExtra as any)?.situationTopic ??
+                      text ??
+                      '',
+                  ).trim() || null,
+
+                safeCore:
+                  String(
+                    (orchExtra as any)?.flow180?.resonance ??
+                      (orchCtxPack as any)?.flow180?.resonance ??
+                      '',
+                  ).trim() || null,
+
+                obsLine:
+                  String(text ?? '').trim() || null,
+
+                shiftLine:
+                  String(
+                    (orchExtra as any)?.flow180?.resonance ??
+                      (orchCtxPack as any)?.flow180?.resonance ??
+                      (orchExtra as any)?.writerDirectives?.deltaLine ??
+                      (orchCtxPack as any)?.writerDirectives?.deltaLine ??
+                      (orchCtxPack as any)?.shiftHint ??
+                      (orchExtra as any)?.shiftHint ??
+                      '',
+                  ).trim() || null,
+
+                nextLine:
+                  String(
+                    (orchCtxPack as any)?.situationTopic ??
+                      (orchExtra as any)?.situationTopic ??
+                      text ??
+                      '',
+                  ).trim() || null,
+
+                safeLine:
+                  String(
+                    (orchExtra as any)?.flow180?.resonance ??
+                      (orchCtxPack as any)?.flow180?.resonance ??
+                      '',
+                  ).trim() || null,
+              },
       });
 
       const flowSeed = formatFlowSeedV1(flowSeedObj).trim();
@@ -3720,9 +3855,11 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
         const normalizedFinalGoalKind = normalizeGoalKind(finalGoalKind);
 
         const chosenGoalKindRaw =
-          existingStrongGoalKind ??
-          normalizedFinalGoalKind ??
-          'uncover';
+          normalizedFinalGoalKind === 'resonate'
+            ? 'resonate'
+            : existingStrongGoalKind ??
+              normalizedFinalGoalKind ??
+              'uncover';
 
         const seedTextForGoal = String(
           exAny?.slotPlanSeed ??
@@ -3740,20 +3877,20 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
         const chosenGoalKind =
           forceDecideBySeed
             ? 'decide'
-            : chosenGoalKindRaw === 'resonate'
-              ? 'uncover'
+            : chosenGoalKindRaw === 'commit'
+              ? 'decide'
               : chosenGoalKindRaw;
 
         const chosenTargetKindRaw =
-          existingStrongTargetKind ??
-          (chosenGoalKindRaw === 'commit' ? 'decide' : chosenGoalKindRaw);
+          normalizedFinalGoalKind === 'resonate'
+            ? 'resonate'
+            : existingStrongTargetKind ??
+              (chosenGoalKindRaw === 'commit' ? 'decide' : chosenGoalKindRaw);
 
         const chosenTargetKind =
-          chosenTargetKindRaw === 'resonate'
-            ? chosenGoalKind
-            : chosenTargetKindRaw === 'commit'
-              ? 'decide'
-              : chosenTargetKindRaw;
+          chosenTargetKindRaw === 'commit'
+            ? 'decide'
+            : chosenTargetKindRaw;
 
         console.log(
           '[IROS/GOALKIND_SOURCE][CHOOSE]',
@@ -5262,10 +5399,11 @@ if (detailModeRaw) {
     }
 
     if (
-      shift2_flowDelta === 'RETURN' ||
-      emotionalTemperature === 'high' ||
-      emotionalTemperature === 'volatile' ||
-      hasAny('戻ってきた', '動けない', '止まる', 'しんどい')
+      hasAny('戻ってきた', '動けない', '止まる', 'しんどい') ||
+      (
+        (emotionalTemperature === 'high' || emotionalTemperature === 'volatile') &&
+        shift2_goalKind === 'stabilize'
+      )
     ) {
       if (
         shift2_goalKind === 'uncover' ||
@@ -6491,12 +6629,13 @@ if (remake?.detected) {
     .trim()
     .toLowerCase();
 
-  const normalizedGoalKind =
+    const normalizedGoalKind =
     currentGoalKind === 'clarify' ||
     currentGoalKind === 'stabilize' ||
     currentGoalKind === 'decide' ||
     currentGoalKind === 'commit' ||
-    currentGoalKind === 'uncover'
+    currentGoalKind === 'uncover' ||
+    currentGoalKind === 'resonate'
       ? currentGoalKind
       : 'uncover';
 
@@ -6505,7 +6644,8 @@ if (remake?.detected) {
     currentTargetKind === 'stabilize' ||
     currentTargetKind === 'decide' ||
     currentTargetKind === 'commit' ||
-    currentTargetKind === 'uncover'
+    currentTargetKind === 'uncover' ||
+    currentTargetKind === 'resonate'
       ? currentTargetKind
       : normalizedGoalKind;
 
@@ -7773,6 +7913,7 @@ try {
       userCode: _userCode ?? null,
       traceId: traceIdCanon,
       inputKind: inputKindCanon,
+      style: style ?? (userProfile as any)?.style ?? null,
 
       exprMeta: exprMetaCanon,
 
@@ -7820,6 +7961,7 @@ try {
 
         traceId: traceIdCanon,
         inputKind: inputKindCanon,
+        style: style ?? (userProfile as any)?.style ?? null,
 
         // UIでは隠しても、次ターン内部用は保持する
         historyForWriter: historyForWriterInternal,

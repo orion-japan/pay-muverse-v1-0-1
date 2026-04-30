@@ -252,11 +252,17 @@ export function computeSlotDecision(input: SlotWeightInput): SlotDecision {
     .sort((a, b) => b[1] - a[1])
     .map(([k]) => k);
 
-  if (truthLike) {
-    order = bringToFront(order, ['OBS', 'SHIFT', 'NEXT', 'SAFE']);
-  } else if (remakeLike || supportiveMode || questionType === 'meaning' || questionType === 'structure') {
-    order = bringToFront(order, ['OBS', 'SHIFT']);
-  }
+    if (truthLike) {
+      order = bringToFront(order, ['OBS', 'SHIFT', 'NEXT', 'SAFE']);
+    } else if (
+      goalKind === 'uncover' ||
+      remakeLike ||
+      supportiveMode ||
+      questionType === 'meaning' ||
+      questionType === 'structure'
+    ) {
+      order = bringToFront(order, ['OBS', 'SHIFT']);
+    }
 
   order = [...order.filter((k) => k !== 'SAFE'), 'SAFE'] as SlotName[];
 

@@ -1808,16 +1808,23 @@ void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）
         // ✅ forced blocks ルートでは meta本文先頭行（preface）を注入しない
         // - seed/preface は PostProcess 側（SLOTPLAN_SEED_TO_WRITER）で管理する
         // - ここで混ぜると RB と seed が二重化しやすい
-
-        blocksForRender = blocks;
-        fallbackTextForRender = '';
-        pickedFromForRender = 'rephraseBlocks-forced';
-        pickedFrom = pickedFromForRender;
+        //
+        // ✅ ただし 3段以下の rephraseBlocks は、そのまま render の正本にしない
+        // - pattern 側は 4責務を持っているため、3段 raw shape を forced すると
+        //   paragraph4 / SAFE 相当が落ちたまま固定されやすい
+        // - 4段以上のときだけ forced で採用する
+        if (rbLen2 >= 4) {
+          blocksForRender = blocks;
+          fallbackTextForRender = '';
+          pickedFromForRender = 'rephraseBlocks-forced';
+          pickedFrom = pickedFromForRender;
+        }
 
         console.warn('[IROS/renderGateway][FORCE_BLOCKS_FROM_REPHRASE]', {
           rev: IROS_RENDER_GATEWAY_REV,
           rbLen: rbLen2,
-          forcedBlocks: blocksForRender.length,
+          forcedBlocks: rbLen2 >= 4 ? blocksForRender.length : 0,
+          skippedBecauseTooShort: rbLen2 < 4,
           prevPickedFrom,
           nextHintFromRb,
           nextHintFromSlotPlan,

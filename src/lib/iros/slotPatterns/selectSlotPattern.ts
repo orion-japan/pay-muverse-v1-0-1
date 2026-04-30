@@ -182,9 +182,9 @@ export function selectSlotPattern(input: SelectSlotPatternInput): PatternKey {
     return 'NORMAL_DETAIL_V1';
   }
 
-  // truth系は TRUTH_V1
+  // truth系は TRUTH_COMPRESSED_V1
   if (truthLike) {
-    return 'TRUTH_V1';
+    return 'TRUTH_COMPRESSED_V1';
   }
 
   // 通常会話で detail 指示があるときだけ DETAIL
@@ -192,6 +192,6 @@ export function selectSlotPattern(input: SelectSlotPatternInput): PatternKey {
     return 'NORMAL_DETAIL_V1';
   }
 
-  // 通常会話の既定は RESONANCE
-  return 'NORMAL_RESONANCE_V1';
+  // 通常会話の既定は COMPRESSED
+  return 'NORMAL_COMPRESSED_V1';
 }

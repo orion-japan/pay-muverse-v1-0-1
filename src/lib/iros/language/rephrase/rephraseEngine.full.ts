@@ -2463,11 +2463,15 @@ const toRephraseBlocks = (s: string): string[] => {
       .filter(Boolean)
       .filter((p) => !isBulletLike(p));
 
-    const sentenceUnits = mergeShortSentences(
-      lines.flatMap((line) => splitParagraphToSentences(line))
-    );
+    if (lines.length >= 4) {
+      blocks = lines;
+    } else {
+      const sentenceUnits = mergeShortSentences(
+        lines.flatMap((line) => splitParagraphToSentences(line))
+      );
 
-    blocks = sentenceUnits.flatMap((p) => splitLongBlock(p));
+      blocks = sentenceUnits.flatMap((p) => splitLongBlock(p));
+    }
   }
 
   blocks = blocks
@@ -2578,37 +2582,6 @@ return blocks;
   const buildHistoryTextLite = (turns: any[]): string => {
     const lines: string[] = ['HISTORY_LITE (DO NOT OUTPUT):'];
 
-    const BANNED_ASSISTANT_PATTERNS: RegExp[] = [
-      /入力はありますか/u,
-      /この意味伝わりますか/u,
-      /何か言ってください/u,
-      /ひとこと.*(でも|だけでも).*いい/u,
-      /短くていいから.*一行/u,
-      /\b\[USER\]\b/u,
-    ];
-
-    const sanitizeAssistantForHistory = (raw: string): string => {
-      let t = String(raw ?? '').replace(/\r\n/g, '\n').trim();
-      if (!t) return '';
-
-      if (BANNED_ASSISTANT_PATTERNS.some((re) => re.test(t))) return '';
-
-      const kept = t
-        .split('\n')
-        .map((x) => x.trim())
-        .filter((x) => x.length > 0)
-        .filter((x) => !BANNED_ASSISTANT_PATTERNS.some((re) => re.test(x)));
-
-      t = kept.join(' ').replace(/\s+/g, ' ').trim();
-      if (!t) return '';
-
-      const firstSentence = t.split(/(?<=[。！？!?])/u)[0]?.trim() ?? t;
-      t = firstSentence.replace(/\s+/g, ' ').trim();
-      if (!t) return '';
-
-      return t.length > 90 ? `${t.slice(0, 90)}…` : t;
-    };
-
     const sanitizeUserForHistory = (raw: string): string => {
       let t = String(raw ?? '').replace(/\r\n/g, '\n').trim();
       if (!t) return '';
@@ -2633,27 +2606,15 @@ return blocks;
     const pickedTurns = (Array.isArray(turns) ? turns : []).slice(-4);
 
     for (const t of pickedTurns) {
-      const role =
-        t?.role === 'assistant'
-          ? 'assistant'
-          : t?.role === 'user'
-            ? 'user'
-            : null;
+      const role = t?.role === 'user' ? 'user' : null;
       if (!role) continue;
 
       const raw = String(t?.content ?? t?.text ?? '').replace(/\r\n/g, '\n').trim();
       if (!raw) continue;
 
-      if (role === 'user') {
-        const one = sanitizeUserForHistory(raw);
-        if (!one) continue;
-        lines.push(`user: ${one}`);
-        continue;
-      }
-
-      const one = sanitizeAssistantForHistory(raw);
+      const one = sanitizeUserForHistory(raw);
       if (!one) continue;
-      lines.push(`assistant: ${one}`);
+      lines.push(`user: ${one}`);
     }
 
     return lines.join('\n');
@@ -2722,24 +2683,119 @@ return blocks;
               [];
 
               const hasHistoryForWriter = Array.isArray(hfw) && hfw.length > 0;
-    // ✅ historyForWriter がある時は、それを writer 用の履歴テキストとして使う
-    if (hasHistoryForWriter) {
-      return buildHistoryTextLite(hfw as any[]);
-    }
-    // ✅ 旧 stopgap も維持
-    // meaning + confirm では HISTORY_LITE を writer に渡さない
-    if (questionType === 'meaning' && tMode === 'confirm') {
-      return '';
-    }
 
-    // ✅ pastState recall（keyword / recent_topic）では HISTORY_LITE fallback も止める
-    if (shouldPreferPastStateRecallForHistory) {
-      return '';
-    }
+              const historyGoalKind = String(
+                (ctxPackForHistoryText as any)?.goalKind ??
+                  (opts as any)?.userContext?.goalKind ??
+                  (opts as any)?.extra?.goalKind ??
+                  ''
+              ).trim();
 
-    // ✅ fallback: 履歴正本が無い時だけ使う
-    return buildHistoryTextLite(lastTurns);
+              const explicitContinuationRequested = /この前|続き|前に言ってた|前に|前の話(?:し)?|前の流れ|つなげて|続きとして/.test(
+                String((opts as any)?.userText ?? '')
+              );
+
+              const shouldDropHistoryLiteByMode =
+                historyPatternKey === 'NORMAL_COMPRESSED_V1' &&
+                historyGoalKind === 'stabilize' &&
+                !explicitContinuationRequested;
+
+              if (hasHistoryForWriter) {
+                const currentUserNorm = String((opts as any)?.userText ?? '')
+                  .replace(/\r\n/g, '\n')
+                  .trim();
+
+                const lastHistoryUserNorm = (() => {
+                  const lastUser = [...(hfw as any[])]
+                    .reverse()
+                    .find((x) => x?.role === 'user');
+                  return String(lastUser?.content ?? lastUser?.text ?? '')
+                    .replace(/\r\n/g, '\n')
+                    .trim();
+                })();
+
+                const shouldDropDuplicateHistoryLite =
+                  historyPatternKey === 'NORMAL_COMPRESSED_V1' &&
+                  !!currentUserNorm &&
+                  lastHistoryUserNorm === currentUserNorm;
+
+                try {
+                  console.log(
+                    '[IROS/HISTORY_LITE_GUARD]',
+                    JSON.stringify({
+                      historyPatternKey,
+                      historyGoalKind,
+                      explicitContinuationRequested,
+                      currentUserNorm,
+                      lastHistoryUserNorm,
+                      sameAsCurrentUser: lastHistoryUserNorm === currentUserNorm,
+                      shouldDropDuplicateHistoryLite,
+                      shouldDropHistoryLiteByMode,
+                    }),
+                  );
+                } catch {}
+
+                if (shouldDropHistoryLiteByMode) {
+                  return '';
+                }
+
+                if (shouldDropDuplicateHistoryLite) {
+                  return '';
+                }
+
+                return buildHistoryTextLite(hfw as any[]);
+              }
+
+              const currentUserNormForFallback = String((opts as any)?.userText ?? '')
+                .replace(/\r\n/g, '\n')
+                .trim();
+
+              const lastTurnsUserNorm = (() => {
+                const lastUser = [...(Array.isArray(lastTurns) ? lastTurns : [])]
+                  .reverse()
+                  .find((x) => x?.role === 'user');
+                return String(lastUser?.content ?? lastUser?.text ?? '')
+                  .replace(/\r\n/g, '\n')
+                  .trim();
+              })();
+
+              const shouldDropDuplicateHistoryLiteFromFallback =
+                historyPatternKey === 'NORMAL_COMPRESSED_V1' &&
+                !!currentUserNormForFallback &&
+                lastTurnsUserNorm === currentUserNormForFallback;
+
+              try {
+                console.log(
+                  '[IROS/HISTORY_LITE_FALLBACK_GUARD]',
+                  JSON.stringify({
+                    historyPatternKey,
+                    currentUserNormForFallback,
+                    lastTurnsUserNorm,
+                    sameAsCurrentUser: lastTurnsUserNorm === currentUserNormForFallback,
+                    shouldDropDuplicateHistoryLiteFromFallback,
+                  }),
+                );
+              } catch {}
+
+              // ✅ 旧 stopgap も維持
+              // meaning + confirm では HISTORY_LITE を writer に渡さない
+              if (questionType === 'meaning' && tMode === 'confirm') {
+                return '';
+              }
+
+              // ✅ pastState recall（keyword / recent_topic）では HISTORY_LITE fallback も止める
+              if (shouldPreferPastStateRecallForHistory) {
+                return '';
+              }
+
+              if (shouldDropDuplicateHistoryLiteFromFallback) {
+                return '';
+              }
+
+              // ✅ fallback: 履歴正本が無い時だけ使う
+              return buildHistoryTextLite(lastTurns);
   })();
+
 // slot由来の下書き（露出禁止）
 // - @OBS 内の user/lastUserText を writer に渡さない（userText混入の経路を遮断）
 const sanitizeSlotTextForWriter = (s: string) => {
@@ -4337,9 +4393,46 @@ const systemPromptForWriter = [
       key !== 'IR_DETAIL_V1' &&
       key !== 'NORMAL_DETAIL_V1' &&
       key !== 'NORMAL_RESONANCE_V1' &&
-      key !== 'DECLARATION_RESONANCE_V1'
+      key !== 'DECLARATION_RESONANCE_V1' &&
+      key !== 'NORMAL_COMPRESSED_V1'
     ) {
       return {};
+    }
+
+    if (key === 'NORMAL_COMPRESSED_V1') {
+      return {
+        pattern_key: key,
+        pattern_mode: 'normal_compressed',
+        bodyStyle: {
+          preferBlockSplit: true,
+          minBlocks: 4,
+          maxBlocks: 4,
+          maxSentencesPerBlock: 2,
+          minSentences: 4,
+          maxSentences: 8,
+        },
+        writeConstraints: [
+          'normal_compressed では、必ず4つの段落で返す',
+          '4つの段落は、OBS → SHIFT → NEXT → SAFE の順に固定する',
+          'OBS / SHIFT / NEXT / SAFE は説明文ではなく自然文で書く',
+          '1段落目は今いちばん前にある状態だけを書く',
+          '2段落目は流れが実際に止まる一点そのものを書く',
+          '3段落目はまだ残っている未解決の状態そのものを書く',
+          '4段落目は同じ状態に残る静かな余韻だけを書く',
+          'seedにない新しい具体軸を足さない',
+          '同じ核を言い換えて深める',
+          '質問しない',
+          '安心させる表現を書かない',
+'評価や肯定で締めない',
+'「大丈夫」「十分」「問題ない」を使わない',
+'「〜と思います」「〜かもしれません」を使わない',
+'助言や方向づけを書かない',
+'読者に対する配慮・励ましを書かない',
+'「だから」で文を始めない',
+'「〜のだと思います」を使わない',
+'「〜だけです」で締めない',
+        ],
+      };
     }
 
     if (key === 'DECLARATION_RESONANCE_V1' || key === 'NORMAL_RESONANCE_V1') {
@@ -4352,19 +4445,20 @@ const systemPromptForWriter = [
         pattern_block_order:
           'state_surface,state_weight,state_open_edge,state_residue',
         block_state_surface:
-          '1段落目は、いま前に出ている状態そのものを書く。説明や要約ではなく、その場にもう立っている変化を自然文で置く。1文目は状態をそのまま置き、2文目はその続きとして向きや残り方を書く。逆接や説明の接続で起こさず、前の文の余韻がそのまま続く始まりを優先する。「でもそのあとに」「そのあとに」「ここで」「つまり」「言いながらも」で起こさない。',
+          '1段落目は、いま前に出ている状態そのものを書く。説明・要約・解釈で起こさない。',
         block_state_weight:
-          '2段落目は、その話がどの重さで立っているかを書く。強さや重さは書いてよいが、案内や整理にしない。前段の余韻を受けて始め、重さが自然ににじむ書き方を優先する。「だから」「そのうえで」「つまり」「しかも」などの説明的な接続で起こさない。',
+          '2段落目は、その話がどの重さで立っているかを書く。整理・説得・意味づけにしない。',
         block_state_open_edge:
-          '3段落目は、まだ決まりきっていない部分を書く。注意や命名や接地の案内にしない。未固定のまま残っている差や揺れだけを観測として置く。文頭は前段から静かに引き継ぎ、整理して切り分けるより、まだひとつに閉じない感じを残す。「まだ全部がはっきりしているわけではなくて」「ただ」「だから」「だから今は」など、説明してつなぐ言い方を優先しない。',
+          '3段落目は、まだ決まりきっていない部分を書く。未固定の差や揺れだけを置く。',
         block_state_residue:
-          '4段落目は、最後に残る感じだけを書く。締めや行動提案や変化予告にしない。ここまでの流れを静かに受けて、状態の端に残るものだけを置いて閉じる。言葉や文そのものには触れず、少し開いたまま余韻で終える。',
+          '4段落目は、最後に残る感じだけを書く。締め・結論・助言にしない。',
         bodyStyle: {
           preferBlockSplit: true,
           minBlocks: 4,
-          maxSentencesPerBlock: 4,
-          minSentences: 8,
-          maxSentences: 12,
+          maxBlocks: 4,
+          maxSentencesPerBlock: 2,
+          minSentences: 4,
+          maxSentences: 8,
         },
         writeConstraints: [
           `${
@@ -4373,20 +4467,11 @@ const systemPromptForWriter = [
               : 'normal_resonance'
           } では、必ず4つの段落で返す`,
           '4つの段落は、state_surface → state_weight → state_open_edge → state_residue の順に固定する',
-          'guide を書かない',
-          '注意を書かない',
-          '次の一歩を書かない',
-          '締めの結論を書かない',
           '観測から始める',
-          '各段落の文頭は、前の段落や前の文の余韻を受けて始める',
-          '説明的な接続語より、流れを引き継ぐ自然な始まりを優先する',
-          '「そのうえで」「つまり」「したがって」「要するに」「ここで」「次は」を優先して使わない',
+          '説明ではなく共鳴で書く',
           '未固定部分は未固定のまま置く',
-          '3段落目で案内や命名をしない',
-          '3段落目で接地や確定を書かない',
-          '4段落目で変化予告や締めをしない',
-          '最後は residue で終える',
-          '段落末だけを着地させ、各文末は次の文へ少し開いて渡す',
+          '締め・結論を書かない',
+          '最後は余韻で終える',
         ],
       };
     }
@@ -5702,7 +5787,26 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
     // ここでは display 用 block の正本には採用しない。
     const normalizedText = String(text ?? '').trim();
 
-    let blocksText = toRephraseBlocks(normalizedText);
+    const normalizedParagraphsForCompressed = normalizedText
+      .split(/\n{2,}/)
+      .map((x) => String(x ?? '').trim())
+      .filter(Boolean);
+
+    const sentenceUnitsForCompressed =
+      normalizedParagraphsForCompressed.length === 2
+        ? normalizedParagraphsForCompressed
+            .flatMap((p) =>
+              String(p)
+                .split(/(?<=[。！？!?])\s*/u)
+                .map((x) => String(x ?? '').trim())
+                .filter(Boolean)
+            )
+        : [];
+
+    let blocksText =
+      normalizedParagraphsForCompressed.length === 2 && sentenceUnitsForCompressed.length === 4
+        ? sentenceUnitsForCompressed.slice(0, 4)
+        : toRephraseBlocks(normalizedText);
 
     if (!Array.isArray(blocksText) || blocksText.length === 0) {
       blocksText = toRephraseBlocks(normalizedText);
@@ -5741,52 +5845,54 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
       .toLowerCase();
 
     // questionType は writer 本文ではなく、必ず「ユーザーの質問文」から推定する。
-    const questionTypeSourceText = String(
-      userText ??
-        (opts as any)?.userText ??
-        (
-          Array.isArray((opts as any)?.messages)
-            ? (opts as any).messages.filter((m: any) => m?.role === 'user').slice(-1)[0]?.content
-            : ''
-        ) ??
-        ''
-    ).trim();
+// questionType は writer 本文ではなく、必ず「ユーザーの質問文」から推定する。
+const questionTypeSourceText = String(
+  userText ??
+    (opts as any)?.userText ??
+    (
+      Array.isArray((opts as any)?.messages)
+        ? (opts as any).messages.filter((m: any) => m?.role === 'user').slice(-1)[0]?.content
+        : ''
+    ) ??
+    ''
+).trim();
 
-    const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
-      const explicit = questionTypeFromContext;
-      if (
-        explicit === 'meaning' ||
-        explicit === 'structure' ||
-        explicit === 'intent' ||
-        explicit === 'truth'
-      ) {
-        return explicit;
-      }
+const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
+  const explicit = questionTypeFromContext;
+  if (
+    explicit === 'meaning' ||
+    explicit === 'structure' ||
+    explicit === 'intent' ||
+    explicit === 'truth'
+  ) {
+    return explicit;
+  }
 
-      const s = String(v ?? '').trim();
+  const s = String(v ?? '').trim();
 
-      if (
-        /どうしたら良い|どうしたらいい|どうすれば良い|どうすればいい|良い方法|いい方法|方法はありますか|どう進めたら良い|どう進めたらいい|どう進めれば良い|どう進めればいい|最終的にどうしたら|最終的にどうすれば|協調する方法|打ち解けるには/u.test(
-          s
-        )
-      ) {
-        return 'intent';
-      }
+  if (
+    /どうしたら良い|どうしたらいい|どうすれば良い|どうすればいい|良い方法|いい方法|方法はありますか|どう進めたら良い|どう進めたらいい|どう進めれば良い|どう進めればいい|最終的にどうしたら|最終的にどうすれば|協調する方法|打ち解けるには/u.test(
+      s
+    )
+  ) {
+    return 'intent';
+  }
 
-      if (
-        /とは|教えて|ありますか|ですか|登場しますか|出てきますか|書かれていますか|記されていますか|載っていますか|あるか|ないか/u.test(
-          s
-        )
-      ) {
-        return 'truth';
-      }
+  if (
+    /とは|教えて|ありますか|登場しますか|出てきますか|書かれていますか|記されていますか|載っていますか|あるか|ないか/u.test(
+      s
+    ) ||
+    /(?:^|[。！？\s「『（(])[^。！？\n]*ですか(?:[。！？]|$)/u.test(s)
+  ) {
+    return 'truth';
+  }
 
-      if (/意図|どうしたい|どこへ向かう|何のため/u.test(s)) return 'intent';
-      if (/意味|なぜ|どういうこと|どう受け止め|どう読める/u.test(s)) return 'meaning';
-      if (/構造|仕組み|関係|違い|配置|流れ|構成|背景|文脈|位置づけ/u.test(s)) return 'structure';
+  if (/意図|どうしたい|どこへ向かう|何のため/u.test(s)) return 'intent';
+  if (/意味|なぜ|どういうこと|どう受け止め|どう読める/u.test(s)) return 'meaning';
+  if (/構造|仕組み|関係|違い|配置|流れ|構成|背景|文脈|位置づけ/u.test(s)) return 'structure';
 
-      return null;
-    };
+  return null;
+};
 
     const resolvedQuestionType = inferQuestionType(
       questionTypeSourceText || normalizedText
@@ -5845,9 +5951,12 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
     );
 
     const patternKey = (
-      selectedByFunction ||
-      preSelectedPatternKey ||
-      'NORMAL_RESONANCE_V1'
+      preSelectedPatternKey === 'NORMAL_RESONANCE_V1' ||
+      preSelectedPatternKey === 'DECLARATION_RESONANCE_V1'
+        ? preSelectedPatternKey
+        : selectedByFunction ||
+          preSelectedPatternKey ||
+          'NORMAL_RESONANCE_V1'
     ) as any;
 
     console.log(
@@ -6071,7 +6180,8 @@ if (
 
               if (
                 patternKey === 'NORMAL_RESONANCE_V1' ||
-                patternKey === 'DECLARATION_RESONANCE_V1'
+                patternKey === 'DECLARATION_RESONANCE_V1' ||
+                patternKey === 'NORMAL_COMPRESSED_V1'
               ) {
                 const shouldNormalizeLead = slotIndex > 0 || unitLocalIndex > 0;
 
@@ -6083,7 +6193,20 @@ if (
                     .replace(/^しかも、?/u, '')
                     .replace(/^だから今は、?/u, '今は、')
                     .replace(/^だから、?/u, '')
-                    .replace(/^ただ、?/u, '');
+                    .replace(/^ただ、?/u, '')
+                    .replace(/^変えるべき点を急ぐより、?/u, '')
+                    .replace(/^見るなら、?/u, '')
+                    .replace(/^次に見るのは、?/u, '')
+                    .replace(/^見る場所は、?/u, '')
+                    .replace(/^そこをそのまま見ておくといいです。?$/u, '同じ核だけが、静かに残っています。')
+                    .replace(/^いまは、その止まり方をそのまま置いておけば足ります。?$/u, '同じ核だけが、静かに残っています。')
+                    .replace(/^そこに触れれば十分です。?$/u, 'その一点だけが、静かに残っています。')
+                    .replace(/^そこを見れば足ります。?$/u, 'その一点だけが、静かに残っています。')
+                    .replace(/^そこだけを見れば十分です。?$/u, 'その一点だけが、静かに残っています。')
+                    .replace(/見えてきます/u, '残っています')
+                    .replace(/広がります/u, '残っています')
+                    .replace(/戻ります/u, '残ります')
+                    .replace(/ほどけます/u, '残ります');
                 }
 
                 text = text.trim();
@@ -6403,82 +6526,30 @@ if (slotDecision && typeof slotDecision === 'object') {
         out.push(s);
       };
 
-      const naturalizeShift = (p: any): string | null => {
-        const kind = String(p?.kind ?? '').trim();
-        const line = String(p?.line ?? '').trim();
-        const summary = String(p?.summary ?? '').trim();
-        const message = String(p?.message ?? '').trim();
+      const isNormalCompressedPattern =
+        String(patternKey ?? '').trim() === 'NORMAL_COMPRESSED_V1';
 
-        if (summary) return summary;
-        if (message) return message;
-
-        if (kind === 'stabilize_shift') {
-          return 'いまは、揺れている見方をいったん整え直して受け取る流れです。';
-        }
-        if (kind === 'decide_shift') {
-          return 'ここでは、論点をひとつに絞って答えを置く流れです。';
-        }
-        if (kind === 'narrow_shift') {
-          return 'ここでは、話を広げすぎず一点に絞って見ます。';
-        }
-
-        if (line) {
-          const intentNow = String((p as any)?.intent ?? '').trim();
-          const hintNow = String((p as any)?.hint ?? '').trim();
-
-          if (
-            intentNow === 'answer_truth_structure' ||
-            hintNow === 'clarify_truth_structure_v1'
-          ) {
-            return null;
-          }
-
-          if (/整理します|整える|見直す方向/.test(line)) {
-            return 'いまは、見方の基準を整え直す流れです。';
-          }
-          return line;
-        }
-
-        return null;
-      };
-
-      const naturalizeNext = (p: any): string | null => {
-        const qTypeNow = String(resolvedQuestionType ?? '').trim();
-        if (qTypeNow === 'truth') {
+        const naturalizeShift = (p: any): string | null => {
+          const line = String(p?.line ?? '').trim();
+          if (line) return line;
           return null;
-        }
+        };
 
-        const mode = String(p?.mode ?? '').trim();
-        const hint = String(p?.hint ?? '').trim();
-        const message = String(p?.message ?? '').trim();
-        const line = String(p?.line ?? '').trim();
+        const naturalizeNext = (p: any): string | null => {
+          if (isNormalCompressedPattern) return null;
 
-        if (message) return message;
+          const line = String(p?.line ?? '').trim();
+          if (line) return line;
 
-        if (mode === 'observe_hint' && hint) {
           return null;
-        }
+        };
 
-        if (hint) {
+
+        const naturalizeSafe = (p: any): string | null => {
+          const line = String(p?.line ?? '').trim();
+          if (line) return line;
           return null;
-        }
-
-        if (line) return line;
-
-        return null;
-      };
-
-      const naturalizeSafe = (p: any): string | null => {
-        const message = String(p?.message ?? '').trim();
-        const hint = String(p?.hint ?? '').trim();
-        const line = String(p?.line ?? '').trim();
-
-        if (message) return message;
-        if (hint) return 'いまは、急いで結論を増やさなくても大丈夫です。';
-        if (line) return line;
-
-        return null;
-      };
+        };
 
       if (payload && typeof payload === 'object') {
         if (key === 'OBS') {
@@ -6575,9 +6646,12 @@ if (slotDecision && typeof slotDecision === 'object') {
         ? slotDecision.order.length
         : 4;
 
-    const shouldPreferCanonicalBlocks =
-      isIRDetailPatternForDisplay || canonicalBlocksBySlot.length >= expectedDisplayBlocks;
-
+        const shouldPreferCanonicalBlocks =
+          isIRDetailPatternForDisplay ||
+          activePatternKeyForDisplay === 'DECLARATION_RESONANCE_V1' ||
+          (activePatternKeyForDisplay === 'NORMAL_COMPRESSED_V1'
+            ? canonicalBlocksBySlot.length >= 2
+            : canonicalBlocksBySlot.length >= expectedDisplayBlocks);
     if (shouldPreferCanonicalBlocks) {
       if (canonicalBlocksBySlot.length > 0) {
         slotBlocksText.push(...canonicalBlocksBySlot);
@@ -7422,7 +7496,10 @@ raw = await (async () => {
   })();
 
   const shouldInjectStateCues =
-    !alreadyHasStateCues && !!stateCuesText.trim() && !!pastStateNoteText;
+    stateCuesPatternKey !== 'NORMAL_COMPRESSED_V1' &&
+    !alreadyHasStateCues &&
+    !!stateCuesText.trim() &&
+    !!pastStateNoteText;
 
   const stateCuesMsg =
     shouldInjectStateCues
@@ -7834,12 +7911,13 @@ const laneKeyForPattern = String(
 const shouldForceDecidePattern =
   goalKindForPattern === 'decide' || laneKeyForPattern === 'T_CONCRETIZE';
 
-const writerPatternKey = (
-  shouldForceDecidePattern &&
-  selectedPatternKey === 'NORMAL_RESONANCE_V1'
-    ? 'NORMAL_DETAIL_V1'
-    : selectedPatternKey
-) as any;
+  const writerPatternKey = (
+    shouldForceDecidePattern
+      ? selectedPatternKey === 'NORMAL_RESONANCE_V1'
+        ? 'NORMAL_DETAIL_V1'
+        : selectedPatternKey
+      : selectedPatternKey
+  ) as any;
 
 console.log(
   '[IROS/rephraseEngine][WRITER_PATTERN_KEY_TRACE]',
@@ -8018,77 +8096,97 @@ const finalWriterDirectivesExtraLines = (() => {
   return lines;
 })();
 
+const shouldInjectFinalWriterDirectives =
+  finalWriterDirectivesExtraLines.length > 0;
+
+const shouldInjectPatternContract =
+  finalWriterDirectivesExtraLines.length > 0;
+
 const finalWriterDirectivesMsg =
-  finalWriterDirectivesExtraLines.length > 0
+  shouldInjectFinalWriterDirectives
     ? ({
         role: 'assistant',
         content: `WRITER_DIRECTIVES (DO NOT OUTPUT):\n${finalWriterDirectivesExtraLines.join('\n')}`.trim(),
       } as const)
     : null;
 
-const finalPatternContractMsg =
-  finalWriterDirectivesExtraLines.length > 0
-    ? ({
-        role: 'assistant',
-        content: [
-          'PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):',
-          'exact_paragraphs=4',
-          writerPatternKey === 'NORMAL_RESONANCE_V1'
-            ? 'paragraph1=state_surface'
-            : 'paragraph1=current_state',
-          writerPatternKey === 'NORMAL_RESONANCE_V1'
-            ? 'paragraph2=state_weight'
-            : 'paragraph2=breakdown_core_gap',
-          writerPatternKey === 'NORMAL_RESONANCE_V1'
-            ? 'paragraph3=state_open_edge'
-            : 'paragraph3=reading_direction',
-          writerPatternKey === 'NORMAL_RESONANCE_V1'
-            ? 'paragraph4=state_residue'
-            : 'paragraph4=conclusion',
-          'never_stop_at_paragraph3=true',
-          'never_leave_paragraph4_empty=true',
-          ...(writerPatternKey === 'NORMAL_RESONANCE_V1'
-            ? [
-                'paragraph1_must_start_from_user_core=false',
-                'paragraph1_must_not_start_with_demonstrative_subject=false',
-                'paragraph1_must_not_repeat_user_text_verbatim=true',
-                'paragraph1_must_not_begin_with_text_meta=false',
-                'paragraph1_must_begin_from_state_itself=true',
-                'paragraph1_sentence1=place_the_state_change_itself_first_as_a_real_shift_in_position_or stance_without_describing_the_wording_phrase_or_way_of_saying_it',
-                'paragraph1_sentence2=continue_only_the_same_state_shift_naturally_as_presence_direction_or irreversibility_without_explaining_the_wording_or_naming_the_phrase_itself',
-                'paragraph2_sentence1=state_the_weight_as_commitment_direction_or_irreversibility_without_evaluating_the_wording',
-                'paragraph3_must_not_be_guide=true',
-                'paragraph3_must_not_sound_closed=true',
-                'paragraph3_must_not_include_acceptance_line=true',
-                'paragraph3_sentence1=leave_only_one_unfixed_edge_between_the_clauses_without_closure',
-                'paragraph3_sentence2=keep_the_edge_observational_and_unresolved',
-                'paragraph4_must_be_one_sentence=false',
-                'paragraph4_must_not_be_closing_line=true',
-                'paragraph4_must_not_be_question=true',
-                'paragraph4_must_not_be_instruction=true',
-                'paragraph4_must_not_reference_text_or_wording_itself=true',
-                'paragraph4_must_not_use_sufficiency_or_completion_language=true',
-                'paragraph4_sentence1=leave_one_quiet_residue_in_the_state_itself_without_meta_commentary_text_reference_or_sufficiency_closure',
-              ]
-            : [
-              'paragraph1_must_follow_current_state_then_misrecognition_negation_then_structural_reframe=true',
-              'paragraph1_min_sentences=3',
-              'paragraph1_sentence3=place_one_soft_assertion_of_the_core_without_overexplaining_or_hard_closure',
-              'paragraph2_must_follow_breakdown_core_gap_then_breakdown_defense_then_breakdown_rejection_target=true',
-              'paragraph2_min_sentences=3',
-              'paragraph2_sentence1=name_what_two_forces_or_needs_are_coexisting_in_plain_language_without_meta_explanation',
-              'paragraph3_must_follow_reading_direction_then_sort_axis_then_sort_boundary=true',
-              'paragraph3_min_sentences=3',
-              'paragraph3_sentence1=place_a_tentative_direction_of_which_side_is_more_central_now_without_finalizing_the_conclusion',
-              'paragraph4_must_include_caution=true',
-              'paragraph4_must_end_with_closing_line=true',
-              'paragraph4_min_sentences=3',
-              'emit_fixed_section_headings=false',
-              ]),
-        ].join('\n'),
-      } as const)
-    : null;
-
+    const finalPatternContractMsg =
+    shouldInjectPatternContract
+      ? ({
+          role: 'assistant',
+          content:
+            writerPatternKey === 'NORMAL_COMPRESSED_V1'
+              ? [
+'PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):',
+'exact_paragraphs=4',
+'paragraph1=OBS',
+'paragraph2=SHIFT',
+'paragraph3=NEXT',
+'paragraph4=SAFE',
+'never_stop_at_paragraph3=true',
+'never_leave_paragraph4_empty=true',
+'use_only_OBS_LINE_and_SHIFT_LINE=false',
+'do_not_add_new_words=true',
+'do_not_expand_meaning=false',
+                ].join('\n')
+              : [
+                  'PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):',
+                  'exact_paragraphs=4',
+                  writerPatternKey === 'NORMAL_RESONANCE_V1'
+                    ? 'paragraph1=state_surface'
+                    : 'paragraph1=current_state',
+                  writerPatternKey === 'NORMAL_RESONANCE_V1'
+                    ? 'paragraph2=state_weight'
+                    : 'paragraph2=breakdown_core_gap',
+                  writerPatternKey === 'NORMAL_RESONANCE_V1'
+                    ? 'paragraph3=state_open_edge'
+                    : 'paragraph3=reading_direction',
+                  writerPatternKey === 'NORMAL_RESONANCE_V1'
+                    ? 'paragraph4=state_residue'
+                    : 'paragraph4=conclusion',
+                  'never_stop_at_paragraph3=true',
+                  'never_leave_paragraph4_empty=true',
+                  ...(writerPatternKey === 'NORMAL_RESONANCE_V1'
+                    ? [
+                        'paragraph1_must_start_from_user_core=false',
+                        'paragraph1_must_not_start_with_demonstrative_subject=false',
+                        'paragraph1_must_not_repeat_user_text_verbatim=true',
+                        'paragraph1_must_not_begin_with_text_meta=false',
+                        'paragraph1_must_begin_from_state_itself=true',
+                        'paragraph1_sentence1=place_the_state_change_itself_first_as_a_real_shift_in_position_or stance_without_describing_the_wording_phrase_or_way_of_saying_it',
+                        'paragraph1_sentence2=continue_only_the_same_state_shift_naturally_as_presence_direction_or irreversibility_without_explaining_the_wording_or_naming_the_phrase_itself',
+                        'paragraph2_sentence1=state_the_weight_as_commitment_direction_or_irreversibility_without_evaluating_the_wording',
+                        'paragraph3_must_not_be_guide=true',
+                        'paragraph3_must_not_sound_closed=true',
+                        'paragraph3_must_not_include_acceptance_line=true',
+                        'paragraph3_sentence1=leave_only_one_unfixed_edge_between_the_clauses_without_closure',
+                        'paragraph3_sentence2=keep_the_edge_observational_and_unresolved',
+                        'paragraph4_must_be_one_sentence=false',
+                        'paragraph4_must_not_be_closing_line=true',
+                        'paragraph4_must_not_be_question=true',
+                        'paragraph4_must_not_be_instruction=true',
+                        'paragraph4_must_not_reference_text_or_wording_itself=true',
+                        'paragraph4_must_not_use_sufficiency_or_completion_language=true',
+                        'paragraph4_sentence1=leave_one_quiet_residue_in_the_state_itself_without_meta_commentary_text_reference_or_sufficiency_closure',
+                      ]
+                    : [
+                        'paragraph1_must_follow_current_state_then_misrecognition_negation_then_structural_reframe=true',
+                        'paragraph1_min_sentences=3',
+                        'paragraph1_sentence3=place_one_soft_assertion_of_the_core_without_overexplaining_or_hard_closure',
+                        'paragraph2_must_follow_breakdown_core_gap_then_breakdown_defense_then_breakdown_rejection_target=true',
+                        'paragraph2_min_sentences=3',
+                        'paragraph2_sentence1=name_what_two_forces_or_needs_are_coexisting_in_plain_language_without_meta_explanation',
+                        'paragraph3_must_follow_reading_direction_then_sort_axis_then_sort_boundary=true',
+                        'paragraph3_min_sentences=3',
+                        'paragraph3_sentence1=place_a_tentative_direction_of_which_side_is_more_central_now_without_finalizing_the_conclusion',
+                        'paragraph4_must_include_caution=true',
+                        'paragraph4_must_end_with_closing_line=true',
+                        'paragraph4_min_sentences=3',
+                        'emit_fixed_section_headings=false',
+                      ]),
+                ].join('\n'),
+        } as const)
+      : null;
     const messagesForWriterFinal = (() => {
       const base = [...messagesForWriter];
       const inserts = [finalWriterDirectivesMsg, finalPatternContractMsg].filter(Boolean) as Array<{
@@ -8124,10 +8222,13 @@ const finalPatternContractMsg =
               )
             )
           : false,
-        hasP4ResidueRule: Array.isArray(messagesForWriterFinal)
+          hasP4ResidueRule: Array.isArray(messagesForWriterFinal)
           ? messagesForWriterFinal.some((m: any) =>
               String(m?.content ?? '').includes(
-                'paragraph4_must_not_reference_text_or_wording_itself=true'
+                'paragraph4_sentence1=leave_one_quiet_unfinished_response_near_the_same_core'
+              ) ||
+              String(m?.content ?? '').includes(
+                'paragraph4_sentence1=leave_one_quiet_residue_in_the_state_itself'
               )
             )
           : false,
@@ -9061,6 +9162,71 @@ userContext: {
     afterHead: safeHead(String(candidate ?? ''), 160),
   });
 
+  const normalizeResonanceMetaPhrases = (src: string): string => {
+    let out = String(src ?? '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .trim();
+
+      const activePatternKeyForResonanceNormalize = String(
+        (debug as any)?.patternKey ??
+          (opts as any)?.meta?.extra?.patternKey ??
+          (opts as any)?.userContext?.meta?.extra?.patternKey ??
+          ''
+      ).trim();
+
+      const goalKindForResonanceNormalize = String(
+        (opts as any)?.userContext?.ctxPack?.goalKind ??
+          (opts as any)?.meta?.extra?.ctxPack?.goalKind ??
+          (opts as any)?.ctxPack?.goalKind ??
+          ''
+      ).trim();
+
+      const targetKindForResonanceNormalize = String(
+        (opts as any)?.userContext?.ctxPack?.targetKind ??
+          (opts as any)?.meta?.extra?.ctxPack?.targetKind ??
+          (opts as any)?.ctxPack?.targetKind ??
+          ''
+      ).trim();
+
+      const replyGoalKindForResonanceNormalize = String(
+        (opts as any)?.userContext?.ctxPack?.replyGoal?.kind ??
+          (opts as any)?.meta?.extra?.ctxPack?.replyGoal?.kind ??
+          (opts as any)?.ctxPack?.replyGoal?.kind ??
+          ''
+      ).trim();
+
+      const shouldNormalizeResonanceMeta =
+      activePatternKeyForResonanceNormalize === 'NORMAL_RESONANCE_V1' ||
+      activePatternKeyForResonanceNormalize === 'DECLARATION_RESONANCE_V1' ||
+      goalKindForResonanceNormalize === 'resonate' ||
+      targetKindForResonanceNormalize === 'resonate' ||
+      replyGoalKindForResonanceNormalize === 'resonate';
+
+    const hasResonanceMetaPhrase =
+      /、というより、|、という声として届いています。|、という声は|^いまあるのは、|^今あるのは、|^だから、|^残るのは、/u.test(
+        out
+      );
+
+    if (!shouldNormalizeResonanceMeta && !hasResonanceMetaPhrase) {
+      return out;
+    }
+
+    out = out
+      .replace(/、というより、/gu, '。')
+      .replace(/、という声として届いています。/gu, '。')
+      .replace(/、という声は/gu, '。')
+      .replace(/今あるのは、/gu, '')
+      .replace(/そこをそのままにして触れるほうが、/gu, 'そのまま触れるほうが、')
+      .replace(/だから、説明で包まずに触れます。/gu, '説明で包まずに触れます。')
+      .replace(/だから、決めた形よりも、/gu, '決めた形よりも、');
+
+    return out.trim();
+  };
+
+  const candidateBeforeResonanceMetaNormalize = String(candidate ?? '');
+  candidate = normalizeResonanceMetaPhrases(candidate);
+
   const normalizeDeclarationMetaPhrases = (src: string): string => {
     let out = String(src ?? '')
       .replace(/\r\n/g, '\n')
@@ -9071,94 +9237,20 @@ userContext: {
         (debug as any)?.patternKey ?? ''
       ).trim();
       if (
-        activePatternKeyForDeclarationMetaNormalize !== 'DECLARATION_RESONANCE_V1' &&
-        activePatternKeyForDeclarationMetaNormalize !== 'NORMAL_RESONANCE_V1'
+        activePatternKeyForDeclarationMetaNormalize !== 'DECLARATION_RESONANCE_V1'
       ) {
         return out;
       }
-      if (!out) return out;
 
-      out = out
-        .replace(
-          /「\s*([^「」]+?)\s*\n+\s*」/gu,
-          '「$1」'
-        )
-        .replace(
-          /(^|\n\n)その(?:言葉|宣言)は、もう前に出ています。/gu,
-          '$1もう前に出ています。'
-        )
-        .replace(
-          /(^|\n\n)その言葉は、もう動き始めています。/gu,
-          '$1もう動き始めています。'
-        )
-        .replace(
-          /(^|\n\n)その言葉は、もう誰かの許しを待っていません。/gu,
-          '$1もう誰かの許しを待っていません。'
-        )
-        .replace(
-          /(^|\n\n)その言葉は、もう曖昧さに居場所を与えない強さがあります。/gu,
-          '$1もう曖昧さに居場所を与えない強さがあります。'
-        )
-        .replace(
-          /(^|\n\n)その言葉は、もう逃げない側に立つ、ということです。/gu,
-          '$1もう逃げない側に立っています。'
-        )
-        .replace(
-          /(^|\n\n)その言葉は、もう他人の輪の外に出ています。/gu,
-          '$1もう他人の輪の外に出ています。'
-        )
-        .replace(
-          /(^|\n\n)その(?:言葉|宣言)は、もう内側で組み上がっています。/gu,
-          '$1もう内側で組み上がっています。'
-        )
-        .replace(
-          /(^|\n\n)その(?:言葉|宣言)は、もう現実をつくる側に立っています。/gu,
-          '$1もう現実をつくる側に立っています。'
-        )
-        .replace(
-          /(^|\n\n)その宣言は、もう外へ向いて立っています。/gu,
-          '$1もう外へ向いて立っています。'
-        )
-        .replace(
-          /(^|\n\n)その言い方は、もうただの願いではなく、前に出る宣言になっています。/gu,
-          '$1もうただの願いではなく、前に出る宣言になっています。'
-        )
-        .replace(
-          /(^|\n\n)現実を作る、という言い方が先に立っています。/gu,
-          '$1もう現実を作る側に立っています。'
-        )
-        .replace(
-          /(^|\n\n)現実を作る、という言い方がもう前に出ています。/gu,
-          '$1もう現実を作る側に立っています。'
-        )
-        .replace(
-          /だから、この言葉は宣言としては十分に届いています。/gu,
-          'その輪郭は、もう届いています。'
-        )
-        .replace(
-          /いまは、その宣言が立っているところまでで十分です。/gu,
-          'その宣言が立っているところまでは、もう見えています。'
-        )
-        .replace(
-          /でも、その未確定さも含めて、いまの文は立っています。/gu,
-          'その未確定さは、まだ静かに残っています。'
-        )
-        .replace(
-          /その(余白|端|未確定さ|余地)ごと、(?:いまの|今の|この)?(?:文|言葉)は立っています。/gu,
-          'その$1は、まだ静かに残っています。'
-        )
-        .replace(
-          /でもその(余白|余地)ごと、この言葉は前に出ています。/gu,
-          'その$1は、まだ静かに残っています。'
-        )
-        .replace(
-          /そのまま、少し余白を残して立っています。/gu,
-          '少し余白が、まだ残っています。'
-        )
-        .replace(
-          /その言葉は、静かに残ります。/gu,
-          '静かな残りが、まだそこにあります。'
-        );
+    out = out
+      .replace(
+        /そのまま、少し余白を残して立っています。/gu,
+        '少し余白が、まだ残っています。'
+      )
+      .replace(
+        /その言葉は、静かに残ります。/gu,
+        '静かな残りが、まだそこにあります。'
+      );
 
     return out.trim();
   };
@@ -9170,8 +9262,10 @@ userContext: {
     traceId: debug.traceId,
     conversationId: debug.conversationId,
     userCode: debug.userCode,
-    applied: candidateBeforeDeclarationMetaNormalize !== String(candidate ?? ''),
-    beforeHead: safeHead(candidateBeforeDeclarationMetaNormalize, 160),
+    applied:
+      candidateBeforeResonanceMetaNormalize !== String(candidate ?? '') ||
+      candidateBeforeDeclarationMetaNormalize !== String(candidate ?? ''),
+    beforeHead: safeHead(candidateBeforeResonanceMetaNormalize, 160),
     afterHead: safeHead(String(candidate ?? ''), 160),
   });
 

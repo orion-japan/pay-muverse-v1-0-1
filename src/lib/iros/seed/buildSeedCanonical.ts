@@ -31,6 +31,14 @@ export type SeedCanonicalInput = {
   meaningSkeleton?: MeaningSkeletonV2 | null;
   flow180?: Flow180Like | null;
 
+  flow?: {
+    current?: string | null;
+    prev?: string | null;
+    delta?: string | null;
+    energy?: string | null;
+    futureRandom?: string | null;
+  } | null;
+
   focus?: string | null;
   tone?: string | null;
   pressure?: string | null;
@@ -49,6 +57,18 @@ export type SeedCanonicalInput = {
   phase?: string | null;
   qCode?: string | null;
   eTurn?: string | null;
+
+  surfacePlan?: {
+    obsCore?: string | null;
+    shiftCore?: string | null;
+    nextCore?: string | null;
+    safeCore?: string | null;
+
+    obsLine?: string | null;
+    shiftLine?: string | null;
+    nextLine?: string | null;
+    safeLine?: string | null;
+  } | null;
 };
 
 export type SeedCanonical = {
@@ -60,6 +80,15 @@ export type SeedCanonical = {
   oneLineConstraint: string;
 
   meaning: string;
+
+  flow: {
+    current: string | null;
+    prev: string | null;
+    delta: string | null;
+    energy: string | null;
+    futureRandom: string | null;
+  };
+
   state: {
     from: string | null;
     to: string | null;
@@ -78,6 +107,18 @@ export type SeedCanonical = {
     phase: string | null;
     qCode: string | null;
     eTurn: string | null;
+  };
+
+  surfacePlan: {
+    obsCore: string | null;
+    shiftCore: string | null;
+    nextCore: string | null;
+    safeCore: string | null;
+
+    obsLine: string | null;
+    shiftLine: string | null;
+    nextLine: string | null;
+    safeLine: string | null;
   };
 
   rules: string[];
@@ -135,6 +176,10 @@ function mapDepth(depthStage: string | null): SeedDepth {
 
 function buildMeaning(input: SeedCanonicalInput): string {
   const explicitMeaning = clean(input.meaning);
+  const fromInputFocus = clean(input.focus);
+  const fromUserCore = clean(input.userCore);
+  const fromHistoryLine = clean(input.historyLine);
+
   const structuralMeaning = clean(input.meaningSkeleton?.structuralMeaning);
   const transitionMeaning = clean(input.meaningSkeleton?.transitionMeaning);
 
@@ -161,6 +206,9 @@ function buildMeaning(input: SeedCanonicalInput): string {
 
   return (
     explicitMeaning ??
+    fromInputFocus ??
+    fromUserCore ??
+    fromHistoryLine ??
     structuralMeaning ??
     cleanTransition ??
     fromFlow180 ??
@@ -175,6 +223,9 @@ function buildFocus(input: SeedCanonicalInput): string {
 
   const fromUserCore = clean(input.userCore);
   if (fromUserCore) return fromUserCore;
+
+  const fromHistoryLine = clean(input.historyLine);
+  if (fromHistoryLine) return fromHistoryLine;
 
   const fromSkeletonFocus = clean(input.meaningSkeleton?.focus);
   if (fromSkeletonFocus) return fromSkeletonFocus;
@@ -196,7 +247,8 @@ function buildOneLineConstraint(input: SeedCanonicalInput): string {
   const pieces = [
     '1核心',
     '説明を増やさない',
-    '同一テーマ内での視点の深掘りは許可',
+    'seedにない新しい具体軸を足さない',
+    '同じ核を言い換えて深める',
   ];
 
   const askBackAllowed = input.askBackAllowed === true;
@@ -234,67 +286,58 @@ function buildRules(input: SeedCanonicalInput): string[] {
 }
 
 function buildSeedText(seed: Omit<SeedCanonical, 'text'>): string {
-  const stateFlow = compactLines([
-    seed.state.from ? `from=${seed.state.from}` : null,
-    seed.state.to ? `to=${seed.state.to}` : null,
-    seed.state.flow ? `flow=${seed.state.flow}` : null,
-    seed.state.deltaType ? `deltaType=${seed.state.deltaType}` : null,
-  ]);
+  const line = (label: string, value: string | null | undefined): string | null => {
+    const s = clean(value);
+    if (!s) return null;
+    return `${label}:\n${s}`;
+  };
 
-  const context = compactLines([
-    seed.context.userCore ? `userCore=${seed.context.userCore}` : null,
-    seed.context.historyLine ? `historyLine=${seed.context.historyLine}` : null,
-  ]);
+  const differenceText = [
+    clean(seed.state.flow),
+    clean(seed.state.from) && clean(seed.state.to)
+      ? `${clean(seed.state.from)} -> ${clean(seed.state.to)}`
+      : null,
+    clean(seed.flow.delta),
+  ]
+    .filter((v): v is string => Boolean(v))
+    .join('\n');
 
-  const meta = compactLines([
-    seed.meta.goalKind ? `goalKind=${seed.meta.goalKind}` : null,
-    seed.meta.depthStage ? `depthStage=${seed.meta.depthStage}` : null,
-    seed.meta.phase ? `phase=${seed.meta.phase}` : null,
-    seed.meta.qCode ? `qCode=${seed.meta.qCode}` : null,
-    seed.meta.eTurn ? `e_turn=${seed.meta.eTurn}` : null,
-  ]);
+    const surfacePlanText = [
+      clean(seed.surfacePlan.obsCore) ? `OBS=${clean(seed.surfacePlan.obsCore)}` : null,
+      clean(seed.surfacePlan.shiftCore) ? `SHIFT=${clean(seed.surfacePlan.shiftCore)}` : null,
+      clean(seed.surfacePlan.nextCore) ? `NEXT=${clean(seed.surfacePlan.nextCore)}` : null,
+      clean(seed.surfacePlan.safeCore) ? `SAFE=${clean(seed.surfacePlan.safeCore)}` : null,
 
-  const rules =
-    seed.rules.length > 0
-      ? seed.rules.map((rule) => `- ${rule}`).join('\n')
-      : '- 質問しない';
+      clean(seed.surfacePlan.obsLine) ? `OBS_LINE=${clean(seed.surfacePlan.obsLine)}` : null,
+      clean(seed.surfacePlan.shiftLine) ? `SHIFT_LINE=${clean(seed.surfacePlan.shiftLine)}` : null,
+      clean(seed.surfacePlan.nextLine) ? `NEXT_LINE=${clean(seed.surfacePlan.nextLine)}` : null,
+      clean(seed.surfacePlan.safeLine) ? `SAFE_LINE=${clean(seed.surfacePlan.safeLine)}` : null,
+    ]
+    .filter((v): v is string => Boolean(v))
+    .join('\n');
 
-  return compactLines([
-    'SEED (DO NOT OUTPUT):',
-    '',
-    'MEANING:',
-    seed.meaning,
-    '',
-    'FOCUS:',
-    seed.focus,
-    '',
-    'TONE:',
-    seed.tone,
-    '',
-    'DEPTH:',
-    seed.depth,
-    '',
-    'PRESSURE:',
-    seed.pressure,
-    '',
-    seed.relationContext ? 'RELATION_CONTEXT:' : null,
-    seed.relationContext ?? null,
-    seed.relationContext ? '' : null,
-// 'ONE_LINE_CONSTRAINT:',
-// seed.oneLineConstraint,
-    '',
-    'STATE:',
-    stateFlow,
-    '',
-    'CONTEXT:',
-    context,
-    '',
-    'META:',
-    meta,
-    '',
-    'RULES:',
-    rules,
-  ]);
+    return compactLines([
+      'SEED (DO NOT OUTPUT):',
+      '',
+      line('FLOW', [
+        clean(seed.flow.current) ? `current=${clean(seed.flow.current)}` : null,
+        clean(seed.flow.prev) ? `prev=${clean(seed.flow.prev)}` : null,
+        clean(seed.flow.delta) ? `delta=${clean(seed.flow.delta)}` : null,
+        clean(seed.flow.energy) ? `energy=${clean(seed.flow.energy)}` : null,
+        clean(seed.flow.futureRandom) ? `futureRandom=${clean(seed.flow.futureRandom)}` : null,
+      ]
+        .filter((v): v is string => Boolean(v))
+        .join('\n')),
+      line('CONTEXT', clean(seed.context.userCore) ?? clean(seed.focus)),
+      line('DIFFERENCE', differenceText),
+      line('FOCUS', clean(seed.focus)),
+      line('TONE', clean(seed.tone)),
+      line('PRESSURE', clean(seed.pressure)),
+      line('DEPTH', clean(seed.depth)),
+      line('SURFACE_PLAN', surfacePlanText),
+      line('ONE_LINE_CONSTRAINT', clean(seed.oneLineConstraint)),
+      line('RELATION', clean(seed.relationContext)),
+    ]);
 }
 
 export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
@@ -382,41 +425,116 @@ export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
         })()
     : baseMeaning;
 
-  const seedWithoutText: Omit<SeedCanonical, 'text'> = {
-    focus,
-    tone,
-    depth,
-    pressure,
-    relationContext,
-    oneLineConstraint,
+    const seedWithoutText: Omit<SeedCanonical, 'text'> = {
+      focus,
+      tone,
+      depth,
+      pressure,
+      relationContext,
+      oneLineConstraint,
 
-    meaning,
+      meaning,
 
-    state: {
-      from: clean(input.flow180?.from) ?? clean(input.writerDirectives?.flowFrom),
-      to: clean(input.flow180?.to) ?? clean(input.writerDirectives?.flowTo),
-      flow: clean(input.flow180?.primary) ?? clean(input.flow180?.sentence),
-      deltaType: clean(input.flow180?.deltaType),
-    },
+      flow: {
+        current: clean(input.flow?.current),
+        prev: clean(input.flow?.prev),
+        delta: clean(input.flow?.delta),
+        energy: clean(input.flow?.energy),
+        futureRandom: clean(input.flow?.futureRandom),
+      },
 
-    context: {
-      userCore: clean(input.userCore) ?? clean(input.focus),
-      historyLine: clean(input.historyLine),
-    },
+      state: {
+        from: clean(input.flow180?.from) ?? clean(input.writerDirectives?.flowFrom),
+        to: clean(input.flow180?.to) ?? clean(input.writerDirectives?.flowTo),
+        flow: clean(input.flow180?.primary) ?? clean(input.flow180?.sentence),
+        deltaType: clean(input.flow180?.deltaType),
+      },
 
-    meta: {
-      goalKind,
-      depthStage: clean(input.depthStage),
-      phase: clean(input.phase),
-      qCode: clean(input.qCode),
-      eTurn: clean(input.eTurn),
-    },
+      context: {
+        userCore: clean(input.userCore) ?? clean(input.focus),
+        historyLine: clean(input.historyLine),
+      },
 
-    rules,
-  };
+      meta: {
+        goalKind,
+        depthStage: clean(input.depthStage),
+        phase: clean(input.phase),
+        qCode: clean(input.qCode),
+        eTurn: clean(input.eTurn),
+      },
 
-  return {
-    ...seedWithoutText,
-    text: buildSeedText(seedWithoutText),
-  };
+      surfacePlan: {
+        obsCore:
+          clean(input.surfacePlan?.obsCore) ??
+          clean(input.userCore) ??
+          clean(input.focus),
+
+          shiftCore:
+          clean(input.surfacePlan?.shiftCore) ??
+          clean(input.flow180?.primary) ??
+          structuralMeaning ??
+          transitionMeaning ??
+          null,
+        nextCore:
+          clean(input.surfacePlan?.nextCore) ??
+          clean(input.meaningSkeleton?.focus) ??
+          clean(input.focus),
+
+        safeCore:
+          clean(input.surfacePlan?.safeCore) ??
+          null,
+
+        obsLine:
+          clean(input.surfacePlan?.obsLine) ??
+          (() => {
+            const v =
+              clean(input.surfacePlan?.obsCore) ??
+              clean(input.userCore) ??
+              clean(input.focus);
+            if (!v) return null;
+            return /[。！？]$/.test(v) ? v : `${v}。`;
+          })(),
+
+          shiftLine:
+          clean(input.surfacePlan?.shiftLine) ??
+          (() => {
+            const v =
+              clean(input.surfacePlan?.shiftCore) ??
+              clean(input.flow180?.primary) ??
+              structuralMeaning ??
+              transitionMeaning;
+            if (!v) return null;
+            return /[。！？]$/.test(v) ? v : `${v}。`;
+          })(),
+        nextLine:
+          clean(input.surfacePlan?.nextLine) ??
+          (() => {
+            const v =
+              clean(input.surfacePlan?.nextCore) ??
+              clean(input.meaningSkeleton?.focus) ??
+              clean(input.focus);
+            if (!v) return null;
+            return /[。！？]$/.test(v) ? v : `${v}。`;
+          })(),
+
+          safeLine:
+          clean(input.surfacePlan?.safeLine) ??
+          (() => {
+            const v =
+              clean(input.surfacePlan?.safeCore) ??
+              clean(input.flow180?.primary) ??
+              structuralMeaning ??
+              transitionMeaning ??
+              clean(input.focus);
+            if (!v) return null;
+            return /[。！？]$/.test(v) ? v : `${v}。`;
+          })(),
+
+      },
+      rules,
+    };
+    return {
+      ...seedWithoutText,
+      text: buildSeedText(seedWithoutText),
+    };
 }
