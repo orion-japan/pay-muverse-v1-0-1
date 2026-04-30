@@ -4431,6 +4431,9 @@ const systemPromptForWriter = [
 '「だから」で文を始めない',
 '「〜のだと思います」を使わない',
 '「〜だけです」で締めない',
+'「理由の入口」「あとで届く」「触れた面」を使わない',
+'未来の変化や後で分かる予告を書かない',
+'原因・理由・入口を推測しない',
         ],
       };
     }
@@ -8127,7 +8130,7 @@ const finalWriterDirectivesMsg =
 'never_leave_paragraph4_empty=true',
 'use_only_OBS_LINE_and_SHIFT_LINE=false',
 'do_not_add_new_words=true',
-'do_not_expand_meaning=false',
+'do_not_expand_meaning=true',
                 ].join('\n')
               : [
                   'PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):',

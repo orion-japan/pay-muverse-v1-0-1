@@ -3121,8 +3121,6 @@ function normForRecall(v: any): string {
                   String(
                     (orchExtra as any)?.flow180?.resonance ??
                       (orchCtxPack as any)?.flow180?.resonance ??
-                      (orchExtra as any)?.writerDirectives?.deltaLine ??
-                      (orchCtxPack as any)?.writerDirectives?.deltaLine ??
                       (orchCtxPack as any)?.shiftHint ??
                       (orchExtra as any)?.shiftHint ??
                       '',
@@ -3146,17 +3144,14 @@ function normForRecall(v: any): string {
                 obsLine:
                   String(text ?? '').trim() || null,
 
-                shiftLine:
+                  shiftLine:
                   String(
                     (orchExtra as any)?.flow180?.resonance ??
                       (orchCtxPack as any)?.flow180?.resonance ??
-                      (orchExtra as any)?.writerDirectives?.deltaLine ??
-                      (orchCtxPack as any)?.writerDirectives?.deltaLine ??
                       (orchCtxPack as any)?.shiftHint ??
                       (orchExtra as any)?.shiftHint ??
                       '',
                   ).trim() || null,
-
                 nextLine:
                   String(
                     (orchCtxPack as any)?.situationTopic ??

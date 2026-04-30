@@ -192,29 +192,21 @@ function buildMeaning(input: SeedCanonicalInput): string {
       ? transitionMeaning
       : null;
 
-  const fromFlow180 =
-    clean(input.flow180?.sentence) &&
-    !isCommand(clean(input.flow180?.sentence))
-      ? clean(input.flow180?.sentence)
-      : null;
+      const fromFlow180 =
+      clean(input.flow180?.primary) && !isCommand(clean(input.flow180?.primary))
+        ? clean(input.flow180?.primary)
+        : null;
 
-  const fromDeltaLine =
-    clean(input.writerDirectives?.deltaLine) &&
-    !isCommand(clean(input.writerDirectives?.deltaLine))
-      ? clean(input.writerDirectives?.deltaLine)
-      : null;
-
-  return (
-    explicitMeaning ??
-    fromInputFocus ??
-    fromUserCore ??
-    fromHistoryLine ??
-    structuralMeaning ??
-    cleanTransition ??
-    fromFlow180 ??
-    fromDeltaLine ??
-    '今回の返答は一点に収束させる'
-  );
+    return (
+      explicitMeaning ??
+      structuralMeaning ??
+      cleanTransition ??
+      fromFlow180 ??
+      fromInputFocus ??
+      fromUserCore ??
+      fromHistoryLine ??
+      '今回の返答は一点に収束させる'
+    );
 }
 
 function buildFocus(input: SeedCanonicalInput): string {
@@ -229,9 +221,6 @@ function buildFocus(input: SeedCanonicalInput): string {
 
   const fromSkeletonFocus = clean(input.meaningSkeleton?.focus);
   if (fromSkeletonFocus) return fromSkeletonFocus;
-
-  const fromDeltaLine = clean(input.writerDirectives?.deltaLine);
-  if (fromDeltaLine) return fromDeltaLine;
 
   return '今回の焦点を一つに絞る';
 }
