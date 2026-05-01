@@ -359,8 +359,6 @@ export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
   const joinedSignals = [
     structuralMeaning,
     transitionMeaning,
-    flowSentence,
-    deltaLine,
     userCore,
     historyLine,
     baseMeaning,
@@ -393,8 +391,6 @@ export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
     const pickA =
     structuralMeaning ||
     transitionMeaning ||
-    flowSentence ||
-    deltaLine ||
     userCore ||
     '';
 
@@ -414,116 +410,135 @@ export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
         })()
     : baseMeaning;
 
-    const seedWithoutText: Omit<SeedCanonical, 'text'> = {
-      focus,
-      tone,
-      depth,
-      pressure,
-      relationContext,
-      oneLineConstraint,
+    const safeMeaningSource =
+    structuralMeaning ??
+    transitionMeaning ??
+    null;
 
-      meaning,
+  const safeGateText = [
+    clean(input.userCore),
+    clean(input.focus),
+    clean(input.meaningSkeleton?.focus),
+  ]
+    .filter((v): v is string => Boolean(v))
+    .join('\n');
 
-      flow: {
-        current: clean(input.flow?.current),
-        prev: clean(input.flow?.prev),
-        delta: clean(input.flow?.delta),
-        energy: clean(input.flow?.energy),
-        futureRandom: clean(input.flow?.futureRandom),
-      },
+    const isAnswerSafeMode =
+    safeMeaningSource != null &&
+    /どういうこと|なぜ|原因|構造|答えて|教えて/.test(safeGateText);
 
-      state: {
-        from: clean(input.flow180?.from) ?? clean(input.writerDirectives?.flowFrom),
-        to: clean(input.flow180?.to) ?? clean(input.writerDirectives?.flowTo),
-        flow: clean(input.flow180?.primary) ?? clean(input.flow180?.sentence),
-        deltaType: clean(input.flow180?.deltaType),
-      },
+  const shouldExposeSafeMeaning = isAnswerSafeMode;
 
-      context: {
-        userCore: clean(input.userCore) ?? clean(input.focus),
-        historyLine: clean(input.historyLine),
-      },
+  const seedWithoutText: Omit<SeedCanonical, 'text'> = {
+    focus,
+    tone,
+    depth,
+    pressure,
+    relationContext,
+    oneLineConstraint,
 
-      meta: {
-        goalKind,
-        depthStage: clean(input.depthStage),
-        phase: clean(input.phase),
-        qCode: clean(input.qCode),
-        eTurn: clean(input.eTurn),
-      },
+    meaning,
 
-      surfacePlan: {
-        obsCore:
-          clean(input.surfacePlan?.obsCore) ??
-          clean(input.userCore) ??
-          clean(input.focus),
+    flow: {
+      current: clean(input.flow?.current),
+      prev: clean(input.flow?.prev),
+      delta: clean(input.flow?.delta),
+      energy: clean(input.flow?.energy),
+      futureRandom: clean(input.flow?.futureRandom),
+    },
 
-          shiftCore:
-          clean(input.surfacePlan?.shiftCore) ??
-          clean(input.flow180?.primary) ??
-          structuralMeaning ??
-          transitionMeaning ??
-          null,
-        nextCore:
-          clean(input.surfacePlan?.nextCore) ??
-          clean(input.meaningSkeleton?.focus) ??
-          clean(input.focus),
+    state: {
+      from: clean(input.flow180?.from) ?? clean(input.writerDirectives?.flowFrom),
+      to: clean(input.flow180?.to) ?? clean(input.writerDirectives?.flowTo),
+      flow: clean(input.flow180?.primary),
+      deltaType: clean(input.flow180?.deltaType),
+    },
 
-        safeCore:
-          clean(input.surfacePlan?.safeCore) ??
-          null,
+    context: {
+      userCore: clean(input.userCore) ?? clean(input.focus),
+      historyLine: clean(input.historyLine),
+    },
 
-        obsLine:
-          clean(input.surfacePlan?.obsLine) ??
-          (() => {
-            const v =
-              clean(input.surfacePlan?.obsCore) ??
-              clean(input.userCore) ??
-              clean(input.focus);
-            if (!v) return null;
-            return /[。！？]$/.test(v) ? v : `${v}。`;
-          })(),
+    meta: {
+      goalKind,
+      depthStage: clean(input.depthStage),
+      phase: clean(input.phase),
+      qCode: clean(input.qCode),
+      eTurn: clean(input.eTurn),
+    },
 
-          shiftLine:
-          clean(input.surfacePlan?.shiftLine) ??
-          (() => {
-            const v =
-              clean(input.surfacePlan?.shiftCore) ??
-              clean(input.flow180?.primary) ??
-              structuralMeaning ??
-              transitionMeaning;
-            if (!v) return null;
-            return /[。！？]$/.test(v) ? v : `${v}。`;
-          })(),
-        nextLine:
-          clean(input.surfacePlan?.nextLine) ??
-          (() => {
-            const v =
-              clean(input.surfacePlan?.nextCore) ??
-              clean(input.meaningSkeleton?.focus) ??
-              clean(input.focus);
-            if (!v) return null;
-            return /[。！？]$/.test(v) ? v : `${v}。`;
-          })(),
+    surfacePlan: {
+      obsCore:
+        clean(input.surfacePlan?.obsCore) ??
+        clean(input.userCore) ??
+        clean(input.focus),
 
-          safeLine:
-          clean(input.surfacePlan?.safeLine) ??
-          (() => {
-            const v =
-              clean(input.surfacePlan?.safeCore) ??
-              clean(input.flow180?.primary) ??
-              structuralMeaning ??
-              transitionMeaning ??
-              clean(input.focus);
-            if (!v) return null;
-            return /[。！？]$/.test(v) ? v : `${v}。`;
-          })(),
+      shiftCore:
+        clean(input.surfacePlan?.shiftCore) ??
+        clean(input.flow180?.primary) ??
+        structuralMeaning ??
+        transitionMeaning ??
+        null,
 
-      },
-      rules,
-    };
-    return {
-      ...seedWithoutText,
-      text: buildSeedText(seedWithoutText),
-    };
+      nextCore:
+        clean(input.surfacePlan?.nextCore) ??
+        clean(input.meaningSkeleton?.focus) ??
+        clean(input.focus),
+
+      safeCore:
+        clean(input.surfacePlan?.safeCore) ??
+        (shouldExposeSafeMeaning ? safeMeaningSource : null),
+
+      obsLine:
+        clean(input.surfacePlan?.obsLine) ??
+        (() => {
+          const v =
+            clean(input.surfacePlan?.obsCore) ??
+            clean(input.userCore) ??
+            clean(input.focus);
+          if (!v) return null;
+          return /[。！？]$/.test(v) ? v : `${v}。`;
+        })(),
+
+      shiftLine:
+        clean(input.surfacePlan?.shiftLine) ??
+        (() => {
+          const v =
+            clean(input.surfacePlan?.shiftCore) ??
+            clean(input.flow180?.primary) ??
+            structuralMeaning ??
+            transitionMeaning;
+          if (!v) return null;
+          return /[。！？]$/.test(v) ? v : `${v}。`;
+        })(),
+
+      nextLine:
+        clean(input.surfacePlan?.nextLine) ??
+        (() => {
+          const v =
+            clean(input.surfacePlan?.nextCore) ??
+            clean(input.meaningSkeleton?.focus) ??
+            clean(input.focus);
+          if (!v) return null;
+          return /[。！？]$/.test(v) ? v : `${v}。`;
+        })(),
+
+      safeLine:
+        clean(input.surfacePlan?.safeLine) ??
+        (() => {
+          const v =
+            clean(input.surfacePlan?.safeCore) ??
+            (shouldExposeSafeMeaning ? safeMeaningSource : null);
+          if (!v) return null;
+          return /[。！？]$/.test(v) ? v : `${v}。`;
+        })(),
+    },
+
+    rules,
+  };
+
+  return {
+    ...seedWithoutText,
+    text: buildSeedText(seedWithoutText),
+  };
 }

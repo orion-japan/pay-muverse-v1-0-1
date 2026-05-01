@@ -544,7 +544,7 @@ function buildClarify(
                     : directAnswerRequested
                       ? '答えの芯だけが、先に出ている'
                       : shouldAnswerTruthStructure
-                        ? 'まだ見えていないところだけが、静かに残っている'
+                        ? 'まだ輪郭にならないものが、静かに残っている'
                         : clarifyMeaning.line;
                 const askBackAllowedNow =
                   !isT &&

@@ -4412,29 +4412,35 @@ const systemPromptForWriter = [
           maxSentences: 8,
         },
         writeConstraints: [
+          // --- 構造 ---
           'normal_compressed では、必ず4つの段落で返す',
-          '4つの段落は、OBS → SHIFT → NEXT → SAFE の順に固定する',
-          'OBS / SHIFT / NEXT / SAFE は説明文ではなく自然文で書く',
-          '1段落目は今いちばん前にある状態だけを書く',
-          '2段落目は流れが実際に止まる一点そのものを書く',
-          '3段落目はまだ残っている未解決の状態そのものを書く',
-          '4段落目は同じ状態に残る静かな余韻だけを書く',
-          'seedにない新しい具体軸を足さない',
+          '段落順は OBS → SHIFT → NEXT → SAFE に固定する',
+
+          // --- 各段落の役割 ---
+          'OBSは今いちばん前にある状態だけを書く',
+          'SHIFTは流れが止まっている一点だけを書く',
+          'NEXTは未解決のまま残っている状態だけを書く',
+          'SAFEは余韻または意味の最小表現だけを書く',
+
+          // --- 基本ルール ---
+          '説明せず自然文で書く',
+          'seedにない新しい意味・具体軸を足さない',
           '同じ核を言い換えて深める',
           '質問しない',
-          '安心させる表現を書かない',
-'評価や肯定で締めない',
-'「大丈夫」「十分」「問題ない」を使わない',
-'「〜と思います」「〜かもしれません」を使わない',
-'助言や方向づけを書かない',
-'読者に対する配慮・励ましを書かない',
-'「だから」で文を始めない',
-'「〜のだと思います」を使わない',
-'「〜だけです」で締めない',
-'「理由の入口」「あとで届く」「触れた面」を使わない',
-'未来の変化や後で分かる予告を書かない',
-'原因・理由・入口を推測しない',
-        ],
+
+          // --- 意味制御（最重要） ---
+          'SAFE以外で意味を収束させない',
+          '原因・理由・構造を推測しない',
+          '入力にない関係・対立・感情を作らない',
+
+          // --- 禁止表現（まとめ） ---
+          '助言・方向づけ・励ましを書かない',
+          '評価・肯定・安心させる表現を書かない',
+          '未来予測や変化の示唆を書かない',
+          '「〜と思います」「〜かもしれません」を使わない',
+          '「だから」で文を始めない',
+          '断定的なまとめ表現で締めない（〜だけです等）',
+        ]
       };
     }
 
@@ -8102,6 +8108,11 @@ const finalWriterDirectivesExtraLines = (() => {
 const shouldInjectFinalWriterDirectives =
   finalWriterDirectivesExtraLines.length > 0;
 
+const answerSafeMode =
+  goalKindForPattern === 'explain' ||
+  goalKindForPattern === 'decide' ||
+  laneKeyForPattern === 'T_CONCRETIZE';
+
 const shouldInjectPatternContract =
   finalWriterDirectivesExtraLines.length > 0;
 
@@ -8113,24 +8124,44 @@ const finalWriterDirectivesMsg =
       } as const)
     : null;
 
-    const finalPatternContractMsg =
+const finalPatternContractMsg =
     shouldInjectPatternContract
       ? ({
           role: 'assistant',
           content:
             writerPatternKey === 'NORMAL_COMPRESSED_V1'
-              ? [
-'PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):',
-'exact_paragraphs=4',
-'paragraph1=OBS',
-'paragraph2=SHIFT',
-'paragraph3=NEXT',
-'paragraph4=SAFE',
-'never_stop_at_paragraph3=true',
-'never_leave_paragraph4_empty=true',
-'use_only_OBS_LINE_and_SHIFT_LINE=false',
-'do_not_add_new_words=true',
-'do_not_expand_meaning=true',
+                ? [
+                  'PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):',
+                  'exact_paragraphs=4',
+                  'paragraph1=OBS',
+                  'paragraph2=SHIFT',
+                  'paragraph3=NEXT',
+                  `paragraph4=${answerSafeMode ? 'SAFE' : 'RESIDUE'}`,
+                  'never_stop_at_paragraph3=true',
+                  'never_leave_paragraph4_empty=true',
+                  'use_only_OBS_LINE_and_SHIFT_LINE=false',
+                  'do_not_add_new_words=true',
+                  'do_not_expand_meaning=true',
+                  'paragraph4_must_not_include_cause=true',
+                  'paragraph4_must_not_include_explanation=true',
+                  'paragraph4_must_not_include_evidence=true',
+                  ...(answerSafeMode
+                    ? []
+                    : [
+'paragraph4_role=OPEN_END',
+'paragraph4_must_not_close=true',
+'paragraph4_extend_unresolved_state=true',
+                        'paragraphs_focus_on_state_density=true',
+                        'paragraphs_keep_ambiguity_without_resolving=true',
+                        'paragraphs_hold_unformed_direction=true',
+                        'paragraphs_expand_how_the_state_is_present=true',
+                        'paragraphs_describe_remaining_shape_and_texture=true',
+
+                        // ▼ ここを追加（自由度の回復）
+                        'allow_expression_variation=true',
+                        'avoid_repeating_same_words_across_paragraphs=true',
+                        'prefer_words_like_trace_presence_residue_over_evidence=true',
+                      ]),
                 ].join('\n')
               : [
                   'PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):',
@@ -10653,29 +10684,36 @@ userContext: {
       ? buildDetailPatternWriterDirectives(retryPatternKey)
       : {}),
   };
-  return await runRetryPass({
-    debug,
-    opts: {
-      ...(opts ?? {}),
-      slotDecision: retrySlotDecisionForWriter,
-      writerDirectives: {
-        ...retryWriterDirectivesFromSlot,
-      },
+// ▼ 最終出力直前フィルター
+const filteredDraft =
+  typeof baseDraftForRepair === 'string'
+    ? baseDraftForRepair.replace(/証拠/g, '気配')
+    : baseDraftForRepair;
+
+return await runRetryPass({
+  debug,
+  opts: {
+    ...(opts ?? {}),
+    slotDecision: retrySlotDecisionForWriter,
+    writerDirectives: {
+      ...retryWriterDirectivesFromSlot,
     },
-    slotPlanPolicyResolved,
+  },
+  slotPlanPolicyResolved,
 
-    systemPrompt,
-    internalPack,
-    turns: lastTurnsSafe,
-    baseDraftForRepair,
-    userText,
+  systemPrompt,
+  internalPack,
+  turns: lastTurnsSafe,
+  baseDraftForRepair: filteredDraft, // ←ここ変更
 
-    candidate,
-    scaffoldActive,
-    seedFromSlots,
-    inKeys,
-    maxLines,
-    renderEngine,
+  userText,
+
+  candidate,
+  scaffoldActive,
+  seedFromSlots,
+  inKeys,
+  maxLines,
+  renderEngine,
 
     isDirectTask,
     isMicroOrGreetingNow,
