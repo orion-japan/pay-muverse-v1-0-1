@@ -3096,6 +3096,37 @@ if (isIrDiagnosis) {
 } else {
   const seedDraftSanitized = sanitizeSeedDraftForLLM(seedDraft0);
 
+  const resolvedAskSeedFromShift = (() => {
+    try {
+      const source = String(slotsTextRawAll ?? seedDraftRaw ?? '').trim();
+      if (!source) return '';
+
+      const m = source.match(/@SHIFT\s+({[^\n]+})/);
+      if (!m?.[1]) return '';
+
+      const obj = JSON.parse(m[1]);
+
+      const intent = String(obj?.intent ?? '').trim();
+      const meaningKind = String(obj?.meaning_kind ?? '').trim();
+      const sourceKind = String(obj?.source ?? '').trim();
+      const seedText = String(obj?.seed_text ?? '').replace(/\s+/g, ' ').trim();
+
+      const isResolvedTruthStructure =
+        sourceKind === 'resolved_ask' &&
+        (
+          intent === 'answer_truth_structure' ||
+          meaningKind === 'answer_truth_structure' ||
+          meaningKind === 'truth_structure'
+        );
+
+      if (!isResolvedTruthStructure || !seedText) return '';
+
+      return seedText;
+    } catch {
+      return '';
+    }
+  })();
+
   const canonicalOneLineSeed = (() => {
     try {
       const source = [String(seedDraftRaw ?? ''), String(slotsTextRawAll ?? '')]
@@ -3117,7 +3148,8 @@ if (isIrDiagnosis) {
   const FALLBACK_SEED =
     'ユーザーの最後の発話に、結論を先にして短く直接答えてください。';
 
-    seedFinal =
+  seedFinal =
+    resolvedAskSeedFromShift ||
     chooseSeedForLLM(seedDraftSanitized, '') ||
     canonicalOneLineSeed ||
     FALLBACK_SEED;
@@ -4420,7 +4452,10 @@ const systemPromptForWriter = [
           'OBSは今いちばん前にある状態だけを書く',
           'SHIFTは流れが止まっている一点だけを書く',
           'NEXTは未解決のまま残っている状態だけを書く',
-          'SAFEは余韻または意味の最小表現だけを書く',
+          'SAFEは許可・励まし・安心づけにしない。中心・余白・分岐・揺れのどれかを、構造の残りとして短く置く',
+          'SAFEは「〜していい」「無理に〜しなくていい」「十分です」「落ち着いていきます」で閉じない',
+
+          // --- 基本ルール ---
 
           // --- 基本ルール ---
           '説明せず自然文で書く',
@@ -4578,10 +4613,10 @@ const systemPromptForWriter = [
         (isCompareStructureBomb
           ? '4段落目の2文目は、二者がそろうと関係に何が立ち上がるかを書く。安全方向に戻さず、深さと広さ、温度と風通し、推進力と視点の変化のように、組み合わさったときの魅力が見える文にする。'
           : isMeaningUncoverBomb
-            ? '4段落目の2文目は、SAFEを極限まで弱める。励ましや保留理由にしない。いま一つに決めきれないこと自体が自然であることだけを、ごく薄く残す。核を弱めず、未完了の余白だけを最小限に置く。'
-            : isIntentMethodBomb
-              ? '4段落目の2文目は、方法を広げすぎない注意だけを残す。慰めにしない。全部を片づけようとするとまたぼやけることを、短く置く。'
-              : '4段落目の2文目は、まだ固めきらなくていいことを書く。理由説明にしない。単に余白を足すのではなく、いま一つに決めきれないこと自体が自然であると伝わる文にする。前文の核を弱めず、未完了のまま置いてよい感覚だけを残す。'),
+            ? '4段落目の2文目は、SAFEを極限まで弱める。励まし・許可・安心づけ・保留理由にしない。まだ閉じていない構造の残りだけを書く。未完了を肯定せず、何がまだ整いきっていないかを短く残す。'
+          : isIntentMethodBomb
+            ? '4段落目の2文目は、方法を広げすぎない注意だけを残す。慰めにしない。全部を片づけようとするとまたぼやけることを、短く置く。'
+            : '4段落目の2文目は、励まし・許可・安心づけにしない。まだ整いきっていない構造の残りだけを書く。未完了を肯定せず、何がまだ閉じていないかを短く残す。前文の核を弱めない。'),
 
       block_closing_line:
         relationshipDetailMaterial?.block_closing_line ??
@@ -5959,13 +5994,36 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
       })
     );
 
+    const resolvedAskForMaterialize =
+      (ctxPackForWriter as any)?.resolvedAsk ??
+      (opts as any)?.ctxPack?.resolvedAsk ??
+      (opts as any)?.meta?.extra?.ctxPack?.resolvedAsk ??
+      (opts as any)?.userContext?.ctxPack?.resolvedAsk ??
+      (opts as any)?.userContext?.meta?.extra?.ctxPack?.resolvedAsk ??
+      null;
+
+    const resolvedAskReadingModeForMaterialize = String(
+      (resolvedAskForMaterialize as any)?.readingMode ??
+        (resolvedAskForMaterialize as any)?.replyMode ??
+        ''
+    ).trim();
+
+    const isPartnerSideResonanceForMaterialize =
+      String((resolvedAskForMaterialize as any)?.askType ?? '').trim() === 'truth_structure' &&
+      resolvedAskReadingModeForMaterialize === 'partner_side_resonance';
+
     const patternKey = (
-      preSelectedPatternKey === 'NORMAL_RESONANCE_V1' ||
-      preSelectedPatternKey === 'DECLARATION_RESONANCE_V1'
-        ? preSelectedPatternKey
-        : selectedByFunction ||
-          preSelectedPatternKey ||
-          'NORMAL_RESONANCE_V1'
+      isPartnerSideResonanceForMaterialize
+        ? 'PARTNER_SIDE_RESONANCE_V1'
+        : preSelectedPatternKey === 'IR_DETAIL_V1' ||
+            preSelectedPatternKey === 'NORMAL_DETAIL_V1' ||
+            preSelectedPatternKey === 'NORMAL_RESONANCE_V1' ||
+            preSelectedPatternKey === 'DECLARATION_RESONANCE_V1' ||
+            preSelectedPatternKey === 'PARTNER_SIDE_RESONANCE_V1'
+          ? preSelectedPatternKey
+          : selectedByFunction ||
+            preSelectedPatternKey ||
+            'NORMAL_RESONANCE_V1'
     ) as any;
 
     console.log(
@@ -6004,7 +6062,8 @@ let materializedBlocks: Array<{
     | 'STATE_SURFACE'
     | 'STATE_WEIGHT'
     | 'STATE_OPEN_EDGE'
-    | 'STATE_RESIDUE';
+    | 'STATE_RESIDUE'
+    | 'STATE_ACTION';
   blockKey?: string;
   heading?: string;
 }> = [];
@@ -6016,7 +6075,8 @@ if (
   (patternKey === 'IR_DETAIL_V1' ||
     patternKey === 'NORMAL_DETAIL_V1' ||
     patternKey === 'NORMAL_RESONANCE_V1' ||
-    patternKey === 'DECLARATION_RESONANCE_V1') &&
+    patternKey === 'DECLARATION_RESONANCE_V1' ||
+    patternKey === 'PARTNER_SIDE_RESONANCE_V1') &&
   Array.isArray(patternBlocksResult.blocks) &&
   patternBlocksResult.blocks.length > 0
 ) {
@@ -6024,11 +6084,12 @@ if (
     .map((x) => String(x ?? '').trim())
     .filter(Boolean);
 
-  const shouldExpandSourceUnits =
+    const shouldExpandSourceUnits =
     patternKey === 'NORMAL_DETAIL_V1' ||
     patternKey === 'NORMAL_RESONANCE_V1' ||
     patternKey === 'IR_DETAIL_V1' ||
-    patternKey === 'DECLARATION_RESONANCE_V1';
+    patternKey === 'DECLARATION_RESONANCE_V1' ||
+    patternKey === 'PARTNER_SIDE_RESONANCE_V1';
   const sourceUnits = shouldExpandSourceUnits
     ? sourceBlocksRaw.flatMap((block) =>
         String(block ?? '')
@@ -6051,13 +6112,16 @@ if (
     | 'STATE_WEIGHT'
     | 'STATE_OPEN_EDGE'
     | 'STATE_RESIDUE'
+    | 'STATE_ACTION'
   > =
-  patternKey === 'DECLARATION_RESONANCE_V1' ||
-  patternKey === 'NORMAL_RESONANCE_V1'
-    ? ['STATE_SURFACE', 'STATE_WEIGHT', 'STATE_OPEN_EDGE', 'STATE_RESIDUE']
-    : patternKey === 'NORMAL_DETAIL_V1'
-      ? ['OBS', 'SHIFT', 'NEXT', 'SAFE']
-      : ['OBS', 'STATE', 'GUIDE', 'MESSAGE'];
+  patternKey === 'PARTNER_SIDE_RESONANCE_V1'
+    ? ['STATE_SURFACE', 'STATE_WEIGHT', 'STATE_OPEN_EDGE', 'STATE_ACTION']
+    : patternKey === 'DECLARATION_RESONANCE_V1' ||
+        patternKey === 'NORMAL_RESONANCE_V1'
+      ? ['STATE_SURFACE', 'STATE_WEIGHT', 'STATE_OPEN_EDGE', 'STATE_RESIDUE']
+      : patternKey === 'NORMAL_DETAIL_V1'
+        ? ['OBS', 'SHIFT', 'NEXT', 'SAFE']
+        : ['OBS', 'STATE', 'GUIDE', 'MESSAGE'];
 
       const firstBlockBySlot = new Map<string, { heading?: string }>();
       const slotBlockCounts = new Map<string, number>();
@@ -6087,6 +6151,7 @@ if (
     };
 
     const declarationTakePlan =
+      patternKey === 'PARTNER_SIDE_RESONANCE_V1' ||
       patternKey === 'DECLARATION_RESONANCE_V1' ||
       patternKey === 'NORMAL_RESONANCE_V1'
         ? (() => {
@@ -6097,13 +6162,13 @@ if (
             if (total === 2) return [1, 1, 0, 0];
             if (total === 3) return [1, 1, 1, 0];
 
-            const residueCount = 1;
+            const lastCount = 1;
             const openEdgeCount = Math.min(2, Math.max(1, total - 3));
-            const headRemaining = Math.max(2, total - residueCount - openEdgeCount);
+            const headRemaining = Math.max(2, total - lastCount - openEdgeCount);
             const stateSurfaceCount = Math.min(2, Math.max(1, headRemaining - 1));
             const stateWeightCount = Math.max(1, headRemaining - stateSurfaceCount);
 
-            return [stateSurfaceCount, stateWeightCount, openEdgeCount, residueCount];
+            return [stateSurfaceCount, stateWeightCount, openEdgeCount, lastCount];
           })()
         : null;
 
@@ -7623,7 +7688,7 @@ raw = await (async () => {
     : '';
 
 const packNorm = (__writerInjectedPack ?? '').toString();
-
+let deepRevealLineForWriter: string | null = null;
 // ===== TRANSITION MEANING OBSERVE + SKELETON (段階B観測) =====
 try {
 
@@ -7632,8 +7697,10 @@ try {
     ? packNorm
     : '';
 
-const flowBlock =
-  sourcePack.match(/FLOW_V2\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ \-]+(?:\s*\(DO NOT OUTPUT\))?:|$)/)?.[0] ?? '';
+    const flowBlock =
+    sourcePack.match(/FLOW_V2\s*\(DO NOT OUTPUT\):[\s\S]*?(?=\n[A-Z0-9_ \-]+(?:\s*\(DO NOT OUTPUT\))?:|$)/)?.[0] ??
+    sourcePack.match(/(?:^|\n)FLOW:\s*\n[\s\S]*?(?=\n[A-Z0-9_ \-]+:|$)/)?.[0] ??
+    '';
 
 const stateBlock =
   sourcePack.match(/STATE:\n[\s\S]*?(?=\n[A-Z_]+:|$)/)?.[0] ?? '';
@@ -7662,6 +7729,13 @@ const energy =
     const c = current ?? '';
     const m = c.match(/^(e[1-5])-/i);
     return m ? m[1].toLowerCase() : null;
+  })();
+
+const futureRandom =
+  getFromBlock(flowBlock, 'futureRandom') ??
+  (() => {
+    const m = sourcePack.match(/futureRandom=([^\n]+)/);
+    return m?.[1]?.trim() || null;
   })();
 
 const parseFlowId = (value: string | null) => {
@@ -7696,6 +7770,7 @@ const parseFlowId = (value: string | null) => {
 
 const prevParsed = parseFlowId(prev);
 const currentParsed = parseFlowId(current);
+const futureParsed = parseFlowId(futureRandom);
 
 const e_prev = prevParsed.e;
 const layer_prev = prevParsed.layer;
@@ -7705,8 +7780,17 @@ const e_now = currentParsed.e;
 const layer_now = currentParsed.layer;
 const polarity_now = currentParsed.polarity;
 
+const e_future = futureParsed.e;
+const layer_future = futureParsed.layer;
+const polarity_future = futureParsed.polarity;
+
 const focusFromSeed = (() => {
   const m = sourcePack.match(/FOCUS:\n([^\n]+)/);
+  return m?.[1]?.trim() || null;
+})();
+
+const differenceFromSeed = (() => {
+  const m = sourcePack.match(/DIFFERENCE:\n([^\n]+)/);
   return m?.[1]?.trim() || null;
 })();
 
@@ -7732,13 +7816,78 @@ const stageLabel = (layer: string | null) => {
   }
 };
 
+const transition180 = (() => {
+  const from = currentParsed.raw;
+  const to = futureParsed.raw;
+
+  if (!from || !to || !e_now || !layer_now || !polarity_now || !e_future || !layer_future || !polarity_future) {
+    return null;
+  }
+
+  const stageShift =
+    layer_now.charAt(0).toUpperCase() === layer_future.charAt(0).toUpperCase()
+      ? 'same_stage_band'
+      : `${layer_now.charAt(0).toUpperCase()}_to_${layer_future.charAt(0).toUpperCase()}`;
+
+  const polarityShift =
+    polarity_now === polarity_future
+      ? `same_${polarity_now}`
+      : `${polarity_now}_to_${polarity_future}`;
+
+  const energyShift =
+    e_now === e_future
+      ? 'same_energy'
+      : `${e_now}_to_${e_future}`;
+
+  const fromStageLabel = stageLabel(layer_now);
+  const toStageLabel = stageLabel(layer_future);
+
+  const meaning =
+    differenceFromSeed ||
+    (fromStageLabel && toStageLabel
+      ? `${fromStageLabel}から、${toStageLabel}へ向かう気配`
+      : null);
+
+  return {
+    from,
+    to,
+    stageShift,
+    polarityShift,
+    energyShift,
+    fromStageLabel,
+    toStageLabel,
+    meaning,
+  };
+})();
+
 const transitionMeaningFromSeed = (() => {
+  if (differenceFromSeed) return differenceFromSeed;
   if (focusFromSeed) return focusFromSeed;
+  if (transition180?.meaning) return transition180.meaning;
   return null;
 })();
 
 let transitionMeaning: string | null = transitionMeaningFromSeed || null;
-// transitionStruct は削除（writerに渡さないため）
+
+deepRevealLineForWriter = (() => {
+  try {
+    const meaning = transitionMeaning ?? null;
+    if (!meaning) return null;
+
+    const stingLevelNow =
+      (opts as any)?.userContext?.ctxPack?.stingLevel ??
+      (opts as any)?.userContext?.stingLevel ??
+      null;
+
+    if (String(stingLevelNow).toUpperCase() !== 'HIGH') return null;
+
+    return meaning;
+  } catch {
+    return null;
+  }
+})();
+
+// transitionStruct はまだ writer に渡さない。まず観測ログだけに出す。
   console.log(
     '[IROS/TRANSITION_MEANING][OBSERVE_JSON]',
     JSON.stringify(
@@ -7751,16 +7900,21 @@ let transitionMeaning: string | null = transitionMeaningFromSeed || null;
           prev,
           delta,
           energy,
+          futureRandom,
         },
         parsed: {
           e_prev,
           e_now,
+          e_future,
           layer_prev,
           layer_now,
+          layer_future,
           polarity_prev,
           polarity_now,
+          polarity_future,
         },
         picked: transitionMeaning,
+        transition180,
         // transitionStruct removed
       },
       null,
@@ -7900,7 +8054,17 @@ const selectedPatternKey = String(
     }) ??
     ''
 ).trim();
-const goalKindForPattern = String(
+
+const questionTypeForPattern = String(
+  (opts as any)?.userContext?.question?.questionType ??
+    (opts as any)?.userContext?.meta?.extra?.question?.questionType ??
+    (opts as any)?.ctxPack?.question?.questionType ??
+    (opts as any)?.meta?.extra?.question?.questionType ??
+    (opts as any)?.meta?.extra?.ctxPack?.question?.questionType ??
+    ''
+).trim();
+
+const goalKindForPatternRaw = String(
   (ctxPackForWriter && typeof ctxPackForWriter === 'object'
     ? (ctxPackForWriter as any).goalKind
     : null) ??
@@ -7909,6 +8073,11 @@ const goalKindForPattern = String(
       : null) ??
     ''
 ).trim();
+
+const goalKindForPattern =
+  questionTypeForPattern === 'structure' && goalKindForPatternRaw === 'resonate'
+    ? 'uncover'
+    : goalKindForPatternRaw;
 
 const laneKeyForPattern = String(
   (ctxPackForWriter && typeof ctxPackForWriter === 'object'
@@ -7920,13 +8089,20 @@ const laneKeyForPattern = String(
 const shouldForceDecidePattern =
   goalKindForPattern === 'decide' || laneKeyForPattern === 'T_CONCRETIZE';
 
-  const writerPatternKey = (
-    shouldForceDecidePattern
+const shouldForceStructureDetailPattern =
+  questionTypeForPattern === 'structure' &&
+  goalKindForPattern === 'uncover' &&
+  selectedPatternKey === 'NORMAL_COMPRESSED_V1';
+
+const writerPatternKey = (
+  shouldForceStructureDetailPattern
+    ? 'NORMAL_DETAIL_V1'
+    : shouldForceDecidePattern
       ? selectedPatternKey === 'NORMAL_RESONANCE_V1'
         ? 'NORMAL_DETAIL_V1'
         : selectedPatternKey
       : selectedPatternKey
-  ) as any;
+) as any;
 
 console.log(
   '[IROS/rephraseEngine][WRITER_PATTERN_KEY_TRACE]',
@@ -7980,51 +8156,424 @@ const isDetailPatternWriter =
   writerPatternKey === 'NORMAL_RESONANCE_V1' ||
   writerPatternKey === 'DECLARATION_RESONANCE_V1';
 
-const writerDirectivesFromSlot = isDetailPatternWriter
+const isTruthCompressedWriter = writerPatternKey === 'TRUTH_COMPRESSED_V1';
+
+const isHealthReportConversation =
+  (ctxPackForWriter && typeof ctxPackForWriter === 'object' &&
+    (ctxPackForWriter as any).healthReport === true) ||
+  (opts as any)?.ctxPack?.healthReport === true ||
+  (opts as any)?.meta?.extra?.healthReport === true ||
+  (opts as any)?.meta?.extra?.ctxPack?.healthReport === true ||
+  (opts as any)?.userContext?.ctxPack?.healthReport === true ||
+  (opts as any)?.userContext?.meta?.extra?.ctxPack?.healthReport === true;
+
+  const isConsultationEntryForWriter =
+  Boolean(
+    (ctxPackForWriter && typeof ctxPackForWriter === 'object'
+      ? (ctxPackForWriter as any).consultationEntry
+      : false) ||
+      (opts as any)?.ctxPack?.consultationEntry === true ||
+      (opts as any)?.meta?.extra?.ctxPack?.consultationEntry === true ||
+      (opts as any)?.userContext?.ctxPack?.consultationEntry === true ||
+      (opts as any)?.userContext?.meta?.extra?.ctxPack?.consultationEntry === true
+  );
+
+const isCategoryOnlyConsultationForWriter =
+  Boolean(
+    (ctxPackForWriter && typeof ctxPackForWriter === 'object'
+      ? (ctxPackForWriter as any).categoryOnlyConsultation
+      : false) ||
+      (opts as any)?.ctxPack?.categoryOnlyConsultation === true ||
+      (opts as any)?.meta?.extra?.ctxPack?.categoryOnlyConsultation === true ||
+      (opts as any)?.userContext?.ctxPack?.categoryOnlyConsultation === true ||
+      (opts as any)?.userContext?.meta?.extra?.ctxPack?.categoryOnlyConsultation === true
+  );
+
+const resolvedAskForWriter =
+  (ctxPackForWriter && typeof ctxPackForWriter === 'object'
+    ? (ctxPackForWriter as any).resolvedAsk
+    : null) ??
+  (opts as any)?.ctxPack?.resolvedAsk ??
+  (opts as any)?.meta?.extra?.ctxPack?.resolvedAsk ??
+  (opts as any)?.userContext?.ctxPack?.resolvedAsk ??
+  (opts as any)?.userContext?.meta?.extra?.ctxPack?.resolvedAsk ??
+  null;
+
+const resolvedAskTopicForWriter = String(
+  (resolvedAskForWriter as any)?.topic ?? ''
+).trim();
+
+const resolvedAskSourceTextForWriter = String(
+  (resolvedAskForWriter as any)?.sourceUserText ?? ''
+).trim();
+
+const resolvedAskReadingModeForWriter = String(
+  (resolvedAskForWriter as any)?.readingMode ??
+    (resolvedAskForWriter as any)?.replyMode ??
+    ''
+).trim();
+
+const isPartnerSideResonance =
+  String((resolvedAskForWriter as any)?.askType ?? '').trim() === 'truth_structure' &&
+  resolvedAskReadingModeForWriter === 'partner_side_resonance' &&
+  resolvedAskTopicForWriter.length > 0;
+  const isRelationshipUserSideSupport =
+  String((resolvedAskForWriter as any)?.askType ?? '').trim() === 'relationship_support' &&
+  resolvedAskReadingModeForWriter === 'user_side_support' &&
+  resolvedAskTopicForWriter.length > 0;
+const isResonanceStructureFollowup =
+  String((resolvedAskForWriter as any)?.askType ?? '').trim() === 'truth_structure' &&
+  /共鳴|響き|象徴|構造/u.test(resolvedAskSourceTextForWriter) &&
+  resolvedAskTopicForWriter.length > 0;
+  const resonanceStructureWriterDirectives = isPartnerSideResonance
   ? {
-      ...buildDetailPatternWriterDirectives(
-        writerPatternKey === 'DECLARATION_RESONANCE_V1'
-          ? 'NORMAL_DETAIL_V1'
-          : writerPatternKey
-      ),
+      pattern_mode: 'partner_side_resonance_state',
+      block_state_surface:
+        '相手側の今の様子から、普通の会話文で入る。ユーザー側の不安を主語にしない。「彼は、気持ちが切れたというより、仕事でかなり余裕がなくなっているように見えます」のように、相手側の状態を短く言う。',
+      block_state_weight:
+        '既出文脈に仕事の忙しさがある場合は、本文に一度だけ自然に入れる。「この前も仕事が忙しいと言っていたので」くらいの会話語にする。元発話を引用しない。',
+      block_state_open_edge:
+        '相手の本心は断定しない。「気持ちがない」ではなく「返せる状態にない可能性がある」と、分かる範囲だけを普通の言葉で言う。',
+      block_state_action:
+        '最後は、相手を追い詰めない短い一手だけを書く。「急がなくて大丈夫、落ち着いたらでいいよ」くらいの一文にする。説明で締めない。',
+      bodyStyle: {
+        preferBlockSplit: true,
+        minBlocks: 2,
+        maxBlocks: 3,
+        maxSentencesPerBlock: 2,
+        minSentences: 3,
+        maxSentences: 5,
+      },
+      writeConstraints: [
+        'partner_side_resonance_state では、通常の NORMAL_DETAIL_V1 の guide / caution / closing の責務を書かない',
+        'ユーザー側の不安ではなく、彼/彼女/相手側の状態から入る',
+        '相手本人の事実・本心を断定しない',
+        '「待つしかない」「待つことが答え」で閉じない',
+        '「線」「流れ」「余白」「置く」「置いておく」「前に出ている」「静かに見る」を使わない',
+        '「分けて見る」「ここで読める」「構造として」「フローとして」「表に出にくい」を使わない',
+        '「仕事側の圧」ではなく「仕事の忙しさ」「仕事で余裕がない」を使う',
+        '既出履歴に仕事の忙しさがある場合は、会話語で一度だけ自然に入れる',
+        '元発話を引用しない',
+        '最後は短い一手だけにする',
+        '3〜5文で会話として返す',
+      ],
     }
-  : {
-      slot_order: Array.isArray(slotDecisionForWriter?.order)
-        ? slotDecisionForWriter.order.join(',')
-        : '',
+  : isResonanceStructureFollowup
+    ? {
+        pattern_mode: 'resonance_structure_followup',
+        block_current_state:
+          '1段落目の1文目は、依頼文ではなく対象そのものから入る。対象は resolvedAsk.topic。今回なら菅原道真公との関係を見る。sourceUserText の「共鳴で、構造からみてください」自体を分析しない。',
+        block_structural_reframe:
+          '対象を、事実確認だけで閉じず、共鳴構造・象徴構造・関係構造として読む。史実断定にしないが、象徴の筋は具体的に置く。',
+        block_breakdown_core_gap:
+          '噛み合っていない点は、対象そのものとの直接関係か、対象が持つ象徴構造との共鳴かを分ける。',
+        block_reading_direction:
+          '見る方向は、土地・系譜・神社確認だけに寄せず、未完・不遇・名誉回復・場を鎮める力など、対象が持つ構造の線を読む。',
+        block_conclusion:
+          '最後に残る核は、対象とユーザーの間に何が共鳴しているかを一文で置く。依頼文の分析に戻らない。',
+        writeConstraints: [
+          'resolvedAsk.sourceUserText を分析対象にしない',
+          'resolvedAsk.topic を主対象として答える',
+          '「共鳴で、構造からみてください」という言葉自体の説明をしない',
+          '事実確認・神社名・地名・系譜確認だけに寄せない',
+          '対象の象徴構造、関係構造、場に残る意味を読む',
+          '菅原道真公の場合は、理不尽に退けられたもの、未完のまま残った力、名誉回復、祀られることで場を鎮める構造を候補として扱う',
+          '断定しすぎず、ただし抽象語だけで逃げない',
+        ],
+      }
+    : {};
+    const isRelationshipReflectionSolve =
+    isRelationshipUserSideSupport &&
+    /(どうしたら|どうすれば|解決|連絡|返信|返事|不安|距離感|今の状態|今どう|どう見え|どう映)/u.test(
+      resolvedAskSourceTextForWriter,
+    );
 
-      slot_opening_role: Array.isArray(slotDecisionForWriter?.order)
-        ? String(slotDecisionForWriter.order[0] ?? '')
-        : '',
+  const relationshipUserSideSupportWriterDirectives =
+    isRelationshipUserSideSupport
+      ? isRelationshipReflectionSolve
+        ? {
+            pattern_mode: 'relationship_reflection_solve',
+            bodyStyle: {
+              preferBlockSplit: true,
+              minBlocks: 3,
+              maxBlocks: 4,
+              maxSentencesPerBlock: 2,
+              minSentences: 5,
+              maxSentences: 8,
+            },
+            block_user_side_receive:
+              '普通の会話として、まず不安を受ける。「それは不安になりますね」のように自然に入る。',
+            block_user_side_boundary:
+              '相手側の本心や事実は断定しない。ただし、今こちらに映っている相手側の動きは可能性として短く触れてよい。',
+            block_user_side_next:
+              '最後は、追いすぎず離れすぎない距離感か、送るなら短い一言まで自然に落とす。',
+            writeConstraints: [
+              'relationship_reflection_solve では、相手側だけでもユーザー側だけでも終わらない',
+              '相手側に見えている動き、ユーザーの状態が相手像に反映している部分、今こちらが取る距離感を自然に統合する',
+              'ユーザーの不安・投影・思い込みが、相手の沈黙や反応をどう重く見せているかを一文で含める',
+              '相手の本心や事実を断定しない。「そう映っている」「そう見えやすい」という温度で返す',
+              '仕事など既出文脈がある場合だけ、相手側の余裕の薄さとして自然に一度だけ触れてよい',
+              '最後は、追いすぎず離れすぎない距離感、または送るなら短い一言まで落としてよい',
+              '番号・見出し・箇条書きにはせず、自然な3〜4段落で返す',
+              '短く切りすぎない。少なくとも5文以上で、受け止め→相手側の見え方→ユーザー側の反映→距離感の順に自然に展開する',
+              '「前にある」「残る」「置く」「空白」「ほどく」「気配」「余白」を使わない',
+            ],
+          }
+        : {
+            pattern_mode: 'relationship_user_side_support',
+            bodyStyle: {
+              preferBlockSplit: true,
+              minBlocks: 2,
+              maxBlocks: 3,
+              maxSentencesPerBlock: 2,
+              minSentences: 2,
+              maxSentences: 4,
+            },
+            block_user_side_receive:
+              '普通の会話として、まず心配を受ける。「それは心配になりますね」のように自然に入る。',
+            block_user_side_boundary:
+              '彼側の事情・本心・仕事などは推測しない。相手側を読むのではなく、連絡が来ないことで心配しているユーザー側を受ける。',
+            block_user_side_next:
+              '最後は助言ではなく、今はその心配を受け取っていることを短く返す。構造語で締めない。',
+            writeConstraints: [
+              'relationship_user_side_support では、彼側の本心・事情を推測しない',
+              '仕事の忙しさを出さない',
+              '「返す余裕」「冷めた」「気持ちがない」など相手側の状態を読まない',
+              '「前にある」「残る」「置く」「空白」「ほどく」「気配」「余白」を使わない',
+              '普通の会話として、心配を受ける',
+              '2〜4文で返す',
+            ],
+          }
+      : {};
+    const consultationEntryWriterDirectives =
+    isConsultationEntryForWriter || isCategoryOnlyConsultationForWriter
+      ? {
+          pattern_mode: 'consultation_entry',
+          bodyStyle: {
+            preferBlockSplit: true,
+            minBlocks: 2,
+            maxBlocks: 3,
+            maxSentencesPerBlock: 2,
+            minSentences: 2,
+            maxSentences: 4,
+          },
+          block_entry_receive:
+            '相談の入口として、まだ内容を決めつけずに受ける。「恋愛の相談ですね」のように短く自然に入る。',
+          block_entry_boundary:
+            '入力にない具体軸を足さない。相手・彼・彼女・連絡・距離・温度差・不安・仕事などを、ユーザーがまだ言っていない場合は出さない。',
+          block_entry_next:
+            '質問で終わらず、話し始められる入口として返す。「まずは話したいところからで大丈夫です」くらいの自然な受け口にする。',
+          writeConstraints: [
+            'consultation_entry では、相談内容を先読みしない',
+            '入力にない具体軸を足さない',
+            '「相手」「彼」「彼女」「連絡」「距離」「温度差」「不安」「仕事」を、入力にない限り使わない',
+            '「置く」「置いて」「ほどく」を使わない',
+            '構造語・診断語・フロー語を出さない',
+            '質問で終わらない',
+            '相談の入口として、2〜4文で自然に受ける',
+          ],
+        }
+      : {};
 
-      ...(slotDecisionForWriter?.emphasis
-        ? Object.fromEntries(
-            Object.entries(slotDecisionForWriter.emphasis).map(([k, v]) => [
-              `slot_emphasis_${String(k).toLowerCase()}`,
-              String(v),
-            ])
-          )
-        : {}),
+      const writerDirectivesFromSlot = isPartnerSideResonance
+      ? {
+          ...resonanceStructureWriterDirectives,
+          ...relationshipUserSideSupportWriterDirectives,
+          ...consultationEntryWriterDirectives,
+        }
+      : isDetailPatternWriter
+        ? {
+            ...buildDetailPatternWriterDirectives(
+              writerPatternKey === 'DECLARATION_RESONANCE_V1'
+                ? 'NORMAL_DETAIL_V1'
+                : writerPatternKey
+            ),
+            ...resonanceStructureWriterDirectives,
+            ...relationshipUserSideSupportWriterDirectives,
+            ...consultationEntryWriterDirectives,
+          }
+        : {
+            slot_order: Array.isArray(slotDecisionForWriter?.order)
+              ? slotDecisionForWriter.order.join(',')
+              : '',
 
-      ...(slotDecisionForWriter?.weights
-        ? Object.fromEntries(
-            Object.entries(slotDecisionForWriter.weights).map(([k, v]) => [
-              `slot_weight_${String(k).toLowerCase()}`,
-              String(v),
-            ])
-          )
-        : {}),
+            slot_opening_role: Array.isArray(slotDecisionForWriter?.order)
+              ? String(slotDecisionForWriter.order[0] ?? '')
+              : '',
+          ...(slotDecisionForWriter?.emphasis
+            ? Object.fromEntries(
+                Object.entries(slotDecisionForWriter.emphasis).map(([k, v]) => [
+                  `slot_emphasis_${String(k).toLowerCase()}`,
+                  String(v),
+                ])
+              )
+            : {}),
 
-      ...buildDetailPatternWriterDirectives(writerPatternKey),
-    };
+          ...(slotDecisionForWriter?.weights
+            ? Object.fromEntries(
+                Object.entries(slotDecisionForWriter.weights).map(([k, v]) => [
+                  `slot_weight_${String(k).toLowerCase()}`,
+                  String(v),
+                ])
+              )
+            : {}),
 
-const writerDirectivesForFinal = isDetailPatternWriter
-  ? Object.fromEntries(
-      Object.entries(writerDirectivesFromSlot ?? {}).filter(
-        ([key]) => !String(key).startsWith('slot_')
-      )
-    )
-  : writerDirectivesFromSlot;
+          ...buildDetailPatternWriterDirectives(writerPatternKey),
+
+          ...(isTruthCompressedWriter
+            ? {
+                slot_emphasis_safe: '1',
+                slot_weight_safe: '0.45',
+                block_conclusion:
+                  'SAFEは許可・励まし・安心づけにしない。最後は、中心・余白・分岐・揺れのどれかを、構造の残りとして短く置く。',
+                block_closing_line:
+                  '「〜していい」「無理に〜しなくていい」「十分です」「落ち着いていきます」で閉じない。構造の残りだけで閉じる。',
+              }
+            : {}),
+
+          ...(isHealthReportConversation
+            ? {
+                pattern_mode: 'casual_health_conversation',
+                bodyStyle: {
+                  preferBlockSplit: true,
+                  minBlocks: 2,
+                  maxBlocks: 3,
+                  maxSentencesPerBlock: 2,
+                  minSentences: 2,
+                  maxSentences: 5,
+                },
+                slot_emphasis_obs: '1',
+                slot_emphasis_shift: '3',
+                slot_emphasis_next: '0',
+                slot_emphasis_safe: '1',
+                slot_weight_obs: '0.75',
+                slot_weight_shift: '1.45',
+                slot_weight_next: '0',
+                slot_weight_safe: '0.55',
+                block_conclusion:
+                  '体調報告として普通の会話語で受ける。観測文・構造文・余韻文にしない。',
+                block_closing_line:
+                  '「その一文」「前にある」「残っています」「置かれています」「気配」「余白」「言い切りすぎず」「整理しきらない」を使わない。まず「それはかなりきつかったですね」「大変でしたね」のように自然に受ける。',
+                writeConstraints: [
+                  '体調報告では、OBS/SHIFT/NEXT/SAFEの構造語を表に出さない',
+                  '普通の会話語で返す',
+                  '復唱だけで終わらない',
+                  '「その一文」「前にある」「残っています」「置かれています」「気配」「余白」「言い切りすぎず」「整理しきらない」を使わない',
+                  '「それはかなりきつかったですね」「大変でしたね」のように、まず相手の大変さを自然に受ける',
+                  '構造説明・意味づけ・180フローの説明へ飛ばない',
+                  '医療診断や断定はしない',
+                  '必要なら短く、体調の話として受け取っていることだけを添える',
+                ],
+              }
+            : {}),
+
+            ...relationshipUserSideSupportWriterDirectives,
+            ...consultationEntryWriterDirectives,
+          };
+          const relationshipAdviceRepairMode:
+          | 'solution_concretize'
+          | 'wait_anxiety'
+          | 'influence_reframe'
+          | null = (() => {
+            const pack = String(__writerInjectedPack ?? '');
+
+            if (/RELATIONSHIP_WAIT_ANXIETY_CONCRETIZE\s*\(DO NOT OUTPUT\):/.test(pack)) {
+              return 'wait_anxiety';
+            }
+            if (/RELATIONSHIP_INFLUENCE_REFRAME\s*\(DO NOT OUTPUT\):/.test(pack)) {
+              return 'influence_reframe';
+            }
+            if (/RELATIONSHIP_SOLUTION_CONCRETIZE\s*\(DO NOT OUTPUT\):/.test(pack)) {
+              return 'solution_concretize';
+            }
+
+            return null;
+          })();
+
+          const relationshipAdviceRepairWriterDirectives =
+          relationshipAdviceRepairMode === 'influence_reframe'
+            ? {
+                pattern_key: 'NORMAL_DETAIL_V1',
+                pattern_mode: 'relationship_influence_reframe',
+                bodyStyle: {
+                  preferBlockSplit: true,
+                  minBlocks: 4,
+                  maxBlocks: 5,
+                  maxSentencesPerBlock: 2,
+                  minSentences: 7,
+                  maxSentences: 10,
+                },
+                writeConstraints: [
+                  'RELATIONSHIP_ADVICE_REPAIR では normal_compressed の制約を使わない',
+                  '状態観測だけに戻らない',
+                  '相手を直接変えられる、相手が必ず変わる、とは断定しない',
+                  'ただし、自分の不安・力み・追いかける反応が変わると、関係の空気・届き方・距離感は変わる可能性があると返す',
+                  '変える対象は「彼」ではなく、「自分の立ち位置」「不安から追わない位置」「言葉の出し方」だと説明する',
+                  '彼を操作するために自分を変える、という方向にはしない',
+                  '鏡のように映っていた相手像も、ユーザーの見方や反応が変わることで、拒絶ではなく余地として見え方が変わることを説明する',
+                  'ユーザーの状態が「彼を変えたい」から「自分の位置を変えると関係の場が変わる」に移るように返す',
+                  '必要なら、「彼を変えたい」ではなく「私は不安から追わない位置に戻る」という具体的な変換文を出す',
+                  '番号・見出し・箇条書きにはせず、普通の会話文で返す',
+                ],
+                block_repair_receive:
+                  'まず、気持ちが変わると関係の空気が変わることはあるが、彼自身を直接変えるとは言い切れないと返す。',
+                block_repair_reframe:
+                  '変える対象は彼ではなく、自分の立ち位置・不安から追わない位置・言葉の出し方だと説明する。',
+                block_repair_mirror:
+                  '鏡のように映っていた彼の沈黙や反応も、自分の反応が変わることで拒絶ではなく余地として見え方が変わることを説明する。',
+                block_repair_landing:
+                  '最後は「彼を変えたい」ではなく「私は不安から追わない位置に戻る」という具体的な変換で着地する。',
+              }
+            : relationshipAdviceRepairMode === 'wait_anxiety'
+              ? {
+                    pattern_key: 'NORMAL_DETAIL_V1',
+                    pattern_mode: 'relationship_solution_concretize',
+                    bodyStyle: {
+                      preferBlockSplit: true,
+                      minBlocks: 4,
+                      maxBlocks: 5,
+                      maxSentencesPerBlock: 2,
+                      minSentences: 7,
+                      maxSentences: 10,
+                    },
+                    writeConstraints: [
+                      'RELATIONSHIP_ADVICE_REPAIR では normal_compressed の制約を使わない',
+                      '状態観測に戻らない',
+                      '「まだ決めきれない」「残っている」「開いたまま」「輪郭」「そっと置く」で終わらない',
+                      'ユーザーは前回助言の意味や使い方を聞いている。前回助言を具体的に扱える形へ変換する',
+                      '前回の抽象助言を、ユーザーが今できる具体的な一手に変換する',
+                      '「待つ」「置いておく」だけで終わらせない',
+                      '一度だけ送れる短文例を必ず出す',
+                      '送った後は連投しない境界まで入れる',
+                      'なぜ連投しない方がよいのか、理由まで自然に説明する',
+                      '連投すると、不安を解消するための連絡になりやすく、相手には重く届きやすいことを説明する',
+                      '一通で止めることは我慢ではなく、その一通に役割を渡すことだと説明する',
+                      '追いかけたい気持ちは否定せず、重く送らせない',
+                      'ユーザーの状態が「何もできない」から「一手は打てた」に変わるように返す',
+                      '番号・見出し・箇条書きにはせず、普通の会話文で返す',
+                    ],
+                    block_repair_receive:
+                      'まず「それだと分かりにくいですね」と受ける。',
+                    block_repair_action:
+                      '具体的には、何もしないという意味ではなく、一度だけ急かさない短文を送ることだと説明する。',
+                    block_repair_example:
+                      '例文として「忙しいと思うけど、落ち着いたら連絡もらえたらうれしい」くらいの文を出す。',
+                    block_repair_reason:
+                      '止める理由を説明する。連投すると不安を解消するための連絡になり、相手には重く届きやすい。一通で止めることで、伝えた事実を作り、その一通に役割を渡せる。',
+                    block_repair_boundary:
+                      '送ったあとは追加で追わず、その一通に役割を渡すと締める。',
+                  }
+                : null;
+
+          const writerDirectivesForFinal = relationshipAdviceRepairWriterDirectives
+            ? relationshipAdviceRepairWriterDirectives
+            : isDetailPatternWriter
+              ? Object.fromEntries(
+                  Object.entries(writerDirectivesFromSlot ?? {}).filter(
+                    ([key]) => !String(key).startsWith('slot_')
+                  )
+                )
+              : writerDirectivesFromSlot;
 
 console.log(
   '[IROS/rephraseEngine][CALL_WRITER_ARGS]',
@@ -8166,18 +8715,20 @@ const finalPatternContractMsg =
               : [
                   'PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):',
                   'exact_paragraphs=4',
-                  writerPatternKey === 'NORMAL_RESONANCE_V1'
+                  writerPatternKey === 'NORMAL_RESONANCE_V1' || isPartnerSideResonance
                     ? 'paragraph1=state_surface'
                     : 'paragraph1=current_state',
-                  writerPatternKey === 'NORMAL_RESONANCE_V1'
+                  writerPatternKey === 'NORMAL_RESONANCE_V1' || isPartnerSideResonance
                     ? 'paragraph2=state_weight'
                     : 'paragraph2=breakdown_core_gap',
-                  writerPatternKey === 'NORMAL_RESONANCE_V1'
+                  writerPatternKey === 'NORMAL_RESONANCE_V1' || isPartnerSideResonance
                     ? 'paragraph3=state_open_edge'
                     : 'paragraph3=reading_direction',
-                  writerPatternKey === 'NORMAL_RESONANCE_V1'
-                    ? 'paragraph4=state_residue'
-                    : 'paragraph4=conclusion',
+                  isPartnerSideResonance
+                    ? 'paragraph4=state_action'
+                    : writerPatternKey === 'NORMAL_RESONANCE_V1'
+                      ? 'paragraph4=state_residue'
+                      : 'paragraph4=conclusion',
                   'never_stop_at_paragraph3=true',
                   'never_leave_paragraph4_empty=true',
                   ...(writerPatternKey === 'NORMAL_RESONANCE_V1'
@@ -8221,21 +8772,54 @@ const finalPatternContractMsg =
                 ].join('\n'),
         } as const)
       : null;
-    const messagesForWriterFinal = (() => {
-      const base = [...messagesForWriter];
-      const inserts = [finalWriterDirectivesMsg, finalPatternContractMsg].filter(Boolean) as Array<{
-        role: 'assistant';
-        content: string;
-      }>;
+      const messagesForWriterFinal = (() => {
+        const seedDraftForWriter = String(seedDraft ?? '').replace(/\s+/g, ' ').trim();
 
-      if (inserts.length === 0) return base;
+        const shouldRewriteSeedPack =
+          seedDraftForWriter.length > 0 &&
+          seedDraftForWriter.length <= 240 &&
+          !/^ユーザーの最後の発話に/.test(seedDraftForWriter) &&
+          !/^@/.test(seedDraftForWriter);
 
-      if (base.length > 0 && base[base.length - 1]?.role === 'user') {
-        return [...base.slice(0, -1), ...inserts, base[base.length - 1]];
-      }
+        const rewriteSeedPackContent = (content: string) => {
+          if (!shouldRewriteSeedPack) return content;
+          if (!/SEED\s*\(DO NOT OUTPUT\):/i.test(content)) return content;
 
-      return [...base, ...inserts];
-    })();
+          let next = String(content ?? '');
+
+          next = next
+            .replace(/(CONTEXT:\n)[^\n]*/u, `$1${seedDraftForWriter}`)
+            .replace(/(FOCUS:\n)[^\n]*/u, `$1${seedDraftForWriter}`)
+            .replace(/(OBS=)[^\n]*/u, '$1いま出ている体感や報告を、丸写しせず自然に受ける')
+            .replace(/(NEXT=)[^\n]*/u, '$1必要以上に構造化せず、会話として少しだけ返す')
+            .replace(/(OBS_LINE=)[^\n]*/u, '$1まず自然な受け文で返す。ユーザー文をそのまま復唱しない。')
+            .replace(/(NEXT_LINE=)[^\n]*/u, '$1丸写しではなく、感じ取った強さだけを短く返す。');
+
+          return next;
+        };
+
+        const base = [...messagesForWriter].map((m: any) => {
+          if (String(m?.role ?? '') !== 'assistant') return m;
+
+          const content = String(m?.content ?? '');
+          const rewritten = rewriteSeedPackContent(content);
+
+          return rewritten === content ? m : { ...m, content: rewritten };
+        });
+
+        const inserts = [finalWriterDirectivesMsg, finalPatternContractMsg].filter(Boolean) as Array<{
+          role: 'assistant';
+          content: string;
+        }>;
+
+        if (inserts.length === 0) return base;
+
+        if (base.length > 0 && base[base.length - 1]?.role === 'user') {
+          return [...base.slice(0, -1), ...inserts, base[base.length - 1]];
+        }
+
+        return [...base, ...inserts];
+      })();
 
     console.log(
       '[IROS/rephraseEngine][FINAL_PATTERN_CONTRACT_CHECK]',
@@ -8278,6 +8862,8 @@ const finalPatternContractMsg =
       model: opts.model ?? 'gpt-5',
       temperature: opts.temperature ?? 0.7,
       messages: (() => {
+
+
         console.log(
           '[IROS/rephraseEngine][FINAL_MESSAGES_FOR_WRITER]',
           JSON.stringify({
@@ -8298,6 +8884,12 @@ const finalPatternContractMsg =
       ...({ slotDecision: slotDecisionForWriter } as any),
       writerDirectives: {
         ...writerDirectivesForFinal,
+        ...(deepRevealLineForWriter
+          ? {
+              deepRevealLine: deepRevealLineForWriter,
+              forceUseDeepReveal: true,
+            }
+          : {}),
       },
 
         // ✅ 追加：冒頭オウム返しガード用（messagesには入れない。比較専用）

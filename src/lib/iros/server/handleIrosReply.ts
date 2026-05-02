@@ -2241,6 +2241,19 @@ function normForRecall(v: any): string {
     });
     t.context_ms = msSince(tc);
 
+    const currentUserTextForMemoryGate = String(text ?? '').replace(/\s+/g, ' ').trim();
+
+    const isCategoryOnlyConsultation = (() => {
+      const s = currentUserTextForMemoryGate;
+      if (!s) return false;
+
+      const hasContinuationCue =
+        /(この前|前に|以前|さっき|続き|件|話した|話していた|連絡が取れない|仕事が忙しい|返信|返事|彼のこと|彼女のこと|相手のこと)/u.test(s);
+
+      if (hasContinuationCue) return false;
+
+      return /^(恋愛|仕事|家族|人間関係|夫婦|親子|職場|将来|進路|お金|体調|健康|人生|自分|自己理解)の相談(があります|です|をしたいです|をしたい|したいです|したい)?[。.!！?？\s]*$/u.test(s);
+    })();
     /* ---------------------------
        3) Orchestrator
     ---------------------------- */
@@ -2407,8 +2420,15 @@ function normForRecall(v: any): string {
           ? (baseMetaMergedForTurn as any).extra.ctxPack
           : {};
 
-      const preOrchCtxPack = (baseMetaMergedForTurn as any).extra.ctxPack as any;
-      const histCtx = lastCtxPackFromHistory && typeof lastCtxPackFromHistory === 'object'
+          const preOrchCtxPack = (baseMetaMergedForTurn as any).extra.ctxPack as any;
+
+          if (isCategoryOnlyConsultation) {
+            preOrchCtxPack.categoryOnlyConsultation = true;
+            preOrchCtxPack.consultationEntry = true;
+            preOrchCtxPack.recallMode = 'fresh_or_soft';
+          }
+
+          const histCtx = lastCtxPackFromHistory && typeof lastCtxPackFromHistory === 'object'
         ? lastCtxPackFromHistory
         : null;
 
@@ -2498,7 +2518,9 @@ function normForRecall(v: any): string {
               }
             }
 
-            const shouldResetContext = topicChangedHard;
+            const shouldResetContext =
+            topicChangedHard ||
+            isCategoryOnlyConsultation;
 
             if (shouldResetContext) {
               // 過去文脈を完全遮断
@@ -2572,6 +2594,7 @@ function normForRecall(v: any): string {
             }
 
             if (
+              !isCategoryOnlyConsultation &&
               !preOrchCtxPack.historyForWriterAt &&
               typeof histCtx?.historyForWriterAt === 'string' &&
               histCtx.historyForWriterAt.trim()
@@ -2580,6 +2603,7 @@ function normForRecall(v: any): string {
             }
 
             if (
+              !isCategoryOnlyConsultation &&
               !preOrchCtxPack.flow &&
               histCtx?.flow &&
               typeof histCtx.flow === 'object'
@@ -2588,6 +2612,7 @@ function normForRecall(v: any): string {
             }
 
             if (
+              !isCategoryOnlyConsultation &&
               preOrchCtxPack.returnStreak == null &&
               histCtx?.returnStreak != null
             ) {
@@ -2595,6 +2620,7 @@ function normForRecall(v: any): string {
             }
 
             if (
+              !isCategoryOnlyConsultation &&
               !preOrchCtxPack.historyForWriter &&
               Array.isArray(histCtx?.historyForWriter) &&
               histCtx.historyForWriter.length > 0
@@ -2603,6 +2629,7 @@ function normForRecall(v: any): string {
             }
 
             if (
+              !isCategoryOnlyConsultation &&
               !preOrchCtxPack.historyForWriterAt &&
               typeof histCtx?.historyForWriterAt === 'string' &&
               histCtx.historyForWriterAt.trim()
@@ -2617,6 +2644,13 @@ function normForRecall(v: any): string {
                   ? Object.keys(snap).slice(0, 20)
                   : null,
               earlyResolvedAskType: resolvedAskEarly?.askType ?? '',
+              isCategoryOnlyConsultation,
+              categoryOnlyConsultation:
+                Boolean((preOrchCtxPack as any)?.categoryOnlyConsultation),
+              consultationEntry:
+                Boolean((preOrchCtxPack as any)?.consultationEntry),
+              recallMode:
+                String((preOrchCtxPack as any)?.recallMode ?? ''),
               injectedTopicDigest:
                 typeof preOrchCtxPack.topicDigest === 'string'
                   ? preOrchCtxPack.topicDigest.slice(0, 80)
@@ -2985,6 +3019,134 @@ function normForRecall(v: any): string {
           seed_text: diagnosisTopicHintForWriter ?? String(text ?? '').trim(),
         };
       }
+      console.log('[IROS/FLOW_SEED_BUILD_ENTER]', {
+        textHead: String(text ?? '').slice(0, 80),
+        historyForTurnLen: Array.isArray(historyForTurn) ? historyForTurn.length : null,
+        orchCtxPackHistoryForWriterLen: Array.isArray((orchCtxPack as any)?.historyForWriter)
+          ? ((orchCtxPack as any).historyForWriter as any[]).length
+          : null,
+        extraLocalHistoryForWriterLen: Array.isArray((extraLocal as any)?.ctxPack?.historyForWriter)
+          ? ((extraLocal as any).ctxPack.historyForWriter as any[]).length
+          : null,
+      });
+      const previousReplyRephraseSeed = (() => {
+        const currentText = String(text ?? '').replace(/\s+/g, ' ').trim();
+
+        const wantsPreviousReplyRephrase =
+          /(意味がわからない|意味が分からない|わかりにくい|分かりにくい|わかりやすく|分かりやすく|どういうこと|つまり|言い換えて|言い換え|翻訳して|翻訳)/u.test(
+            currentText,
+          );
+
+        const asksRealTranslation =
+          /(英語|日本語|中国語|韓国語|フランス語|スペイン語|ドイツ語|translate|translation|English|Japanese)/i.test(
+            currentText,
+          );
+
+        if (!wantsPreviousReplyRephrase || asksRealTranslation) return null;
+
+        const historyCandidates = [
+          Array.isArray(historyForTurn) ? historyForTurn : [],
+          Array.isArray((orchCtxPack as any)?.historyForWriter)
+            ? ((orchCtxPack as any).historyForWriter as any[])
+            : [],
+          Array.isArray((orchExtra as any)?.ctxPack?.historyForWriter)
+            ? ((orchExtra as any).ctxPack.historyForWriter as any[])
+            : [],
+          Array.isArray((extraLocal as any)?.ctxPack?.historyForWriter)
+            ? ((extraLocal as any).ctxPack.historyForWriter as any[])
+            : [],
+        ];
+
+        const pickContent = (m: any): string => {
+          if (!m || typeof m !== 'object') return '';
+
+          const role = String(m?.role ?? m?.type ?? '').trim();
+          if (!/^(assistant|ai|model|iros)$/i.test(role)) return '';
+
+          const content =
+            typeof m?.content === 'string'
+              ? String(m.content).trim()
+              : typeof m?.text === 'string'
+                ? String(m.text).trim()
+                : typeof m?.assistantText === 'string'
+                  ? String(m.assistantText).trim()
+                  : typeof m?.message === 'string'
+                    ? String(m.message).trim()
+                    : '';
+
+          if (!content) return '';
+          if (/^(SEED|INTERNAL PACK|HISTORY_LITE|WRITER_DIRECTIVES|PATTERN_OUTPUT_CONTRACT)/.test(content)) return '';
+
+          return content
+            .replace(/\s+/g, ' ')
+            .replace(/[🌀🪔]/g, '')
+            .trim();
+        };
+
+        const previousAssistantText =
+          historyCandidates
+            .flatMap((items) => [...items].reverse())
+            .map(pickContent)
+            .find(Boolean) ?? '';
+            console.log('[IROS/PREV_REPLY_REPHRASE_SEED_CHECK]', {
+              currentText,
+              wantsPreviousReplyRephrase,
+              asksRealTranslation,
+              historyCandidateLens: historyCandidates.map((items) => items.length),
+              historyCandidateTails: historyCandidates.map((items) =>
+                items.slice(-3).map((m: any) => ({
+                  keys: m && typeof m === 'object' ? Object.keys(m).slice(0, 12) : [],
+                  role: String(m?.role ?? m?.type ?? ''),
+                  contentHead: String(
+                    m?.content ??
+                      m?.text ??
+                      m?.assistantText ??
+                      m?.message ??
+                      '',
+                  ).slice(0, 160),
+                })),
+              ),
+              previousAssistantTextHead: previousAssistantText.slice(0, 160),
+              previousReplyRephraseSeedWillApply: Boolean(previousAssistantText),
+            });
+        if (!previousAssistantText) return null;
+
+        return [
+          '直前のassistant返答を、ユーザーにわかる普通の言葉へ言い換える。',
+          '現在のユーザー文そのものを翻訳・英訳・意味説明しない。',
+          '新しい助言や相手側の断定を足さない。',
+          '「わかりやすく言うと、」から始める。',
+          `直前assistant返答：${previousAssistantText}`,
+        ].join('\n');
+      })();
+
+      const flowSeedUserCore =
+        previousReplyRephraseSeed ??
+        (String(text ?? '').trim() || null);
+
+      const flowSeedFocus =
+        previousReplyRephraseSeed ??
+        (String(
+          (orchExtra as any)?.situationTopic ??
+            (orchCtxPack as any)?.situationTopic ??
+            text ??
+            '',
+        ).trim() || null);
+
+      const flowSeedObsLine =
+        previousReplyRephraseSeed
+          ? '直前のassistant返答を、わかりやすい普通の言葉に言い換える。'
+          : String(text ?? '').trim() || null;
+
+      const flowSeedNextLine =
+        previousReplyRephraseSeed
+          ? '現在のユーザー文そのものではなく、直前assistant返答を対象にする。'
+          : String(
+              (orchCtxPack as any)?.situationTopic ??
+                (orchExtra as any)?.situationTopic ??
+                text ??
+                '',
+            ).trim() || null;
 
       const flowSeedObj = buildFlowSeedV1({
         flow: {
@@ -3012,10 +3174,11 @@ function normForRecall(v: any): string {
             null,
         },
 
-        userCore:
-          String(text ?? '').trim() || null,
+        userCore: flowSeedUserCore,
 
         historyLine: (() => {
+          if (previousReplyRephraseSeed) return null;
+
           const rawHistory = String(
             orchCtxPack?.conversationLine ??
               orchExtra?.conversationLine ??
@@ -3033,11 +3196,13 @@ function normForRecall(v: any): string {
         })(),
 
         memoryLine:
-          String(
-            orchCtxPack?.topicDigest ??
-              orchExtra?.topicDigest ??
-              '',
-          ).trim() || null,
+          previousReplyRephraseSeed
+            ? null
+            : String(
+                orchCtxPack?.topicDigest ??
+                  orchExtra?.topicDigest ??
+                  '',
+              ).trim() || null,
 
         meaningSkeleton:
           (orchExtra as any)?.meaningSkeleton ??
@@ -3050,17 +3215,30 @@ function normForRecall(v: any): string {
           null,
 
         writerDirectives:
-          (orchExtra as any)?.writerDirectives ??
-          (orchCtxPack as any)?.writerDirectives ??
-          null,
+          previousReplyRephraseSeed
+            ? {
+                pattern_mode: 'previous_reply_rephrase',
+                bodyStyle: {
+                  preferBlockSplit: true,
+                  minBlocks: 2,
+                  maxBlocks: 3,
+                  maxSentencesPerBlock: 2,
+                  minSentences: 2,
+                  maxSentences: 5,
+                },
+                writeConstraints: [
+                  '現在のユーザー文そのものを翻訳しない',
+                  '現在のユーザー文そのものの意味説明をしない',
+                  '直前assistant返答だけを平易に言い換える',
+                  '「わかりやすく言うと、」から始める',
+                  '新しい助言や相手側の断定を足さない',
+                ],
+              }
+            : (orchExtra as any)?.writerDirectives ??
+              (orchCtxPack as any)?.writerDirectives ??
+              null,
 
-        focus:
-          String(
-            (orchExtra as any)?.situationTopic ??
-              (orchCtxPack as any)?.situationTopic ??
-              text ??
-              '',
-          ).trim() || null,
+        focus: flowSeedFocus,
 
         tone:
           String(
@@ -3069,10 +3247,12 @@ function normForRecall(v: any): string {
           ).trim() || null,
 
         pressure:
-          String(
-            (orchExtra as any)?.pressure ??
-              'observe',
-          ).trim() || null,
+          previousReplyRephraseSeed
+            ? 'observe'
+            : String(
+                (orchExtra as any)?.pressure ??
+                  'observe',
+              ).trim() || null,
 
         depthStage:
           String(
@@ -3104,68 +3284,65 @@ function normForRecall(v: any): string {
           ).trim() || null,
 
         goalKind:
-          String(
-            orchCtxPack?.goalKind ??
-              orchExtra?.goalKind ??
-              '',
-          ).trim() || null,
+          previousReplyRephraseSeed
+            ? 'clarify'
+            : String(
+                orchCtxPack?.goalKind ??
+                  orchExtra?.goalKind ??
+                  '',
+              ).trim() || null,
 
-          surfacePlan:
+        surfacePlan:
           (orchExtra as any)?.flowSeed
             ? null
             : {
-                obsCore:
-                  String(text ?? '').trim() || null,
+                obsCore: flowSeedObsLine,
 
-                  shiftCore:
-                  String(
-                    (orchExtra as any)?.flow180?.resonance ??
-                      (orchCtxPack as any)?.flow180?.resonance ??
-                      (orchCtxPack as any)?.shiftHint ??
-                      (orchExtra as any)?.shiftHint ??
-                      '',
-                  ).trim() || null,
+                shiftCore:
+                  previousReplyRephraseSeed
+                    ? '翻訳ではなく、直前の返答をわかる言葉に直す。'
+                    : String(
+                        (orchExtra as any)?.flow180?.resonance ??
+                          (orchCtxPack as any)?.flow180?.resonance ??
+                          (orchCtxPack as any)?.shiftHint ??
+                          (orchExtra as any)?.shiftHint ??
+                          '',
+                      ).trim() || null,
 
-                nextCore:
-                  String(
-                    (orchCtxPack as any)?.situationTopic ??
-                      (orchExtra as any)?.situationTopic ??
-                      text ??
-                      '',
-                  ).trim() || null,
+                nextCore: flowSeedNextLine,
 
                 safeCore:
-                  String(
-                    (orchExtra as any)?.flow180?.resonance ??
-                      (orchCtxPack as any)?.flow180?.resonance ??
-                      '',
-                  ).trim() || null,
+                  previousReplyRephraseSeed
+                    ? 'ユーザー文の意味説明に戻らない。'
+                    : String(
+                        (orchExtra as any)?.flow180?.resonance ??
+                          (orchCtxPack as any)?.flow180?.resonance ??
+                          '',
+                      ).trim() || null,
 
-                obsLine:
-                  String(text ?? '').trim() || null,
+                obsLine: flowSeedObsLine,
 
-                  shiftLine:
-                  String(
-                    (orchExtra as any)?.flow180?.resonance ??
-                      (orchCtxPack as any)?.flow180?.resonance ??
-                      (orchCtxPack as any)?.shiftHint ??
-                      (orchExtra as any)?.shiftHint ??
-                      '',
-                  ).trim() || null,
-                nextLine:
-                  String(
-                    (orchCtxPack as any)?.situationTopic ??
-                      (orchExtra as any)?.situationTopic ??
-                      text ??
-                      '',
-                  ).trim() || null,
+                shiftLine:
+                  previousReplyRephraseSeed
+                    ? '翻訳ではなく、直前の返答をわかる言葉に直す。'
+                    : String(
+                        (orchExtra as any)?.flow180?.resonance ??
+                          (orchCtxPack as any)?.flow180?.resonance ??
+                          (orchCtxPack as any)?.shiftHint ??
+                          (orchExtra as any)?.shiftHint ??
+                          '',
+                      ).trim() || null,
+
+                nextLine: flowSeedNextLine,
 
                 safeLine:
-                  String(
-                    (orchExtra as any)?.flow180?.resonance ??
-                      (orchCtxPack as any)?.flow180?.resonance ??
-                      '',
-                  ).trim() || null,
+                  previousReplyRephraseSeed
+                    ? 'ユーザー文の意味説明に戻らない。'
+                    : String(
+                        (orchExtra as any)?.flow180?.resonance ??
+                          (orchCtxPack as any)?.flow180?.resonance ??
+                          '',
+                      ).trim() || null,
               },
       });
 
@@ -4519,6 +4696,31 @@ if (restored) {
 try {
   const userText = text ?? '';
 
+  const relationshipHistoryText = (() => {
+    const rows =
+      Array.isArray((extra2 as any)?.ctxPack?.historyForWriter)
+        ? (extra2 as any).ctxPack.historyForWriter
+        : [];
+
+    const userLines = rows
+      .map((m: any) => {
+        const role = m?.role === 'user' ? 'user' : m?.role === 'assistant' ? 'assistant' : null;
+        const content =
+          typeof m?.content === 'string'
+            ? String(m.content).trim()
+            : typeof m?.text === 'string'
+              ? String(m.text).trim()
+              : '';
+
+        if (role !== 'user' || !content) return '';
+        return content;
+      })
+      .filter(Boolean)
+      .slice(-6);
+
+    return userLines.join('\n').slice(0, 800).trim();
+  })();
+
   const topicDigest =
     (extra2 as any)?.ctxPack?.topicDigest ??
     (out as any)?.metaForSave?.extra?.topicDigest ??
@@ -4531,7 +4733,7 @@ try {
   const resolved = resolveRelation({
     userText,
     topicDigest,
-    historyText: null, // 今は未接続
+    historyText: relationshipHistoryText || null,
     candidates: null,  // memory recall 候補は次段
     lastRelationId: (extra2 as any)?.ctxPack?.relationId ?? null,
     selfId: userCode ?? 'self',
@@ -4584,7 +4786,7 @@ try {
   const context = buildRelationshipContext({
     userText,
     topicDigest,
-    historyText: null,
+    historyText: relationshipHistoryText || null,
     recalledMemory,
   });
 
@@ -5506,7 +5708,111 @@ if (detailModeRaw) {
         clear: false,
       } as const;
     }
+    const hasPartnerSubjectForReading =
+      /(彼|彼女|相手|あの人|好きな人|パートナー)/u.test(currentUserText);
 
+    const hasPartnerReadingRequest =
+      /(様子|状態|気持ち|本心|側).*(見て|みて|教えて|読んで|知りたい|わかる|分かる)/u.test(currentUserText) ||
+      /(見て|みて|読んで).*(様子|状態|気持ち|本心|側)/u.test(currentUserText) ||
+      /(どうして|なぜ|なんで|何して|どう思って|どう感じて|返せない|返さない|返ってこない|返信しない|連絡しない)/u.test(currentUserText) ||
+      (/(共鳴|構造|フロー)/u.test(currentUserText) &&
+        /(彼|彼女|相手|あの人|好きな人|パートナー|連絡|返信|返事)/u.test(currentUserText));
+
+    const hasOnlyUserWorryAboutPartner =
+      hasPartnerSubjectForReading &&
+      /(心配|不安|つらい|辛い|しんどい|寂しい|さみしい|怖い)/u.test(currentUserText) &&
+      !hasPartnerReadingRequest;
+
+    const wantsPartnerSideResonance =
+      hasPartnerSubjectForReading &&
+      hasPartnerReadingRequest &&
+      !hasOnlyUserWorryAboutPartner;
+
+        const partnerSideHistoryHint = (() => {
+          const rows = Array.isArray((extra2 as any)?.ctxPack?.historyForWriter)
+            ? (extra2 as any).ctxPack.historyForWriter
+            : [];
+
+          const normalizedRows = rows
+            .map((m: any) => {
+              const role =
+                m?.role === 'user'
+                  ? 'user'
+                  : m?.role === 'assistant'
+                    ? 'assistant'
+                    : null;
+
+              const content =
+                typeof m?.content === 'string'
+                  ? String(m.content).trim()
+                  : typeof m?.text === 'string'
+                    ? String(m.text).trim()
+                    : '';
+
+              if (!role || !content) return null;
+
+              return {
+                role,
+                content: content.replace(/\s+/g, ' ').trim(),
+              };
+            })
+            .filter(Boolean) as Array<{ role: 'user' | 'assistant'; content: string }>;
+
+          const userHit = normalizedRows
+            .filter((m) => m.role === 'user')
+            .map((m) => m.content)
+            .filter((line) =>
+              /(１週間|1週間|一週間|仕事が忙しい|仕事.*忙しい|忙しい|多忙)/u.test(line)
+            )
+            .slice(-1)[0];
+
+            if (userHit) {
+              return 'この前、彼が仕事が忙しいと言っていた流れがあります。';
+            }
+
+          const assistantHit = normalizedRows
+            .filter((m) => m.role === 'assistant')
+            .map((m) => m.content)
+            .filter((line) =>
+              /(相手の出していた「仕事が忙しい」|仕事の忙しさ|仕事側の圧|仕事側に意識|仕事側の流れ)/u.test(line)
+            )
+            .slice(-1)[0];
+
+          if (!assistantHit) return '';
+
+          return 'この前の流れでは、彼の仕事の忙しさが連絡の止まり方に関係していました。';
+        })();
+
+        if (hasOnlyUserWorryAboutPartner) {
+          return {
+            next: {
+              topic: '連絡が来ないことで心配している状態',
+              askType: 'relationship_support',
+              replyMode: 'user_side_support',
+              readingMode: 'user_side_support',
+              sourceUserText: currentUserText,
+            },
+            clear: false,
+          } as const;
+        }
+
+    if (wantsPartnerSideResonance) {
+      return {
+        next: {
+          topic: /彼女/u.test(currentUserText)
+            ? '連絡が取れない彼女側の状態'
+            : /相手|あの人|好きな人|パートナー/u.test(currentUserText)
+              ? '連絡が取れない相手側の状態'
+              : '連絡が取れない彼側の状態',
+          askType: 'truth_structure',
+          replyMode: 'partner_side_resonance',
+          readingMode: 'partner_side_resonance',
+          sourceUserText: currentUserText,
+          historyHint: partnerSideHistoryHint || null,
+        },
+        clear: false,
+      } as const;
+    }
     // ✅ truth_structure 明示
     if (explicitTruthStructure) {
       return {
@@ -6501,13 +6807,31 @@ const awakenLevelLocal =
 const awakenCollapseLocal =
   cpForTargetKind?.awaken?.detail?.collapseHint === true;
 
-const wantsResonanceSummaryLocal =
+  const wantsResonanceSummaryLocal =
   cpForTargetKind?.replyGoal?.kind === 'resonate' ||
   cpForTargetKind?.goalKind === 'resonate' ||
   (out.metaForSave as any)?.targetKind === 'resonate' ||
   (out.metaForSave as any)?.target_kind === 'resonate';
 
-  const awakenOverride =
+const questionTypeForFinalTarget =
+  typeof cpForTargetKind?.question?.questionType === 'string'
+    ? String(cpForTargetKind.question.questionType).trim()
+    : typeof (out.metaForSave as any)?.extra?.question?.questionType === 'string'
+      ? String((out.metaForSave as any).extra.question.questionType).trim()
+      : null;
+
+const patternKeyForFinalTarget =
+  typeof cpForTargetKind?.patternKey === 'string'
+    ? String(cpForTargetKind.patternKey).trim()
+    : typeof (out.metaForSave as any)?.extra?.patternKey === 'string'
+      ? String((out.metaForSave as any).extra.patternKey).trim()
+      : null;
+
+const shouldForceUncoverForStructureTarget =
+  questionTypeForFinalTarget === 'structure' ||
+  patternKeyForFinalTarget === 'NORMAL_DETAIL_V1';
+
+const awakenOverride =
   awakenCollapseLocal
     ? 'clarify'
     : null;
@@ -6525,18 +6849,23 @@ const goalKindBase =
 // 🔥 FINAL TARGET KIND（共鳴は方向、行為は保持）
 // ============================================
 
-const finalTargetKind =
-  (out.metaForSave as any)?.targetKind ??
-  cpForTargetKind?.targetKind ??
-  awakenOverride ??
-  goalKindBase ??
-  'uncover'; // ← replyGoal を完全排除
+const finalTargetKind = shouldForceUncoverForStructureTarget
+  ? 'uncover'
+  : (out.metaForSave as any)?.targetKind ??
+    cpForTargetKind?.targetKind ??
+    awakenOverride ??
+    goalKindBase ??
+    'uncover'; // ← replyGoal を完全排除
 
 (out.metaForSave as any).targetKind = finalTargetKind;
+(out.metaForSave as any).target_kind = finalTargetKind;
 cpForTargetKind.targetKind = finalTargetKind;
 
-// goalKind は空のときだけ補完する
-if (
+if (shouldForceUncoverForStructureTarget) {
+  cpForTargetKind.goalKind = 'uncover';
+  cpForTargetKind.replyGoal = { kind: 'uncover' };
+  (out.metaForSave as any).goalKind = 'uncover';
+} else if (
   !(typeof cpForTargetKind.goalKind === 'string' && cpForTargetKind.goalKind.trim())
 ) {
   cpForTargetKind.goalKind =
@@ -6544,7 +6873,6 @@ if (
       ? (goalKindBase ?? cpForTargetKind?.replyGoal?.kind ?? 'uncover')
       : finalTargetKind;
 }
-
 console.log('[IROS][TARGET_KIND_FINAL]', {
   finalTargetKind,
   awakenLevelLocal,

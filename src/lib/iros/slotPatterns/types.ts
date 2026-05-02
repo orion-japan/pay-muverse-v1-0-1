@@ -4,12 +4,13 @@ export type PatternKey =
   | 'NORMAL_RESONANCE_V1'
   | 'NORMAL_COMPRESSED_V1'
   | 'DECLARATION_RESONANCE_V1'
+  | 'PARTNER_SIDE_RESONANCE_V1'
   | 'TRUTH_V1'
   | 'TRUTH_COMPRESSED_V1'
   | 'IR_LIGHT_V1'
   | 'IR_DETAIL_V1';
 
-export type PatternSlotKey =
+  export type PatternSlotKey =
   | 'TARGET'
   | 'OBS'
   | 'SHIFT'
@@ -21,7 +22,8 @@ export type PatternSlotKey =
   | 'STATE_SURFACE'
   | 'STATE_WEIGHT'
   | 'STATE_OPEN_EDGE'
-  | 'STATE_RESIDUE';
+  | 'STATE_RESIDUE'
+  | 'STATE_ACTION';
 
   export type PatternBlockKey =
   | 'current_state'
@@ -50,8 +52,10 @@ export type PatternSlotKey =
   | 'state_open_edge_3'
   | 'state_residue'
   | 'state_residue_2'
-  | 'state_residue_3';
-
+  | 'state_residue_3'
+  | 'state_action'
+  | 'state_action_2'
+  | 'state_action_3';
 export type PatternBlockSpec = {
   key: PatternBlockKey;
   required: boolean;

@@ -219,7 +219,7 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
   ).trim();
 
   const shouldSuppressHistoryText =
-    earlyQuestionType === 'structure' || earlyGoalKind === 'uncover';
+    earlyQuestionType === 'structure'
 
   const historyText = shouldSuppressHistoryText ? '' : rawHistoryText;
 
@@ -2538,6 +2538,22 @@ const mirrorFlowV1ForSeed: any =
                       .filter(Boolean)
                   : [];
 // --- questionType → writerDirectives反映 ---
+const currentUserTextForRelationshipReflection = String(
+  (args as any)?.userText ??
+    (args as any)?.followupText ??
+    (args as any)?.inputText ??
+    (args as any)?.currentUserText ??
+    '',
+).trim();
+
+const isRelationshipReflectionQuestion =
+  /(恋愛|彼|彼女|相手|好きな人|連絡|返信|既読|未読|復縁|距離|関係|気持ち)/u.test(
+    currentUserTextForRelationshipReflection,
+  ) &&
+  /(どうしたら|どうすれば|解決|連絡|返信|返事|今の状態|今どう|どう見え|どう映|不安|距離感)/u.test(
+    currentUserTextForRelationshipReflection,
+  );
+
 const effectiveQuestionType = String(
   (args as any)?.questionType ??
   (args as any)?.extra?.question?.questionType ??
@@ -2545,49 +2561,75 @@ const effectiveQuestionType = String(
   (args as any)?.userContext?.ctxPack?.question?.questionType ??
   ''
 ).trim();
-
+try {
+  console.log('[IROS/RELATIONSHIP_REFLECTION_RULE_CHECK]', {
+    currentUserTextForRelationshipReflection,
+    isRelationshipReflectionQuestion,
+    goalKindNow,
+    patternKeyForDefaults,
+    effectiveQuestionType,
+  });
+} catch {}
 if (effectiveQuestionType === 'truth') {
   incomingWriterDirectives.mode = 'answer_truth_structure';
   incomingWriterDirectives.forbidTopicExpansion = true;
   incomingWriterDirectives.forceSingleConclusion = true;
   incomingWriterDirectives.noAbstractEscape = true;
 }
+
+if (effectiveQuestionType === 'structure') {
+  incomingWriterDirectives.mode = 'answer_truth_structure';
+  incomingWriterDirectives.forbidTopicExpansion = true;
+  incomingWriterDirectives.noAbstractEscape = true;
+}
 const isNormalCompressedPattern =
   patternKeyForDefaults === 'NORMAL_COMPRESSED_V1';
 
-const mergedWriteConstraints = Array.from(
-  new Set([
-    ...incomingWriteConstraints,
-    ...(isNormalCompressedPattern
-      ? [
-        '最初の1文を観測案内の定型で始めない',
-        '「いま見えているのは」「いま見ているのは」で始めない',
-        '「次に見るのは」「見るなら」「だから、見る場所は」で始めない',
-        'OBSは今起きている状態そのものを説明せずにそのまま置く',
-        'SHIFTは流れが細くなる一点そのものを説明せずにそのまま置く',
-        'NEXTはまだ残っている未解決の一点そのものを置く',
-        'SAFEは同じ状態の静かな残りだけを置く',
-        '状態を見ている説明文にしない',
-        '案内・観測・解説の言い方にしない',
-      ]
-      : [
-          '最初に相手へ触れてから核心に入る',
-          '最初の1文は観測で始める',
-          '共感だけで終わらない',
-          'いまの焦点を一つに絞る',
-          'decide時も短く切りすぎず、少し滞在感を持たせてよい',
-          'resonate時は説明だけで終わらず、同じ意味を別角度でもう1段だけ展開してよい',
-          '1つの結論だけで終わらず、説明→補足→余白の順で最低2段階に展開する',
-          '2〜4文で1まとまりにし、少なくとも2まとまり以上で構成する',
-          '1つのまとまりに理由・補足・結論を詰め込みすぎない',
-          '話題が切り替わる時、理由に移る時、まとめに移る時は段落を分ける',
-          'OBSは今起きていることを先に置く',
-          'SHIFTはその理由や背景構造を次のまとまりで述べる',
-          'NEXTは次に見る一点や分岐点を最後のまとまりで述べる',
-        ]),
-  ])
-);
+  const mergedWriteConstraints = Array.from(
+    new Set([
+      ...incomingWriteConstraints,
 
+      ...(isRelationshipReflectionQuestion
+        ? [
+            '関係性・恋愛相談で、解決/どうしたら/連絡/相手の状態に関わる場合は、相手側の様子だけで答えない',
+            '相手側に見えている動き、ユーザーの状態が相手像に反映している部分、今こちらが取る距離感を内部で統合する',
+            'ユーザーの不安・投影・思い込みが、相手の沈黙や反応をどう重く見せているかを自然に含める',
+            '相手の本心や事実を断定しない。「そう映っている」「そう見えやすい」という温度で返す',
+            '最後は、追いすぎず離れすぎない距離感、または送るなら短い一言まで落としてよい',
+            '番号・見出し・箇条書きにはせず、自然な2〜4段落で返す',
+            'このケースでは短く切りすぎない。少なくとも5文以上で、受け止め→相手側の見え方→ユーザー側の反映→距離感の順に自然に展開する',
+          ]
+        : []),
+
+      ...(isNormalCompressedPattern && !isRelationshipReflectionQuestion
+        ? [
+            '最初の1文を観測案内の定型で始めない',
+            '「いま見えているのは」「いま見ているのは」で始めない',
+            '「次に見るのは」「見るなら」「だから、見る場所は」で始めない',
+            'OBSは今起きている状態そのものを説明せずにそのまま置く',
+            'SHIFTは流れが細くなる一点そのものを説明せずにそのまま置く',
+            'NEXTはまだ残っている未解決の一点そのものを置く',
+            'SAFEは同じ状態の静かな残りだけを置く',
+            '状態を見ている説明文にしない',
+            '案内・観測・解説の言い方にしない',
+          ]
+        : [
+            '最初に相手へ触れてから核心に入る',
+            '最初の1文は観測で始める',
+            '共感だけで終わらない',
+            'いまの焦点を一つに絞る',
+            'decide時も短く切りすぎず、少し滞在感を持たせてよい',
+            'resonate時は説明だけで終わらず、同じ意味を別角度でもう1段だけ展開してよい',
+            '1つの結論だけで終わらず、説明→補足→余白の順で最低2段階に展開する',
+            '2〜4文で1まとまりにし、少なくとも2まとまり以上で構成する',
+            '1つのまとまりに理由・補足・結論を詰め込みすぎない',
+            '話題が切り替わる時、理由に移る時、まとめに移る時は段落を分ける',
+            'OBSは今起きていることを先に置く',
+            'SHIFTはその理由や背景構造を次のまとまりで述べる',
+            'NEXTは次に見る一点や分岐点を最後のまとまりで述べる',
+          ]),
+    ])
+  );
 const preservedPatternDirectives = Object.fromEntries(
   Object.entries(incomingWriterDirectives).filter(([key, value]) => {
     if (!/^(pattern_|block_)/.test(String(key))) return false;
@@ -3050,6 +3092,14 @@ return {
                   if (!wd || typeof wd !== 'object') return '';
 
                   const lines: string[] = ['WRITER_DIRECTIVES (DO NOT OUTPUT):'];
+
+                  const deepRevealLine = String((wd as any)?.deepRevealLine ?? '').trim();
+                  const forceUseDeepReveal = (wd as any)?.forceUseDeepReveal === true;
+
+                  if (deepRevealLine) {
+                    lines.push(`deepRevealLine=${deepRevealLine}`);
+                    lines.push(`forceUseDeepReveal=${forceUseDeepReveal ? 'true' : 'false'}`);
+                  }
                   const slotDecision = (args as any)?.slotDecision ?? (args as any)?.userContext?.ctxPack?.slotDecision;
 
                   const patternKeyForSlotGate = String((wd as any)?.pattern_key ?? '').trim();
@@ -3538,26 +3588,436 @@ const followupKind =
       .join('\n');
   })();
 
-const internalPackForWriter = (() => {
-  let base = [
-    String(internalPackForWriterSource ?? ''),
-    irMetaBlock,
-    diagnosisFollowupBlock,
-  ]
-    .filter(Boolean)
-    .join('\n\n')
-    .replace(/^[ \t]*@OBS[^\n]*(?:\n|$)/gm, '')
-    .replace(/^[ \t]*@SHIFT[^\n]*(?:\n|$)/gm, '')
-    .replace(/^[ \t]*@SAFE[^\n]*(?:\n|$)/gm, '')
-    .replace(/^[ \t]*@NEXT_HINT[^\n]*(?:\n|$)/gm, '')
-    .replace(/(?:^|\n)@DELTA[^\n]*/g, '')
+  const internalPackForWriter = (() => {
+    const seedInstructionCoreForPack = (() => {
+      try {
+        const source = String(seedTextRawBase ?? '').trim();
 
-    // FLOW_V2 は SEED の difference / transition 観測に必要なので final pack に残す
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+        const fromSeedInstruction = (() => {
+          if (!source) return '';
 
-  return base;
-})();
+          const marker = 'この意味を優先し、それ以外の文脈は補助として扱ってください。';
+          const markerIndex = source.indexOf(marker);
+          if (markerIndex < 0) return '';
+
+          const afterMarker = source.slice(markerIndex + marker.length).trim();
+          const firstLine = afterMarker
+            .split('\n')
+            .map((line) => line.trim())
+            .find((line) => {
+              if (!line) return false;
+              if (/^(INTERNAL PACK|STATE:|META:|FLOW:|FLOW_STORY:|FLOW_V2)/.test(line)) return false;
+              if (/^(inputKind=|directTask=|depthStage=|phase=|qCode=|openingPolicy=|intentBand=|tLayerHint=|itOk=|e_turn=)/.test(line)) return false;
+              return true;
+            });
+
+          return String(firstLine ?? '').replace(/\s+/g, ' ').trim();
+        })();
+
+        if (fromSeedInstruction) return fromSeedInstruction;
+
+        const fallbackFromUserText = String((args as any)?.userText ?? '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        return fallbackFromUserText;
+      } catch {
+        return '';
+      }
+    })();
+
+    const rewritePackWithSeedInstructionCore = (content: string) => {
+      const seed = seedInstructionCoreForPack;
+      if (!seed) return content;
+      if (seed.length > 240) return content;
+      if (/^ユーザーの最後の発話に/.test(seed)) return content;
+      if (/^@/.test(seed)) return content;
+
+      return String(content ?? '')
+        .replace(/(CONTEXT:\n)[^\n]*/u, `$1${seed}`)
+        .replace(/(FOCUS:\n)[^\n]*/u, `$1${seed}`)
+        .replace(/(OBS=)[^\n]*/u, '$1いま出ている体感や報告を、丸写しせず自然に受ける')
+        .replace(/(NEXT=)[^\n]*/u, '$1必要以上に構造化せず、会話として少しだけ返す')
+        .replace(/(OBS_LINE=)[^\n]*/u, '$1まず自然な受け文で返す。ユーザー文をそのまま復唱しない。')
+        .replace(/(NEXT_LINE=)[^\n]*/u, '$1丸写しではなく、感じ取った強さだけを短く返す。');
+    };
+
+    let base = [
+      rewritePackWithSeedInstructionCore(String(internalPackForWriterSource ?? '')),
+      irMetaBlock,
+      diagnosisFollowupBlock,
+      (() => {
+        const relationCtxPack =
+          ((args as any)?.userContext?.ctxPack &&
+          typeof (args as any).userContext.ctxPack === 'object'
+            ? (args as any).userContext.ctxPack
+            : null) ??
+          ((args as any)?.userContext?.meta?.extra?.ctxPack &&
+          typeof (args as any).userContext.meta.extra.ctxPack === 'object'
+            ? (args as any).userContext.meta.extra.ctxPack
+            : null) ??
+          ((args as any)?.meta?.extra?.ctxPack &&
+          typeof (args as any).meta.extra.ctxPack === 'object'
+            ? (args as any).meta.extra.ctxPack
+            : null) ??
+          ((args as any)?.extra?.ctxPack &&
+          typeof (args as any).extra.ctxPack === 'object'
+            ? (args as any).extra.ctxPack
+            : null) ??
+          ((ctxPack as any) && typeof (ctxPack as any) === 'object'
+            ? (ctxPack as any)
+            : null);
+
+        const memory =
+          relationCtxPack?.relationshipMemory ??
+          (ctxPack as any)?.relationshipMemory ??
+          null;
+
+        const relationFocus =
+          relationCtxPack?.relationFocus ??
+          (ctxPack as any)?.relationFocus ??
+          null;
+          try {
+            console.log('[IROS/writerCalls][RELATION_MEMORY_HINT_SOURCE]', {
+              traceId: (args as any)?.traceId ?? null,
+              conversationId: (args as any)?.conversationId ?? null,
+              userCode: (args as any)?.userCode ?? null,
+              relationCtxPackKeys:
+                relationCtxPack && typeof relationCtxPack === 'object'
+                  ? Object.keys(relationCtxPack)
+                  : [],
+              hasRelationshipMemory: !!memory,
+              hasRelationFocus: !!relationFocus,
+              memoryKeys:
+                memory && typeof memory === 'object'
+                  ? Object.keys(memory)
+                  : [],
+              relationId:
+                relationCtxPack?.relationId ??
+                memory?.relation_id ??
+                null,
+              displayName:
+                memory?.display_name ??
+                null,
+            });
+          } catch {}
+          const currentUserText = String(
+            (args as any)?.userText ??
+              (args as any)?.followupText ??
+              (args as any)?.inputText ??
+              (args as any)?.currentUserText ??
+              '',
+          )
+            .replace(/\s+/g, ' ')
+            .trim();
+
+          const historyForRelationHint =
+            (Array.isArray((args as any)?.userContext?.historyForWriter) &&
+            (args as any).userContext.historyForWriter.length > 0
+              ? (args as any).userContext.historyForWriter
+              : Array.isArray((args as any)?.userContext?.ctxPack?.historyForWriter) &&
+                  (args as any).userContext.ctxPack.historyForWriter.length > 0
+                ? (args as any).userContext.ctxPack.historyForWriter
+                : Array.isArray((relationCtxPack as any)?.historyForWriter)
+                  ? (relationCtxPack as any).historyForWriter
+                  : Array.isArray((ctxPack as any)?.historyForWriter)
+                    ? (ctxPack as any).historyForWriter
+                    : []) as any[];
+
+          const previousUserTextForRelationHint =
+            [...historyForRelationHint]
+              .reverse()
+              .map((m: any) => {
+                const role = String(m?.role ?? m?.type ?? '').trim().toLowerCase();
+                if (role !== 'user') return '';
+
+                return String(
+                  m?.content ??
+                    m?.text ??
+                    m?.message ??
+                    m?.userText ??
+                    '',
+                )
+                  .replace(/\s+/g, ' ')
+                  .trim();
+              })
+              .find(Boolean) ?? '';
+
+          const isRelationshipDeicticFollowup =
+            /(この状況|この場合|この件|それ|これ|今の状態|どうしたら解決|どうすれば解決|解決しますか|どうしたらいい|どうすればいい)/u.test(
+              currentUserText,
+            ) &&
+            /(彼|彼女|相手|恋愛|連絡|返信|返事|不安|距離|沈黙)/u.test(
+              previousUserTextForRelationHint,
+            );
+
+          const relationId = String(
+            (ctxPack as any)?.relationId ??
+              relationCtxPack?.relationId ??
+              memory?.relation_id ??
+              '',
+          ).trim();
+
+          const displayName = String(memory?.display_name ?? '').trim();
+          const confidence =
+            typeof memory?.confidence === 'number' ? memory.confidence : null;
+
+          const hasRelationshipMemory =
+            memory != null &&
+            typeof memory === 'object' &&
+            (
+              relationId ||
+              displayName ||
+              Array.isArray(memory?.facts) ||
+              Array.isArray(memory?.patterns) ||
+              Array.isArray(memory?.safe_openers) ||
+              Array.isArray(memory?.pressure_triggers) ||
+              Array.isArray(memory?.user_reaction_pattern) ||
+              Array.isArray(memory?.unresolved_topics)
+            );
+
+          if (!hasRelationshipMemory && !relationFocus && !isRelationshipDeicticFollowup) return '';
+
+          const pickStrings = (value: unknown, limit: number): string[] => {
+            if (!Array.isArray(value)) return [];
+            return value
+              .map((item: any) => {
+                if (typeof item === 'string') return item;
+                if (item && typeof item === 'object') {
+                  return String(
+                    item.note ??
+                      item.value ??
+                      item.key ??
+                      '',
+                  ).trim();
+                }
+                return '';
+              })
+              .map((v) => String(v ?? '').replace(/\s+/g, ' ').trim())
+              .filter(Boolean)
+              .slice(0, limit);
+          };
+
+          const facts = pickStrings(memory?.facts, 3);
+          const patterns = pickStrings(memory?.patterns, 3);
+          const safeOpeners = pickStrings(memory?.safe_openers, 3);
+          const pressureTriggers = pickStrings(memory?.pressure_triggers, 3);
+          const userReactionPattern = pickStrings(memory?.user_reaction_pattern, 3);
+          const unresolvedTopics = pickStrings(memory?.unresolved_topics, 3);
+
+          return [
+            'RELATION_MEMORY_HINT (DO NOT OUTPUT):',
+            `CURRENT_USER=${currentUserText}`,
+            previousUserTextForRelationHint ? `previousUserText=${previousUserTextForRelationHint.slice(0, 180)}` : '',
+            isRelationshipDeicticFollowup ? 'continuationHint=直前の恋愛相談を指す参照語フォローの可能性がある' : '',
+            relationId ? `relationId=${relationId}` : '',
+            displayName ? `displayName=${displayName}` : '',
+            confidence != null ? `confidence=${confidence}` : '',
+            relationFocus ? `relationFocus=${JSON.stringify(relationFocus)}` : '',
+            facts.length ? `facts=${facts.join(' / ')}` : '',
+            patterns.length ? `patterns=${patterns.join(' / ')}` : '',
+            safeOpeners.length ? `safeOpeners=${safeOpeners.join(' / ')}` : '',
+            pressureTriggers.length ? `pressureTriggers=${pressureTriggers.join(' / ')}` : '',
+            userReactionPattern.length ? `userReactionPattern=${userReactionPattern.join(' / ')}` : '',
+            unresolvedTopics.length ? `unresolvedTopics=${unresolvedTopics.join(' / ')}` : '',
+            'RULE=現在のユーザー文を最優先する',
+            'RULE=「この状況」「それ」「この場合」などの参照語は、直前履歴が恋愛相談ならその続き候補として扱う',
+            'RULE=relationId または displayName がある場合だけ、同じ相手の続き候補として強めに扱う',
+            'RULE=「彼」「相手」だけで相手が曖昧な場合は、過去記憶を強く使わない',
+            'RULE=過去記憶は断定に使わず、距離感・不安・反応パターン・安全な言葉の補助としてだけ使う',
+            'RULE=別の相手の可能性がある場合は、この記憶を使わない',
+            'RULE=相手の本心や事実確認としては使わない',
+          ]
+          .filter(Boolean)
+          .join('\n');
+      })(),
+      (() => {
+        const currentUserText = String(
+          (args as any)?.userText ??
+            (args as any)?.followupText ??
+            (args as any)?.inputText ??
+            (args as any)?.currentUserText ??
+            '',
+        )
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        const historyForWriterSource =
+          (Array.isArray((args as any)?.userContext?.historyForWriter) &&
+            (args as any).userContext.historyForWriter.length > 0
+            ? (args as any).userContext.historyForWriter
+            : Array.isArray((args as any)?.userContext?.ctxPack?.historyForWriter) &&
+                (args as any).userContext.ctxPack.historyForWriter.length > 0
+              ? (args as any).userContext.ctxPack.historyForWriter
+              : Array.isArray((ctxPack as any)?.historyForWriter)
+                ? (ctxPack as any).historyForWriter
+                : []) as any[];
+
+        const previousAssistantText =
+          [...historyForWriterSource]
+            .reverse()
+            .map((m: any) => {
+              const role = String(m?.role ?? m?.type ?? '').trim().toLowerCase();
+              if (role !== 'assistant' && role !== 'iros' && role !== 'model') return '';
+
+              const content = String(
+                m?.content ??
+                  m?.text ??
+                  m?.message ??
+                  m?.assistantText ??
+                  '',
+              )
+                .replace(/\s+/g, ' ')
+                .trim();
+
+              if (!content) return '';
+              if (/^(SEED|INTERNAL PACK|WRITER_DIRECTIVES|PATTERN_OUTPUT_CONTRACT)/.test(content)) return '';
+
+              return content;
+            })
+            .find(Boolean) ?? '';
+            const isRelationshipInfluenceReframe =
+            (
+              /(私|自分|気持ち|意識|状態|波動|エネルギー|内側).*(変えたら|変わったら|整えたら|上げたら|戻したら).*(彼|彼女|相手|関係|現実).*(変わる|変わります|変化する|動く|連絡|返信|返事)/u.test(
+                currentUserText,
+              ) ||
+              /(彼|彼女|相手|関係|現実).*(変わる|変わります|変化する|動く|連絡|返信|返事).*(私|自分|気持ち|意識|状態|波動|エネルギー|内側).*(変えたら|変わったら|整えたら|上げたら|戻したら)/u.test(
+                currentUserText,
+              ) ||
+              /(私の気持ちを変えたら|私の意識を変えたら|自分が変われば|私が変われば|波動を変えたら|状態を変えたら|意識を変えたら|内側を変えたら)/u.test(
+                currentUserText,
+              ) ||
+              /(彼|彼女|相手).*(変えるには|変えたい|動かしたい|動いてほしい|反応を変えたい|態度を変えたい|連絡させたい|返信させたい|返事させたい)/u.test(
+                currentUserText,
+              ) ||
+              /(彼の反応を変えたい|彼女の反応を変えたい|相手の反応を変えたい|彼の態度を変えたい|彼女の態度を変えたい|相手の態度を変えたい|彼に動いてほしい|彼女に動いてほしい|相手に動いてほしい|彼から連絡させたい|彼女から連絡させたい|相手から連絡させたい|連絡させたい|返信させたい|返事させたい)/u.test(
+                currentUserText,
+              )
+            ) &&
+            /(彼|彼女|相手|関係|恋愛|連絡|返信|返事|鏡|反映|現実|反応|態度)/u.test(
+              `${currentUserText} ${previousAssistantText}`,
+            );
+
+          if (isRelationshipInfluenceReframe) {
+            return [
+              'RELATIONSHIP_INFLUENCE_REFRAME (DO NOT OUTPUT):',
+              `CURRENT_USER=${currentUserText}`,
+              previousAssistantText ? `PREVIOUS_ASSISTANT=${previousAssistantText.slice(0, 360)}` : '',
+              'MODE=自分の状態が変わることで、関係の場・届き方・相手像がどう変わるかを説明する',
+              'RULE=相手を直接変えられる、相手が必ず変わる、とは断定しない',
+              'RULE=ただし、自分の不安・力み・追いかける反応が変わると、関係の空気・届き方・距離感は変わる可能性があると返す',
+              'RULE=変える対象は「彼」ではなく、「自分の立ち位置」「不安から追わない位置」「言葉の出し方」だと説明する',
+              'RULE=彼を操作するために自分を変える、という方向にはしない',
+              'RULE=鏡のように映っていた相手像も、ユーザーの見方や反応が変わることで、拒絶ではなく余地として見え方が変わることを説明する',
+              'RULE=ユーザーの状態が「彼を変えたい」から「自分の位置を変えると関係の場が変わる」に移るように返す',
+              'RULE=必要なら、「彼を変えたい」ではなく「私は不安から追わない位置に戻る」という具体的な変換文を出す',
+              'OUTPUT=普通の会話文で、3〜5段落。番号・見出し・箇条書きにしない',
+            ]
+              .filter(Boolean)
+              .join('\n');
+          }
+            const isRelationshipWaitAnxietyConcretize =
+            (
+              /(待つ|待って|待っている|待つという|待つの|待てない).*(不安|しんどい|つらい|辛い|苦しい|増す|増える|大きくなる|耐えられない)/u.test(
+                currentUserText,
+              ) ||
+              /(不安|しんどい|つらい|辛い|苦しい).*(増す|増える|大きくなる|待つ|待って|待てない)/u.test(
+                currentUserText,
+              )
+            ) &&
+            /(連絡|彼|彼女|相手|恋愛|返信|返事|待つ|一通|連投|急かさない)/u.test(
+              `${currentUserText} ${previousAssistantText}`,
+            );
+
+          if (isRelationshipWaitAnxietyConcretize) {
+            return [
+              'RELATIONSHIP_WAIT_ANXIETY_CONCRETIZE (DO NOT OUTPUT):',
+              `CURRENT_USER=${currentUserText}`,
+              previousAssistantText ? `PREVIOUS_ASSISTANT=${previousAssistantText.slice(0, 360)}` : '',
+              'MODE=待つことで増える不安を、具体的に扱える形へ変換する',
+              'RULE=状態観測に戻らない。「待つあいだに不安が前に出る」「重さが残る」などで終わらない',
+              'RULE=「待つ」は、何もしないで耐えることではないと説明する',
+              'RULE=「待つ」は、一通送ったあとに不安を連投で処理しない時間だと説明する',
+              'RULE=不安が増すのは自然だと受ける。ただし不安のまま追加で送ると、確認したい圧が強くなりやすいと説明する',
+              'RULE=「返事がない＝嫌われた」と決めず、「今は相手の返せるタイミングを待っている」と読み替える方向を出す',
+              'RULE=待つ時間を、見捨てられている時間にしないことを説明する',
+              'RULE=追加で送る代わりに、すでに送った一通の役割を思い出す方向へ返す',
+              'RULE=ユーザーの状態が「待つしかない」から「待つ時間の扱い方がわかった」に変わるように返す',
+              'OUTPUT=普通の会話文で、3〜5段落。番号・見出し・箇条書きにしない',
+            ]
+              .filter(Boolean)
+              .join('\n');
+          }
+
+          const previousUserTextForSolution =
+            [...historyForWriterSource]
+              .reverse()
+              .map((m: any) => {
+                const role = String(m?.role ?? m?.type ?? '').trim().toLowerCase();
+                if (role !== 'user') return '';
+
+                return String(
+                  m?.content ??
+                    m?.text ??
+                    m?.message ??
+                    m?.userText ??
+                    '',
+                )
+                  .replace(/\s+/g, ' ')
+                  .trim();
+              })
+              .find(Boolean) ?? '';
+
+          const isRelationshipSolutionConcretize =
+          (
+            /(解決(?:方法)?がわからない|解決(?:方法)?が分からない|解決.*わからない|解決.*分からない|答え(?:が|を)?(?:ほしい|欲しい|知りたい)|答え(?:的|っぽい|みたい)(?:なの|なもの|もの)?(?:が|を)?(?:ほしい|欲しい|知りたい)|正解(?:が|を)?(?:ほしい|欲しい|知りたい)|どうするのが正解|どうしたら正解|どうすれば正解|どうすればいいかわからない|どうしたらいいかわからない|具体的に|何をすれば|何を送れば|それだとわからない|それだと分からない|意味がわからない|意味が分からない)/u.test(
+              currentUserText,
+            ) ||
+            (
+              /(この状況|この場合|この件|それ|これ|今の状態|どうしたら解決|どうすれば解決|解決しますか|どうしたらいい|どうすればいい)/u.test(
+                currentUserText,
+              ) &&
+              /(彼|彼女|相手|恋愛|連絡|返信|返事|不安|距離|沈黙)/u.test(
+                previousUserTextForSolution,
+              )
+            )
+          ) &&
+            /(連絡|彼|彼女|相手|恋愛|返信|返事|急かさない|そっと|置いておく|待つ|距離|不安|沈黙)/u.test(
+              `${currentUserText} ${previousAssistantText} ${previousUserTextForSolution}`,
+            );
+          if (!isRelationshipSolutionConcretize) return '';
+
+          return [
+            'RELATIONSHIP_SOLUTION_CONCRETIZE (DO NOT OUTPUT):',
+            `CURRENT_USER=${currentUserText}`,
+            previousAssistantText ? `PREVIOUS_ASSISTANT=${previousAssistantText.slice(0, 360)}` : '',
+            'MODE=前回の抽象助言を、具体的な一手に変換する',
+            'RULE=状態観測に戻らない。「まだ決めきれない」「残っている」「開いたまま」などで終わらない',
+            'RULE=「待つ」「置いておく」だけで終わらせない。ユーザーが今できる一通・一手まで落とす',
+            'RULE=追いかけたい気持ちを否定せず、でも重く送らせない',
+            'RULE=一度だけ送れる短文例を出す。例：「忙しいと思うけど、落ち着いたら連絡もらえたらうれしい」',
+            'RULE=送った後は連投しない、という境界まで入れる',
+            'RULE=ユーザーの状態が「何もできない」から「一手は打てた」に変わるように返す',
+            'OUTPUT=普通の会話文で、2〜4段落。番号・見出し・箇条書きにしない',
+          ]
+            .filter(Boolean)
+            .join('\n');
+      })(),
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+      .replace(/^[ \t]*@OBS[^\n]*(?:\n|$)/gm, '')
+      .replace(/^[ \t]*@SHIFT[^\n]*(?:\n|$)/gm, '')
+      .replace(/^[ \t]*@SAFE[^\n]*(?:\n|$)/gm, '')
+      .replace(/^[ \t]*@NEXT_HINT[^\n]*(?:\n|$)/gm, '')
+      .replace(/(?:^|\n)@DELTA[^\n]*/g, '')
+
+      // FLOW_V2 は SEED の difference / transition 観測に必要なので final pack に残す
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+    return base;
+  })();
 
 try {
   const packNormFinal = norm(internalPackForWriter);
@@ -3768,7 +4228,84 @@ try {
           const tailMessages = messages.slice(prefixCount);
 
           messages = [...prefix, ...mergeConsecutiveSameRole(tailMessages)];
-          messages = ensureEndsWithUser(messages, String(args.userText ?? ''));
+
+          const finalUserTextForWriter = (() => {
+            const currentUserText = String(args.userText ?? '').replace(/\s+/g, ' ').trim();
+            const packText = String(packMsg?.content ?? '');
+
+            const resolvedAskForFinalUser =
+              (args as any)?.ctxPack?.resolvedAsk ??
+              (args as any)?.meta?.extra?.ctxPack?.resolvedAsk ??
+              (args as any)?.userContext?.ctxPack?.resolvedAsk ??
+              (args as any)?.userContext?.meta?.extra?.ctxPack?.resolvedAsk ??
+              null;
+
+              const resolvedAskTopic = String(
+                (resolvedAskForFinalUser as any)?.topic ?? ''
+              )
+                .replace(/\s+/g, ' ')
+                .trim();
+
+              const resolvedAskHistoryHint = String(
+                (resolvedAskForFinalUser as any)?.historyHint ?? ''
+              )
+                .replace(/\s+/g, ' ')
+                .trim();
+
+              const resolvedAskReadingMode = String(
+                (resolvedAskForFinalUser as any)?.readingMode ??
+                  (resolvedAskForFinalUser as any)?.replyMode ??
+                  ''
+              )
+                .replace(/\s+/g, ' ')
+                .trim();
+
+              const isPartnerSideResonance =
+                String((resolvedAskForFinalUser as any)?.askType ?? '').trim() === 'truth_structure' &&
+                resolvedAskReadingMode === 'partner_side_resonance' &&
+                resolvedAskTopic.length > 0;
+
+                if (isPartnerSideResonance) {
+                  return [
+                    resolvedAskTopic,
+                    '',
+                    ...(resolvedAskHistoryHint
+                      ? [
+                          '既出文脈:',
+                          resolvedAskHistoryHint,
+                          '',
+                          '既出文脈は必要な場合だけ、本文に一度だけ自然に入れてください。',
+                        ]
+                      : []),
+                    '彼/彼女/相手側の様子を、事実断定ではなく「今こちらにそう映っている可能性」として会話文で返してください。',
+                    '相手側だけを読むのではなく、ユーザー側の不安・投影・思い込みがどこに重なっているかも、自然に一文で含めてください。',
+                    '解決や「どうしたら」に関わる場合は、最後に今こちらが取る距離感を短く置いてください。',
+                    'ただし番号・見出し・箇条書きにはせず、自然な2〜3段落で返してください。',
+                    '彼/彼女/相手の本心や事実を断定しないでください。',
+                  ].join('\n');
+                }
+
+            const contextFromPack =
+              packText.match(/(?:^|\n)CONTEXT:\n([^\n]+)/)?.[1]?.replace(/\s+/g, ' ').trim() ?? '';
+
+            const isResonanceStructureInstruction =
+              /共鳴|構造|象徴|響き/u.test(currentUserText) &&
+              contextFromPack.length > 0 &&
+              contextFromPack !== currentUserText;
+
+            if (!isResonanceStructureInstruction) {
+              return currentUserText;
+            }
+
+            return [
+              contextFromPack,
+              '',
+              '共鳴構造・象徴構造・関係構造として見てください。',
+              'この依頼文そのものは分析せず、対象そのものを見てください。',
+            ].join('\n');
+          })();
+
+          messages = ensureEndsWithUser(messages, finalUserTextForWriter);
 
   let digest = (args.historyDigestV1 ?? null) as HistoryDigestV1 | null;
   if (digest) {

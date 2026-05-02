@@ -3,6 +3,7 @@ import { IR_DETAIL_V1 } from './irDetailV1';
 import { NORMAL_COMPRESSED_V1 } from './normalCompressedV1';
 import { NORMAL_DETAIL_V1 } from './normalDetailV1';
 import { NORMAL_RESONANCE_V1 } from './normalResonanceV1';
+import { PARTNER_SIDE_RESONANCE_V1 } from './partnerSideResonanceV1';
 import { TRUTH_COMPRESSED_V1 } from './truthCompressedV1';
 import { TRUTH_V1 } from './truthV1';
 import type {
@@ -37,6 +38,7 @@ const PATTERN_SPECS: Record<PatternKey, PatternSpec> = {
   NORMAL_RESONANCE_V1,
   NORMAL_COMPRESSED_V1,
   DECLARATION_RESONANCE_V1,
+  PARTNER_SIDE_RESONANCE_V1,
   TRUTH_V1,
   TRUTH_COMPRESSED_V1,
   IR_LIGHT_V1: EMPTY_IR_LIGHT_V1,

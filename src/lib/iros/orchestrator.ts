@@ -1943,6 +1943,41 @@ if (!isIrDiagnosisTurn_here && !isGreetingTurn) {
         intentLine: intentLineNow,
         intentTransition: intentTransitionNow,
       });
+
+      try {
+        console.log('[IROS/QUESTION_FLOW][QUESTION_AFTER_ENGINE]', {
+          hasQuestion: Boolean(ex.question),
+          questionType:
+            ex.question && typeof ex.question === 'object'
+              ? String((ex.question as any)?.questionType ?? '') || null
+              : null,
+          questionKeys:
+            ex.question && typeof ex.question === 'object'
+              ? Object.keys(ex.question as any)
+              : null,
+          questionRaw:
+            ex.question && typeof ex.question === 'object'
+              ? ex.question
+              : null,
+        });
+      } catch {}
+
+      if (
+        ex.question &&
+        typeof ex.question === 'object' &&
+        String((ex.question as any)?.questionType ?? '').trim()
+      ) {
+        if (!ex.ctxPack || typeof ex.ctxPack !== 'object') {
+          ex.ctxPack = {};
+        }
+
+        ex.ctxPack.question = ex.question;
+
+        console.log('[IROS/QUESTION_FLOW][QUESTION_SAVED_TO_CTXPACK]', {
+          questionType: String((ex.question as any)?.questionType ?? '') || null,
+          hasCtxPackQuestion: Boolean(ex.ctxPack?.question),
+        });
+      }
   }
 
   const slotsEmpty =
@@ -2207,7 +2242,60 @@ if (shouldFallbackNormalChat) {
         /この(並び|話|構造)/u.test(currentUserTextForNormalChat) ||
         /あの(並び|話|構造)/u.test(currentUserTextForNormalChat) ||
         /(その|この|あの).*(地球外生命体|宇宙人).*(話|構造)/u.test(currentUserTextForNormalChat);
+        const isGenericStructureFollowup =
+        (
+          /^(共鳴で、?構造から(みて|見て|見てください)|構造から(みて|見て|見てください)|構造的に(みて|見て|見てください)|共鳴で(みて|見て|見てください))$/u.test(
+            currentUserTextForNormalChat
+          ) ||
+          (
+            /(共鳴|構造|構造的)/u.test(currentUserTextForNormalChat) &&
+            /(みて|見て|見てください|お願いします|ください)/u.test(currentUserTextForNormalChat)
+          )
+        ) &&
+        !/(コード|SQL|ログ|修正|実装|エラー|typecheck|npm|rg)/u.test(currentUserTextForNormalChat);
 
+      const followupTopicForNormalChat = (() => {
+        const candidates = Array.isArray(recentUserTextsForNormalChat)
+          ? [...recentUserTextsForNormalChat].reverse()
+          : [];
+
+        for (const raw of candidates) {
+          const s = String(raw ?? '').replace(/\s+/g, ' ').trim();
+          if (!s) continue;
+
+          // 今回のような追加指示そのものは対象にしない
+          if (
+            /(共鳴|構造|構造的)/u.test(s) &&
+            /(みて|見て|見てください|お願いします|ください)/u.test(s)
+          ) {
+            continue;
+          }
+
+          // 技術作業ログは対象にしない
+          if (/(コード|SQL|ログ|修正|実装|エラー|typecheck|npm|rg|行)/u.test(s)) {
+            continue;
+          }
+
+          // 直近の自然文・質問文を対象候補にする
+          if (
+            /(関係|つなが|繋が|なにかわか|何かわか|意味|理由|どういう|感じ|気配|違和感|道真|菅原|公)/u.test(s) ||
+            /[?？]/u.test(s)
+          ) {
+            return s.slice(0, 180);
+          }
+        }
+
+        return null;
+      })();
+
+      if (isGenericStructureFollowup && followupTopicForNormalChat) {
+        return {
+          topic: followupTopicForNormalChat,
+          askType: 'truth_structure',
+          replyMode: 'direct_answer_first',
+          sourceUserText: currentUserTextForNormalChat,
+        };
+      }
       if (
         inheritedResolvedAskForNormalChat?.askType === 'truth_structure' &&
         isReferentialTruthFollowup
@@ -2260,32 +2348,91 @@ if (shouldFallbackNormalChat) {
           typeof existingCtxPackForNormalChat.question === 'object' &&
           String((existingCtxPackForNormalChat.question as any)?.questionType ?? '').trim())
             ? existingCtxPackForNormalChat.question
-            : (((meta as any)?.extra?.question &&
-                typeof (meta as any).extra.question === 'object')
-                ? (meta as any).extra.question
-                : null);
+            : ((ex as any)?.question &&
+                typeof (ex as any).question === 'object' &&
+                String(((ex as any).question as any)?.questionType ?? '').trim())
+              ? (ex as any).question
+              : (((meta as any)?.extra?.question &&
+                  typeof (meta as any).extra.question === 'object')
+                  ? (meta as any).extra.question
+                  : null);
+                  try {
+                    console.log('[IROS/QUESTION_FLOW][NORMALCHAT_PICK]', {
+                      hasExistingCtxQuestion: Boolean(existingCtxPackForNormalChat?.question),
+                      existingCtxQuestionType:
+                        typeof existingCtxPackForNormalChat?.question === 'object' &&
+                        existingCtxPackForNormalChat.question
+                          ? String((existingCtxPackForNormalChat.question as any)?.questionType ?? '') || null
+                          : null,
+                      hasExQuestion: Boolean((ex as any)?.question),
+                      exQuestionType:
+                        typeof (ex as any)?.question === 'object' && (ex as any).question
+                          ? String(((ex as any).question as any)?.questionType ?? '') || null
+                          : null,
+                      hasMetaExtraQuestion: Boolean((meta as any)?.extra?.question),
+                      metaExtraQuestionType:
+                        typeof (meta as any)?.extra?.question === 'object' &&
+                        (meta as any).extra.question
+                          ? String(((meta as any).extra.question as any)?.questionType ?? '') || null
+                          : null,
+                      pickedQuestionType:
+                        typeof questionForNormalChat === 'object' && questionForNormalChat
+                          ? String((questionForNormalChat as any)?.questionType ?? '') || null
+                          : null,
 
-                const ctxPackForNormalChat = {
-                  ...existingCtxPackForNormalChat,
-                  ...(questionForNormalChat ? { question: questionForNormalChat } : {}),
-                  ...(earlyShiftKindForNormalChat ? { shiftKind: earlyShiftKindForNormalChat } : {}),
-                  ...(earlyResolvedAskForNormalChat ? { resolvedAsk: earlyResolvedAskForNormalChat } : {}),
+                      earlyResolvedAskForNormalChat:
+                        earlyResolvedAskForNormalChat
+                          ? {
+                              topic: String((earlyResolvedAskForNormalChat as any)?.topic ?? ''),
+                              askType: String((earlyResolvedAskForNormalChat as any)?.askType ?? ''),
+                              replyMode: String((earlyResolvedAskForNormalChat as any)?.replyMode ?? ''),
+                              sourceUserText: String((earlyResolvedAskForNormalChat as any)?.sourceUserText ?? ''),
+                            }
+                          : null,
 
-                  ...(existingCtxPackForNormalChat?.diagnosisFollowup === true
-                    ? { diagnosisFollowup: true }
-                    : {}),
-                  ...(typeof existingCtxPackForNormalChat?.followupKind === 'string' &&
-                    String(existingCtxPackForNormalChat.followupKind).trim()
-                    ? { followupKind: String(existingCtxPackForNormalChat.followupKind).trim() }
-                    : {}),
-                  ...(typeof existingCtxPackForNormalChat?.topicHint === 'string' &&
-                    String(existingCtxPackForNormalChat.topicHint).trim()
-                    ? { topicHint: String(existingCtxPackForNormalChat.topicHint).trim() }
-                    : {}),
-                  ...(existingCtxPackForNormalChat?.diagnosisFollowup === true
-                    ? { continuityKind: 'diagnosis_followup' }
-                    : {}),
-                };
+                      ctxPackForNormalChatWillHaveResolvedAsk:
+                        Boolean(earlyResolvedAskForNormalChat),
+                    });
+                  } catch {}
+
+
+                  const ctxPackForNormalChat = {
+                    ...existingCtxPackForNormalChat,
+                    ...(questionForNormalChat ? { question: questionForNormalChat } : {}),
+                    ...(earlyShiftKindForNormalChat ? { shiftKind: earlyShiftKindForNormalChat } : {}),
+                    ...(earlyResolvedAskForNormalChat ? { resolvedAsk: earlyResolvedAskForNormalChat } : {}),
+
+                    ...(existingCtxPackForNormalChat?.diagnosisFollowup === true
+                      ? { diagnosisFollowup: true }
+                      : {}),
+                    ...(typeof existingCtxPackForNormalChat?.followupKind === 'string' &&
+                      String(existingCtxPackForNormalChat.followupKind).trim()
+                      ? { followupKind: String(existingCtxPackForNormalChat.followupKind).trim() }
+                      : {}),
+                    ...(typeof existingCtxPackForNormalChat?.topicHint === 'string' &&
+                      String(existingCtxPackForNormalChat.topicHint).trim()
+                      ? { topicHint: String(existingCtxPackForNormalChat.topicHint).trim() }
+                      : {}),
+                    ...(existingCtxPackForNormalChat?.diagnosisFollowup === true
+                      ? { continuityKind: 'diagnosis_followup' }
+                      : {}),
+                  };
+
+                  if (questionForNormalChat) {
+                    if (!(meta as any).extra || typeof (meta as any).extra !== 'object') {
+                      (meta as any).extra = {};
+                    }
+
+                    if (
+                      !(meta as any).extra.ctxPack ||
+                      typeof (meta as any).extra.ctxPack !== 'object'
+                    ) {
+                      (meta as any).extra.ctxPack = {};
+                    }
+
+                    (meta as any).extra.question = questionForNormalChat;
+                    (meta as any).extra.ctxPack.question = questionForNormalChat;
+                  }
 
     const fallback = buildNormalChatSlotPlan({
       userText: textForCounsel,

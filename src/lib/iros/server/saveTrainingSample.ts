@@ -376,6 +376,25 @@ export async function saveIrosTrainingSample(params: SaveIrosTrainingSampleParam
   // target_kind（★ goal.kind を最優先にする）
   // target_kind（★ ctxPack / goal / top-level を最優先し、最後だけ resolver に落とす）
   const targetKind = (() => {
+    const trainingQuestionType =
+      pickString(meta?.extra?.ctxPack?.question?.questionType) ??
+      pickString(meta?.extra?.question?.questionType) ??
+      null;
+
+    const trainingPatternKey =
+      pickString(meta?.extra?.ctxPack?.patternKey) ??
+      pickString(meta?.extra?.patternKey) ??
+      null;
+
+    // structure 質問、または NORMAL_DETAIL_V1 まで進んだターンは、
+    // 保存・Training 側でも resonate に戻さず uncover として扱う。
+    if (
+      trainingQuestionType === 'structure' ||
+      trainingPatternKey === 'NORMAL_DETAIL_V1'
+    ) {
+      return 'uncover';
+    }
+
     const c0 = normalizeTargetKindOrNull(
       pickString(meta?.extra?.ctxPack?.targetKind)
     );

@@ -284,6 +284,7 @@ function buildClarify(
   flow?: { delta?: string; confidence?: number; returnStreak?: number } | null,
   resolvedAskTypeArg?: string | null,
   questionArg?: any,
+  resolvedAskArg?: any,
 ): NormalChatSlot[] {
   const lane = laneKey;
   const isT = lane === 'T_CONCRETIZE';
@@ -299,7 +300,19 @@ function buildClarify(
     ['first_line_is_core', 'then_action_in_10min', 'no_checklist', 'plain_words'],
   ];
 
-  const seedText = clamp(norm(userText), 240);
+  const resolvedAskTopic = String((resolvedAskArg as any)?.topic ?? '').trim();
+  const resolvedAskSourceUserText = String((resolvedAskArg as any)?.sourceUserText ?? '').trim();
+
+  const seedText = clamp(
+    norm(resolvedAskTopic || userText),
+    240
+  );
+
+  const instructionText = clamp(
+    norm(resolvedAskSourceUserText || userText),
+    240
+  );
+
   const delta = flowDelta ? String(flowDelta) : null;
   const conf = typeof flow?.confidence === 'number' ? flow.confidence : undefined;
 
@@ -455,38 +468,46 @@ function buildClarify(
     String(flow?.delta ?? flowDelta ?? '').toUpperCase() === 'RETURN' &&
     Number((flow as any)?.returnStreak ?? 0) >= 2;
 
-    const normalizedUserText = norm(userText);
+    const normalizedUserText = norm(instructionText);
+    const normalizedTargetText = norm(seedText);
+
     const resolvedAskType: string = (() => {
       const stamped = String(resolvedAskTypeArg ?? '').trim();
 
       const looksTruthStructure =
-        /(地球外生命体|宇宙人)/.test(normalizedUserText) &&
-        /(人間|人類)/.test(normalizedUserText) &&
-        /(作った|作られた|介入)/.test(normalizedUserText) &&
-        /(構造)/.test(normalizedUserText);
-
-      if (stamped === 'truth_structure' && !looksTruthStructure) {
-        return '';
-      }
+        (
+          /(地球外生命体|宇宙人)/.test(normalizedTargetText) &&
+          /(人間|人類)/.test(normalizedTargetText) &&
+          /(作った|作られた|介入)/.test(normalizedTargetText) &&
+          /(構造)/.test(normalizedUserText + normalizedTargetText)
+        ) ||
+        (
+          !!resolvedAskTopic &&
+          stamped === 'truth_structure'
+        );
 
       if (stamped) return stamped;
       return looksTruthStructure ? 'truth_structure' : '';
     })();
 
-  console.log('[IROS/NORMAL_CHAT][BUILD_CLARIFY_TRACE]', {
-    userHead: String(userText ?? '').slice(0, 80),
-    resolvedAskTypeArg: String(resolvedAskTypeArg ?? ''),
-    resolvedAskType,
-    lane,
-    isT,
-    normalizedUserText: normalizedUserText.slice(0, 120),
-    questionType,
-    tMode,
-    questionFocus: questionFocus || null,
-    usePastReframe,
-    splitFactHypothesis,
-    avoidPrematureClosure,
-  });
+    console.log('[IROS/NORMAL_CHAT][BUILD_CLARIFY_TRACE]', {
+      userHead: String(userText ?? '').slice(0, 80),
+      resolvedAskTypeArg: String(resolvedAskTypeArg ?? ''),
+      resolvedAskType,
+      lane,
+      isT,
+      normalizedUserText: normalizedUserText.slice(0, 120),
+      normalizedTargetText: normalizedTargetText.slice(0, 160),
+      resolvedAskTopic: resolvedAskTopic || null,
+      resolvedAskSourceUserText: resolvedAskSourceUserText || null,
+      instructionText: instructionText || null,
+      questionType,
+      tMode,
+      questionFocus: questionFocus || null,
+      usePastReframe,
+      splitFactHypothesis,
+      avoidPrematureClosure,
+    });
 
   const directAnswerRequested =
     /答え|結論|要するに|真実が知りたい|本当のことが知りたい|そろそろ結論|今の未来|未来だよ/.test(seedText);
@@ -534,6 +555,13 @@ function buildClarify(
               ? 'decide_shift_v1'
               : 'clarify_meaning_v1';
 
+              const wantsResonanceStructureReading =
+                shouldAnswerTruthStructure &&
+                (
+                  /(共鳴|響き|象徴|構造)/u.test(instructionText) ||
+                  /(共鳴|響き|象徴|構造)/u.test(resolvedAskSourceUserText)
+                );
+
               const shiftLineBase =
               isT
                 ? null
@@ -544,7 +572,9 @@ function buildClarify(
                     : directAnswerRequested
                       ? '答えの芯だけが、先に出ている'
                       : shouldAnswerTruthStructure
-                        ? 'まだ輪郭にならないものが、静かに残っている'
+                        ? wantsResonanceStructureReading
+                          ? '事実確認だけで閉じず、対象に響いている象徴構造と関係構造を読む'
+                          : '中心の気配だけが、静かに残っています'
                         : clarifyMeaning.line;
                 const askBackAllowedNow =
                   !isT &&
@@ -1199,11 +1229,18 @@ function buildFlowReply(args: {
       ) ||
       /(もっと共鳴|共鳴して|枠を外して|枠から外れて|一般的な回答をしないで|そのまま返して|会話にして|会話語|コードからも外れて|説明になっちゃう|説明だよ)/.test(rawTextNow);
 
-    const isClarifyLike =
+      const isClarifyLike =
       !styleResonateOverride &&
       (
         isClarify(t) ||
         resolvedAskType === 'truth_structure' ||
+        String(
+          (args as any)?.ctxPack?.question?.questionType ??
+            (args as any)?.meta?.extra?.ctxPack?.question?.questionType ??
+            (args as any)?.meta?.extra?.question?.questionType ??
+            ''
+        ).trim() === 'structure' ||
+        /構造|構造的|仕組み|関係|違い|配置|流れ|構成/.test(String(t ?? '')) ||
         resolvedAskType === 'meaning' ||
         resolvedAskType === 'definition' ||
         resolvedAskType === 'topic_clarify'
@@ -1392,10 +1429,10 @@ function buildFlowReply(args: {
     // ② 司令塔 goalKind を最優先
     if (goalKind2 === 'resonate') {
       return stampShiftMeta('narrow_shift', {
-        goalKind: 'resonate' as any,
-        targetKind: 'resonate' as any,
+        goalKind: 'uncover' as any,
+        targetKind: 'uncover' as any,
         laneKey: null,
-        replyGoalKind: 'resonate' as any,
+        replyGoalKind: 'uncover' as any,
       });
     }
 
@@ -1419,14 +1456,14 @@ function buildFlowReply(args: {
           ? targetKindNowRaw
           : null;
 
-      if (targetKindNow === 'resonate') {
-        return stampShiftMeta('narrow_shift', {
-          goalKind: 'resonate' as any,
-          targetKind: 'resonate' as any,
-          laneKey: null,
-          replyGoalKind: 'resonate' as any,
-        });
-      }
+          if (targetKindNow === 'resonate') {
+            return stampShiftMeta('narrow_shift', {
+              goalKind: 'uncover' as any,
+              targetKind: 'resonate' as any,
+              laneKey: null,
+              replyGoalKind: 'uncover' as any,
+            });
+          }
 
       return stampShiftMeta('narrow_shift', {
         goalKind: 'uncover',
@@ -1466,10 +1503,10 @@ function buildFlowReply(args: {
         targetKindNowRaw === 'resonate'
       ) {
         return stampShiftMeta('narrow_shift', {
-          goalKind: 'resonate' as any,
+          goalKind: 'uncover' as any,
           targetKind: 'resonate' as any,
           laneKey: null,
-          replyGoalKind: 'resonate' as any,
+          replyGoalKind: 'uncover' as any,
         });
       }
 
@@ -1974,33 +2011,121 @@ function buildFlowReply(args: {
             seed_text: seedText,
           });
 
-  return [
-    {
-      key: 'OBS',
-      role: 'assistant',
-      style: 'soft',
-      content: m('OBS', {
-        laneKey: laneKeyForObs,
-        flow: conf === undefined ? { delta } : { delta, confidence: conf },
-      }),
-    },
-    {
-      key: 'SHIFT',
-      role: 'assistant',
-      style: 'neutral',
-      content: shift,
-    },
-    {
-      key: 'SAFE',
-      role: 'assistant',
-      style: 'soft',
-      content: m('SAFE', {
-        laneKey: laneKeyForObs,
-        flow: conf === undefined ? { delta } : { delta, confidence: conf },
-      }),
-    },
-    buildNextHintSlot({ userText: t, laneKey: laneKeyForObs as any, flowDelta: delta }),
-  ];
+          const healthReport =
+          (args as any)?.ctxPack?.healthReport === true ||
+          (args as any)?.meta?.extra?.healthReport === true ||
+          (args as any)?.meta?.extra?.ctxPack?.healthReport === true;
+
+        const healthReportKindRaw =
+          String((args as any)?.ctxPack?.healthReportKind ?? '').trim() ||
+          String((args as any)?.meta?.extra?.healthReportKind ?? '').trim() ||
+          String((args as any)?.meta?.extra?.ctxPack?.healthReportKind ?? '').trim();
+
+        const healthReportKind:
+          | 'initial'
+          | 'recovery'
+          | 'continuing' =
+          healthReportKindRaw === 'recovery' ||
+          healthReportKindRaw === 'continuing' ||
+          healthReportKindRaw === 'initial'
+            ? healthReportKindRaw
+            : 'initial';
+
+        const healthCasualReportKind =
+          healthReportKind === 'recovery'
+            ? 'health_recovery'
+            : healthReportKind === 'continuing'
+              ? 'health_continuing'
+              : 'health_initial';
+
+              const healthShiftLine = (() => {
+                if (healthReportKind === 'recovery') {
+                  return /1日|一日|１日/.test(t)
+                    ? '1日で治ったなら、少しほっとするところです。'
+                    : '今は問題ないなら、ひとまず落ち着いていてよかったです。';
+                }
+
+                if (healthReportKind === 'continuing') {
+                  return 'まだ続いているなら、無理しないほうがいいところです。';
+                }
+
+                return 'かなりきつかったことが、まず伝わってきます。';
+              })();
+
+        const healthConversationHint = healthReport
+          ? {
+              casualReportKind: healthCasualReportKind,
+              healthReportKind,
+              conversationEntry: true,
+              writerHint:
+                healthReportKind === 'recovery'
+                  ? '回復報告として普通の会話語で受ける。「話を置いておく」「閉じる」「大丈夫です」で終わらない。よかった、少しほっとした、という受け方にする。'
+                  : healthReportKind === 'continuing'
+                    ? '体調が続いている報告として普通の会話語で受ける。観測文・構造文にしない。無理しない方向で短く受ける。'
+                    : '体調報告として、まず普通の会話で受ける。「その一文そのもの」「そこに留まっています」「前にあるのは」などの観測文にしない。復唱だけで終わらず、「それはきつかったですね」「かなり大変でしたね」のように自然に受ける。構造説明へ飛ばない。',
+            }
+          : null;
+
+        return [
+          {
+            key: 'OBS',
+            role: 'assistant',
+            style: healthReport ? 'friendly' : 'soft',
+            content: m('OBS', {
+              laneKey: laneKeyForObs,
+              flow: conf === undefined ? { delta } : { delta, confidence: conf },
+              ...(healthConversationHint ? healthConversationHint : {}),
+            }),
+          },
+          {
+            key: 'SHIFT',
+            role: 'assistant',
+            style: healthReport ? 'friendly' : 'neutral',
+            content: healthReport
+              ? m('SHIFT', {
+                  kind: 'casual_health_report',
+                  healthReportKind,
+                  casualReportKind: healthCasualReportKind,
+                  intent: 'receive_as_conversation',
+                  hint:
+                    healthReportKind === 'recovery'
+                      ? 'health_recovery_conversation_entry_v1'
+                      : healthReportKind === 'continuing'
+                        ? 'health_continuing_conversation_entry_v1'
+                        : 'health_report_conversation_entry_v1',
+                  line: healthShiftLine,
+                  rules: {
+                    no_observation_phrase: true,
+                    no_repeat_only: true,
+                    no_structure_explain: true,
+                    receive_first: true,
+                    plain_words: true,
+                  },
+                })
+              : shift,
+          },
+          {
+            key: 'SAFE',
+            role: 'assistant',
+            style: healthReport ? 'friendly' : 'soft',
+            content: m('SAFE', {
+              laneKey: laneKeyForObs,
+              flow: conf === undefined ? { delta } : { delta, confidence: conf },
+              ...(healthConversationHint
+                ? {
+                    casualReportKind: healthCasualReportKind,
+                    healthReportKind,
+                    conversationEntry: true,
+                    writerHint:
+                      healthReportKind === 'recovery'
+                        ? '最後も会話として軽く受ける。話を閉じるより、治ってよかったという自然な受け方にする。'
+                        : '最後も構造の余韻ではなく、会話として軽く受ける。医療断定や診断はしない。',
+                  }
+                : {}),
+            }),
+          },
+          buildNextHintSlot({ userText: t, laneKey: laneKeyForObs as any, flowDelta: delta }),
+        ];
 }
 
 // ✅ 置き換え 1) safeLaneKey を関数まるごと置き換え
@@ -2108,6 +2233,9 @@ export function buildNormalChatSlotPlan(args: {
       flow as any,
       resolvedAskType,
       question,
+      (args as any)?.ctxPack?.resolvedAsk ??
+        (args as any)?.meta?.extra?.ctxPack?.resolvedAsk ??
+        null,
     );
   } else if (isCompose(userText)) {
     reason = 'compose';

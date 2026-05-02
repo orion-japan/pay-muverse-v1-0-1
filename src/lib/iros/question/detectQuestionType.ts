@@ -169,17 +169,6 @@ export function detectQuestionType(input: DetectQuestionTypeInput): QuestionType
     addIfMatched(
       scores,
       text,
-      'meaning',
-      [
-        /意味|意義|どう受け取る|どう捉える|何を意味する/,
-        /自分にとって|どういう意味/,
-      ],
-      2 * contextWeight,
-    );
-
-    addIfMatched(
-      scores,
-      text,
       'future_design',
       [
         /これから|今後|未来|次に|進めたい|作りたい|設計したい/,
@@ -216,17 +205,15 @@ export function detectQuestionType(input: DetectQuestionTypeInput): QuestionType
     // - 「何ができるの？」を「主張の型」に倒さない
     // - 「Irosって何？」系を先に説明要求として扱う
     if (asksCapability) {
-      scores.meaning += 5 * contextWeight;
-      scores.structure = Math.max(0, scores.structure - 2 * contextWeight);
+      scores.meaning += 1 * contextWeight;
     }
 
     if (asksDirectDefinition) {
-      scores.meaning += 3 * contextWeight;
+      scores.meaning += 1 * contextWeight;
     }
 
     if (asksCapability && asksRepairAnswer) {
-      scores.meaning += 3 * contextWeight;
-      scores.structure = Math.max(0, scores.structure - 3 * contextWeight);
+      scores.meaning += 1 * contextWeight;
     }
 
     const eTurn = normalizeText(String(input.eTurn ?? ''));

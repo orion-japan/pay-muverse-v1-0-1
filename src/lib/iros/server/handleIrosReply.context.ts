@@ -275,7 +275,56 @@ export async function buildTurnContext(
   // ✅ FramePlan を作って baseMeta に入れる（Layer C/D の入口）
   try {
     const inputKind = detectInputKind(text);
+    const healthReportKind = (() => {
+      const s = String(text ?? '').trim();
+      if (!s) return null as 'initial' | 'recovery' | 'continuing' | null;
 
+      if (/(構造|意味|診断|どういう|なぜ|原因|修正|実装|コード|SQL|ログ)/.test(s)) {
+        return null as 'initial' | 'recovery' | 'continuing' | null;
+      }
+
+      const hasInitialHealthSignal =
+        /(熱|発熱|高熱|微熱|38度|３８度|39度|３９度|体調|しんどい|だるい|寒気|頭痛|咳|喉|喉が痛い|寝込|病院|風邪|インフル|コロナ|寒い|寒かった|冷え|冷える|震える|震え|ストーブ|暖房)/.test(s);
+
+      const hasRecoverySignal =
+        /(治った|治りました|治って|治り|下がった|下がりました|落ち着いた|落ち着きました|回復|良くなった|よくなった|大丈夫|問題ない|平気)/.test(s);
+
+      const hasContinuingSignal =
+        /(まだ|続いて|続く|残って|残る|ぶり返|治らない|下がらない|しんどい|だるい|きつい|寒い|冷える|震える|震え)/.test(s) &&
+        /(熱|発熱|体調|だるさ|寒気|頭痛|咳|喉|風邪|インフル|コロナ|寒い|寒かった|冷え|冷える|震える|震え|ストーブ|暖房)/.test(s);
+
+      if (hasContinuingSignal) return 'continuing';
+      if (hasRecoverySignal) return 'recovery';
+      if (hasInitialHealthSignal) return 'initial';
+
+      return null as 'initial' | 'recovery' | 'continuing' | null;
+    })();
+
+    const healthReport = healthReportKind !== null;
+
+    if (healthReport) {
+      (baseMetaForTurn as any).extra =
+        (baseMetaForTurn as any).extra && typeof (baseMetaForTurn as any).extra === 'object'
+          ? (baseMetaForTurn as any).extra
+          : {};
+
+      (baseMetaForTurn as any).extra.ctxPack =
+        (baseMetaForTurn as any).extra.ctxPack &&
+        typeof (baseMetaForTurn as any).extra.ctxPack === 'object'
+          ? (baseMetaForTurn as any).extra.ctxPack
+          : {};
+
+      (baseMetaForTurn as any).extra.healthReport = true;
+      (baseMetaForTurn as any).extra.healthReportKind = healthReportKind;
+      (baseMetaForTurn as any).extra.ctxPack.healthReport = true;
+      (baseMetaForTurn as any).extra.ctxPack.healthReportKind = healthReportKind;
+      (baseMetaForTurn as any).extra.ctxPack.casualReportKind =
+        healthReportKind === 'recovery'
+          ? 'health_recovery'
+          : healthReportKind === 'continuing'
+            ? 'health_continuing'
+            : 'health_initial';
+    }
     // =========================
     // ✅ Concept Lock (RECALL hint)
     // =========================
@@ -389,7 +438,7 @@ export async function buildTurnContext(
   const followupSourceText = detailSourceText.trim();
 
   const isFollowupRequest =
-    /具体的に|わかりやすく|つまり|どういうこと|それって|どうすれば|何をすれば|続き|言い換えて|簡単に|一言で|もう少し深く|その理由|なぜそうなる/.test(
+    /具体的に|わかりやすく|分かりやすく|つまり|どういうこと|それって|どうすれば|何をすれば|続き|言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|もう少し深く|その理由|なぜそうなる/.test(
       followupSourceText
     );
 
@@ -418,7 +467,7 @@ export async function buildTurnContext(
       ? null
       : /どうすれば|何をすれば|次は|どう動く/.test(followupSourceText)
         ? 'action'
-        : /言い換えて|簡単に|一言で/.test(followupSourceText)
+        : /言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|わかりやすく|分かりやすく|つまり|どういうこと/.test(followupSourceText)
           ? 'rephrase'
           : /もう少し深く|その理由|なぜそうなる/.test(followupSourceText)
             ? 'deepen'

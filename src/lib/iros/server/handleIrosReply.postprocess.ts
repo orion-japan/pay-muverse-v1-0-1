@@ -3085,7 +3085,107 @@ const shouldInjectPreface =
   !microNow;
 
 let seedForWriterRaw = shouldInjectPreface ? `${preface}\n${slotTextStr}` : slotTextStr;
+// ✅ 直前返答の言い換え要求
+// - 「意味がわからないので、翻訳してください」は翻訳タスクではなく、直前assistant返答の平易化として扱う
+// - userTextそのものを seed にすると writer が英訳/意味説明へ流れるため、直前assistant本文を seed 正本にする
+try {
+  const userTextNowForPrevRephrase = String(userText ?? '').replace(/\s+/g, ' ').trim();
 
+  const wantsPreviousReplyRephrase =
+    /(意味がわからない|意味が分からない|わかりにくい|分かりにくい|わかりやすく|分かりやすく|どういうこと|つまり|言い換えて|言い換え|翻訳して|翻訳)/u.test(
+      userTextNowForPrevRephrase,
+    );
+
+  const asksRealTranslation =
+    /(英語|日本語|中国語|韓国語|フランス語|スペイン語|ドイツ語|translate|translation|English|Japanese)/i.test(
+      userTextNowForPrevRephrase,
+    );
+
+    const historyForPreviousReplyCandidates = [
+      Array.isArray((args as any)?.history) ? ((args as any).history as any[]) : [],
+      Array.isArray((metaForSave as any)?.extra?.ctxPack?.historyForWriter)
+        ? ((metaForSave as any).extra.ctxPack.historyForWriter as any[])
+        : [],
+      Array.isArray((metaForSave as any)?.ctxPack?.historyForWriter)
+        ? ((metaForSave as any).ctxPack.historyForWriter as any[])
+        : [],
+      Array.isArray((metaForSave as any)?.extra?.historyForWriter)
+        ? ((metaForSave as any).extra.historyForWriter as any[])
+        : [],
+    ];
+
+    const historyForPreviousReply =
+      historyForPreviousReplyCandidates.find((items) =>
+        items.some((m: any) => {
+          const role = String(m?.role ?? m?.type ?? '').trim();
+          const content =
+            typeof m?.content === 'string'
+              ? String(m.content).trim()
+              : typeof m?.text === 'string'
+                ? String(m.text).trim()
+                : typeof m?.assistantText === 'string'
+                  ? String(m.assistantText).trim()
+                  : typeof m?.message === 'string'
+                    ? String(m.message).trim()
+                    : '';
+
+          return /^(assistant|ai|model|iros)$/i.test(role) && content;
+        }),
+      ) ?? [];
+
+    const previousAssistantText =
+      [...historyForPreviousReply]
+        .reverse()
+        .map((m: any) => {
+          const role = String(m?.role ?? m?.type ?? '').trim();
+          const content =
+            typeof m?.content === 'string'
+              ? String(m.content).trim()
+              : typeof m?.text === 'string'
+                ? String(m.text).trim()
+                : typeof m?.assistantText === 'string'
+                  ? String(m.assistantText).trim()
+                  : typeof m?.message === 'string'
+                    ? String(m.message).trim()
+                    : '';
+
+          if (!/^(assistant|ai|model|iros)$/i.test(role)) return '';
+          if (!content) return '';
+          if (/^(SEED|INTERNAL PACK|HISTORY_LITE|WRITER_DIRECTIVES|PATTERN_OUTPUT_CONTRACT)/.test(content)) return '';
+
+          return content;
+        })
+        .find(Boolean) ?? '';
+      console.log('[IROS/PostProcess][PREVIOUS_REPLY_REPHRASE_CHECK]', {
+        wantsPreviousReplyRephrase,
+        asksRealTranslation,
+        microNow,
+        historyLen: historyForPreviousReply.length,
+        historyTail: historyForPreviousReply.slice(-4).map((m: any) => ({
+          keys: m && typeof m === 'object' ? Object.keys(m).slice(0, 12) : [],
+          role: String(m?.role ?? ''),
+          contentHead: String(m?.content ?? m?.text ?? m?.assistantText ?? m?.message ?? '').slice(0, 120),
+        })),
+        previousAssistantTextHead: previousAssistantText.slice(0, 120),
+      });
+  if (!microNow && wantsPreviousReplyRephrase && !asksRealTranslation && previousAssistantText) {
+    const previousPlain = previousAssistantText
+      .replace(/\s+/g, ' ')
+      .replace(/[🌀🪔]/g, '')
+      .trim();
+
+    const prevReplyRephraseSeed = [
+      '直前のassistant返答を、ユーザーにわかる普通の言葉へ言い換える。',
+      '現在のユーザー文そのものを翻訳・英訳・意味説明しない。',
+      '新しい助言や相手側の断定を足さない。',
+      '「わかりやすく言うと、」から始める。',
+      `直前assistant返答：${previousPlain}`,
+      '@SHIFT {"kind":"previous_reply_rephrase","intent":"rephrase_previous_assistant_reply","hint":"previous_reply_rephrase_v1","rules":{"answer_user_meaning":false,"no_translation":true,"use_previous_assistant_reply":true},"meaning_kind":"previous_reply_rephrase"}',
+    ].join('\n');
+
+    seedForWriterRaw = prevReplyRephraseSeed;
+  }
+} catch {}
 // ✅ NEW: Concept Lock (RECALL) を seed の先頭に強制注入（PPが llmRewriteSeed を上書きしても残る）
 try {
   const cr: any = (metaForSave as any)?.extra?.conceptRecall ?? null;
