@@ -8470,6 +8470,12 @@ const isResonanceStructureFollowup =
             ...relationshipUserSideSupportWriterDirectives,
             ...consultationEntryWriterDirectives,
           };
+
+          const isDeepReadHintWriter =
+            /DEEP_READ_HINT\s*\(DO NOT OUTPUT\):/.test(
+              String(__writerInjectedPack ?? ''),
+            );
+
           const relationshipAdviceRepairMode:
           | 'solution_concretize'
           | 'wait_anxiety'
@@ -8565,16 +8571,53 @@ const isResonanceStructureFollowup =
                   }
                 : null;
 
-          const writerDirectivesForFinal = relationshipAdviceRepairWriterDirectives
-            ? relationshipAdviceRepairWriterDirectives
-            : isDetailPatternWriter
-              ? Object.fromEntries(
-                  Object.entries(writerDirectivesFromSlot ?? {}).filter(
-                    ([key]) => !String(key).startsWith('slot_')
-                  )
-                )
-              : writerDirectivesFromSlot;
+                const deepReadWriterDirectives = isDeepReadHintWriter
+                ? {
+                    pattern_key: 'NORMAL_DETAIL_V1',
+                    pattern_mode: 'deep_read',
+                    bodyStyle: {
+                      preferBlockSplit: true,
+                      minBlocks: 3,
+                      maxBlocks: 5,
+                      maxSentencesPerBlock: 2,
+                      minSentences: 5,
+                      maxSentences: 9,
+                    },
+                    writeConstraints: [
+                      'DEEP_READ_HINT では normal_compressed の強い抑制を使わない',
+                      '無意識を読んだ、見抜いた、筒抜け、とは出力しない',
+                      '人格診断・決めつけ・断定にしない',
+                      '相手の本心や事実確認には使わない',
+                      '発話の奥に出ている反応パターンを、自然文に忍ばせる',
+                      '原因を断定せず、「そう見えやすい」「強く出ている」「重なっている」程度の温度で返す',
+                      '状態観測だけで終わらず、ユーザーが扱える形へ戻す',
+                      '番号・見出し・箇条書きにはせず、普通の会話文で返す',
+                    ],
+                    block_deep_read_surface:
+                      'まず表の相談内容を自然に受ける。',
+                    block_deep_read_under:
+                      '次に、言葉の奥で強くなっている反応パターンを、断定せず自然文で一段だけ触れる。',
+                    block_deep_read_return:
+                      '最後は、ユーザーが扱える見方・置き方・一手に戻す。',
+                  }
+                : {};
 
+                const baseWriterDirectivesForFinal = isDetailPatternWriter
+                ? Object.fromEntries(
+                    Object.entries(writerDirectivesFromSlot ?? {}).filter(
+                      ([key]) => !String(key).startsWith('slot_')
+                    )
+                  )
+                : writerDirectivesFromSlot;
+
+              const writerDirectivesForFinal = relationshipAdviceRepairWriterDirectives
+                ? relationshipAdviceRepairWriterDirectives
+                : isDeepReadHintWriter
+                  ? {
+                      ...baseWriterDirectivesForFinal,
+                      ...deepReadWriterDirectives,
+                    }
+                  : baseWriterDirectivesForFinal;
 console.log(
   '[IROS/rephraseEngine][CALL_WRITER_ARGS]',
   JSON.stringify({
@@ -8604,8 +8647,13 @@ console.log(
       typeof (opts as any).userContext.ctxPack === 'object'
         ? (opts as any).userContext.ctxPack.patternKey ?? null
         : null,
-    writerDirectiveKeys: Object.keys(writerDirectivesFromSlot ?? {}),
-    writerDirectivePreview: writerDirectivesFromSlot,
+        writerDirectiveKeys: Object.keys(writerDirectivesForFinal ?? {}),
+        writerDirectivePreview: writerDirectivesForFinal,
+        writerDirectiveFromSlotKeys: Object.keys(writerDirectivesFromSlot ?? {}),
+        writerDirectiveFromSlotPreview: writerDirectivesFromSlot,
+        isDeepReadHintWriter,
+        hasDeepReadWriterDirectives:
+          Object.keys(deepReadWriterDirectives ?? {}).length > 0,
   })
 );
 const finalWriterDirectivesExtraLines = (() => {

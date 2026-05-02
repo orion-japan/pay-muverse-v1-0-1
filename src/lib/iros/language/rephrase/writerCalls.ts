@@ -2545,7 +2545,78 @@ const currentUserTextForRelationshipReflection = String(
     (args as any)?.currentUserText ??
     '',
 ).trim();
+const ctxPackForDeepReadUnlock =
+  ((args as any)?.userContext?.ctxPack &&
+  typeof (args as any).userContext.ctxPack === 'object'
+    ? (args as any).userContext.ctxPack
+    : null) ??
+  ((args as any)?.userContext?.meta?.extra?.ctxPack &&
+  typeof (args as any).userContext.meta.extra.ctxPack === 'object'
+    ? (args as any).userContext.meta.extra.ctxPack
+    : null) ??
+  ((args as any)?.meta?.extra?.ctxPack &&
+  typeof (args as any).meta.extra.ctxPack === 'object'
+    ? (args as any).meta.extra.ctxPack
+    : null) ??
+  ((args as any)?.extra?.ctxPack &&
+  typeof (args as any).extra.ctxPack === 'object'
+    ? (args as any).extra.ctxPack
+    : null) ??
+  ((ctxPack as any) && typeof (ctxPack as any) === 'object'
+    ? (ctxPack as any)
+    : null);
 
+const stingLevelForDeepReadUnlock = String(
+  ctxPackForDeepReadUnlock?.stingLevel ??
+    (args as any)?.stingLevel ??
+    (args as any)?.extra?.stingLevel ??
+    (ctxPack as any)?.stingLevel ??
+    '',
+)
+  .trim()
+  .toUpperCase();
+
+const returnStreakRawForDeepReadUnlock =
+  ctxPackForDeepReadUnlock?.flow?.returnStreak ??
+  ctxPackForDeepReadUnlock?.returnStreak ??
+  (args as any)?.flow?.returnStreak ??
+  (args as any)?.extra?.flow?.returnStreak ??
+  (ctxPack as any)?.flow?.returnStreak ??
+  (ctxPack as any)?.returnStreak ??
+  0;
+
+const returnStreakForDeepReadUnlock =
+  Number.isFinite(Number(returnStreakRawForDeepReadUnlock))
+    ? Number(returnStreakRawForDeepReadUnlock)
+    : 0;
+
+const repeatSignalRawForDeepReadUnlock =
+  ctxPackForDeepReadUnlock?.repeatSignal ??
+  ctxPackForDeepReadUnlock?.repeatSignalSame ??
+  (args as any)?.repeatSignal ??
+  (args as any)?.repeatSignalSame ??
+  (ctxPack as any)?.repeatSignal ??
+  (ctxPack as any)?.repeatSignalSame ??
+  null;
+
+const hasRepeatSignalForDeepReadUnlock =
+  repeatSignalRawForDeepReadUnlock === true ||
+  String(repeatSignalRawForDeepReadUnlock ?? '').trim().length > 0;
+
+const shouldUnlockDeepReadConstraints =
+  stingLevelForDeepReadUnlock === 'HIGH' ||
+  returnStreakForDeepReadUnlock >= 2 ||
+  hasRepeatSignalForDeepReadUnlock;
+
+try {
+  console.log('[IROS/writerCalls][DEEP_READ_UNLOCK_CHECK]', {
+    currentUserTextForRelationshipReflection,
+    stingLevelForDeepReadUnlock,
+    returnStreakForDeepReadUnlock,
+    hasRepeatSignalForDeepReadUnlock,
+    shouldUnlockDeepReadConstraints,
+  });
+} catch {}
 const isRelationshipReflectionQuestion =
   /(恋愛|彼|彼女|相手|好きな人|連絡|返信|既読|未読|復縁|距離|関係|気持ち)/u.test(
     currentUserTextForRelationshipReflection,
@@ -2601,7 +2672,7 @@ const isNormalCompressedPattern =
           ]
         : []),
 
-      ...(isNormalCompressedPattern && !isRelationshipReflectionQuestion
+        ...(isNormalCompressedPattern && !isRelationshipReflectionQuestion && !shouldUnlockDeepReadConstraints
         ? [
             '最初の1文を観測案内の定型で始めない',
             '「いま見えているのは」「いま見ているのは」で始めない',
@@ -3646,6 +3717,98 @@ const followupKind =
       rewritePackWithSeedInstructionCore(String(internalPackForWriterSource ?? '')),
       irMetaBlock,
       diagnosisFollowupBlock,
+
+      (() => {
+        const deepCtxPack =
+          ((args as any)?.userContext?.ctxPack &&
+          typeof (args as any).userContext.ctxPack === 'object'
+            ? (args as any).userContext.ctxPack
+            : null) ??
+          ((args as any)?.userContext?.meta?.extra?.ctxPack &&
+          typeof (args as any).userContext.meta.extra.ctxPack === 'object'
+            ? (args as any).userContext.meta.extra.ctxPack
+            : null) ??
+          ((args as any)?.meta?.extra?.ctxPack &&
+          typeof (args as any).meta.extra.ctxPack === 'object'
+            ? (args as any).meta.extra.ctxPack
+            : null) ??
+          ((args as any)?.extra?.ctxPack &&
+          typeof (args as any).extra.ctxPack === 'object'
+            ? (args as any).extra.ctxPack
+            : null) ??
+          ((ctxPack as any) && typeof (ctxPack as any) === 'object'
+            ? (ctxPack as any)
+            : null);
+
+        const currentUserText = String(
+          (args as any)?.userText ??
+            (args as any)?.followupText ??
+            (args as any)?.inputText ??
+            (args as any)?.currentUserText ??
+            '',
+        )
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        const stingLevel = String(
+          deepCtxPack?.stingLevel ??
+            (args as any)?.stingLevel ??
+            (args as any)?.extra?.stingLevel ??
+            (ctxPack as any)?.stingLevel ??
+            '',
+        )
+          .trim()
+          .toUpperCase();
+
+        const returnStreakRaw =
+          deepCtxPack?.flow?.returnStreak ??
+          deepCtxPack?.returnStreak ??
+          (args as any)?.flow?.returnStreak ??
+          (args as any)?.extra?.flow?.returnStreak ??
+          (ctxPack as any)?.flow?.returnStreak ??
+          (ctxPack as any)?.returnStreak ??
+          0;
+
+        const returnStreak = Number.isFinite(Number(returnStreakRaw))
+          ? Number(returnStreakRaw)
+          : 0;
+
+        const repeatSignalRaw =
+          deepCtxPack?.repeatSignal ??
+          deepCtxPack?.repeatSignalSame ??
+          (args as any)?.repeatSignal ??
+          (args as any)?.repeatSignalSame ??
+          (ctxPack as any)?.repeatSignal ??
+          (ctxPack as any)?.repeatSignalSame ??
+          null;
+
+        const hasRepeatSignal =
+          repeatSignalRaw === true ||
+          String(repeatSignalRaw ?? '').trim().length > 0;
+
+        const shouldOpenDeepRead =
+          stingLevel === 'HIGH' || returnStreak >= 2 || hasRepeatSignal;
+
+        if (!shouldOpenDeepRead) return '';
+
+        return [
+          'DEEP_READ_HINT (DO NOT OUTPUT):',
+          `CURRENT_USER=${currentUserText}`,
+          stingLevel ? `stingLevel=${stingLevel}` : '',
+          `returnStreak=${returnStreak}`,
+          hasRepeatSignal ? `repeatSignal=${String(repeatSignalRaw)}` : '',
+          'MODE=発話の奥に出ている反応パターンを軽く読む',
+          'RULE=無意識を読んだ、見抜いた、筒抜け、とは出力しない',
+          'RULE=人格診断・決めつけ・断定にしない',
+          'RULE=相手の本心や事実確認には使わない',
+          'RULE=言葉の選び方、回避、強まり、繰り返し、急な確定欲求を「いま表に出ている反応の癖」として扱う',
+          'RULE=必要な場合だけ、自然文で一段深く触れる',
+          'RULE=状態観測だけで終わらず、ユーザーが扱える形へ戻す',
+        ]
+          .filter(Boolean)
+          .join('\n');
+      })(),
+
       (() => {
         const relationCtxPack =
           ((args as any)?.userContext?.ctxPack &&
