@@ -3834,85 +3834,122 @@ const followupKind =
               previousUserTextForRelationHint,
             );
 
-          const relationId = String(
-            (ctxPack as any)?.relationId ??
-              relationCtxPack?.relationId ??
-              memory?.relation_id ??
-              '',
-          ).trim();
+            const relationId = String(
+              (ctxPack as any)?.relationId ??
+                relationCtxPack?.relationId ??
+                memory?.relation_id ??
+                memory?.relationId ??
+                '',
+            ).trim();
 
-          const displayName = String(memory?.display_name ?? '').trim();
-          const confidence =
-            typeof memory?.confidence === 'number' ? memory.confidence : null;
+            const displayName = String(
+              memory?.display_name ??
+                memory?.displayName ??
+                relationCtxPack?.displayName ??
+                (ctxPack as any)?.displayName ??
+                '',
+            ).trim();
 
-          const hasRelationshipMemory =
-            memory != null &&
-            typeof memory === 'object' &&
-            (
-              relationId ||
-              displayName ||
-              Array.isArray(memory?.facts) ||
-              Array.isArray(memory?.patterns) ||
-              Array.isArray(memory?.safe_openers) ||
-              Array.isArray(memory?.pressure_triggers) ||
-              Array.isArray(memory?.user_reaction_pattern) ||
-              Array.isArray(memory?.unresolved_topics)
-            );
+            const confidence =
+              typeof memory?.confidence === 'number' ? memory.confidence : null;
 
-          if (!hasRelationshipMemory && !relationFocus && !isRelationshipDeicticFollowup) return '';
+            const hasRelationshipMemory =
+              memory != null &&
+              typeof memory === 'object' &&
+              (
+                relationId ||
+                displayName ||
+                Array.isArray(memory?.facts) ||
+                Array.isArray(memory?.patterns) ||
+                Array.isArray(memory?.safe_openers) ||
+                Array.isArray(memory?.pressure_triggers) ||
+                Array.isArray(memory?.user_reaction_pattern) ||
+                Array.isArray(memory?.unresolved_topics)
+              );
 
-          const pickStrings = (value: unknown, limit: number): string[] => {
-            if (!Array.isArray(value)) return [];
-            return value
-              .map((item: any) => {
-                if (typeof item === 'string') return item;
-                if (item && typeof item === 'object') {
-                  return String(
-                    item.note ??
-                      item.value ??
-                      item.key ??
-                      '',
-                  ).trim();
-                }
-                return '';
-              })
-              .map((v) => String(v ?? '').replace(/\s+/g, ' ').trim())
-              .filter(Boolean)
-              .slice(0, limit);
-          };
+            const relationshipAliasText = [
+              currentUserText,
+              previousUserTextForRelationHint,
+            ]
+              .join(' ')
+              .replace(/\s+/g, ' ')
+              .trim();
 
-          const facts = pickStrings(memory?.facts, 3);
-          const patterns = pickStrings(memory?.patterns, 3);
-          const safeOpeners = pickStrings(memory?.safe_openers, 3);
-          const pressureTriggers = pickStrings(memory?.pressure_triggers, 3);
-          const userReactionPattern = pickStrings(memory?.user_reaction_pattern, 3);
-          const unresolvedTopics = pickStrings(memory?.unresolved_topics, 3);
+            const hasGenericRelationshipAlias =
+              /(彼|彼女|相手|好きな人|元彼|元カノ|パートナー|恋愛|連絡|返信|返事|距離|不安|大事にされたい)/u.test(
+                relationshipAliasText,
+              );
 
-          return [
-            'RELATION_MEMORY_HINT (DO NOT OUTPUT):',
-            `CURRENT_USER=${currentUserText}`,
-            previousUserTextForRelationHint ? `previousUserText=${previousUserTextForRelationHint.slice(0, 180)}` : '',
-            isRelationshipDeicticFollowup ? 'continuationHint=直前の恋愛相談を指す参照語フォローの可能性がある' : '',
-            relationId ? `relationId=${relationId}` : '',
-            displayName ? `displayName=${displayName}` : '',
-            confidence != null ? `confidence=${confidence}` : '',
-            relationFocus ? `relationFocus=${JSON.stringify(relationFocus)}` : '',
-            facts.length ? `facts=${facts.join(' / ')}` : '',
-            patterns.length ? `patterns=${patterns.join(' / ')}` : '',
-            safeOpeners.length ? `safeOpeners=${safeOpeners.join(' / ')}` : '',
-            pressureTriggers.length ? `pressureTriggers=${pressureTriggers.join(' / ')}` : '',
-            userReactionPattern.length ? `userReactionPattern=${userReactionPattern.join(' / ')}` : '',
-            unresolvedTopics.length ? `unresolvedTopics=${unresolvedTopics.join(' / ')}` : '',
-            'RULE=現在のユーザー文を最優先する',
-            'RULE=「この状況」「それ」「この場合」などの参照語は、直前履歴が恋愛相談ならその続き候補として扱う',
-            'RULE=relationId または displayName がある場合だけ、同じ相手の続き候補として強めに扱う',
-            'RULE=「彼」「相手」だけで相手が曖昧な場合は、過去記憶を強く使わない',
-            'RULE=過去記憶は断定に使わず、距離感・不安・反応パターン・安全な言葉の補助としてだけ使う',
-            'RULE=別の相手の可能性がある場合は、この記憶を使わない',
-            'RULE=相手の本心や事実確認としては使わない',
-          ]
-          .filter(Boolean)
-          .join('\n');
+            const shouldSuggestRelationshipDisplayName =
+              Boolean(relationId) &&
+              !displayName &&
+              hasGenericRelationshipAlias &&
+              (hasRelationshipMemory || !!relationFocus || isRelationshipDeicticFollowup);
+
+            if (!hasRelationshipMemory && !relationFocus && !isRelationshipDeicticFollowup) return '';
+
+            const pickStrings = (value: unknown, limit: number): string[] => {
+              if (!Array.isArray(value)) return [];
+              return value
+                .map((item: any) => {
+                  if (typeof item === 'string') return item;
+                  if (item && typeof item === 'object') {
+                    return String(
+                      item.note ??
+                        item.value ??
+                        item.key ??
+                        '',
+                    ).trim();
+                  }
+                  return '';
+                })
+                .map((v) => String(v ?? '').replace(/\s+/g, ' ').trim())
+                .filter(Boolean)
+                .slice(0, limit);
+            };
+
+            const facts = pickStrings(memory?.facts, 3);
+            const patterns = pickStrings(memory?.patterns, 3);
+            const safeOpeners = pickStrings(memory?.safe_openers, 3);
+            const pressureTriggers = pickStrings(memory?.pressure_triggers, 3);
+            const userReactionPattern = pickStrings(memory?.user_reaction_pattern, 3);
+            const unresolvedTopics = pickStrings(memory?.unresolved_topics, 3);
+
+            return [
+              'RELATION_MEMORY_HINT (DO NOT OUTPUT):',
+              `CURRENT_USER=${currentUserText}`,
+              previousUserTextForRelationHint ? `previousUserText=${previousUserTextForRelationHint.slice(0, 180)}` : '',
+              isRelationshipDeicticFollowup ? 'continuationHint=直前の恋愛相談を指す参照語フォローの可能性がある' : '',
+              relationId ? `relationId=${relationId}` : '',
+              displayName ? `displayName=${displayName}` : '',
+              shouldSuggestRelationshipDisplayName ? 'relationshipDisplayNameMissing=true' : '',
+              shouldSuggestRelationshipDisplayName
+                ? 'RULE=同じ相手として今後も見ていけるように、最後に一度だけ、本名ではなく呼び名でよいことを短く添える'
+                : '',
+              shouldSuggestRelationshipDisplayName
+                ? 'RULE=呼び名確認は重くしない。「本名でなくて大丈夫なので、この相手の呼び名だけ決めておけます」程度にする'
+                : '',
+              shouldSuggestRelationshipDisplayName
+                ? 'RULE=呼び名確認では、個人情報を求める感じにしない。「Aさん」「彼」「好きな人」などで扱えると伝える'
+                : '',
+              confidence != null ? `confidence=${confidence}` : '',
+              relationFocus ? `relationFocus=${JSON.stringify(relationFocus)}` : '',
+              facts.length ? `facts=${facts.join(' / ')}` : '',
+              patterns.length ? `patterns=${patterns.join(' / ')}` : '',
+              safeOpeners.length ? `safeOpeners=${safeOpeners.join(' / ')}` : '',
+              pressureTriggers.length ? `pressureTriggers=${pressureTriggers.join(' / ')}` : '',
+              userReactionPattern.length ? `userReactionPattern=${userReactionPattern.join(' / ')}` : '',
+              unresolvedTopics.length ? `unresolvedTopics=${unresolvedTopics.join(' / ')}` : '',
+              'RULE=現在のユーザー文を最優先する',
+              'RULE=「この状況」「それ」「この場合」などの参照語は、直前履歴が恋愛相談ならその続き候補として扱う',
+              'RULE=relationId または displayName がある場合だけ、同じ相手の続き候補として強めに扱う',
+              'RULE=「彼」「相手」だけで相手が曖昧な場合は、過去記憶を強く使わない',
+              'RULE=過去記憶は断定に使わず、距離感・不安・反応パターン・安全な言葉の補助としてだけ使う',
+              'RULE=別の相手の可能性がある場合は、この記憶を使わない',
+              'RULE=相手の本心や事実確認としては使わない',
+            ]
+            .filter(Boolean)
+            .join('\n');
       })(),
       (() => {
         const currentUserText = String(

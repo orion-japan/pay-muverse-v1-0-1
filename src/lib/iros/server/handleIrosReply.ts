@@ -4730,7 +4730,7 @@ try {
     (extra2 as any)?.ctxPack?.emotionalTemperature ?? null;
 
   // ===== ① 関係対象の解決 =====
-  const resolved = resolveRelation({
+  const resolvedBase = resolveRelation({
     userText,
     topicDigest,
     historyText: relationshipHistoryText || null,
@@ -4738,6 +4738,124 @@ try {
     lastRelationId: (extra2 as any)?.ctxPack?.relationId ?? null,
     selfId: userCode ?? 'self',
   });
+
+  const genericRelationshipText = [
+    userText,
+    relationshipHistoryText,
+    typeof topicDigest === 'string' ? topicDigest : '',
+  ]
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+    const pendingRelationshipDisplayName =
+    Boolean((extra2 as any)?.ctxPack?.pendingRelationshipDisplayName);
+
+  const pendingRelationshipRelationId = String(
+    (extra2 as any)?.ctxPack?.pendingRelationshipRelationId ??
+      (extra2 as any)?.ctxPack?.relationId ??
+      '',
+  ).trim();
+
+  const displayNameFromShortRelationshipReply = (() => {
+    const raw = String(userText ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!raw) return null;
+    if (raw.length > 24) return null;
+
+    const historyHasRelationshipContext =
+      /(彼|彼女|相手|好きな人|元彼|元カノ|パートナー|恋愛|連絡|返信|返事|不安|距離|大事にされたい|好き|関係|相談)/u.test(
+        String(relationshipHistoryText ?? ''),
+      );
+
+    const canTreatAsPendingDisplayName =
+      pendingRelationshipDisplayName && Boolean(pendingRelationshipRelationId);
+
+    const displayNameRejectWords =
+      /(ことで|について|相談|恋愛|連絡|返信|返事|不安|距離|関係|気持ち|好き|大事にされたい|心配|悩み|話|ですか|ますか|したい|してほしい|されたい|ください)/u;
+
+    const looksLikeStandaloneDisplayNameReply =
+      !displayNameRejectWords.test(raw) &&
+      /^(名前は|呼び名は|相手は|彼は|彼女は)?\s*[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}A-Za-z0-9ー・]{1,12}(さん|くん|ちゃん|様|氏)?です$/u.test(
+        raw,
+      );
+
+    if (
+      !historyHasRelationshipContext &&
+      !canTreatAsPendingDisplayName &&
+      !looksLikeStandaloneDisplayNameReply
+    ) {
+      return null;
+    }
+
+    const cleaned = raw
+      .replace(/^(名前は|呼び名は|相手は|彼は|彼女は)\s*/u, '')
+      .replace(/(です|でお願いします|で大丈夫です|と呼んでください|と呼びます|にします)$/u, '')
+      .trim();
+
+    if (!cleaned) return null;
+    if (cleaned.length > 16) return null;
+    if (displayNameRejectWords.test(cleaned)) return null;
+
+    if (
+      /^(彼|彼女|相手|好きな人|元彼|元カノ|パートナー|恋愛|相談|連絡|返信|返事|不安|距離)$/u.test(
+        cleaned,
+      )
+    ) {
+      return null;
+    }
+
+    return cleaned;
+  })();
+
+  const shouldUseGenericRomanticRelation =
+    !resolvedBase?.relationId &&
+    (
+      (
+        /(彼|彼女|相手|好きな人|元彼|元カノ|パートナー)/u.test(genericRelationshipText) &&
+        /(恋愛|連絡|返信|返事|不安|距離|大事にされたい|好き|関係|相談)/u.test(genericRelationshipText)
+      ) ||
+      Boolean(displayNameFromShortRelationshipReply)
+    );
+
+    const resolved = shouldUseGenericRomanticRelation
+    ? {
+        relationId:
+          displayNameFromShortRelationshipReply && pendingRelationshipRelationId
+            ? pendingRelationshipRelationId
+            : `${userCode ?? 'self'}__generic_romantic_partner`,
+        mode: 'fallback',
+        matchedEntityIds: [],
+        matchedNames: displayNameFromShortRelationshipReply
+          ? [displayNameFromShortRelationshipReply]
+          : [],
+        primaryEntityId: null,
+        secondaryEntityId: null,
+        reason: displayNameFromShortRelationshipReply
+          ? 'generic_romantic_relation_display_name_reply'
+          : 'generic_romantic_relation_fallback',
+      }
+    : resolvedBase;
+
+  try {
+    console.log('[IROS/RELATIONSHIP_LAYER][GENERIC_RELATION_DEBUG]', {
+      userCode,
+      userText,
+      topicDigest,
+      relationshipHistoryText,
+      genericRelationshipText,
+      resolvedBaseRelationId: resolvedBase?.relationId ?? null,
+      pendingRelationshipDisplayName,
+      pendingRelationshipRelationId,
+      displayNameFromShortRelationshipReply,
+      shouldUseGenericRomanticRelation,
+      resolvedRelationId: resolved?.relationId ?? null,
+      resolvedReason: resolved?.reason ?? null,
+      resolvedMatchedNames: resolved?.matchedNames ?? null,
+    });
+  } catch {}
 
   const recalledRows = resolved?.relationId
     ? await loadRelationshipMemoriesForTurn({
@@ -4818,18 +4936,41 @@ try {
     relation: resolved,
   };
   (extra2.ctxPack as any).relationshipMemory = recalledMemory;
+
   if (resolved?.relationId) {
+    const resolvedDisplayName =
+      Array.isArray(resolved.matchedNames) && resolved.matchedNames.length > 0
+        ? String(resolved.matchedNames[0] ?? '').trim()
+        : '';
+
+        const existingRelationshipDisplayName = String(
+          (extra2.ctxPack as any)?.relationshipDisplayName ??
+            (recalledMemory as any)?.display_name ??
+            (recalledMemory as any)?.displayName ??
+            (out as any)?.metaForSave?.extra?.ctxPack?.relationshipDisplayName ??
+            '',
+        ).trim();
+
+    const effectiveRelationshipDisplayName =
+      resolvedDisplayName || existingRelationshipDisplayName;
+
     (extra2.ctxPack as any).relationId = resolved.relationId;
+
+    if (effectiveRelationshipDisplayName) {
+      (extra2.ctxPack as any).relationshipDisplayName =
+        effectiveRelationshipDisplayName;
+      delete (extra2.ctxPack as any).pendingRelationshipDisplayName;
+      delete (extra2.ctxPack as any).pendingRelationshipRelationId;
+    } else if (resolved.reason === 'generic_romantic_relation_fallback') {
+      (extra2.ctxPack as any).pendingRelationshipDisplayName = true;
+      (extra2.ctxPack as any).pendingRelationshipRelationId = resolved.relationId;
+    }
 
     await upsertRelationshipMemory({
       userCode,
       relationId: resolved.relationId,
 
-      displayName:
-        Array.isArray(resolved.matchedNames) && resolved.matchedNames.length > 0
-          ? resolved.matchedNames[0]
-          : null,
-
+      displayName: effectiveRelationshipDisplayName || null,
       role:
         resolved.mode === 'between_others'
           ? 'other'
@@ -4850,6 +4991,38 @@ try {
             ? 0.8
             : 0.5,
     });
+
+    // Relationship Layer はこの位置で ctxPack を更新するため、
+    // metaForSave 側にも明示同期して次ターンへ pending / relationId / displayName を残す。
+    (out as any).metaForSave = (out as any).metaForSave ?? {};
+    (out as any).metaForSave.extra = (out as any).metaForSave.extra ?? {};
+    (out as any).metaForSave.extra.ctxPack =
+      (out as any).metaForSave.extra.ctxPack &&
+      typeof (out as any).metaForSave.extra.ctxPack === 'object'
+        ? (out as any).metaForSave.extra.ctxPack
+        : {};
+
+    (out as any).metaForSave.extra.ctxPack.relationship =
+      (extra2.ctxPack as any).relationship;
+    (out as any).metaForSave.extra.ctxPack.relationshipMemory =
+      (extra2.ctxPack as any).relationshipMemory;
+    (out as any).metaForSave.extra.ctxPack.relationId =
+      (extra2.ctxPack as any).relationId;
+
+    if ((extra2.ctxPack as any).relationshipDisplayName) {
+      (out as any).metaForSave.extra.ctxPack.relationshipDisplayName =
+        (extra2.ctxPack as any).relationshipDisplayName;
+    }
+
+    if ((extra2.ctxPack as any).pendingRelationshipDisplayName) {
+      (out as any).metaForSave.extra.ctxPack.pendingRelationshipDisplayName =
+        (extra2.ctxPack as any).pendingRelationshipDisplayName;
+      (out as any).metaForSave.extra.ctxPack.pendingRelationshipRelationId =
+        (extra2.ctxPack as any).pendingRelationshipRelationId;
+    } else {
+      delete (out as any).metaForSave.extra.ctxPack.pendingRelationshipDisplayName;
+      delete (out as any).metaForSave.extra.ctxPack.pendingRelationshipRelationId;
+    }
   }
 } catch (e) {
   // 安全に無視
@@ -8970,6 +9143,50 @@ try {
       ...latestCtxPack,
     };
   }
+
+  // ✅ Relationship Layer の relationId / pending / displayName は、
+  // rephrase 後の latestCtxPack で薄まることがあるため、最終返却直前に再注入する。
+  const relationshipCarryCtx =
+    (out as any)?.metaForSave?.extra?.ctxPack &&
+    typeof (out as any).metaForSave.extra.ctxPack === 'object'
+      ? ((out as any).metaForSave.extra.ctxPack as any)
+      : null;
+
+  if (relationshipCarryCtx) {
+    resultForReturn.meta.extra = resultForReturn.meta.extra ?? {};
+    resultForReturn.meta.extra.ctxPack =
+      resultForReturn.meta.extra.ctxPack &&
+      typeof resultForReturn.meta.extra.ctxPack === 'object'
+        ? resultForReturn.meta.extra.ctxPack
+        : {};
+
+    const dstCtx = resultForReturn.meta.extra.ctxPack as any;
+
+    for (const key of [
+      'relationship',
+      'relationshipMemory',
+      'relationId',
+      'relationshipDisplayName',
+      'pendingRelationshipDisplayName',
+      'pendingRelationshipRelationId',
+    ]) {
+      if (Object.prototype.hasOwnProperty.call(relationshipCarryCtx, key)) {
+        const value = relationshipCarryCtx[key];
+        if (value !== undefined) {
+          dstCtx[key] = value;
+        }
+      }
+    }
+
+    if (
+      relationshipCarryCtx.relationshipDisplayName &&
+      !relationshipCarryCtx.pendingRelationshipDisplayName
+    ) {
+      delete dstCtx.pendingRelationshipDisplayName;
+      delete dstCtx.pendingRelationshipRelationId;
+    }
+  }
+
   if (latestCtxPack || latestExtra) {
     const digestTopic: any =
       latestCtxPack?.historyDigestV1 &&
@@ -9030,6 +9247,70 @@ try {
   }
 } catch {}
 
+const relationshipDisplayNameForRegistration = String(
+  (out as any)?.metaForSave?.extra?.ctxPack?.relationshipDisplayName ?? '',
+).trim();
+
+const currentUserTextForRelationshipRegistration = String(text ?? '')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const relationshipRegistrationRejectWords =
+  /(ことで|について|相談|恋愛|連絡|返信|返事|不安|距離|関係|気持ち|好き|大事にされたい|心配|悩み|話|ですか|ますか|したい|してほしい|されたい|ください)/u;
+
+const isRelationshipDisplayNameRegistrationTurn =
+  !!relationshipDisplayNameForRegistration &&
+  !relationshipRegistrationRejectWords.test(currentUserTextForRelationshipRegistration) &&
+  /^(名前は|呼び名は|相手は|彼は|彼女は)?\s*[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}A-Za-z0-9ー・]{1,12}(さん|くん|ちゃん|様|氏)?です$/u.test(
+    currentUserTextForRelationshipRegistration,
+  );
+
+const relationshipDisplayNameRegistrationText =
+  isRelationshipDisplayNameRegistrationTurn
+    ? `${relationshipDisplayNameForRegistration}として受け取りました。\n次から「彼」と言っても、${relationshipDisplayNameForRegistration}のこととして見ていけます。🪔`
+    : '';
+
+    if (relationshipDisplayNameRegistrationText) {
+      out.assistantText = relationshipDisplayNameRegistrationText;
+      (out as any).content = relationshipDisplayNameRegistrationText;
+      (out as any).text = relationshipDisplayNameRegistrationText;
+
+      out.metaForSave = out.metaForSave ?? {};
+      out.metaForSave.extra = out.metaForSave.extra ?? {};
+
+      (out.metaForSave.extra as any).rephraseBlocks = [
+        {
+          text: relationshipDisplayNameRegistrationText,
+          kind: 'p',
+        },
+      ];
+      (out.metaForSave.extra as any).rephraseBlocksTraceId = traceId;
+      (out.metaForSave.extra as any).finalTextPolicy =
+        'RELATIONSHIP_DISPLAY_NAME_REGISTRATION';
+      (out.metaForSave.extra as any).finalTextPolicyPickedFrom =
+        'relationship_display_name_registration';
+      (out.metaForSave.extra as any).finalAssistantText =
+        relationshipDisplayNameRegistrationText;
+
+      resultForReturn.assistantText = relationshipDisplayNameRegistrationText;
+      resultForReturn.content = relationshipDisplayNameRegistrationText;
+      resultForReturn.text = relationshipDisplayNameRegistrationText;
+
+      resultForReturn.meta = resultForReturn.meta ?? {};
+      resultForReturn.meta.extra = resultForReturn.meta.extra ?? {};
+      resultForReturn.meta.extra.rephraseBlocks = [
+        {
+          text: relationshipDisplayNameRegistrationText,
+          kind: 'p',
+        },
+      ];
+      resultForReturn.meta.extra.relationshipDisplayNameRegistered = true;
+      resultForReturn.meta.extra.relationshipDisplayNameRegisteredText =
+        relationshipDisplayNameRegistrationText;
+      resultForReturn.meta.extra.finalTextPolicy =
+        'RELATIONSHIP_DISPLAY_NAME_REGISTRATION';
+    }
+
 try {
   console.log('[IROS/Reply][FINAL_RETURN_WILLROTATION]', {
     conversationId,
@@ -9039,9 +9320,10 @@ try {
       resultForReturn?.meta?.extra?.ctxPack_willRotation ?? null,
     result_ctxPack_willRotation:
       resultForReturn?.ctxPack_willRotation ?? null,
+    relationshipDisplayNameRegistrationText:
+      relationshipDisplayNameRegistrationText || null,
   });
 } catch {}
-
 return {
   ok: true,
   result: resultForReturn,
