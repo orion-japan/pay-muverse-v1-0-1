@@ -12,7 +12,12 @@ export type DeepReadReason =
   | 'avoidance'
   | 'projection'
   | 'deictic_followup'
-  | 'certainty_pressure';
+  | 'certainty_pressure'
+  | 'business_pressure'
+  | 'receiver_mismatch'
+  | 'future_gap'
+  | 'future_placement'
+  | 'market_competition';
 
 export type DeepReadDetection = {
   shouldOpen: boolean;
@@ -27,6 +32,11 @@ export type DeepReadDetection = {
     hasAvoidanceSignal: boolean;
     hasProjectionSignal: boolean;
     hasDeicticFollowup: boolean;
+    hasBusinessPressure: boolean;
+    hasReceiverMismatch: boolean;
+    hasFutureGap: boolean;
+    hasFuturePlacement: boolean;
+    hasMarketCompetition: boolean;
   };
 };
 
@@ -151,6 +161,44 @@ export function detectDeepRead(input: DetectDeepReadInput): DeepReadDetection {
 
   if (hasDeicticFollowup) reasons.push('deictic_followup');
 
+  const hasBusinessPressure =
+    /(仕事|事業|案件|提案|営業|商談|相手先|取引先|顧客|クライアント|プロジェクト|開発|実装|進め|進ま|進捗|成果|結果|売上|導入|採用)/u.test(
+      currentUserText,
+    );
+
+  if (hasBusinessPressure) reasons.push('business_pressure');
+
+  const hasReceiverMismatch =
+    /(理解されない|理解してくれない|伝わらない|届かない|刺さらない|受け取ってもらえない|必要でない|必要な所|必要なところ|どこも理解|相手先がいる|思うように行かない|思うようにいかない)/u.test(
+      currentUserText,
+    );
+
+  if (hasReceiverMismatch) reasons.push('receiver_mismatch');
+
+  const hasFutureGap =
+    /(先進的|新しい|先に見える|先が見える|先に進んで|未来|まだ早い|早すぎる|受け皿|追いついていない|追いつかない|分かる人がいない|わかる人がいない)/u.test(
+      currentUserText,
+    );
+
+  if (hasFutureGap) reasons.push('future_gap');
+
+  const hasFuturePlacement =
+    /(この先|この先進的なもの|先進的なもの|見えている未来|未来).*(どこ|場所|相手|誰|持っていけば|置けば|置く|届きやすい|受け取られ|動き始め|現実として動く)/u.test(
+      currentUserText,
+    ) ||
+    /(どこに持っていけば|どこに置けば|誰に持っていけば|どんな場所|どんな相手|一番届きやすい|ちゃんと受け取られ|現実として動き始め)/u.test(
+      currentUserText,
+    );
+
+  if (hasFuturePlacement) reasons.push('future_placement');
+
+  const hasMarketCompetition =
+    /(競合|競争|市場|ライバル|先を越され|先越され|遅れる|置いていかれる|スピード|急がないと|進めないと|止まれない)/u.test(
+      currentUserText,
+    );
+
+  if (hasMarketCompetition) reasons.push('market_competition');
+
   const hints: string[] = [];
 
   if (reasons.includes('certainty_pressure')) {
@@ -183,16 +231,57 @@ export function detectDeepRead(input: DetectDeepReadInput): DeepReadDetection {
     );
   }
 
+  if (reasons.includes('business_pressure')) {
+    hints.push(
+      '仕事や事業の文脈で、止まっていること自体が焦りを強めている可能性がある',
+    );
+  }
+
+  if (reasons.includes('receiver_mismatch')) {
+    hints.push(
+      '内容そのものより、必要な場所や受け取れる相手に届いていないことが苦しさを作っている可能性がある',
+    );
+  }
+
+  if (reasons.includes('future_gap')) {
+    hints.push(
+      '先に見えているものと、相手側の受け皿や理解の速度に差があり、手応えが消えやすくなっている可能性がある',
+    );
+  }
+
+  if (reasons.includes('future_placement')) {
+    hints.push(
+      '未来を予測せず、最初に現実化する場所・相手・入口として扱う必要がある',
+    );
+  }
+
+  if (reasons.includes('market_competition')) {
+    hints.push(
+      '競合や市場の圧があり、進めたい力が強いほど伝達や判断が重くなりやすい可能性がある',
+    );
+  }
+
   const shouldOpen = reasons.length > 0;
+
+  const hasBusinessDeepRead =
+    hasBusinessPressure ||
+    hasReceiverMismatch ||
+    hasFutureGap ||
+    hasFuturePlacement ||
+    hasMarketCompetition;
 
   const level: DeepReadLevel =
     !shouldOpen
       ? 'off'
-      : reasons.includes('sting_high') && hasCertaintyPressure
+      : (reasons.includes('sting_high') && hasCertaintyPressure) ||
+          (hasBusinessDeepRead && reasons.includes('sting_high')) ||
+          (hasReceiverMismatch && hasFutureGap) ||
+          hasFuturePlacement
         ? 'middle'
         : reasons.includes('sting_high') ||
             reasons.includes('return_streak') ||
-            reasons.includes('repeat_signal')
+            reasons.includes('repeat_signal') ||
+            hasBusinessDeepRead
           ? 'light'
           : 'light';
 
@@ -209,6 +298,11 @@ export function detectDeepRead(input: DetectDeepReadInput): DeepReadDetection {
       hasAvoidanceSignal,
       hasProjectionSignal,
       hasDeicticFollowup,
+      hasBusinessPressure,
+      hasReceiverMismatch,
+      hasFutureGap,
+      hasFuturePlacement,
+      hasMarketCompetition,
     },
   };
 }

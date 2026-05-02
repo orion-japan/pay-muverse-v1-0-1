@@ -1125,21 +1125,24 @@ const mirrorFlowV1ForSeed: any =
                         '',
                       ),
                     ) || null,
-                  oneLineConstraint:
+                    oneLineConstraint:
                     (() => {
                       const raw = cleanMeaningLine(
                         pick(
                           (ctxPack as any)?.seed?.oneLineConstraint,
-                          '1核心 / 説明を増やさない / seedにない新しい具体軸を足さない / 同じ核を言い換えて深める / Δは1つ必ず含める / 質問しない',
+                          '1核心 / 根拠ある意味展開は許可 / 定義・階層化・象徴化は許可 / 根拠のない個人背景・過去・原因は足さない / Δは1つ必ず含める / 質問しない',
                         ),
                       );
 
                       const normalized = String(raw ?? '')
-                        .replace(/同一テーマ内で自然に広げることは許可/g, 'seedにない新しい具体軸を足さない')
-                        .replace(/同一テーマ内での視点の深掘りは許可/g, '同じ核を言い換えて深める')
+                        .replace(/説明を増やさない/g, '根拠ある意味展開は許可')
+                        .replace(/seedにない新しい具体軸を足さない/g, '根拠のない個人背景・過去・原因は足さない')
+                        .replace(/同一テーマ内で自然に広げることは許可/g, '根拠ある意味展開は許可')
+                        .replace(/同一テーマ内での視点の深掘りは許可/g, '定義・階層化・象徴化は許可')
+                        .replace(/同じ核を言い換えて深める/g, '同じ問いの中で定義・階層・象徴まで深める')
                         .trim();
 
-                      return normalized || '1核心 / 説明を増やさない / seedにない新しい具体軸を足さない / 同じ核を言い換えて深める / Δは1つ必ず含める / 質問しない';
+                      return normalized || '1核心 / 根拠ある意味展開は許可 / 定義・階層化・象徴化は許可 / 根拠のない個人背景・過去・原因は足さない / Δは1つ必ず含める / 質問しない';
                     })(),
                 },
 
@@ -1170,9 +1173,10 @@ const mirrorFlowV1ForSeed: any =
                   flowTo: String((args as any)?.flow180?.to ?? '').trim() || null,
                   writeConstraints: [
                     '1核心',
-                    '説明を増やさない',
-                    'seedにない新しい具体軸を足さない',
-                    '同じ核を言い換えて深める',
+                    '根拠ある意味展開は許可',
+                    '定義・階層化・象徴化は許可',
+                    '根拠のない個人背景・過去・原因は足さない',
+                    '同じ問いの中で定義・階層・象徴まで深める',
                     '質問しない',
                   ],
                 },
@@ -2404,12 +2408,14 @@ const mirrorFlowV1ForSeed: any =
 
                       case 'structure_explain':
                         return [
-                          '- Explain the structure plainly and compactly.',
-                          '- Prioritize frame and mechanism over emotional expansion.',
-                          '- Avoid poetic drift and avoid widening beyond the asked structure.',
-                          '- Do not end with a question.',
-                          '- Do not ask the user to introspect or continue unless explicitly requested.',
-                          '- Finish with the explanation itself.',
+                          '- Explain the structure with enough depth when the user asks for a concept, mechanism, layer, meaning, intention, symbol, or relationship.',
+                          '- Do not compress conceptual explanation into a short resonance reply.',
+                          '- You may define the concept, divide it into layers, explain transitions, use symbolic language, and end with a distilled insight.',
+                          '- Headings and Markdown are allowed when they help understanding; headings should read like part of the prose, not mechanical labels.',
+                          '- Do not invent personal background, hidden past, factual causes, or the inner truth of another person.',
+                          '- Stay grounded in the user’s question, FLOW, phase, depth, meaningSkeleton, writerDirectives, and transferred structure.',
+                          '- Do not end with a question unless the user explicitly asks for one.',
+                          '- Finish with the explanation or a concise symbolic closing line.',
                         ];
 
                       case 'return_adjust':
@@ -2612,8 +2618,9 @@ if (effectiveQuestionType === 'truth') {
 
 if (effectiveQuestionType === 'structure') {
   incomingWriterDirectives.mode = 'answer_truth_structure';
-  incomingWriterDirectives.forbidTopicExpansion = true;
-  incomingWriterDirectives.noAbstractEscape = true;
+  incomingWriterDirectives.forbidTopicExpansion = false;
+  incomingWriterDirectives.noAbstractEscape = false;
+  incomingWriterDirectives.allowStructuralExpansion = true;
 }
 const isNormalCompressedPattern =
   patternKeyForDefaults === 'NORMAL_COMPRESSED_V1';

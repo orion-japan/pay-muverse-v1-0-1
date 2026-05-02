@@ -1947,6 +1947,59 @@ try {
   }
 } catch {}
 
+// ✅ Markdown小見出し保護
+// - "**第一層：見える意図** 本文..." のように
+//   太字小見出しと本文が同一blockに結合された場合だけ、renderV2前に分離する。
+// - 意味は変えず、表示上の小見出し独立だけを守る。
+try {
+  const splitBoldSubheadingBlock = (raw: unknown): string[] => {
+    const text = String(raw ?? '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .trim();
+
+    if (!text) return [];
+
+    const protectedText = text
+      // block先頭または行頭の「**短い小見出し** 本文」を分離
+      .replace(
+        /(^|\n)(\*\*[^*\n]{1,40}\*\*)[ \t]+(?=\S)/g,
+        '$1$2\n\n'
+      )
+      // 「中心軸 本文」など、Markdown除去後の小見出し結合も保護
+      .replace(
+        /(^|\n)((?:第[一二三四五六七八九十]+層[:：][^\n]{1,24}|中心軸))[ \t]+(?=\S)/g,
+        '$1$2\n\n'
+      );
+
+    return protectedText
+      .split(/\n{2,}/u)
+      .map((x) => String(x ?? '').trim())
+      .filter(Boolean);
+  };
+
+  if (Array.isArray(blocksForRender) && blocksForRender.length > 0) {
+    const expandedBlocks: any[] = [];
+
+    for (const block of blocksForRender as any[]) {
+      const parts = splitBoldSubheadingBlock((block as any)?.text ?? block);
+
+      if (parts.length <= 1) {
+        expandedBlocks.push(block);
+        continue;
+      }
+
+      for (const part of parts) {
+        expandedBlocks.push({
+          ...(typeof block === 'object' && block !== null ? block : {}),
+          text: part,
+        });
+      }
+    }
+
+    blocksForRender = expandedBlocks;
+  }
+} catch {}
 
 const shouldDisableLineLimitForRephrase =
   pickedFromForRender === 'rephraseBlocks' ||

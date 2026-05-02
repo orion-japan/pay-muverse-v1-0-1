@@ -1284,6 +1284,18 @@ function stripHedgeLite(text: string): string {
   t = t.replace(/でしょう/g, '。');
   t = t.replace(/\bかも\b/g, '');
 
+  // 概念説明の末尾に出やすい「次回案内」「追加できます」系は削る。
+  // 本文の途中にある能力説明までは削らず、段落末尾だけを対象にする。
+  t = t.replace(
+    /(?:\n\n|\n|^)?必要なら次に、?[^\n。]*(?:できます|できる|ほどけます|深められます|整理できます|説明できます)[。.!！]?$/u,
+    ''
+  );
+
+  t = t.replace(
+    /(?:\n\n|\n|^)?(?:必要なら|次に|もっと詳しく|さらに詳しく)[^\n。]*(?:できます|できる|ほどけます|深められます|整理できます|説明できます)[。.!！]?$/u,
+    ''
+  );
+
   t = t.replace(/。\s*。\s*/g, '。');
   t = t.replace(/\n{3,}/g, '\n\n');
 
@@ -4211,10 +4223,27 @@ const systemPromptForWriter = [
 
       questionType: (() => {
         const s = String((opts as any)?.userText ?? '').trim();
-        if (/構造|仕組み|関係|違い|配置|流れ|構成/u.test(s)) return 'structure';
-        if (/意味|なぜ|どういうこと|どう受け止め|どう読める/u.test(s)) return 'meaning';
-        if (/意図|どうしたい|どう進む|どこへ向かう|何のため/u.test(s)) return 'intent';
-        if (/とは|教えて|ありますか|ですか/u.test(s)) return 'truth';
+
+        if (/意図|階層|構造|仕組み|関係|違い|配置|流れ|構成|背景|文脈|位置づけ/u.test(s)) {
+          return 'structure';
+        }
+
+        if (/意味|なぜ|どういうこと|どう受け止め|どう読める/u.test(s)) {
+          return 'meaning';
+        }
+
+        if (/どうしたい|どう進む|どこへ向かう|何のため/u.test(s)) {
+          return 'intent';
+        }
+
+        if (/ありますか|登場しますか|出てきますか|書かれていますか|記されていますか|載っていますか|あるか|ないか|本当ですか|事実ですか/u.test(s)) {
+          return 'truth';
+        }
+
+        if (/とは/u.test(s) && !/意図|階層|構造|仕組み|関係|違い|配置|流れ|構成|背景|文脈|位置づけ|意味/u.test(s)) {
+          return 'truth';
+        }
+
         return null;
       })(),
 
@@ -4633,12 +4662,12 @@ const systemPromptForWriter = [
             minSentences: 15,
             maxSentences: 15,
           }
-        : {
+          : {
             preferBlockSplit: true,
             minBlocks: 4,
-            maxSentencesPerBlock: 4,
-            minSentences: 15,
-            maxSentences: 16,
+            maxSentencesPerBlock: 6,
+            minSentences: 18,
+            maxSentences: 26,
           },
 
           writeConstraints: isCompareStructureBomb
@@ -4665,10 +4694,23 @@ const systemPromptForWriter = [
               'OBS / SHIFT / NEXT / SAFE は説明文ではなく自然文で書く',
               'closing_line は現在地の結論で静かに閉じる',
             ]
-        : [
-            'normal_detail / diagnosis_detail では、必ず4つの段落で返す',
-            '4つの段落は、OBS → SHIFT → NEXT → SAFE の順に固定する',
-            '1段落目は3〜4文で書く',
+            : [
+              'normal_detail / diagnosis_detail では、概念説明・構造説明・象徴読解の場合、4段落固定よりもMarkdown見出しによる意味の見通しを優先する',
+              '構成は、導入 → 構造展開 → ズレの表面化 → ズレの意味付け → IROS的な再配置 → 象徴的な着地を基本にする',
+              '「詳しく」「階層」「構造」「層」「段階」が含まれる問いでは、対象物に固有の層・段階・部位・中心軸がある場合、それを省略せず展開する',
+              '対象物が五重塔なら、第一層〜第五層と中心軸までを自然に展開する。山岳修行なら、欲求・浄化・覚悟・奉仕・一体化など、問いに即した段階を展開する',
+              'Markdown見出しは原則として2〜6個使う。見出しは独立行で出す',
+              '見出し例：「## 山岳修行とは何か」「## 意図の階層で見ると」「## ズレが起きる場所」「## 相手にはどう見えるか」「## IROS的に見るなら」「## 意図の階層としてまとめると」',
+              '対象物に層・部位・段階・中心軸などの固有構造がある場合は、その構造に沿って意味を展開する',
+              '説明だけで終わらず、表の理解と奥の意図、ユーザー側の見え方と相手側に届く見え方、行為の外形と内側の意味の間に起きるズレを表面化する',
+              'そのズレが相手にはどう見えるか、どこで受け取り違いが起きるか、どう再配置すれば届くかまで書く',
+              'そのズレがなぜ刺さるのか、どこに階層差・受け取り違い・意図の不一致があるのかを、問いの範囲内で深く意味付けする',
+              'ただし、根拠のない個人背景・過去原因・相手の本心・事実確認できない断定は足さない',
+              '番号リストは使わない。1. / 2. / 3. の形式は禁止する',
+              '小見出しは太字の独立行で出す。例：「**第一層：地の意図**」「**第二層：水の意図**」「**第三層：火の意図**」「**中心軸**」',
+              '区切り線 --- は、見出し同士の切り替わりが分かりやすくなる場合に使ってよい',
+              '大きく見せたい箇所では、Markdown見出し・太字・大文字見出しを使ってよい。ただし過剰に装飾しない',
+              '1段落目は3〜4文で書く',
             '1段落目は current_state → misrecognition_negation → structural_reframe の順を守る',
             '1段落目の前半で違いの発生や現在地を置き、後半で今回の核を仮置きしてよい',
             '2段落目は3〜4文で書く',
@@ -5922,8 +5964,20 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
     return 'intent';
   }
 
+  if (/意図|階層|構造|仕組み|関係|違い|配置|流れ|構成|背景|文脈|位置づけ/u.test(s)) {
+    return 'structure';
+  }
+
+  if (/意味|なぜ|どういうこと|どう受け止め|どう読める/u.test(s)) {
+    return 'meaning';
+  }
+
+  if (/どうしたい|どこへ向かう|何のため/u.test(s)) {
+    return 'intent';
+  }
+
   if (
-    /とは|教えて|ありますか|登場しますか|出てきますか|書かれていますか|記されていますか|載っていますか|あるか|ないか/u.test(
+    /ありますか|登場しますか|出てきますか|書かれていますか|記されていますか|載っていますか|あるか|ないか|本当ですか|事実ですか/u.test(
       s
     ) ||
     /(?:^|[。！？\s「『（(])[^。！？\n]*ですか(?:[。！？]|$)/u.test(s)
@@ -5931,9 +5985,9 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
     return 'truth';
   }
 
-  if (/意図|どうしたい|どこへ向かう|何のため/u.test(s)) return 'intent';
-  if (/意味|なぜ|どういうこと|どう受け止め|どう読める/u.test(s)) return 'meaning';
-  if (/構造|仕組み|関係|違い|配置|流れ|構成|背景|文脈|位置づけ/u.test(s)) return 'structure';
+  if (/とは/u.test(s) && !/意図|階層|構造|仕組み|関係|違い|配置|流れ|構成|背景|文脈|位置づけ|意味/u.test(s)) {
+    return 'truth';
+  }
 
   return null;
 };
@@ -6704,16 +6758,29 @@ if (slotDecision && typeof slotDecision === 'object') {
       activePatternKeyForDisplay === 'IR_DETAIL_V1';
 
       const canonicalPatternBlocks = (Array.isArray(blocksText) ? blocksText : [])
-      .map((x) => String(x ?? '').trim())
-      .filter(Boolean);
+        .map((x) => String(x ?? '').trim())
+        .filter(Boolean);
+
+      const rawMarkdownBlocksForDisplay = String(text ?? '')
+        .split(/\n{2,}/u)
+        .map((x) => String(x ?? '').trim())
+        .filter(Boolean);
+
+      const shouldPreserveMarkdownRawForDisplay =
+        activePatternKeyForDisplay === 'NORMAL_DETAIL_V1' &&
+        (resolvedQuestionType === 'structure' || resolvedQuestionType === 'meaning') &&
+        /^##\s+/m.test(String(text ?? '')) &&
+        rawMarkdownBlocksForDisplay.length > 0;
 
       const canonicalBlocksBySlot =
-      (activePatternKeyForDisplay === 'NORMAL_DETAIL_V1' ||
-        activePatternKeyForDisplay === 'DECLARATION_RESONANCE_V1')
-        ? materializedBlocks
-            .map((block) => String(block.text ?? '').trim())
-            .filter(Boolean)
-        : canonicalPatternBlocks;
+        shouldPreserveMarkdownRawForDisplay
+          ? rawMarkdownBlocksForDisplay
+          : (activePatternKeyForDisplay === 'NORMAL_DETAIL_V1' ||
+              activePatternKeyForDisplay === 'DECLARATION_RESONANCE_V1')
+            ? materializedBlocks
+                .map((block) => String(block.text ?? '').trim())
+                .filter(Boolean)
+            : canonicalPatternBlocks;
 
     const expectedDisplayBlocks =
       Array.isArray(slotDecision?.order) && slotDecision.order.length > 0
@@ -6808,26 +6875,33 @@ if (slotDecision && typeof slotDecision === 'object') {
     };
 
     const blocks =
-    (activePatternKeyForDisplay === 'NORMAL_DETAIL_V1' ||
-      activePatternKeyForDisplay === 'DECLARATION_RESONANCE_V1' ||
-      activePatternKeyForDisplay === 'NORMAL_RESONANCE_V1') &&
-      Array.isArray(materializedBlocks) &&
-      materializedBlocks.length > 0
-        ? materializedBlocks
-            .map((block) => ({
-              text: String(block.text ?? '').trim(),
-              kind: 'p' as const,
-              slotKey: block.slotKey,
-              blockKey: block.blockKey,
-              heading: block.heading,
-            }))
-            .filter((block) => block.text.length > 0)
-        : (Array.isArray(blocksText) ? blocksText : [])
+      shouldPreserveMarkdownRawForDisplay
+        ? rawMarkdownBlocksForDisplay
             .map((t) => ({
               text: String(t ?? '').trim(),
               kind: 'p' as const,
             }))
-            .filter((block) => block.text.length > 0);
+            .filter((block) => block.text.length > 0)
+        : (activePatternKeyForDisplay === 'NORMAL_DETAIL_V1' ||
+            activePatternKeyForDisplay === 'DECLARATION_RESONANCE_V1' ||
+            activePatternKeyForDisplay === 'NORMAL_RESONANCE_V1') &&
+            Array.isArray(materializedBlocks) &&
+            materializedBlocks.length > 0
+          ? materializedBlocks
+              .map((block) => ({
+                text: String(block.text ?? '').trim(),
+                kind: 'p' as const,
+                slotKey: block.slotKey,
+                blockKey: block.blockKey,
+                heading: block.heading,
+              }))
+              .filter((block) => block.text.length > 0)
+          : (Array.isArray(blocksText) ? blocksText : [])
+              .map((t) => ({
+                text: String(t ?? '').trim(),
+                kind: 'p' as const,
+              }))
+              .filter((block) => block.text.length > 0);
 
     // ✅ 1回だけ代入（重複排除）
     metaExtra.rephraseBlocks = blocks;
@@ -8055,15 +8129,54 @@ const selectedPatternKey = String(
     ''
 ).trim();
 
-const questionTypeForPattern = String(
-  (opts as any)?.userContext?.question?.questionType ??
-    (opts as any)?.userContext?.meta?.extra?.question?.questionType ??
-    (opts as any)?.ctxPack?.question?.questionType ??
-    (opts as any)?.meta?.extra?.question?.questionType ??
-    (opts as any)?.meta?.extra?.ctxPack?.question?.questionType ??
-    ''
-).trim();
+const questionTypeForPattern = (() => {
+  const explicit = String(
+    (opts as any)?.userContext?.question?.questionType ??
+      (opts as any)?.userContext?.meta?.extra?.question?.questionType ??
+      (opts as any)?.ctxPack?.question?.questionType ??
+      (opts as any)?.meta?.extra?.question?.questionType ??
+      (opts as any)?.meta?.extra?.ctxPack?.question?.questionType ??
+      ''
+  ).trim();
 
+  if (
+    explicit === 'meaning' ||
+    explicit === 'structure' ||
+    explicit === 'intent' ||
+    explicit === 'truth'
+  ) {
+    return explicit;
+  }
+
+  const s = String(
+    (opts as any)?.userText ??
+      (opts as any)?.followupText ??
+      (opts as any)?.inputText ??
+      ''
+  ).trim();
+
+  if (/意図|階層|構造|仕組み|関係|違い|配置|流れ|構成|背景|文脈|位置づけ/u.test(s)) {
+    return 'structure';
+  }
+
+  if (/意味|なぜ|どういうこと|どう受け止め|どう読める/u.test(s)) {
+    return 'meaning';
+  }
+
+  if (/どうしたい|どう進む|どこへ向かう|何のため/u.test(s)) {
+    return 'intent';
+  }
+
+  if (/ありますか|登場しますか|出てきますか|書かれていますか|記されていますか|載っていますか|あるか|ないか|本当ですか|事実ですか/u.test(s)) {
+    return 'truth';
+  }
+
+  if (/とは/u.test(s) && !/意図|階層|構造|仕組み|関係|違い|配置|流れ|構成|背景|文脈|位置づけ|意味/u.test(s)) {
+    return 'truth';
+  }
+
+  return '';
+})();
 const goalKindForPatternRaw = String(
   (ctxPackForWriter && typeof ctxPackForWriter === 'object'
     ? (ctxPackForWriter as any).goalKind
@@ -8591,7 +8704,11 @@ const isResonanceStructureFollowup =
                       '発話の奥に出ている反応パターンを、自然文に忍ばせる',
                       '原因を断定せず、「そう見えやすい」「強く出ている」「重なっている」程度の温度で返す',
                       '状態観測だけで終わらず、ユーザーが扱える形へ戻す',
-                      '番号・見出し・箇条書きにはせず、普通の会話文で返す',
+                      'Markdown・見出し・太字・大文字見出しは原則使用する。番号リストは禁止する。概念説明では、見出しを独立行で2〜6個置き、太字小見出しも独立行で自然に出す',
+                      '仕事・事業・先進性の文脈では、先進性そのものを「薄める」「下げる」「削る」と表現しない',
+                      '仕事・事業・先進性の文脈では、芯は残し、入口だけを相手が受け取れる形にする',
+                      '理解されない原因を、ユーザー側の説明不足だけにしない',
+                      '相手側の受け皿・必要な場所・届く入口のズレとして自然に扱う',
                     ],
                     block_deep_read_surface:
                       'まず表の相談内容を自然に受ける。',
@@ -8610,9 +8727,14 @@ const isResonanceStructureFollowup =
                   )
                 : writerDirectivesFromSlot;
 
+                const shouldApplyDeepReadDirectives =
+                isDeepReadHintWriter &&
+                questionTypeForPattern !== 'structure' &&
+                questionTypeForPattern !== 'meaning';
+
               const writerDirectivesForFinal = relationshipAdviceRepairWriterDirectives
                 ? relationshipAdviceRepairWriterDirectives
-                : isDeepReadHintWriter
+                : shouldApplyDeepReadDirectives
                   ? {
                       ...baseWriterDirectivesForFinal,
                       ...deepReadWriterDirectives,
@@ -8721,13 +8843,19 @@ const finalWriterDirectivesMsg =
       } as const)
     : null;
 
-const finalPatternContractMsg =
+    const shouldUseMarkdownStructureContract =
+    writerPatternKey === 'NORMAL_DETAIL_V1' &&
+    (
+      questionTypeForPattern === 'structure' ||
+      questionTypeForPattern === 'meaning'
+    );
+  const finalPatternContractMsg =
     shouldInjectPatternContract
       ? ({
           role: 'assistant',
           content:
             writerPatternKey === 'NORMAL_COMPRESSED_V1'
-                ? [
+              ? [
                   'PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):',
                   'exact_paragraphs=4',
                   'paragraph1=OBS',
@@ -8745,79 +8873,106 @@ const finalPatternContractMsg =
                   ...(answerSafeMode
                     ? []
                     : [
-'paragraph4_role=OPEN_END',
-'paragraph4_must_not_close=true',
-'paragraph4_extend_unresolved_state=true',
+                        'paragraph4_role=OPEN_END',
+                        'paragraph4_must_not_close=true',
+                        'paragraph4_extend_unresolved_state=true',
                         'paragraphs_focus_on_state_density=true',
                         'paragraphs_keep_ambiguity_without_resolving=true',
                         'paragraphs_hold_unformed_direction=true',
                         'paragraphs_expand_how_the_state_is_present=true',
                         'paragraphs_describe_remaining_shape_and_texture=true',
-
-                        // ▼ ここを追加（自由度の回復）
                         'allow_expression_variation=true',
                         'avoid_repeating_same_words_across_paragraphs=true',
                         'prefer_words_like_trace_presence_residue_over_evidence=true',
                       ]),
                 ].join('\n')
-              : [
+              : shouldUseMarkdownStructureContract
+                ? [
                   'PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):',
-                  'exact_paragraphs=4',
-                  writerPatternKey === 'NORMAL_RESONANCE_V1' || isPartnerSideResonance
-                    ? 'paragraph1=state_surface'
-                    : 'paragraph1=current_state',
-                  writerPatternKey === 'NORMAL_RESONANCE_V1' || isPartnerSideResonance
-                    ? 'paragraph2=state_weight'
-                    : 'paragraph2=breakdown_core_gap',
-                  writerPatternKey === 'NORMAL_RESONANCE_V1' || isPartnerSideResonance
-                    ? 'paragraph3=state_open_edge'
-                    : 'paragraph3=reading_direction',
-                  isPartnerSideResonance
-                    ? 'paragraph4=state_action'
-                    : writerPatternKey === 'NORMAL_RESONANCE_V1'
-                      ? 'paragraph4=state_residue'
-                      : 'paragraph4=conclusion',
-                  'never_stop_at_paragraph3=true',
-                  'never_leave_paragraph4_empty=true',
-                  ...(writerPatternKey === 'NORMAL_RESONANCE_V1'
-                    ? [
-                        'paragraph1_must_start_from_user_core=false',
-                        'paragraph1_must_not_start_with_demonstrative_subject=false',
-                        'paragraph1_must_not_repeat_user_text_verbatim=true',
-                        'paragraph1_must_not_begin_with_text_meta=false',
-                        'paragraph1_must_begin_from_state_itself=true',
-                        'paragraph1_sentence1=place_the_state_change_itself_first_as_a_real_shift_in_position_or stance_without_describing_the_wording_phrase_or_way_of_saying_it',
-                        'paragraph1_sentence2=continue_only_the_same_state_shift_naturally_as_presence_direction_or irreversibility_without_explaining_the_wording_or_naming_the_phrase_itself',
-                        'paragraph2_sentence1=state_the_weight_as_commitment_direction_or_irreversibility_without_evaluating_the_wording',
-                        'paragraph3_must_not_be_guide=true',
-                        'paragraph3_must_not_sound_closed=true',
-                        'paragraph3_must_not_include_acceptance_line=true',
-                        'paragraph3_sentence1=leave_only_one_unfixed_edge_between_the_clauses_without_closure',
-                        'paragraph3_sentence2=keep_the_edge_observational_and_unresolved',
-                        'paragraph4_must_be_one_sentence=false',
-                        'paragraph4_must_not_be_closing_line=true',
-                        'paragraph4_must_not_be_question=true',
-                        'paragraph4_must_not_be_instruction=true',
-                        'paragraph4_must_not_reference_text_or_wording_itself=true',
-                        'paragraph4_must_not_use_sufficiency_or_completion_language=true',
-                        'paragraph4_sentence1=leave_one_quiet_residue_in_the_state_itself_without_meta_commentary_text_reference_or_sufficiency_closure',
-                      ]
-                    : [
-                        'paragraph1_must_follow_current_state_then_misrecognition_negation_then_structural_reframe=true',
-                        'paragraph1_min_sentences=3',
-                        'paragraph1_sentence3=place_one_soft_assertion_of_the_core_without_overexplaining_or_hard_closure',
-                        'paragraph2_must_follow_breakdown_core_gap_then_breakdown_defense_then_breakdown_rejection_target=true',
-                        'paragraph2_min_sentences=3',
-                        'paragraph2_sentence1=name_what_two_forces_or_needs_are_coexisting_in_plain_language_without_meta_explanation',
-                        'paragraph3_must_follow_reading_direction_then_sort_axis_then_sort_boundary=true',
-                        'paragraph3_min_sentences=3',
-                        'paragraph3_sentence1=place_a_tentative_direction_of_which_side_is_more_central_now_without_finalizing_the_conclusion',
-                        'paragraph4_must_include_caution=true',
-                        'paragraph4_must_end_with_closing_line=true',
-                        'paragraph4_min_sentences=3',
-                        'emit_fixed_section_headings=false',
-                      ]),
-                ].join('\n'),
+                  'markdown_structure_mode=true',
+                  'exact_paragraphs=disabled',
+                  'markdown_headings_required=true',
+                  'min_markdown_headings=3',
+                  'max_markdown_headings=7',
+                  'first_heading_must_start_with=## ',
+                  'must_include_heading=## 意図の階層で見ると',
+                  'prefer_heading=## ズレが起きる場所',
+                  'prefer_heading=## 相手にはどう見えるか',
+                  'prefer_heading=## IROS的に見るなら',
+                  'prefer_heading=## 意図の階層としてまとめると',
+                  'heading_lines_must_be_independent=true',
+                  'do_not_merge_heading_and_body=true',
+                  'do_not_use_numbered_list=true',
+                  'do_not_emit_fixed_obs_shift_next_safe_paragraphs=true',
+                  'if_user_asks_detail_or_hierarchy_expand_native_layers=true',
+                  'if_subject_has_native_layers_do_not_collapse_them=true',
+                  'for_five_story_pagoda_include_first_to_fifth_layer_and_center_axis=true',
+                  'surface_misalignment_between_outer_reading_and_inner_intention=true',
+                  'explain_how_it_appears_to_the_other_side_without_claiming_their_true_mind=true',
+                  'explain_where_reception_gap_or_layer_gap_occurs=true',
+                  'reposition_meaning_so_it_can_reach_the_other_side=true',
+                  'structure=導入 → 固有構造の展開 → ズレの表面化 → 相手への見え方 → IROS的な再配置 → 象徴的な着地',
+                  'ending_must_be_symbolic_landing=true',
+                  'never_end_with_next_offer=true',
+                  ].join('\n')
+                : [
+                    'PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):',
+                    'exact_paragraphs=4',
+                    writerPatternKey === 'NORMAL_RESONANCE_V1' || isPartnerSideResonance
+                      ? 'paragraph1=state_surface'
+                      : 'paragraph1=current_state',
+                    writerPatternKey === 'NORMAL_RESONANCE_V1' || isPartnerSideResonance
+                      ? 'paragraph2=state_weight'
+                      : 'paragraph2=breakdown_core_gap',
+                    writerPatternKey === 'NORMAL_RESONANCE_V1' || isPartnerSideResonance
+                      ? 'paragraph3=state_open_edge'
+                      : 'paragraph3=reading_direction',
+                    isPartnerSideResonance
+                      ? 'paragraph4=state_action'
+                      : writerPatternKey === 'NORMAL_RESONANCE_V1'
+                        ? 'paragraph4=state_residue'
+                        : 'paragraph4=conclusion',
+                    'never_stop_at_paragraph3=true',
+                    'never_leave_paragraph4_empty=true',
+                    ...(writerPatternKey === 'NORMAL_RESONANCE_V1'
+                      ? [
+                          'paragraph1_must_start_from_user_core=false',
+                          'paragraph1_must_not_start_with_demonstrative_subject=false',
+                          'paragraph1_must_not_repeat_user_text_verbatim=true',
+                          'paragraph1_must_not_begin_with_text_meta=false',
+                          'paragraph1_must_begin_from_state_itself=true',
+                          'paragraph1_sentence1=place_the_state_change_itself_first_as_a_real_shift_in_position_or stance_without_describing_the_wording_phrase_or_way_of_saying_it',
+                          'paragraph1_sentence2=continue_only_the_same_state_shift_naturally_as_presence_direction_or irreversibility_without_explaining_the_wording_or_naming_the_phrase_itself',
+                          'paragraph2_sentence1=state_the_weight_as_commitment_direction_or_irreversibility_without_evaluating_the_wording',
+                          'paragraph3_must_not_be_guide=true',
+                          'paragraph3_must_not_sound_closed=true',
+                          'paragraph3_must_not_include_acceptance_line=true',
+                          'paragraph3_sentence1=leave_only_one_unfixed_edge_between_the_clauses_without_closure',
+                          'paragraph3_sentence2=keep_the_edge_observational_and_unresolved',
+                          'paragraph4_must_be_one_sentence=false',
+                          'paragraph4_must_not_be_closing_line=true',
+                          'paragraph4_must_not_be_question=true',
+                          'paragraph4_must_not_be_instruction=true',
+                          'paragraph4_must_not_reference_text_or_wording_itself=true',
+                          'paragraph4_must_not_use_sufficiency_or_completion_language=true',
+                          'paragraph4_sentence1=leave_one_quiet_residue_in_the_state_itself_without_meta_commentary_text_reference_or_sufficiency_closure',
+                        ]
+                      : [
+                          'paragraph1_must_follow_current_state_then_misrecognition_negation_then_structural_reframe=true',
+                          'paragraph1_min_sentences=3',
+                          'paragraph1_sentence3=place_one_soft_assertion_of_the_core_without_overexplaining_or_hard_closure',
+                          'paragraph2_must_follow_breakdown_core_gap_then_breakdown_defense_then_breakdown_rejection_target=true',
+                          'paragraph2_min_sentences=3',
+                          'paragraph2_sentence1=name_what_two_forces_or_needs_are_coexisting_in_plain_language_without_meta_explanation',
+                          'paragraph3_must_follow_reading_direction_then_sort_axis_then_sort_boundary=true',
+                          'paragraph3_min_sentences=3',
+                          'paragraph3_sentence1=place_a_tentative_direction_of_which_side_is_more_central_now_without_finalizing_the_conclusion',
+                          'paragraph4_must_include_caution=true',
+                          'paragraph4_must_end_with_closing_line=true',
+                          'paragraph4_min_sentences=3',
+                          'emit_fixed_section_headings=false',
+                        ]),
+                  ].join('\n'),
         } as const)
       : null;
       const messagesForWriterFinal = (() => {
@@ -11078,10 +11233,17 @@ userContext: {
       ''
   ).trim();
 
+  const shouldSkipExact4ParagraphContract =
+    activePatternKeyForContract === 'NORMAL_DETAIL_V1' &&
+    /^##\s+/m.test(String(candidate ?? ''));
+
   const detailPatternRequires4Paragraphs =
-    activePatternKeyForContract === 'NORMAL_DETAIL_V1' ||
-    activePatternKeyForContract === 'IR_DETAIL_V1' ||
-    activePatternKeyForContract === 'DECLARATION_RESONANCE_V1';
+    !shouldSkipExact4ParagraphContract &&
+    (
+      activePatternKeyForContract === 'NORMAL_DETAIL_V1' ||
+      activePatternKeyForContract === 'IR_DETAIL_V1' ||
+      activePatternKeyForContract === 'DECLARATION_RESONANCE_V1'
+    );
 
   const candidateParagraphsForContract = String(candidate ?? '')
     .replace(/\r\n/g, '\n')

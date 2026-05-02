@@ -230,14 +230,26 @@ function buildRelationContext(input: SeedCanonicalInput): string | null {
 }
 
 function buildOneLineConstraint(input: SeedCanonicalInput): string {
-  const fromSkeleton = clean(input.meaningSkeleton?.oneLineConstraint);
+  const normalizeConstraint = (value: string | null | undefined): string | null => {
+    const normalized = clean(value)
+      ?.replace(/説明を増やさない/g, '根拠ある意味展開は許可')
+      .replace(/seedにない新しい具体軸を足さない/g, '根拠のない個人背景・過去・原因は足さない')
+      .replace(/同じ核を言い換えて深める/g, '同じ問いの中で定義・階層・象徴まで深める')
+      .replace(/必要以上に構造化せず/g, '必要に応じて定義・階層化・象徴化してよい')
+      .replace(/説明を足さず/g, '根拠ある説明は展開してよい');
+
+    return normalized || null;
+  };
+
+  const fromSkeleton = normalizeConstraint(input.meaningSkeleton?.oneLineConstraint);
   if (fromSkeleton) return fromSkeleton;
 
   const pieces = [
     '1核心',
-    '説明を増やさない',
-    'seedにない新しい具体軸を足さない',
-    '同じ核を言い換えて深める',
+    '根拠ある意味展開は許可',
+    '定義・階層化・象徴化は許可',
+    '根拠のない個人背景・過去・原因は足さない',
+    '同じ問いの中で定義・階層・象徴まで深める',
   ];
 
   const askBackAllowed = input.askBackAllowed === true;
