@@ -30,6 +30,7 @@ import { buildTransition180Candidates } from '@/lib/iros/delta/buildTransition18
 import { selectTransition180 } from '@/lib/iros/delta/selectTransition180';
 import { pickTransitionMeaning } from '@/lib/iros/delta/transitionMeaning';
 import { buildSeedCanonical } from '@/lib/iros/seed/buildSeedCanonical';
+import { detectDeepRead } from '@/lib/iros/deepRead/detectDeepRead';
 
 export type WriterMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 type TurnMsg = { role: 'user' | 'assistant'; content: string };
@@ -2545,68 +2546,27 @@ const currentUserTextForRelationshipReflection = String(
     (args as any)?.currentUserText ??
     '',
 ).trim();
-const ctxPackForDeepReadUnlock =
-  ((args as any)?.userContext?.ctxPack &&
-  typeof (args as any).userContext.ctxPack === 'object'
-    ? (args as any).userContext.ctxPack
-    : null) ??
-  ((args as any)?.userContext?.meta?.extra?.ctxPack &&
-  typeof (args as any).userContext.meta.extra.ctxPack === 'object'
-    ? (args as any).userContext.meta.extra.ctxPack
-    : null) ??
-  ((args as any)?.meta?.extra?.ctxPack &&
-  typeof (args as any).meta.extra.ctxPack === 'object'
-    ? (args as any).meta.extra.ctxPack
-    : null) ??
-  ((args as any)?.extra?.ctxPack &&
-  typeof (args as any).extra.ctxPack === 'object'
-    ? (args as any).extra.ctxPack
-    : null) ??
-  ((ctxPack as any) && typeof (ctxPack as any) === 'object'
-    ? (ctxPack as any)
-    : null);
+const deepReadUnlockDetection = detectDeepRead({
+  currentUserText: currentUserTextForRelationshipReflection,
+  previousUserText: null,
+  previousAssistantText: null,
+  ctxPack,
+  args,
+});
 
-const stingLevelForDeepReadUnlock = String(
-  ctxPackForDeepReadUnlock?.stingLevel ??
-    (args as any)?.stingLevel ??
-    (args as any)?.extra?.stingLevel ??
-    (ctxPack as any)?.stingLevel ??
-    '',
-)
-  .trim()
-  .toUpperCase();
-
-const returnStreakRawForDeepReadUnlock =
-  ctxPackForDeepReadUnlock?.flow?.returnStreak ??
-  ctxPackForDeepReadUnlock?.returnStreak ??
-  (args as any)?.flow?.returnStreak ??
-  (args as any)?.extra?.flow?.returnStreak ??
-  (ctxPack as any)?.flow?.returnStreak ??
-  (ctxPack as any)?.returnStreak ??
-  0;
+const stingLevelForDeepReadUnlock =
+  deepReadUnlockDetection.meta.stingLevel;
 
 const returnStreakForDeepReadUnlock =
-  Number.isFinite(Number(returnStreakRawForDeepReadUnlock))
-    ? Number(returnStreakRawForDeepReadUnlock)
-    : 0;
-
-const repeatSignalRawForDeepReadUnlock =
-  ctxPackForDeepReadUnlock?.repeatSignal ??
-  ctxPackForDeepReadUnlock?.repeatSignalSame ??
-  (args as any)?.repeatSignal ??
-  (args as any)?.repeatSignalSame ??
-  (ctxPack as any)?.repeatSignal ??
-  (ctxPack as any)?.repeatSignalSame ??
-  null;
+  deepReadUnlockDetection.meta.returnStreak;
 
 const hasRepeatSignalForDeepReadUnlock =
-  repeatSignalRawForDeepReadUnlock === true ||
-  String(repeatSignalRawForDeepReadUnlock ?? '').trim().length > 0;
+  deepReadUnlockDetection.meta.hasRepeatSignal;
 
 const shouldUnlockDeepReadConstraints =
-  stingLevelForDeepReadUnlock === 'HIGH' ||
-  returnStreakForDeepReadUnlock >= 2 ||
-  hasRepeatSignalForDeepReadUnlock;
+  deepReadUnlockDetection.reasons.includes('sting_high') ||
+  deepReadUnlockDetection.reasons.includes('return_streak') ||
+  deepReadUnlockDetection.reasons.includes('repeat_signal');
 
 try {
   console.log('[IROS/writerCalls][DEEP_READ_UNLOCK_CHECK]', {
@@ -2615,6 +2575,8 @@ try {
     returnStreakForDeepReadUnlock,
     hasRepeatSignalForDeepReadUnlock,
     shouldUnlockDeepReadConstraints,
+    deepReadLevelForUnlock: deepReadUnlockDetection.level,
+    deepReadReasonsForUnlock: deepReadUnlockDetection.reasons,
   });
 } catch {}
 const isRelationshipReflectionQuestion =
@@ -3719,27 +3681,6 @@ const followupKind =
       diagnosisFollowupBlock,
 
       (() => {
-        const deepCtxPack =
-          ((args as any)?.userContext?.ctxPack &&
-          typeof (args as any).userContext.ctxPack === 'object'
-            ? (args as any).userContext.ctxPack
-            : null) ??
-          ((args as any)?.userContext?.meta?.extra?.ctxPack &&
-          typeof (args as any).userContext.meta.extra.ctxPack === 'object'
-            ? (args as any).userContext.meta.extra.ctxPack
-            : null) ??
-          ((args as any)?.meta?.extra?.ctxPack &&
-          typeof (args as any).meta.extra.ctxPack === 'object'
-            ? (args as any).meta.extra.ctxPack
-            : null) ??
-          ((args as any)?.extra?.ctxPack &&
-          typeof (args as any).extra.ctxPack === 'object'
-            ? (args as any).extra.ctxPack
-            : null) ??
-          ((ctxPack as any) && typeof (ctxPack as any) === 'object'
-            ? (ctxPack as any)
-            : null);
-
         const currentUserText = String(
           (args as any)?.userText ??
             (args as any)?.followupText ??
@@ -3750,53 +3691,25 @@ const followupKind =
           .replace(/\s+/g, ' ')
           .trim();
 
-        const stingLevel = String(
-          deepCtxPack?.stingLevel ??
-            (args as any)?.stingLevel ??
-            (args as any)?.extra?.stingLevel ??
-            (ctxPack as any)?.stingLevel ??
-            '',
-        )
-          .trim()
-          .toUpperCase();
+        const detection = detectDeepRead({
+          currentUserText,
+          previousUserText: null,
+          previousAssistantText: null,
+          ctxPack,
+          args,
+        });
 
-        const returnStreakRaw =
-          deepCtxPack?.flow?.returnStreak ??
-          deepCtxPack?.returnStreak ??
-          (args as any)?.flow?.returnStreak ??
-          (args as any)?.extra?.flow?.returnStreak ??
-          (ctxPack as any)?.flow?.returnStreak ??
-          (ctxPack as any)?.returnStreak ??
-          0;
-
-        const returnStreak = Number.isFinite(Number(returnStreakRaw))
-          ? Number(returnStreakRaw)
-          : 0;
-
-        const repeatSignalRaw =
-          deepCtxPack?.repeatSignal ??
-          deepCtxPack?.repeatSignalSame ??
-          (args as any)?.repeatSignal ??
-          (args as any)?.repeatSignalSame ??
-          (ctxPack as any)?.repeatSignal ??
-          (ctxPack as any)?.repeatSignalSame ??
-          null;
-
-        const hasRepeatSignal =
-          repeatSignalRaw === true ||
-          String(repeatSignalRaw ?? '').trim().length > 0;
-
-        const shouldOpenDeepRead =
-          stingLevel === 'HIGH' || returnStreak >= 2 || hasRepeatSignal;
-
-        if (!shouldOpenDeepRead) return '';
+        if (!detection.shouldOpen) return '';
 
         return [
           'DEEP_READ_HINT (DO NOT OUTPUT):',
           `CURRENT_USER=${currentUserText}`,
-          stingLevel ? `stingLevel=${stingLevel}` : '',
-          `returnStreak=${returnStreak}`,
-          hasRepeatSignal ? `repeatSignal=${String(repeatSignalRaw)}` : '',
+          `level=${detection.level}`,
+          detection.reasons.length ? `reasons=${detection.reasons.join(',')}` : '',
+          detection.meta.stingLevel ? `stingLevel=${detection.meta.stingLevel}` : '',
+          `returnStreak=${detection.meta.returnStreak}`,
+          detection.meta.hasRepeatSignal ? 'repeatSignal=true' : '',
+          detection.hints.length ? `hints=${detection.hints.join(' / ')}` : '',
           'MODE=発話の奥に出ている反応パターンを軽く読む',
           'RULE=無意識を読んだ、見抜いた、筒抜け、とは出力しない',
           'RULE=人格診断・決めつけ・断定にしない',
