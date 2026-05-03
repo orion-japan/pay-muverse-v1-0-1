@@ -49,6 +49,219 @@ function pickObservedText(input: any, builtDebug: Record<string, unknown>): stri
   return '';
 }
 
+function pickSelfAcceptance(input: any): number | null {
+  const candidates = [
+    input?.meta?.extra?.selfAcceptance,
+    input?.meta?.extra?.self_acceptance,
+    input?.meta?.extra?.ctxPack?.selfAcceptance,
+    input?.meta?.extra?.ctxPack?.self_acceptance,
+    input?.meta?.extra?.memoryStateSnapshot?.selfAcceptance,
+    input?.meta?.extra?.ctxPack?.memoryStateSnapshot?.selfAcceptance,
+    input?.meta?.selfAcceptance,
+    input?.meta?.self_acceptance,
+  ];
+
+  for (const raw of candidates) {
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+      return Math.max(0, Math.min(1, raw));
+    }
+
+    if (typeof raw === 'string' && raw.trim()) {
+      const n = Number(raw);
+      if (Number.isFinite(n)) return Math.max(0, Math.min(1, n));
+    }
+  }
+
+  return null;
+}
+
+type SelfAcceptanceBandForDiagnosis = 'unknown' | 'low' | 'middle' | 'high';
+type TargetScopeForDiagnosis = 'self' | 'other' | 'situation';
+type FlowReadModeForDiagnosis =
+  | 'self_state'
+  | 'relational_reflection'
+  | 'situation_reflection';
+type SelfAcceptanceUseScope = 'self' | 'observer_correction';
+
+function classifySelfAcceptanceForDiagnosis(
+  selfAcceptance: number | null,
+): SelfAcceptanceBandForDiagnosis {
+  if (selfAcceptance == null) return 'unknown';
+  if (selfAcceptance < 0.35) return 'low';
+  if (selfAcceptance > 0.7) return 'high';
+  return 'middle';
+}
+
+function isSelfTargetLabel(targetLabel: string): boolean {
+  const s = norm(targetLabel)
+    .replace(/\s+/g, '')
+    .toLowerCase();
+
+  return (
+    !s ||
+    s === '自分' ||
+    s === '今の自分' ||
+    s === '自分自身' ||
+    s === '私' ||
+    s === 'わたし' ||
+    s === '俺' ||
+    s === '僕' ||
+    s === 'あなた自身' ||
+    s === 'self' ||
+    s === 'me'
+  );
+}
+
+function classifyTargetScopeForDiagnosis(targetLabel: string): TargetScopeForDiagnosis {
+  const s = norm(targetLabel).replace(/\s+/g, '').toLowerCase();
+
+  if (isSelfTargetLabel(s)) return 'self';
+
+  if (
+    /(状況|現状|仕事|職場|会社|事業|案件|企画|プロジェクト|サービス|開発|実装|申請|資料|発信|投稿|tiktok|sns|iros|sofia|muverse|mu-verse|マッピング|イベント|場|流れ|恋愛全体|関係全体)/u.test(s)
+  ) {
+    return 'situation';
+  }
+
+  return 'other';
+}
+
+function resolveFlowReadMode(targetScope: TargetScopeForDiagnosis): FlowReadModeForDiagnosis {
+  if (targetScope === 'self') return 'self_state';
+  if (targetScope === 'situation') return 'situation_reflection';
+  return 'relational_reflection';
+}
+
+function buildTargetScopeMaterial(
+  targetLabel: string,
+  targetScope: TargetScopeForDiagnosis,
+  flowReadMode: FlowReadModeForDiagnosis,
+): string {
+  if (targetScope === 'self') {
+    return [
+      '観測対象は自分自身。',
+      '出たフローは、本人の今の状態に近いものとして読む。',
+      '現状には、自分の中で実際に起きている止まり方、動き方、気になり方を現実語で書く。',
+      `flowReadMode=${flowReadMode}`,
+    ].join(' ');
+  }
+
+  if (targetScope === 'situation') {
+    return [
+      `観測対象は「${targetLabel}」という状況・場・テーマ。`,
+      '出たフローは、状況そのものの絶対状態ではなく、観測者に映っている場の動き、詰まり、優先順位、扱い方として読む。',
+      '人の内面や気持ちとして書かず、現実でどの判断・作業・条件が止まりやすいかを書く。',
+      '状況診断では「内側」「気持ち」「心」などの人の心理に見える言葉を避け、判断・優先順位・進行・作業・条件・場の詰まりに置き換える。',
+      `flowReadMode=${flowReadMode}`,
+    ].join(' ');
+  }
+
+  return [
+    `観測対象は「${targetLabel}」という相手。`,
+    '出たフローは、相手本人の本心や事実の確定ではなく、関係の中に出ている相手側の状態として読む。',
+    '相手の状態は必ず書く。ただし「本当はこう思っている」と断定しない。',
+    '「相手側には〜が出ているように見える」「こちらから見ると〜に見える」の温度で書く。',
+    '一般論で終わらせず、読んだ人が強く反応する具体的な状態を一つ入れる。ただし「なんでわかるの？」という表現自体は出さない。',
+    `flowReadMode=${flowReadMode}`,
+  ].join(' ');
+}
+
+function buildSelfAcceptanceMaterial(
+  selfAcceptance: number | null,
+  scope: SelfAcceptanceUseScope,
+  targetScope: TargetScopeForDiagnosis,
+): string {
+  const band = classifySelfAcceptanceForDiagnosis(selfAcceptance);
+
+  if (scope === 'observer_correction') {
+    if (targetScope === 'situation') {
+      if (band === 'low') {
+        return [
+          'これは状況そのものの性質ではなく、観測者側の受け取り方の補正として使う。',
+          '状況を見るときに、周りの反応や条件に意識を取られやすい。',
+          '診断では、場の詰まりと、自分側で扱える一点に変換する。',
+        ].join(' ');
+      }
+
+      if (band === 'high') {
+        return [
+          'これは状況そのものの性質ではなく、観測者側の受け取り方の補正として使う。',
+          '状況を見ても、自分が扱える範囲へ戻りやすい。',
+          '診断では、場の動きと、今どこを整えると動きやすいかに変換する。',
+        ].join(' ');
+      }
+
+      if (band === 'middle') {
+        return [
+          'これは状況そのものの性質ではなく、観測者側の受け取り方の補正として使う。',
+          '状況の動きは見えているが、どこから手をつけるかはまだ決めきれない。',
+          '診断では、状況の見え方と、自分側で決める一点に変換する。',
+        ].join(' ');
+      }
+
+      return [
+        '観測者側の補正値は未取得。',
+        '診断では、内部フロー素材を状況の動きや扱い方として現実語に置き換える。',
+      ].join(' ');
+    }
+
+    if (band === 'low') {
+      return [
+        'これは観測対象本人の状態ではなく、観測者側の受け取り方の補正として使う。',
+        '相手や関係を見ようとすると、観測者側が周りの反応や距離感に意識を取られやすい。',
+        '診断では、相手の内面を断定せず、「こちらから見ると関係がこう見えやすい」という形に変換する。',
+      ].join(' ');
+    }
+
+    if (band === 'high') {
+      return [
+        'これは観測対象本人の状態ではなく、観測者側の受け取り方の補正として使う。',
+        '相手や関係を見ても、観測者側が自分の感覚へ戻りやすく、相手と自分を切り分けて見やすい。',
+        '診断では、相手の内面を断定せず、こちらがどう関わると見え方が整いやすいかに変換する。',
+      ].join(' ');
+    }
+
+    if (band === 'middle') {
+      return [
+        'これは観測対象本人の状態ではなく、観測者側の受け取り方の補正として使う。',
+        '相手の状態を見たい気持ちはあるが、自分がどう関わるか、どこまで決めるかも混ざりやすい。',
+        '診断では、相手の内面を断定せず、関係上の見え方と自分側で扱える一点に変換する。',
+      ].join(' ');
+    }
+
+    return [
+      '観測者側の補正値は未取得。',
+      '診断では、対象本人の内面を断定せず、内部フロー素材を関係上の見え方として現実語に置き換える。',
+    ].join(' ');
+  }
+
+  if (band === 'low') {
+    return [
+      '自分の感覚を後回しにしやすく、周りの反応や関係性に意識を取られやすい状態。',
+      '現実では、自分が何をしたいかより、相手や場にどう見えるかが先に出やすい。',
+      '診断では、外側に合わせすぎて手が止まりやすい点として反映する。',
+    ].join(' ');
+  }
+
+  if (band === 'high') {
+    return [
+      '自分の感覚に戻りやすく、必要なことを選び直しやすい状態。',
+      '現実では、外側に揺れても、自分が進めたいことへ戻る力が残っている。',
+      '診断では、迷いを減らして自分の軸へ戻れる点として反映する。',
+    ].join(' ');
+  }
+
+  if (band === 'middle') {
+    return [
+      '自分の感覚は見えているが、まだ決めきれずに外側の反応も気になりやすい状態。',
+      '現実では、わかっているのに手が止まる、やりたいのに周りが気になる、という形で出やすい。',
+      '診断では、自分の中で決める一点を作ると動きやすい点として反映する。',
+    ].join(' ');
+  }
+
+  return '自己受容の数値は未取得。診断では、内部フロー素材を中心に現実の状態へ置き換える。';
+}
+
 export async function diagnosisEngine(input: any): Promise<any> {
   const built = buildDiagnosisText({
     targetLabel: input.targetLabel,
@@ -63,10 +276,28 @@ export async function diagnosisEngine(input: any): Promise<any> {
     norm(debug.targetLabel) ||
     '自分';
 
+  const targetScope = classifyTargetScopeForDiagnosis(targetLabel);
+  const flowReadMode = resolveFlowReadMode(targetScope);
+  const targetScopeMaterial = buildTargetScopeMaterial(
+    targetLabel,
+    targetScope,
+    flowReadMode,
+  );
+
   const nowShort = norm(debug.nowFlowShort);
   const futureShort = norm(debug.futureFlowShort);
   const delta = norm(debug.deltaSentence);
   const observed = pickObservedText(input, debug);
+
+  const selfAcceptance = pickSelfAcceptance(input);
+  const selfAcceptanceBand = classifySelfAcceptanceForDiagnosis(selfAcceptance);
+  const selfAcceptanceUseScope: SelfAcceptanceUseScope =
+    targetScope === 'self' ? 'self' : 'observer_correction';
+  const selfAcceptanceMaterial = buildSelfAcceptanceMaterial(
+    selfAcceptance,
+    selfAcceptanceUseScope,
+    targetScope,
+  );
 
   const currentMaterial = norm((built.debug as any)?.observationResult);
   const pointMaterial = delta;
@@ -75,7 +306,9 @@ export async function diagnosisEngine(input: any): Promise<any> {
 
   // LLMに渡す素材は「このターンの診断素材」だけ。
   // 会話履歴の要約や、過去の流れの説明には寄せない。
-  // 内部フローは、現実の状況・優先順位・意識の向きに置き換えて使う。
+  // 内部フローは、対象そのものの絶対状態ではなく、観測場に現れた反映として扱う。
+  // 自分診断では本人状態、相手診断では相手側に出ている状態、状況診断では場の動きとして現実語に変換する。
+  // SAは数値として出さず、自分診断では本人状態、相手/状況診断では観測者側の受け取り補正として使う。
   const isDetailMode =
     input?.meta?.extra?.detailMode === true ||
     input?.meta?.detailMode === true;
@@ -92,6 +325,9 @@ ${targetLabel}
 
 【ユーザー入力】
 ${observed || '（入力なし）'}
+
+【対象の読み方】
+${targetScopeMaterial}
 
 【現状の素材】
 ${currentMaterial}
@@ -110,6 +346,9 @@ ${messageMaterial}
 向かう先：${futureShort || '（なし）'}
 変化の要点：${delta || '（なし）'}
 
+【自己受容の素材】
+${selfAcceptanceMaterial}
+
 ---
 
 出力ルール：
@@ -125,22 +364,32 @@ ${messageMaterial}
 ・観測対象は入力された対象をそのまま書く
 
 ・フェーズ、位相、深度、S1、R1、C1、I1、T1、Inner、Outer などの内部分類名や記号は出さない
+・targetScope、flowReadMode、SA、自己受容、selfAcceptance、数値、低い、高い、中間などの内部語は出さない
 ・内部フロー素材をそのまま説明しない
 ・感情や深度の変化は、現実の状況、優先順位、意識の向きに置き換えて書く
+・自己受容の素材は、自分の感覚を後回しにしやすいか、自分の軸に戻りやすいかとして自然に反映する
 ・通常の意識の範囲で理解できる言葉にする
 ・会話の流れを読んでいるように書かない
-・「これまで」「前から」「最近」「ずっと」など、履歴を見ているような言い方は使わない
+・「これまで」「今まで」「前から」「最近」「ずっと」など、履歴を見ているような言い方は使わない
 ・ユーザーの過去、性格、背景、相手の本心を推測しない
 
-・「現状」は、今その人が現実でどんな状態に見えるかを書く
+・自分診断では、出たフローを本人の今の状態として書く
+・相手診断では、相手側に出ている状態を必ず書く。ただし、本心・事実・確定判断として断定しない
+・相手診断では、「相手側には〜が出ているように見える」「こちらから見ると〜に見える」の温度で書く
+・相手診断では、一般論で終わらせず、具体的な状態を一つ入れる
+・状況診断では、人の内面ではなく、場の動き・詰まり・優先順位・判断・作業の進み方として書く
+・状況診断では、「内側」「気持ち」「心」「相手の反応」など、人の心理に見える言葉に寄せすぎない
+・状況診断では、「表では動いているのに内側では慎重」ではなく、「表では進んでいるように見えても、判断や優先順位が固まりにくい」のように書く
+
+・「現状」は、今その人や状況が現実でどんな状態に見えるかを書く
 ・「ポイント」は、今見落としやすい一点、または整えると変わりやすい一点を書く
-・「意識の向かう先」は、気持ちや意識が現実の中でどこへ向かおうとしているかを書く
+・「意識の向かう先」は、自分/相手診断では気持ちや意識の向き、状況診断では次に扱う範囲・判断・優先順位として書く
 ・「メッセージ」は、今の診断を受け取りやすい一文にする
 
 ・「悪いところ」「原因」「問題点」の指摘にしない
 ・抽象語を増やさず、日常語でわかりやすく書く
-・「方向性」「次の段階」「実り」「基盤」「熱量」「意識・感情・行動」「収束」などの抽象語・構造語はできるだけ使わない
-・使う場合は、「向かいたい先」「次にやること」「形になること」「足元の準備」「やりたい気持ち」「気持ちと行動」「整いやすくなる」のように言い換える
+・「方向性」「次の段階」「実り」「基盤」「熱量」「意識・感情・行動」「収束」「境目」などの抽象語・構造語はできるだけ使わない
+・使う場合は、「向かいたい先」「次にやること」「形になること」「足元の準備」「やりたい気持ち」「気持ちと行動」「整いやすくなる」「切り替わるところ」のように言い換える
 ・一文を長くしすぎない
 ・比喩は使ってもよいが、難しい象徴表現にしない
 ・説明しすぎない
@@ -160,6 +409,9 @@ ${targetLabel}
 【ユーザー入力】
 ${observed || '（入力なし）'}
 
+【対象の読み方】
+${targetScopeMaterial}
+
 【現状の素材】
 ${currentMaterial}
 
@@ -177,6 +429,9 @@ ${messageMaterial}
 向かう先：${futureShort || '（なし）'}
 変化の要点：${delta || '（なし）'}
 
+【自己受容の素材】
+${selfAcceptanceMaterial}
+
 ---
 
 出力ルール：
@@ -192,19 +447,29 @@ ${messageMaterial}
 ・観測対象は入力された対象をそのまま書く
 
 ・フェーズ、位相、深度、S1、R1、C1、I1、T1、Inner、Outer などの内部分類名や記号は出さない
+・targetScope、flowReadMode、SA、自己受容、selfAcceptance、数値、低い、高い、中間などの内部語は出さない
 ・「1枚目」「2枚目」「カード」「引いた結果」「出た結果」など、占いを連想させる言い方は使わない
 ・番号づけや手順説明のような書き方をしない
 
 ・内部フロー素材をそのまま説明しない
 ・感情や深度の変化は、現実の状況、優先順位、意識の向きに置き換えて書く
+・自己受容の素材は、自分の感覚を後回しにしやすいか、自分の軸に戻りやすいかとして自然に反映する
 ・通常の意識の範囲で理解できる言葉にする
 ・会話の流れを読んでいるように書かない
-・「これまで」「前から」「最近」「ずっと」など、履歴を見ているような言い方は使わない
+・「これまで」「今まで」「前から」「最近」「ずっと」など、履歴を見ているような言い方は使わない
 ・ユーザーの過去、性格、背景、相手の本心を推測しない
 
-・「現状」は、今その人が現実でどんな状態に見えるかを書く
+・自分診断では、出たフローを本人の今の状態として書く
+・相手診断では、相手側に出ている状態を必ず書く。ただし、本心・事実・確定判断として断定しない
+・相手診断では、「相手側には〜が出ているように見える」「こちらから見ると〜に見える」の温度で書く
+・相手診断では、一般論で終わらせず、具体的な状態を一つ入れる
+・状況診断では、人の内面ではなく、場の動き・詰まり・優先順位・判断・作業の進み方として書く
+・状況診断では、「内側」「気持ち」「心」「相手の反応」など、人の心理に見える言葉に寄せすぎない
+・状況診断では、「表では動いているのに内側では慎重」ではなく、「表では進んでいるように見えても、判断や優先順位が固まりにくい」のように書く
+
+・「現状」は、今その人や状況が現実でどんな状態に見えるかを書く
 ・「ポイント」は、今見落としやすい一点、または整えると変わりやすい一点を書く
-・「意識の向かう先」は、気持ちや意識が現実の中でどこへ向かおうとしているかを書く
+・「意識の向かう先」は、自分/相手診断では気持ちや意識の向き、状況診断では次に扱う範囲・判断・優先順位として書く
 ・「メッセージ」は、今の診断を受け取りやすい一文にする
 
 ・「悪いところ」「原因」「問題点」の指摘にしない
@@ -213,8 +478,8 @@ ${messageMaterial}
   日常的でやわらかい表現に言い換える
 
 ・「成長」「進化」「希望」「歓喜」などの抽象キーワードは使わない
-・「方向性」「次の段階」「実り」「基盤」「熱量」「意識・感情・行動」「収束」などの抽象語・構造語はできるだけ使わない
-・使う場合は、「向かいたい先」「次にやること」「形になること」「足元の準備」「やりたい気持ち」「気持ちと行動」「整いやすくなる」のように言い換える
+・「方向性」「次の段階」「実り」「基盤」「熱量」「意識・感情・行動」「収束」「境目」などの抽象語・構造語はできるだけ使わない
+・使う場合は、「向かいたい先」「次にやること」「形になること」「足元の準備」「やりたい気持ち」「気持ちと行動」「整いやすくなる」「切り替わるところ」のように言い換える
 ・難しい比喩に寄りすぎず、「一読でわかる」言葉にする
 ・専門的・詩的すぎる表現は避ける
 ・説明口調にしすぎない
@@ -228,7 +493,7 @@ ${messageMaterial}
 
 出力例：
 🌀 観測対象：今の自分
-🧭 現状：やりたいことは見えてきていますが、まだ何から形にするかが少し定まりにくい状態です。
+🧭 現状：やりたいことは見えてきていますが、周りの反応が気になって、まだ何から形にするかが少し定まりにくい状態です。
 🧩 ポイント：考えを広げすぎると迷いやすいので、まず一つだけ決めることが大事です。
 🌿 意識の向かう先：外側の反応より、自分が今進めたいことへ意識を戻す方向です。
 🌱 メッセージ：今は「まずこれだけ進める」と決めることで、動きやすくなります。
@@ -261,6 +526,12 @@ ${messageMaterial}
     meaningDirection: futureShort || null,
     meaningTension: nowShort || null,
 
+    targetScope,
+    flowReadMode,
+    selfAcceptance,
+    selfAcceptanceBand,
+    selfAcceptanceUseScope,
+
     observedText: observed || null,
     targetLabel: targetLabel || null,
 
@@ -279,15 +550,32 @@ ${messageMaterial}
       extra: {
         ...((input?.meta as any)?.extra ?? {}),
         irMeta,
+        targetScope,
+        flowReadMode,
+        selfAcceptance,
+        self_acceptance: selfAcceptance,
+        selfAcceptanceUseScope,
         ctxPack: {
           ...(((input?.meta as any)?.extra?.ctxPack) ?? {}),
           irMeta,
+          targetScope,
+          flowReadMode,
+          selfAcceptance,
+          self_acceptance: selfAcceptance,
+          selfAcceptanceUseScope,
         },
       },
     },
     debug: {
       ...debug,
       observedText: observed,
+      targetScope,
+      flowReadMode,
+      selfAcceptance,
+      selfAcceptanceBand,
+      selfAcceptanceUseScope,
+      selfAcceptanceMaterial,
+      targetScopeMaterial,
       irMeta,
     },
   };

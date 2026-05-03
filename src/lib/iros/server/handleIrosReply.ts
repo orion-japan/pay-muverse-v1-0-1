@@ -1200,33 +1200,80 @@ if (isIrDiagnosisInput) {
     .replace(/^\s*ir[\s:：　-]*/u, '')
     .trim();
 
-  const targetLabel = cleanedTargetLabel || '自分';
+    const targetLabel = cleanedTargetLabel || '自分';
 
-  const diag = await diagnosisEngine({
-    targetLabel,
-    meta: {
-      extra: {
-        ...(extraLocal ?? {}),
-        isIrDiagnosisTurn: true,
-        presentationKind: 'diagnosis',
-        mode: 'diagnosis',
-        renderEngine: false,
-        renderEngineGate: false,
-        persistAssistantMessage: true,
-        ctxPack: {},
-        slotPlanKeys: [],
-        slotPlan_keys: [],
+    const diagMemoryState = await (async () => {
+      try {
+        return typeof userCode === 'string' && userCode.trim().length > 0
+          ? await loadIrosMemoryState(supabase as any, userCode)
+          : null;
+      } catch (e) {
+        console.warn('[IROS/DIAGNOSIS][MEMORY_STATE_LOAD_FAILED]', {
+          conversationId,
+          userCode,
+          error: String((e as any)?.message ?? e),
+        });
+        return null;
+      }
+    })();
+
+    const diagSelfAcceptance =
+      typeof diagMemoryState?.selfAcceptance === 'number'
+        ? diagMemoryState.selfAcceptance
+        : typeof (extraLocal as any)?.selfAcceptance === 'number'
+          ? (extraLocal as any).selfAcceptance
+          : typeof (extraLocal as any)?.self_acceptance === 'number'
+            ? (extraLocal as any).self_acceptance
+            : null;
+
+    const diagMemoryStateSnapshot = diagMemoryState
+      ? {
+          qPrimary: diagMemoryState.qPrimary ?? null,
+          depthStage: diagMemoryState.depthStage ?? null,
+          phase: diagMemoryState.phase ?? null,
+          selfAcceptance: diagSelfAcceptance,
+          intentLayer: diagMemoryState.intentLayer ?? null,
+          yLevel: diagMemoryState.yLevel ?? null,
+          hLevel: diagMemoryState.hLevel ?? null,
+          spinLoop: diagMemoryState.spinLoop ?? null,
+          spinStep: diagMemoryState.spinStep ?? null,
+          descentGate: diagMemoryState.descentGate ?? null,
+        }
+      : null;
+
+    const diag = await diagnosisEngine({
+      targetLabel,
+      meta: {
+        extra: {
+          ...(extraLocal ?? {}),
+          selfAcceptance: diagSelfAcceptance,
+          self_acceptance: diagSelfAcceptance,
+          memoryStateSnapshot: diagMemoryStateSnapshot,
+          isIrDiagnosisTurn: true,
+          presentationKind: 'diagnosis',
+          mode: 'diagnosis',
+          renderEngine: false,
+          renderEngineGate: false,
+          persistAssistantMessage: true,
+          ctxPack: {
+            ...(((extraLocal as any)?.ctxPack) ?? {}),
+            selfAcceptance: diagSelfAcceptance,
+            self_acceptance: diagSelfAcceptance,
+            memoryStateSnapshot: diagMemoryStateSnapshot,
+          },
+          slotPlanKeys: [],
+          slotPlan_keys: [],
+        },
+      } as any,
+      slots: {
+        userText: rawIrText,
       },
-    } as any,
-    slots: {
       userText: rawIrText,
-    },
-    userText: rawIrText,
-    inputText: rawIrText,
-    conversationId,
-    userCode,
-    traceId: traceId ?? null,
-  });
+      inputText: rawIrText,
+      conversationId,
+      userCode,
+      traceId: traceId ?? null,
+    });
   const diagIrMeta =
   (diag as any)?.meta?.extra?.ctxPack?.irMeta ??
   (diag as any)?.meta?.extra?.irMeta ??
