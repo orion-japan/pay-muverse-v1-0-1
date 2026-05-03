@@ -465,14 +465,104 @@ export type IrDiagnosisSnapshot = {
   createdAt: string | null;
 };
 
+function normalizeIrDiagnosisTargetForMatch(value: unknown): string {
+  return String(value ?? '')
+    .replace(/[\s　]+/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function pickIrMetaFromMessageMeta(meta: any): any | null {
+  const candidates = [
+    meta?.extra?.irMeta,
+    meta?.extra?.ctxPack?.irMeta,
+    meta?.ctxPack?.irMeta,
+    meta?.irMeta,
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === 'object') return candidate;
+  }
+
+  return null;
+}
+
+function snapshotFromIrMetaAndMessage(row: any, irMeta: any): IrDiagnosisSnapshot | null {
+  const snapshot: IrDiagnosisSnapshot = {
+    target: typeof irMeta?.targetLabel === 'string' ? irMeta.targetLabel : null,
+    observation:
+      typeof irMeta?.observationResult === 'string'
+        ? irMeta.observationResult
+        : null,
+    state:
+      typeof irMeta?.awarenessText === 'string'
+        ? irMeta.awarenessText
+        : null,
+    summary:
+      typeof irMeta?.summaryText === 'string'
+        ? irMeta.summaryText
+        : typeof row?.text === 'string' && row.text.trim()
+          ? row.text.trim()
+          : typeof row?.content === 'string' && row.content.trim()
+            ? row.content.trim()
+            : null,
+    createdAt:
+      typeof row?.created_at === 'string'
+        ? row.created_at
+        : null,
+  };
+
+  const hasDiagnosisSnapshot =
+    snapshot.target !== null ||
+    snapshot.observation !== null ||
+    snapshot.state !== null ||
+    snapshot.summary !== null;
+
+  return hasDiagnosisSnapshot ? snapshot : null;
+}
+
 // ========================================
-// 🔶 loadLatestIrDiagnosisSnapshot（枠だけ）
+// 🔶 loadLatestIrDiagnosisSnapshot
 // ========================================
 export async function loadLatestIrDiagnosisSnapshot(
   supabase: any,
-  userCode: string
+  userCode: string,
+  targetLabel?: string | null
 ): Promise<IrDiagnosisSnapshot | null> {
+  const requestedTarget = normalizeIrDiagnosisTargetForMatch(targetLabel);
+
   try {
+    if (requestedTarget) {
+      const { data: messageRows, error: messageError } = await supabase
+        .from('iros_messages')
+        .select('text, content, meta, created_at')
+        .eq('user_code', userCode)
+        .eq('role', 'assistant')
+        .order('created_at', { ascending: false })
+        .limit(80);
+
+      if (messageError) {
+        console.warn('[IROS][loadLatestIrDiagnosisSnapshot] message query error', {
+          userCode,
+          targetLabel,
+          error: messageError,
+        });
+      } else {
+        const rows = Array.isArray(messageRows) ? messageRows : [];
+
+        for (const row of rows) {
+          const irMeta = pickIrMetaFromMessageMeta((row as any)?.meta);
+          if (!irMeta) continue;
+
+          const rowTarget = normalizeIrDiagnosisTargetForMatch(irMeta?.targetLabel);
+          if (!rowTarget || rowTarget !== requestedTarget) continue;
+
+          const snapshot = snapshotFromIrMetaAndMessage(row, irMeta);
+          if (snapshot) return snapshot;
+        }
+      }
+    }
+
     const { data, error } = await supabase
       .from('iros_memory_state')
       .select(`

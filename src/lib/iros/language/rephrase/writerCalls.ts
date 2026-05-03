@@ -3610,6 +3610,13 @@ const diagnosisFollowupBlock = (() => {
     const aware = String((irMeta as any)?.awarenessText ?? '').trim();
     const summary = String((irMeta as any)?.summaryText ?? '').trim();
     const target = String((irMeta as any)?.targetLabel ?? '').trim();
+    const isSelfTarget =
+      /^(自分|今の自分|わたし|私|僕|俺|自分自身)$/u.test(target);
+
+    const targetDisplay =
+      target && !isSelfTarget && !/(さん|様|先生|くん|ちゃん)$/u.test(target)
+        ? `${target}さん`
+        : target;
 
     const kindRule =
       kind === 'action'
@@ -3624,6 +3631,10 @@ const diagnosisFollowupBlock = (() => {
       'DIAGNOSIS_FOLLOWUP (DO NOT OUTPUT):',
       `FOLLOWUP_KIND=${kind || 'concretize'}`,
       target ? `DIAGNOSIS_TARGET=${target}` : '',
+      targetDisplay ? `DIAGNOSIS_TARGET_DISPLAY=${targetDisplay}` : '',
+      targetDisplay
+        ? `TARGET_NAME_RULE=When referring to the diagnosis target in prose, use "${targetDisplay}" instead of "${target}". Keep stored target labels unchanged.`
+        : '',
       obs ? `DIAGNOSIS_OBSERVATION=${obs}` : '',
       aware ? `DIAGNOSIS_STATE=${aware}` : '',
       summary ? `DIAGNOSIS_SUMMARY=${summary}` : '',

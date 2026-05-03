@@ -2308,6 +2308,43 @@ function normForRecall(v: any): string {
     // ✅ baseMeta は extra を絶対に落とさない（V2: route/ctx → orch へ橋渡し）
     const baseMetaMergedForTurn: any = mergeExtra({ ...(ctx.baseMetaForTurn ?? {}) }, extraLocal ?? null);
 
+    // ✅ buildTurnContext 側で確定した extra / ctxPack を extraLocal に戻す
+    // - diagnosisFollowup / targetLabel / presentationKind は context 側で作られる
+    // - postProcess / rephrase 前の同期は extraLocal を見るため、ここで落とさない
+    {
+      const ctxExtraForTurn =
+        (ctx.baseMetaForTurn as any)?.extra &&
+        typeof (ctx.baseMetaForTurn as any).extra === 'object'
+          ? (ctx.baseMetaForTurn as any).extra
+          : {};
+
+      const prevExtraLocalForTurn =
+        extraLocal && typeof extraLocal === 'object'
+          ? extraLocal
+          : {};
+
+      const ctxPackFromCtxExtra =
+        (ctxExtraForTurn as any)?.ctxPack &&
+        typeof (ctxExtraForTurn as any).ctxPack === 'object'
+          ? (ctxExtraForTurn as any).ctxPack
+          : {};
+
+      const ctxPackFromPrevExtra =
+        (prevExtraLocalForTurn as any)?.ctxPack &&
+        typeof (prevExtraLocalForTurn as any).ctxPack === 'object'
+          ? (prevExtraLocalForTurn as any).ctxPack
+          : {};
+
+      extraLocal = {
+        ...ctxExtraForTurn,
+        ...prevExtraLocalForTurn,
+        ctxPack: {
+          ...ctxPackFromCtxExtra,
+          ...ctxPackFromPrevExtra,
+        },
+      };
+    }
+
     // ✅ GreetingGate の slotPlan を “root” に持ち上げる（extra 側だけだと拾われない経路がある）
     // - runGreetingGate は metaForSave.extra に framePlan/slotPlan/slotPlanPolicy/slotPlanLen を入れている
     // - ここで baseMetaMergedForTurn へコピーして、Orchestrator が確実に拾えるようにする
@@ -2776,7 +2813,6 @@ function normForRecall(v: any): string {
     // =========================
     const isIrDiagnosis =
       orchExtra?.isIrDiagnosisTurn === true ||
-      orchExtra?.presentationKind === 'diagnosis' ||
       orchExtra?.modeHint === 'IR';
 
       if (isIrDiagnosis) {
@@ -2940,14 +2976,30 @@ function normForRecall(v: any): string {
             ? 'diagnosis_action_shift'
             : 'diagnosis_followup_shift';
 
+        const resolvedDiagnosisTargetForWriter =
+          diagnosisTargetAfterOrch ||
+          String((orchCtxPack as any)?.targetLabel ?? '').trim() ||
+          String((orchCtxPack as any)?.diagnosisFollowupTargetLabel ?? '').trim() ||
+          String((orchExtra as any)?.targetLabel ?? '').trim() ||
+          String((extraLocal as any)?.targetLabel ?? '').trim() ||
+          String((extraLocal as any)?.ctxPack?.targetLabel ?? '').trim() ||
+          String((extraLocal as any)?.ctxPack?.diagnosisFollowupTargetLabel ?? '').trim() ||
+          null;
+
         orchCtxPack.diagnosisFollowup = true;
         orchCtxPack.followupKind = diagnosisFollowupKindAfterOrch;
         orchCtxPack.continuityKind = 'diagnosis_followup';
+        orchCtxPack.presentationKind = 'diagnosis';
         orchCtxPack.goalKind = normalizedGoalKind;
         orchCtxPack.targetKind = normalizedGoalKind;
         orchCtxPack.shiftKind = normalizedShiftKind;
         orchCtxPack.replyGoal = { kind: normalizedGoalKind };
         orchCtxPack.question = null;
+
+        if (resolvedDiagnosisTargetForWriter) {
+          orchCtxPack.targetLabel = resolvedDiagnosisTargetForWriter;
+          orchCtxPack.situationTopic = resolvedDiagnosisTargetForWriter;
+        }
 
         if (diagnosisTopicHintAfterOrch) {
           orchCtxPack.topicHint = diagnosisTopicHintAfterOrch;
@@ -2955,26 +3007,24 @@ function normForRecall(v: any): string {
           orchCtxPack.topicDigest = diagnosisTopicHintAfterOrch;
         }
 
-        if (diagnosisTargetAfterOrch) {
-          orchCtxPack.situationTopic = diagnosisTargetAfterOrch;
-        }
-
         if (orchExtra && typeof orchExtra === 'object') {
           (orchExtra as any).diagnosisFollowup = true;
+          (orchExtra as any).presentationKind = 'diagnosis';
           (orchExtra as any).followupKind = diagnosisFollowupKindAfterOrch;
           (orchExtra as any).goalKind = normalizedGoalKind;
           (orchExtra as any).targetKind = normalizedGoalKind;
           (orchExtra as any).shiftKind = normalizedShiftKind;
           (orchExtra as any).question = null;
 
+          if (resolvedDiagnosisTargetForWriter) {
+            (orchExtra as any).targetLabel = resolvedDiagnosisTargetForWriter;
+            (orchExtra as any).situationTopic = resolvedDiagnosisTargetForWriter;
+          }
+
           if (diagnosisTopicHintAfterOrch) {
             (orchExtra as any).topicHint = diagnosisTopicHintAfterOrch;
             (orchExtra as any).conversationLine = diagnosisTopicHintAfterOrch;
             (orchExtra as any).topicDigest = diagnosisTopicHintAfterOrch;
-          }
-
-          if (diagnosisTargetAfterOrch) {
-            (orchExtra as any).situationTopic = diagnosisTargetAfterOrch;
           }
         }
 
@@ -2983,7 +3033,16 @@ function normForRecall(v: any): string {
             ? (extraLocal as any).ctxPack
             : {};
 
+        (extraLocal as any).diagnosisFollowup = true;
+        (extraLocal as any).presentationKind = 'diagnosis';
+        (extraLocal as any).followupKind = diagnosisFollowupKindAfterOrch;
+
+        if (resolvedDiagnosisTargetForWriter) {
+          (extraLocal as any).targetLabel = resolvedDiagnosisTargetForWriter;
+        }
+
         (extraLocal as any).ctxPack.diagnosisFollowup = true;
+        (extraLocal as any).ctxPack.presentationKind = 'diagnosis';
         (extraLocal as any).ctxPack.followupKind = diagnosisFollowupKindAfterOrch;
         (extraLocal as any).ctxPack.continuityKind = 'diagnosis_followup';
         (extraLocal as any).ctxPack.goalKind = normalizedGoalKind;
@@ -2993,14 +3052,15 @@ function normForRecall(v: any): string {
         (extraLocal as any).ctxPack.question =
           (extraLocal as any).ctxPack.question ?? null;
 
+        if (resolvedDiagnosisTargetForWriter) {
+          (extraLocal as any).ctxPack.targetLabel = resolvedDiagnosisTargetForWriter;
+          (extraLocal as any).ctxPack.situationTopic = resolvedDiagnosisTargetForWriter;
+        }
+
         if (diagnosisTopicHintAfterOrch) {
           (extraLocal as any).ctxPack.topicHint = diagnosisTopicHintAfterOrch;
           (extraLocal as any).ctxPack.conversationLine = diagnosisTopicHintAfterOrch;
           (extraLocal as any).ctxPack.topicDigest = diagnosisTopicHintAfterOrch;
-        }
-
-        if (diagnosisTargetAfterOrch) {
-          (extraLocal as any).ctxPack.situationTopic = diagnosisTargetAfterOrch;
         }
       }
 
@@ -3433,6 +3493,94 @@ function normForRecall(v: any): string {
       history: historyForTurn,
       extra: extraLocal ?? null,
     });
+
+    // ✅ diagnosis followup 系を out.metaForSave.extra に明示同期
+    // - rephraseEngine は opts.meta.extra.presentationKind / targetLabel を読む
+    // - extraLocal で確定した診断 followup 情報を、rephrase 呼び出し直前の正本へ戻す
+    {
+      const diagnosisCtx =
+        (extraLocal as any)?.ctxPack && typeof (extraLocal as any).ctxPack === 'object'
+          ? (extraLocal as any).ctxPack
+          : null;
+
+      const shouldSyncDiagnosisToOut =
+        (extraLocal as any)?.diagnosisFollowup === true ||
+        diagnosisCtx?.diagnosisFollowup === true ||
+        String((extraLocal as any)?.presentationKind ?? '').trim() === 'diagnosis' ||
+        String(diagnosisCtx?.presentationKind ?? '').trim() === 'diagnosis';
+
+      console.log(
+        '[IROS/DIAG_OUT_SYNC][CHECK_JSON]',
+        JSON.stringify({
+          traceId: (ctx as any)?.traceId ?? null,
+          shouldSyncDiagnosisToOut,
+          extraLocalDiagnosisFollowup: (extraLocal as any)?.diagnosisFollowup ?? null,
+          extraLocalPresentationKind: (extraLocal as any)?.presentationKind ?? null,
+          extraLocalTargetLabel: (extraLocal as any)?.targetLabel ?? null,
+          diagnosisCtxDiagnosisFollowup: diagnosisCtx?.diagnosisFollowup ?? null,
+          diagnosisCtxPresentationKind: diagnosisCtx?.presentationKind ?? null,
+          diagnosisCtxTargetLabel: diagnosisCtx?.targetLabel ?? null,
+          diagnosisCtxDiagnosisFollowupTargetLabel:
+            diagnosisCtx?.diagnosisFollowupTargetLabel ?? null,
+          diagnosisCtxSituationTopic: diagnosisCtx?.situationTopic ?? null,
+        })
+      );
+
+      if (shouldSyncDiagnosisToOut) {
+        out.metaForSave = out.metaForSave ?? {};
+        (out.metaForSave as any).extra =
+          (out.metaForSave as any).extra &&
+          typeof (out.metaForSave as any).extra === 'object'
+            ? (out.metaForSave as any).extra
+            : {};
+
+        const ex: any = (out.metaForSave as any).extra;
+
+        ex.ctxPack =
+          ex.ctxPack && typeof ex.ctxPack === 'object'
+            ? ex.ctxPack
+            : {};
+
+        const resolvedDiagnosisTargetForOut =
+          String((extraLocal as any)?.targetLabel ?? '').trim() ||
+          String(diagnosisCtx?.targetLabel ?? '').trim() ||
+          String(diagnosisCtx?.diagnosisFollowupTargetLabel ?? '').trim() ||
+          String(diagnosisCtx?.situationTopic ?? '').trim() ||
+          null;
+
+        ex.diagnosisFollowup = true;
+        ex.presentationKind = 'diagnosis';
+        ex.followupKind =
+          String((extraLocal as any)?.followupKind ?? '').trim() ||
+          String(diagnosisCtx?.followupKind ?? '').trim() ||
+          'concretize';
+
+        ex.ctxPack.diagnosisFollowup = true;
+        ex.ctxPack.presentationKind = 'diagnosis';
+        ex.ctxPack.followupKind = ex.followupKind;
+        ex.ctxPack.continuityKind = 'diagnosis_followup';
+
+        if (resolvedDiagnosisTargetForOut) {
+          ex.targetLabel = resolvedDiagnosisTargetForOut;
+          ex.ctxPack.targetLabel = resolvedDiagnosisTargetForOut;
+          ex.ctxPack.situationTopic = resolvedDiagnosisTargetForOut;
+        }
+
+        if (diagnosisCtx?.irMeta && typeof diagnosisCtx.irMeta === 'object') {
+          ex.irMeta = diagnosisCtx.irMeta;
+          ex.ctxPack.irMeta = diagnosisCtx.irMeta;
+        }
+
+        if (diagnosisCtx?.lastIrDiagnosis && typeof diagnosisCtx.lastIrDiagnosis === 'object') {
+          ex.lastIrDiagnosis = diagnosisCtx.lastIrDiagnosis;
+          ex.ctxPack.lastIrDiagnosis = diagnosisCtx.lastIrDiagnosis;
+        }
+
+        if (typeof diagnosisCtx?.topicHint === 'string' && diagnosisCtx.topicHint.trim()) {
+          ex.ctxPack.topicHint = diagnosisCtx.topicHint.trim();
+        }
+      }
+    }
 
     // 🔥 relationship 系を out.metaForSave.extra.ctxPack に明示同期
     {

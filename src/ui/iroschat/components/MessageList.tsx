@@ -435,7 +435,6 @@ export default function MessageList() {
   const loading = chat?.loading ?? false;
   const error = chat?.error ?? null;
   const sendNextStepChoice = chat?.sendNextStepChoice;
-  const setDraftText = chat?.setDraftText;
 
   const authVal = (typeof useAuth === 'function' ? useAuth() : {}) as {
     userCode?: string | null;
@@ -525,10 +524,23 @@ ${main}
   }
 }
 
-const diagnosisSummary =
-  !isUser && m.meta?.presentationKind === 'diagnosis'
-    ? extractDiagnosisSummary(safeText)
-    : '';
+const looksLikeInitialDiagnosisText =
+  !isUser &&
+  /観測対象\s*[:：]/u.test(safeText);
+
+const isDiagnosisMessage =
+  !isUser &&
+  (((m.meta as any)?.presentationKind === 'diagnosis') ||
+    ((m.meta as any)?.extra?.presentationKind === 'diagnosis') ||
+    looksLikeInitialDiagnosisText);
+
+const isDiagnosisFollowup =
+  (m.meta as any)?.extra?.diagnosisFollowup === true ||
+  (m.meta as any)?.extra?.ctxPack?.diagnosisFollowup === true ||
+  (m.meta as any)?.ctxPack?.diagnosisFollowup === true;
+
+const shouldShowDiagnosisNotice =
+  isDiagnosisMessage && !isDiagnosisFollowup;
 
         // ✅ UIモード（SILENCE判定）: serverの meta.extra.uiMode を最優先で拾う
         const uiMode =
@@ -737,38 +749,9 @@ const diagnosisSummary =
                     <>
                       <ChatMarkdown text={safeText} />
 
-                      {!isUser &&
-                        (((m.meta as any)?.presentationKind === 'diagnosis') ||
-                          ((m.meta as any)?.extra?.presentationKind === 'diagnosis')) && (
+                      {shouldShowDiagnosisNotice && (
                         <div className="diagnosisFooter">
-                          {diagnosisSummary ? (
-                            <div style={{ marginBottom: 8 }}>
-<button
-  type="button"
-  onClick={() => {
-    const quoted = `【前回の診断まとめ（引用）】
-<<DIAGNOSIS_QUOTE>>
-${diagnosisSummary}
-<</DIAGNOSIS_QUOTE>>`;
-
-    setDraftText?.(quoted);
-  }}
-  style={{
-    border: '1px solid rgba(147, 116, 255, 0.35)',
-    background: 'rgba(255,255,255,0.9)',
-    color: '#5b3fd1',
-    borderRadius: 999,
-    padding: '6px 12px',
-    fontSize: 12,
-    cursor: 'pointer',
-  }}
->
-  まとめを引用
-</button>
-                            </div>
-                          ) : null}
-
-                          ※詳しくは、「まとめを引用」ボタンをおして入力してください。<br />
+                          ※「診断内容を詳しく」と入力すると深められます。<br />
                           ※なお、何度も同じ観測対象で入力すると、結果が不安定になります。
                         </div>
                       )}

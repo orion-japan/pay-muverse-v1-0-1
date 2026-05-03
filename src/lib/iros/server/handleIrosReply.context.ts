@@ -19,6 +19,40 @@ function normOptString(v: unknown): string | undefined {
   return s.length > 0 ? s : undefined;
 }
 
+function extractDiagnosisFollowupTargetLabel(text: string): string | null {
+  const s = String(text ?? '')
+    .replace(/[\s　]+/g, ' ')
+    .trim();
+
+  if (!s) return null;
+
+  const patterns = [
+    /^(.+?)の(?:今の)?(?:状況|状態|診断内容|診断結果|診断|こと|件)?を?診断(?:を元に|をもとに|に基づいて|にもとづいて|を踏まえて|ベースで|から)/u,
+    /^(.+?)の(?:今の)?(?:状況|状態|診断内容|診断結果|診断|こと|件).*(?:詳しく|詳細|深く|深めて|深める|掘り下げ|具体的に|説明して|解説して)/u,
+    /^(.+?)について.*診断(?:を元に|をもとに|に基づいて|にもとづいて|を踏まえて|ベースで|から)/u,
+    /^(.+?)について.*(?:詳しく|詳細|深く|深めて|深める|掘り下げ|具体的に|説明して|解説して)/u,
+  ];
+
+  for (const pattern of patterns) {
+    const m = s.match(pattern);
+    const raw = String(m?.[1] ?? '').trim();
+    if (!raw) continue;
+
+    const cleaned = raw
+      .replace(/^(この|その|さっきの|前の|今の)\s*/u, '')
+      .replace(/[、。,.!?！？：:「」『』【】\[\]()（）]+$/g, '')
+      .trim();
+
+    if (!cleaned) continue;
+    if (/^(診断|診断内容|診断結果|状況|状態|今|これ|それ|自分)$/.test(cleaned)) continue;
+    if (cleaned.length > 24) continue;
+
+    return cleaned;
+  }
+
+  return null;
+}
+
 export type BuildTurnContextArgs = {
   supabase: SupabaseClient;
   conversationId: string;
@@ -413,14 +447,17 @@ export async function buildTurnContext(
     (baseMetaForTurn as any)?.presentationKind === 'diagnosis';
 
   // 🔥 詳細要求検知
-  const detailSourceText = String(
-    (baseMetaForTurn as any)?.userText ??
-      (baseMetaForTurn as any)?.inputText ??
-      (baseMetaForTurn as any)?.text ??
-      ''
-  );
+  const detailSourceText =
+    normOptString((baseMetaForTurn as any)?.userText) ??
+    normOptString((baseMetaForTurn as any)?.inputText) ??
+    normOptString((baseMetaForTurn as any)?.text) ??
+    normOptString(text) ??
+    '';
 
-  const wantsDetail = /詳しく|詳細|もう少し|深く/.test(detailSourceText);
+  const wantsDetail =
+    /詳しく|詳細|もう少し|深く|深めて|深める|掘り下げ|掘って|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断内容|診断結果|さっきの診断|前の診断|この診断|今の診断/.test(
+      detailSourceText
+    );
 
   // 🔥 前回 irMeta 取得
   const prevIrMeta =
@@ -436,9 +473,11 @@ export async function buildTurnContext(
 
   // 🔥 診断 followup 判定
   const followupSourceText = detailSourceText.trim();
+  const diagnosisFollowupTargetLabel =
+    extractDiagnosisFollowupTargetLabel(followupSourceText);
 
   const isFollowupRequest =
-    /具体的に|わかりやすく|分かりやすく|つまり|どういうこと|それって|どうすれば|何をすれば|続き|言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|もう少し深く|その理由|なぜそうなる/.test(
+    /具体的に|具体化|わかりやすく|分かりやすく|つまり|どういうこと|それって|どうすれば|何をすれば|何から|どこから|どう扱えば|どう受け取れば|どう見れば|続き|続きを|診断の続き|言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|説明して|解説して|補足して|もう少し|もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|さっきの診断|前の診断|この診断|今の診断/.test(
       followupSourceText
     );
 
@@ -449,7 +488,7 @@ export async function buildTurnContext(
 
   if (!isIrDiagnosisTurn && isFollowupRequest) {
     try {
-      lastIrDiagnosis = await loadLatestIrDiagnosisSnapshot(supabase, userCode);
+      lastIrDiagnosis = await loadLatestIrDiagnosisSnapshot(supabase, userCode, diagnosisFollowupTargetLabel);
     } catch (e) {
       console.warn('[IROS][diagnosisFollowup] load failed', e);
     }
@@ -465,11 +504,11 @@ export async function buildTurnContext(
   const diagnosisFollowupKind: 'concretize' | 'action' | 'rephrase' | 'deepen' | null =
     !isDiagnosisFollowup
       ? null
-      : /どうすれば|何をすれば|次は|どう動く/.test(followupSourceText)
+      : /どうすれば|何をすれば|次は|どう動く|何から|どこから|どう扱えば|どう進める|進め方|一手|行動|対処/.test(followupSourceText)
         ? 'action'
-        : /言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|わかりやすく|分かりやすく|つまり|どういうこと/.test(followupSourceText)
+        : /言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|わかりやすく|分かりやすく|つまり|どういうこと|説明して|解説して|補足して/.test(followupSourceText)
           ? 'rephrase'
-          : /もう少し深く|その理由|なぜそうなる/.test(followupSourceText)
+          : /もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|さっきの診断|前の診断|この診断|今の診断/.test(followupSourceText)
             ? 'deepen'
             : 'concretize';
 
@@ -480,10 +519,38 @@ export async function buildTurnContext(
     wantsDetail &&
     hasDiagnosisSource;
 
+  console.log(
+    '[IROS/CONTEXT][DIAG_FOLLOWUP_CHECK_JSON]',
+    JSON.stringify({
+      isIrDiagnosisTurn,
+      wantsDetail,
+      isFollowupRequest,
+      hasDiagnosisSource,
+      isDiagnosisFollowup,
+      isDiagnosisDetailTurn,
+      diagnosisFollowupKind,
+      diagnosisFollowupTargetLabel,
+      followupSourceText,
+      prevIrMetaTargetLabel:
+        String((prevIrMeta as any)?.targetLabel ?? '').trim() || null,
+      hasPrevIrMeta: !!prevIrMeta,
+      lastIrDiagnosisTarget:
+        String((lastIrDiagnosis as any)?.target ?? '').trim() || null,
+      hasLastIrDiagnosis: !!lastIrDiagnosis,
+    })
+  );
+
   if (isDiagnosisFollowup || isDiagnosisDetailTurn) {
     (baseMetaForTurn as any).extra = (baseMetaForTurn as any).extra ?? {};
     (baseMetaForTurn as any).extra.ctxPack =
       (baseMetaForTurn as any).extra.ctxPack ?? {};
+
+    if (diagnosisFollowupTargetLabel) {
+      (baseMetaForTurn as any).extra.diagnosisFollowupTargetLabel =
+        diagnosisFollowupTargetLabel;
+      (baseMetaForTurn as any).extra.ctxPack.diagnosisFollowupTargetLabel =
+        diagnosisFollowupTargetLabel;
+    }
 
       const lastIrDiagnosisResolved =
       lastIrDiagnosis ??
@@ -516,8 +583,22 @@ export async function buildTurnContext(
           }
         : null);
 
-    (baseMetaForTurn as any).extra.isIrDiagnosisTurn = true;
+    const resolvedDiagnosisTargetLabel =
+      diagnosisFollowupTargetLabel ||
+      String((lastIrDiagnosisResolved as any)?.target ?? '').trim() ||
+      String((normalizedIrMeta as any)?.targetLabel ?? '').trim() ||
+      null;
+
+    (baseMetaForTurn as any).targetLabel = resolvedDiagnosisTargetLabel;
+    (baseMetaForTurn as any).presentationKind = 'diagnosis';
+
+    (baseMetaForTurn as any).extra.isIrDiagnosisTurn = false;
+    (baseMetaForTurn as any).extra.presentationKind = 'diagnosis';
+    (baseMetaForTurn as any).extra.targetLabel = resolvedDiagnosisTargetLabel;
     (baseMetaForTurn as any).extra.irMeta = normalizedIrMeta;
+
+    (baseMetaForTurn as any).extra.ctxPack.presentationKind = 'diagnosis';
+    (baseMetaForTurn as any).extra.ctxPack.targetLabel = resolvedDiagnosisTargetLabel;
     (baseMetaForTurn as any).extra.ctxPack.irMeta = normalizedIrMeta;
     if (lastIrDiagnosisResolved) {
       (baseMetaForTurn as any).extra.lastIrDiagnosis = lastIrDiagnosisResolved;
@@ -594,7 +675,9 @@ export async function buildTurnContext(
     }
 
       (baseMetaForTurn as any).presentationKind = 'diagnosis';
-      (baseMetaForTurn as any).mode = 'diagnosis';
+      if (isIrDiagnosisTurn) {
+        (baseMetaForTurn as any).mode = 'diagnosis';
+      }
     }
   const framePlan =
     isIrDiagnosisTurn || isDiagnosisDetailTurn

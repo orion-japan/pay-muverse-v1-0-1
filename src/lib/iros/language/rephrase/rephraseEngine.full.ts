@@ -6029,21 +6029,85 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
       questionTypeSourceText || normalizedText
     );
 
+    const patternMetaExtra: any =
+      metaExtra && typeof metaExtra === 'object' ? (metaExtra as any) : {};
+
+    const patternMetaExtraCtxPack: any =
+      patternMetaExtra?.ctxPack && typeof patternMetaExtra.ctxPack === 'object'
+        ? patternMetaExtra.ctxPack
+        : {};
+
+    const patternUserContextMetaExtra: any =
+      (opts as any)?.userContext?.meta?.extra &&
+      typeof (opts as any).userContext.meta.extra === 'object'
+        ? (opts as any).userContext.meta.extra
+        : {};
+
+    const patternUserContextMetaExtraCtxPack: any =
+      patternUserContextMetaExtra?.ctxPack &&
+      typeof patternUserContextMetaExtra.ctxPack === 'object'
+        ? patternUserContextMetaExtra.ctxPack
+        : {};
+
+    const patternUserContextCtxPack: any =
+      (opts as any)?.userContext?.ctxPack &&
+      typeof (opts as any).userContext.ctxPack === 'object'
+        ? (opts as any).userContext.ctxPack
+        : {};
+
+    const patternOptsCtxPack: any =
+      (opts as any)?.ctxPack && typeof (opts as any).ctxPack === 'object'
+        ? (opts as any).ctxPack
+        : {};
+
+    const patternIrMeta: any =
+      patternMetaExtra?.irMeta ??
+      patternMetaExtraCtxPack?.irMeta ??
+      patternUserContextMetaExtra?.irMeta ??
+      patternUserContextMetaExtraCtxPack?.irMeta ??
+      patternUserContextCtxPack?.irMeta ??
+      patternOptsCtxPack?.irMeta ??
+      null;
+
+    const patternLastIrDiagnosis: any =
+      patternMetaExtra?.lastIrDiagnosis ??
+      patternMetaExtraCtxPack?.lastIrDiagnosis ??
+      patternUserContextMetaExtra?.lastIrDiagnosis ??
+      patternUserContextMetaExtraCtxPack?.lastIrDiagnosis ??
+      patternUserContextCtxPack?.lastIrDiagnosis ??
+      patternOptsCtxPack?.lastIrDiagnosis ??
+      null;
+
     const patternDetailMode =
-      (opts as any)?.ctxPack?.detailMode === true ||
-      (opts as any)?.userContext?.ctxPack?.detailMode === true;
+      patternMetaExtra?.detailMode === true ||
+      patternMetaExtraCtxPack?.detailMode === true ||
+      patternUserContextMetaExtra?.detailMode === true ||
+      patternUserContextMetaExtraCtxPack?.detailMode === true ||
+      patternUserContextCtxPack?.detailMode === true ||
+      patternOptsCtxPack?.detailMode === true;
 
     const patternPresentationKind = String(
-      (opts as any)?.meta?.extra?.presentationKind ??
-        (opts as any)?.userContext?.meta?.extra?.presentationKind ??
-        ''
+      patternMetaExtra?.presentationKind ??
+        patternMetaExtraCtxPack?.presentationKind ??
+        patternUserContextMetaExtra?.presentationKind ??
+        patternUserContextMetaExtraCtxPack?.presentationKind ??
+        patternUserContextCtxPack?.presentationKind ??
+        patternOptsCtxPack?.presentationKind ??
+        (patternIrMeta || patternLastIrDiagnosis ? 'diagnosis' : '')
     )
       .trim()
       .toLowerCase();
 
     const patternTargetLabel =
       String(
-        (metaExtra as any)?.targetLabel ??
+        patternMetaExtra?.targetLabel ??
+          patternMetaExtraCtxPack?.targetLabel ??
+          patternIrMeta?.targetLabel ??
+          patternLastIrDiagnosis?.target ??
+          patternUserContextMetaExtra?.targetLabel ??
+          patternUserContextMetaExtraCtxPack?.targetLabel ??
+          patternUserContextCtxPack?.targetLabel ??
+          patternOptsCtxPack?.targetLabel ??
           (opts as any)?.userContext?.targetLabel ??
           ''
       ).trim() || null;
@@ -6054,6 +6118,17 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
         ''
     ).trim();
 
+    const isDiagnosisFollowupPhrase =
+      /診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|さっきの診断|前の診断|この診断|今の診断|深めて|深める|掘り下げ|掘って/u.test(
+        patternFollowupText
+      );
+
+    const hasPriorDiagnosisForPattern =
+      patternPresentationKind === 'diagnosis' ||
+      !!patternIrMeta ||
+      !!patternLastIrDiagnosis ||
+      (!!patternTargetLabel && isDiagnosisFollowupPhrase);
+
     const patternSelectInput = {
       line: patternPresentationKind === 'diagnosis' ? 'diagnosis' : patternPresentationKind,
       questionType: resolvedQuestionType,
@@ -6061,7 +6136,7 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
       followupText: patternFollowupText,
       userText: patternFollowupText,
       targetLabel: patternTargetLabel,
-      hasPriorDiagnosis: patternPresentationKind === 'diagnosis',
+      hasPriorDiagnosis: hasPriorDiagnosisForPattern,
     };
 
     const preSelectedPatternKey = String((opts as any)?.meta?.extra?.patternKey ?? '').trim();
@@ -6102,15 +6177,17 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
     const patternKey = (
       isPartnerSideResonanceForMaterialize
         ? 'PARTNER_SIDE_RESONANCE_V1'
-        : preSelectedPatternKey === 'IR_DETAIL_V1' ||
-            preSelectedPatternKey === 'NORMAL_DETAIL_V1' ||
-            preSelectedPatternKey === 'NORMAL_RESONANCE_V1' ||
-            preSelectedPatternKey === 'DECLARATION_RESONANCE_V1' ||
-            preSelectedPatternKey === 'PARTNER_SIDE_RESONANCE_V1'
-          ? preSelectedPatternKey
-          : selectedByFunction ||
-            preSelectedPatternKey ||
-            'NORMAL_RESONANCE_V1'
+        : hasPriorDiagnosisForPattern && selectedByFunction === 'IR_DETAIL_V1'
+          ? 'IR_DETAIL_V1'
+          : preSelectedPatternKey === 'IR_DETAIL_V1' ||
+              preSelectedPatternKey === 'NORMAL_DETAIL_V1' ||
+              preSelectedPatternKey === 'NORMAL_RESONANCE_V1' ||
+              preSelectedPatternKey === 'DECLARATION_RESONANCE_V1' ||
+              preSelectedPatternKey === 'PARTNER_SIDE_RESONANCE_V1'
+            ? preSelectedPatternKey
+            : selectedByFunction ||
+              preSelectedPatternKey ||
+              'NORMAL_RESONANCE_V1'
     ) as any;
 
     console.log(
@@ -6790,18 +6867,31 @@ if (slotDecision && typeof slotDecision === 'object') {
     const isIRDetailPatternForDisplay =
       activePatternKeyForDisplay === 'IR_DETAIL_V1';
 
+      const isTinyConnectorBlockForDisplay = (value: unknown): boolean => {
+        if (!isIRDetailPatternForDisplay) return false;
+
+        const normalized = String(value ?? '')
+          .replace(/^#+\s*/u, '')
+          .replace(/[\s*_`>「」『』（）()\[\]【】]/gu, '')
+          .replace(/[、。,.!?！？…]+$/u, '')
+          .trim();
+
+        return /^(その|ただ|でも|そして|それで|一方で|つまり|だから|なお|また)$/u.test(normalized);
+      };
+
       const canonicalPatternBlocks = (Array.isArray(blocksText) ? blocksText : [])
         .map((x) => String(x ?? '').trim())
-        .filter(Boolean);
+        .filter((x) => Boolean(x) && !isTinyConnectorBlockForDisplay(x));
 
       const rawMarkdownBlocksForDisplay = String(text ?? '')
         .split(/\n{2,}/u)
         .map((x) => String(x ?? '').trim())
-        .filter(Boolean);
+        .filter((x) => Boolean(x) && !isTinyConnectorBlockForDisplay(x));
 
       const shouldPreserveMarkdownRawForDisplay =
-        activePatternKeyForDisplay === 'NORMAL_DETAIL_V1' &&
-        (resolvedQuestionType === 'structure' || resolvedQuestionType === 'meaning') &&
+        (activePatternKeyForDisplay === 'IR_DETAIL_V1' ||
+          (activePatternKeyForDisplay === 'NORMAL_DETAIL_V1' &&
+            (resolvedQuestionType === 'structure' || resolvedQuestionType === 'meaning'))) &&
         /^##\s+/m.test(String(text ?? '')) &&
         rawMarkdownBlocksForDisplay.length > 0;
 
@@ -8126,40 +8216,104 @@ const slotDecisionForWriter = computeSlotDecisionFromEngine({
 if (ctxPackForWriter && typeof ctxPackForWriter === 'object') {
   (ctxPackForWriter as any).slotDecision = slotDecisionForWriter;
 }
-const selectedPatternKey = String(
-  (opts as any)?.meta?.extra?.ctxPack?.patternKey ??
-    (opts as any)?.meta?.extra?.patternKey ??
-    (ctxPackForWriter && typeof ctxPackForWriter === 'object'
-      ? (ctxPackForWriter as any).patternKey
-      : null) ??
-    (opts as any)?.ctxPack?.patternKey ??
-    (opts as any)?.userContext?.ctxPack?.patternKey ??
-    selectSlotPattern({
-      line: String(
-        (opts as any)?.meta?.extra?.presentationKind ??
-          (opts as any)?.userContext?.meta?.extra?.presentationKind ??
-          ''
-      )
-        .trim()
-        .toLowerCase(),
-      questionType:
-        String(
-          (opts as any)?.userContext?.question?.questionType ??
-            (opts as any)?.userContext?.meta?.extra?.question?.questionType ??
-            (opts as any)?.ctxPack?.question?.questionType ??
-            (opts as any)?.meta?.extra?.question?.questionType ??
-            (opts as any)?.meta?.extra?.ctxPack?.question?.questionType ??
-            ''
-        ).trim() || null,
-      detailMode:
-        (opts as any)?.ctxPack?.detailMode === true ||
-        (opts as any)?.userContext?.ctxPack?.detailMode === true,
-      followupText: String((opts as any)?.userText ?? '').trim(),
-      userText: String((opts as any)?.userText ?? '').trim(),
-      targetLabel: null,
-      hasPriorDiagnosis: false,
-    }) ??
+const writerPatternFollowupText = String(
+  (opts as any)?.userText ??
+    (opts as any)?.followupText ??
+    (opts as any)?.inputText ??
     ''
+).trim();
+
+const writerPatternTargetLabel =
+  String(
+    (opts as any)?.meta?.extra?.targetLabel ??
+      (opts as any)?.meta?.extra?.ctxPack?.targetLabel ??
+      (opts as any)?.meta?.extra?.irMeta?.targetLabel ??
+      (opts as any)?.meta?.extra?.ctxPack?.irMeta?.targetLabel ??
+      (opts as any)?.meta?.extra?.lastIrDiagnosis?.target ??
+      (opts as any)?.meta?.extra?.ctxPack?.lastIrDiagnosis?.target ??
+      (opts as any)?.ctxPack?.targetLabel ??
+      (opts as any)?.ctxPack?.irMeta?.targetLabel ??
+      (opts as any)?.ctxPack?.lastIrDiagnosis?.target ??
+      (opts as any)?.userContext?.targetLabel ??
+      (opts as any)?.userContext?.ctxPack?.targetLabel ??
+      (opts as any)?.userContext?.ctxPack?.irMeta?.targetLabel ??
+      (opts as any)?.userContext?.ctxPack?.lastIrDiagnosis?.target ??
+      ''
+  ).trim() || null;
+
+const writerPatternPresentationKind = String(
+  (opts as any)?.meta?.extra?.presentationKind ??
+    (opts as any)?.meta?.extra?.ctxPack?.presentationKind ??
+    (opts as any)?.ctxPack?.presentationKind ??
+    (opts as any)?.userContext?.meta?.extra?.presentationKind ??
+    (opts as any)?.userContext?.ctxPack?.presentationKind ??
+    ''
+)
+  .trim()
+  .toLowerCase();
+
+const writerPatternHasIrMeta =
+  !!(opts as any)?.meta?.extra?.irMeta ||
+  !!(opts as any)?.meta?.extra?.ctxPack?.irMeta ||
+  !!(opts as any)?.ctxPack?.irMeta ||
+  !!(opts as any)?.userContext?.ctxPack?.irMeta ||
+  !!(opts as any)?.userContext?.meta?.extra?.irMeta ||
+  !!(opts as any)?.userContext?.meta?.extra?.ctxPack?.irMeta;
+
+const writerPatternHasLastIrDiagnosis =
+  !!(opts as any)?.meta?.extra?.lastIrDiagnosis ||
+  !!(opts as any)?.meta?.extra?.ctxPack?.lastIrDiagnosis ||
+  !!(opts as any)?.ctxPack?.lastIrDiagnosis ||
+  !!(opts as any)?.userContext?.ctxPack?.lastIrDiagnosis ||
+  !!(opts as any)?.userContext?.meta?.extra?.lastIrDiagnosis ||
+  !!(opts as any)?.userContext?.meta?.extra?.ctxPack?.lastIrDiagnosis;
+
+const writerPatternIsDiagnosisFollowupPhrase =
+  /診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|さっきの診断|前の診断|この診断|今の診断|深めて|深める|掘り下げ|掘って/u.test(
+    writerPatternFollowupText
+  );
+
+const writerPatternHasPriorDiagnosis =
+  writerPatternPresentationKind === 'diagnosis' ||
+  writerPatternHasIrMeta ||
+  writerPatternHasLastIrDiagnosis ||
+  (!!writerPatternTargetLabel && writerPatternIsDiagnosisFollowupPhrase);
+
+const writerPatternEarlySelected = selectSlotPattern({
+  line: writerPatternHasPriorDiagnosis ? 'diagnosis' : writerPatternPresentationKind,
+  questionType:
+    String(
+      (opts as any)?.userContext?.question?.questionType ??
+        (opts as any)?.userContext?.meta?.extra?.question?.questionType ??
+        (opts as any)?.ctxPack?.question?.questionType ??
+        (opts as any)?.meta?.extra?.question?.questionType ??
+        (opts as any)?.meta?.extra?.ctxPack?.question?.questionType ??
+        ''
+    ).trim() || null,
+  detailMode:
+    (opts as any)?.ctxPack?.detailMode === true ||
+    (opts as any)?.userContext?.ctxPack?.detailMode === true ||
+    (opts as any)?.meta?.extra?.detailMode === true ||
+    (opts as any)?.meta?.extra?.ctxPack?.detailMode === true,
+  followupText: writerPatternFollowupText,
+  userText: writerPatternFollowupText,
+  targetLabel: writerPatternTargetLabel,
+  hasPriorDiagnosis: writerPatternHasPriorDiagnosis,
+});
+
+const selectedPatternKey = String(
+  writerPatternHasPriorDiagnosis && writerPatternEarlySelected === 'IR_DETAIL_V1'
+    ? 'IR_DETAIL_V1'
+    : (debug as any)?.patternKey ??
+      (ctxPackForWriter && typeof ctxPackForWriter === 'object'
+        ? (ctxPackForWriter as any).patternKey
+        : null) ??
+      (opts as any)?.meta?.extra?.ctxPack?.patternKey ??
+      (opts as any)?.meta?.extra?.patternKey ??
+      (opts as any)?.ctxPack?.patternKey ??
+      (opts as any)?.userContext?.ctxPack?.patternKey ??
+      writerPatternEarlySelected ??
+      ''
 ).trim();
 
 const questionTypeForPattern = (() => {
@@ -8765,7 +8919,7 @@ const isResonanceStructureFollowup =
                 questionTypeForPattern !== 'structure' &&
                 questionTypeForPattern !== 'meaning';
 
-              const writerDirectivesForFinal = relationshipAdviceRepairWriterDirectives
+              const writerDirectivesForFinalRaw = relationshipAdviceRepairWriterDirectives
                 ? relationshipAdviceRepairWriterDirectives
                 : shouldApplyDeepReadDirectives
                   ? {
@@ -8773,6 +8927,15 @@ const isResonanceStructureFollowup =
                       ...deepReadWriterDirectives,
                     }
                   : baseWriterDirectivesForFinal;
+
+              const writerDirectivesForFinal =
+                writerPatternKey === 'IR_DETAIL_V1'
+                  ? {
+                      ...writerDirectivesForFinalRaw,
+                      pattern_key: 'IR_DETAIL_V1',
+                      pattern_mode: 'diagnosis_detail',
+                    }
+                  : writerDirectivesForFinalRaw;
 console.log(
   '[IROS/rephraseEngine][CALL_WRITER_ARGS]',
   JSON.stringify({
