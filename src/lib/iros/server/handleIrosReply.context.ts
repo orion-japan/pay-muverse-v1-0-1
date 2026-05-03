@@ -525,9 +525,21 @@ export async function buildTurnContext(
     }
 
     if (isDiagnosisDetailTurn) {
+      const resolvedDetailKind =
+        diagnosisFollowupKind ?? 'concretize';
+
       (baseMetaForTurn as any).extra.detailMode = true;
+      (baseMetaForTurn as any).extra.followupKind = resolvedDetailKind;
+      (baseMetaForTurn as any).extra.diagnosisFollowup = true;
+
       (baseMetaForTurn as any).extra.ctxPack.detailMode =
         prevDetailMode || true;
+      (baseMetaForTurn as any).extra.ctxPack.followupKind = resolvedDetailKind;
+      (baseMetaForTurn as any).extra.ctxPack.diagnosisFollowup = true;
+      (baseMetaForTurn as any).extra.ctxPack.continuityKind =
+        'diagnosis_followup';
+      (baseMetaForTurn as any).extra.ctxPack.goalKind =
+        resolvedDetailKind === 'action' ? 'action' : 'clarify';
     }
 
     if (isDiagnosisFollowup) {

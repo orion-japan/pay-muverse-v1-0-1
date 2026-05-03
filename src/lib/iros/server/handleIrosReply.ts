@@ -8584,12 +8584,52 @@ try {
             ? (out.metaForSave as any).extra.llmRewriteSeedRaw
             : null,
       },
-      ctxPack: {
-        ...((((out.metaForSave as any)?.extra?.ctxPack ?? null) as any) ?? {}),
-        hasFlowMeaningForAllow:
-          typeof (out.metaForSave as any)?.extra?.flowMeaning === 'string' &&
-          !!String((out.metaForSave as any).extra.flowMeaning).trim(),
-      },
+      ctxPack: (() => {
+        const baseCtx: any =
+          ((((out.metaForSave as any)?.extra?.ctxPack ?? null) as any) ?? {});
+
+        const textForDiagnosisFollowup = String(text ?? '').trim();
+
+        const hasIrDiagnosisContext =
+          baseCtx?.irMeta && typeof baseCtx.irMeta === 'object';
+
+        const asksDiagnosisFollowup =
+          /診断内容|診断結果|さっきの診断|ir診断|詳しく|詳細|深く|具体的に/u.test(
+            textForDiagnosisFollowup,
+          );
+
+        const isDiagnosisFollowupCtx =
+          baseCtx?.diagnosisFollowup === true ||
+          String(baseCtx?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+          (
+            baseCtx?.detailMode === true &&
+            hasIrDiagnosisContext &&
+            asksDiagnosisFollowup
+          );
+
+        const resolvedFollowupKind =
+          typeof baseCtx?.followupKind === 'string' &&
+          String(baseCtx.followupKind).trim()
+            ? String(baseCtx.followupKind).trim()
+            : isDiagnosisFollowupCtx
+              ? 'concretize'
+              : null;
+
+        return {
+          ...baseCtx,
+
+          ...(isDiagnosisFollowupCtx
+            ? {
+                diagnosisFollowup: true,
+                followupKind: resolvedFollowupKind,
+                continuityKind: 'diagnosis_followup',
+              }
+            : {}),
+          hasFlowMeaningForAllow:
+            typeof (out.metaForSave as any)?.extra?.flowMeaning === 'string' &&
+            !!String((out.metaForSave as any).extra.flowMeaning).trim(),
+        };
+      })(),
 
       debug: {
         traceId: traceIdCanon,

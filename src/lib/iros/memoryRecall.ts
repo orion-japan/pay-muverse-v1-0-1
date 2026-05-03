@@ -483,7 +483,6 @@ export async function loadLatestIrDiagnosisSnapshot(
         last_ir_diagnosis_at
       `)
       .eq('user_code', userCode)
-      .eq('is_ir_diagnosis', true)
       .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -495,13 +494,23 @@ export async function loadLatestIrDiagnosisSnapshot(
 
     if (!data) return null;
 
-    return {
+    const snapshot = {
       target: data.last_ir_diagnosis_target ?? null,
       observation: data.last_ir_diagnosis_observation ?? null,
       state: data.last_ir_diagnosis_state ?? null,
       summary: data.last_ir_diagnosis_summary ?? null,
       createdAt: data.last_ir_diagnosis_at ?? null,
     };
+
+    const hasDiagnosisSnapshot =
+      snapshot.target !== null ||
+      snapshot.observation !== null ||
+      snapshot.state !== null ||
+      snapshot.summary !== null;
+
+    if (!hasDiagnosisSnapshot) return null;
+
+    return snapshot;
   } catch (e) {
     console.warn('[IROS][loadLatestIrDiagnosisSnapshot] failed', e);
     return null;

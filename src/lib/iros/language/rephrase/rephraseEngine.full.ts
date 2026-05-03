@@ -4119,6 +4119,39 @@ const ctxPackForWriter =
   (opts as any)?.userContext?.ctxPackV1 ??
   null;
 
+if (ctxPackForWriter && typeof ctxPackForWriter === 'object') {
+  const textForDiagnosisFollowup = String((opts as any)?.userText ?? '').trim();
+
+  const hasIrDiagnosisContext =
+    (ctxPackForWriter as any)?.irMeta &&
+    typeof (ctxPackForWriter as any).irMeta === 'object';
+
+  const asksDiagnosisFollowup =
+    /診断内容|診断結果|さっきの診断|ir診断|詳しく|詳細|深く|具体的に/u.test(
+      textForDiagnosisFollowup,
+    );
+
+  const isDiagnosisFollowupCtx =
+    (ctxPackForWriter as any)?.diagnosisFollowup === true ||
+    String((ctxPackForWriter as any)?.continuityKind ?? '').trim() ===
+      'diagnosis_followup' ||
+    (
+      (ctxPackForWriter as any)?.detailMode === true &&
+      hasIrDiagnosisContext &&
+      asksDiagnosisFollowup
+    );
+
+  if (isDiagnosisFollowupCtx) {
+    (ctxPackForWriter as any).diagnosisFollowup = true;
+    (ctxPackForWriter as any).followupKind =
+      typeof (ctxPackForWriter as any).followupKind === 'string' &&
+      String((ctxPackForWriter as any).followupKind).trim()
+        ? String((ctxPackForWriter as any).followupKind).trim()
+        : 'concretize';
+    (ctxPackForWriter as any).continuityKind = 'diagnosis_followup';
+  }
+}
+
 // question の正本をここで一度だけ決める
 const primaryQuestionForWriter =
   (ctxPackForWriter?.question &&

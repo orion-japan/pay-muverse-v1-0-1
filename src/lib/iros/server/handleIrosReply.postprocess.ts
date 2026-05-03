@@ -1013,7 +1013,34 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
   const metaForSave: any = metaRaw && typeof metaRaw === 'object' ? { ...metaRaw } : {};
 
   // extra は必ず存在
-  metaForSave.extra = metaForSave.extra ?? {};
+  const incomingExtra =
+    (args as any)?.extra && typeof (args as any).extra === 'object'
+      ? (args as any).extra
+      : {};
+
+  const incomingCtxPack =
+    (incomingExtra as any)?.ctxPack && typeof (incomingExtra as any).ctxPack === 'object'
+      ? (incomingExtra as any).ctxPack
+      : {};
+
+  const existingExtra =
+    metaForSave.extra && typeof metaForSave.extra === 'object'
+      ? metaForSave.extra
+      : {};
+
+  const existingCtxPack =
+    (existingExtra as any)?.ctxPack && typeof (existingExtra as any).ctxPack === 'object'
+      ? (existingExtra as any).ctxPack
+      : {};
+
+  metaForSave.extra = {
+    ...incomingExtra,
+    ...existingExtra,
+    ctxPack: {
+      ...incomingCtxPack,
+      ...existingCtxPack,
+    },
+  };
 
   // ✅ FLOW_SEED_V1 正本
   if (typeof flowSeed === 'string' && flowSeed.trim()) {

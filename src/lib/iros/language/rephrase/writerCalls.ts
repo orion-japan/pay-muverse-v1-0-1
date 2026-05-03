@@ -3578,6 +3578,9 @@ const irMetaBlock = (() => {
 })();
 
 const diagnosisFollowup =
+  (args as any)?.ctxPack?.diagnosisFollowup ??
+  (args as any)?.extra?.diagnosisFollowup ??
+  (args as any)?.extra?.ctxPack?.diagnosisFollowup ??
   (args as any)?.meta?.extra?.diagnosisFollowup ??
   (args as any)?.meta?.extra?.ctxPack?.diagnosisFollowup ??
   (args as any)?.meta?.ctxPack?.diagnosisFollowup ??
@@ -3587,6 +3590,9 @@ const diagnosisFollowup =
   false;
 
 const followupKind =
+  (args as any)?.ctxPack?.followupKind ??
+  (args as any)?.extra?.followupKind ??
+  (args as any)?.extra?.ctxPack?.followupKind ??
   (args as any)?.meta?.extra?.followupKind ??
   (args as any)?.meta?.extra?.ctxPack?.followupKind ??
   (args as any)?.meta?.ctxPack?.followupKind ??
@@ -3595,7 +3601,7 @@ const followupKind =
   (args as any)?.userContext?.ctxPack?.followupKind ??
   null;
 
-  const diagnosisFollowupBlock = (() => {
+const diagnosisFollowupBlock = (() => {
     if (!diagnosisFollowup) return '';
 
     const kind = String(followupKind ?? 'concretize').trim();
@@ -4139,84 +4145,85 @@ const followupKind =
     return base;
   })();
 
-try {
-  const packNormFinal = norm(internalPackForWriter);
-  const hFinal = packNormFinal.slice(0, 900);
+  try {
+    const packNormFinal = norm(internalPackForWriter);
+    const hFinal = packNormFinal.slice(0, 900);
 
-  const flowMatchFinal = packNormFinal.match(
-    /FLOW_CONTEXT(?:\s*\(DO NOT OUTPUT\))?:|FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:|FLOW_V2(?:\s*\(DO NOT OUTPUT\))?:/
-  );
-  const flowIdxFinal = flowMatchFinal ? flowMatchFinal.index ?? -1 : -1;
-  const flowSnippetFinal =
-    flowIdxFinal >= 0
-      ? packNormFinal.slice(flowIdxFinal, Math.min(packNormFinal.length, flowIdxFinal + 520))
-      : '';
+    const flowMatchFinal = packNormFinal.match(
+      /FLOW_CONTEXT(?:\s*\(DO NOT OUTPUT\))?:|FLOW_MEANING(?:\s*\(DO NOT OUTPUT\))?:|FLOW_V2(?:\s*\(DO NOT OUTPUT\))?:/
+    );
 
-  const hasOpennessFinal =
-    /(?:^|\n)OPENNESS(?:\n|$)/.test(packNormFinal) ||
-    /tLayerHint=|itOk=/.test(packNormFinal);
+    const flowIdxFinal = flowMatchFinal ? flowMatchFinal.index ?? -1 : -1;
+    const flowSnippetFinal =
+      flowIdxFinal >= 0
+        ? packNormFinal.slice(flowIdxFinal, Math.min(packNormFinal.length, flowIdxFinal + 520))
+        : '';
 
-  const hasWriterDirectivesFinal =
-    /(?:^|\n)WRITER_DIRECTIVES(?:\n|$)/.test(packNormFinal) ||
-    /tone=|maxLines=|slotPolicy=|rotationMention=/.test(packNormFinal);
+    const hasOpennessFinal =
+      /(?:^|\n)OPENNESS(?:\n|$)/.test(packNormFinal) ||
+      /tLayerHint=|itOk=/.test(packNormFinal);
 
-  const hasPatternKeyFinal = /(?:^|\n)pattern_key=/.test(packNormFinal);
-  const hasPatternModeFinal = /(?:^|\n)pattern_mode=/.test(packNormFinal);
-  const hasPatternBlockOrderFinal = /(?:^|\n)pattern_block_order=/.test(packNormFinal);
-  const hasBlockClosingLineFinal = /(?:^|\n)block_closing_line=/.test(packNormFinal);
-  const hasWriteConstraint4Final = /(?:^|\n)writeConstraint4=/.test(packNormFinal);
-  const hasWriteConstraint5Final = /(?:^|\n)writeConstraint5=/.test(packNormFinal);
+    const hasWriterDirectivesFinal =
+      /(?:^|\n)WRITER_DIRECTIVES(?:\n|$)/.test(packNormFinal) ||
+      /tone=|maxLines=|slotPolicy=|rotationMention=/.test(packNormFinal);
 
-  console.log('[IROS/writerCalls][INJECTED_PACK_HEAD_FINAL_RAW]', hFinal);
+    const hasPatternKeyFinal = /(?:^|\n)pattern_key=/.test(packNormFinal);
+    const hasPatternModeFinal = /(?:^|\n)pattern_mode=/.test(packNormFinal);
+    const hasPatternBlockOrderFinal = /(?:^|\n)pattern_block_order=/.test(packNormFinal);
+    const hasBlockClosingLineFinal = /(?:^|\n)block_closing_line=/.test(packNormFinal);
+    const hasWriteConstraint4Final = /(?:^|\n)writeConstraint4=/.test(packNormFinal);
+    const hasWriteConstraint5Final = /(?:^|\n)writeConstraint5=/.test(packNormFinal);
 
-  console.log(
-    '[IROS/writerCalls][INJECTED_PACK_HEAD_FINAL]',
-    JSON.stringify({
-      traceId: (args as any)?.traceId ?? null,
-      conversationId: (args as any)?.conversationId ?? null,
-      packLen: packNormFinal.length,
-      head: hFinal,
-      hasCOORD: /COORD\s*\(DO NOT OUTPUT\)/.test(packNormFinal),
-      hasPolarity: /polarity=/.test(packNormFinal),
-      hasSA: /sa=/.test(packNormFinal),
+    console.log('[IROS/writerCalls][INJECTED_PACK_HEAD_FINAL_RAW]', hFinal);
 
-      hasITX:
-        /itx_step=|itx_reason=/.test(packNormFinal) ||
-        /itOk=/.test(packNormFinal),
+    console.log(
+      '[IROS/writerCalls][INJECTED_PACK_HEAD_FINAL]',
+      JSON.stringify({
+        traceId: (args as any)?.traceId ?? null,
+        conversationId: (args as any)?.conversationId ?? null,
+        packLen: packNormFinal.length,
+        head: hFinal,
+        hasCOORD: /COORD\s*\(DO NOT OUTPUT\)/.test(packNormFinal),
+        hasPolarity: /polarity=/.test(packNormFinal),
+        hasSA: /sa=/.test(packNormFinal),
 
-      hasFuture:
-        /future=/.test(packNormFinal) ||
-        /futureRandom=/.test(packNormFinal),
+        hasITX:
+          /itx_step=|itx_reason=/.test(packNormFinal) ||
+          /itOk=/.test(packNormFinal),
 
-      hasStateCues: /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/.test(packNormFinal),
+        hasFuture:
+          /future=/.test(packNormFinal) ||
+          /futureRandom=/.test(packNormFinal),
 
-      hasFlowMeaning:
-        /(?:^|\n)(?:FLOW_MEANING|FLOW_V2)(?:\s*\(DO NOT OUTPUT\))?:/.test(packNormFinal) ||
-        /hook=/.test(packNormFinal) ||
-        /tension=/.test(packNormFinal) ||
-        /openLoop=/.test(packNormFinal),
+        hasStateCues: /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/.test(packNormFinal),
 
-      hasMirrorFlowSeed:
-        /FLOW_SEED_V1\b/.test(packNormFinal) ||
-        /FLOW:\s*\n/.test(packNormFinal),
+        hasFlowMeaning:
+          /(?:^|\n)(?:FLOW_MEANING|FLOW_V2)(?:\s*\(DO NOT OUTPUT\))?:/.test(packNormFinal) ||
+          /hook=/.test(packNormFinal) ||
+          /tension=/.test(packNormFinal) ||
+          /openLoop=/.test(packNormFinal),
 
-      hasOpenness: hasOpennessFinal,
-      hasWriterDirectives: hasWriterDirectivesFinal,
-      hasPatternKeyFinal,
-      hasPatternModeFinal,
-      hasPatternBlockOrderFinal,
-      hasBlockClosingLineFinal,
-      hasWriteConstraint4Final,
-      hasWriteConstraint5Final,
-      flowSnippet: flowSnippetFinal,
-      saRhythm: saRhythm || null,
-      saTone: saTone || null,
-      saBrevity: saBrevity || null,
-      itxStep: itxStep ?? null,
-      itxReason: itxReason ?? null,
-    })
-  );
-} catch {}
+        hasMirrorFlowSeed:
+          /FLOW_SEED_V1\b/.test(packNormFinal) ||
+          /FLOW:\s*\n/.test(packNormFinal),
+
+        hasOpenness: hasOpennessFinal,
+        hasWriterDirectives: hasWriterDirectivesFinal,
+        hasPatternKeyFinal,
+        hasPatternModeFinal,
+        hasPatternBlockOrderFinal,
+        hasBlockClosingLineFinal,
+        hasWriteConstraint4Final,
+        hasWriteConstraint5Final,
+        flowSnippet: flowSnippetFinal,
+        saRhythm: saRhythm || null,
+        saTone: saTone || null,
+        saBrevity: saBrevity || null,
+        itxStep: itxStep ?? null,
+        itxReason: itxReason ?? null,
+      })
+    );
+  } catch {}
   const isTopicRecallTurn =
     meaningKindRaw === 'topic_recall';
 
