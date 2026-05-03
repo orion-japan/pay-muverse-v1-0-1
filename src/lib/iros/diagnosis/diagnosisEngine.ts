@@ -17,6 +17,7 @@ function pickObservedText(input: any, builtDebug: Record<string, unknown>): stri
     norm(input?.inputText) ||
     norm(input?.observedText) ||
     norm(input?.text);
+
   if (direct) return direct;
 
   const slots = input?.slots;
@@ -29,6 +30,7 @@ function pickObservedText(input: any, builtDebug: Record<string, unknown>): stri
         norm(slot?.value) ||
         norm(slot?.content) ||
         norm(slot?.label);
+
       if (candidate) return candidate;
     }
   }
@@ -40,6 +42,7 @@ function pickObservedText(input: any, builtDebug: Record<string, unknown>): stri
       norm(slots.value) ||
       norm(slots.content) ||
       norm(slots.label);
+
     if (candidate) return candidate;
   }
 
@@ -55,23 +58,34 @@ export async function diagnosisEngine(input: any): Promise<any> {
 
   const debug = (built.debug ?? {}) as Record<string, unknown>;
 
-  const targetLabel = norm(input?.targetLabel) || norm(debug.targetLabel) || '自分';
+  const targetLabel =
+    norm(input?.targetLabel) ||
+    norm(debug.targetLabel) ||
+    '自分';
+
   const nowShort = norm(debug.nowFlowShort);
   const futureShort = norm(debug.futureFlowShort);
   const delta = norm(debug.deltaSentence);
   const observed = pickObservedText(input, debug);
 
-// LLMに渡す素材は「観測対象」と「フロー結果」
-// 通常診断 / 詳細診断 を prompt だけで切り替える
-const isDetailMode =
-  input?.meta?.extra?.detailMode === true ||
-  input?.meta?.detailMode === true;
+  const currentMaterial = norm((built.debug as any)?.observationResult);
+  const pointMaterial = delta;
+  const directionMaterial = norm((built.debug as any)?.awarenessText || delta);
+  const messageMaterial = norm((built.debug as any)?.summaryText);
 
-const prompt = isDetailMode
-  ? `
+  // LLMに渡す素材は「このターンの診断素材」だけ。
+  // 会話履歴の要約や、過去の流れの説明には寄せない。
+  // 内部フローは、現実の状況・優先順位・意識の向きに置き換えて使う。
+  const isDetailMode =
+    input?.meta?.extra?.detailMode === true ||
+    input?.meta?.detailMode === true;
+
+  const prompt = isDetailMode
+    ? `
 あなたは ir診断を行う存在です。
 
-以下の素材を使って、前回の診断をもとに「より深く」説明してください。
+以下の素材だけを使って、前回の診断内容をよりわかりやすく説明してください。
+会話の流れ、過去のやり取り、ユーザーの背景推測は使わないでください。
 
 【観測対象】
 ${targetLabel}
@@ -79,43 +93,66 @@ ${targetLabel}
 【ユーザー入力】
 ${observed || '（入力なし）'}
 
-【観測結果】
-${norm((built.debug as any)?.observationResult)}
+【現状の素材】
+${currentMaterial}
 
-【意識状態】
-${norm((built.debug as any)?.awarenessText || delta)}
+【ポイントの素材】
+${pointMaterial}
 
-【まとめ】
-${norm((built.debug as any)?.summaryText)}
+【意識の向かう先の素材】
+${directionMaterial}
+
+【メッセージの素材】
+${messageMaterial}
+
+【内部フロー素材】
+今の流れ：${nowShort || '（なし）'}
+向かう先：${futureShort || '（なし）'}
+変化の要点：${delta || '（なし）'}
 
 ---
 
 出力ルール：
-・必ず次の4項目だけをこの順番で出力する
+・必ず次の5項目だけをこの順番で出力する
   🌀 観測対象：
-  🧿 観測結果：
-  🌿 意識状態：
-  🌱 まとめ：
+  🧭 現状：
+  🧩 ポイント：
+  🌿 意識の向かう先：
+  🌱 メッセージ：
 
 ・各行は「見出し：本文」を同一行で書く
-・出力はちょうど4行にする
+・出力はちょうど5行にする
 ・観測対象は入力された対象をそのまま書く
 
-・観測結果は「なぜそう見えるか」が少し伝わるように、一段深く書く
-・意識状態は「今どこが揺れているか」「何を整えようとしているか」を現実寄りに書く
-・まとめは「どこへ向かうと流れが整いやすいか」を明確にする
+・フェーズ、位相、深度、S1、R1、C1、I1、T1、Inner、Outer などの内部分類名や記号は出さない
+・内部フロー素材をそのまま説明しない
+・感情や深度の変化は、現実の状況、優先順位、意識の向きに置き換えて書く
+・通常の意識の範囲で理解できる言葉にする
+・会話の流れを読んでいるように書かない
+・「これまで」「前から」「最近」「ずっと」など、履歴を見ているような言い方は使わない
+・ユーザーの過去、性格、背景、相手の本心を推測しない
 
-・前回の流れを前提として書く（新規診断のように書き直さない）
-・抽象語を増やさず、解像度だけ上げる
-・比喩を難しくしすぎない
-・説明しすぎず、納得感を強める
+・「現状」は、今その人が現実でどんな状態に見えるかを書く
+・「ポイント」は、今見落としやすい一点、または整えると変わりやすい一点を書く
+・「意識の向かう先」は、気持ちや意識が現実の中でどこへ向かおうとしているかを書く
+・「メッセージ」は、今の診断を受け取りやすい一文にする
+
+・「悪いところ」「原因」「問題点」の指摘にしない
+・抽象語を増やさず、日常語でわかりやすく書く
+・「方向性」「次の段階」「実り」「基盤」「熱量」「意識・感情・行動」「収束」などの抽象語・構造語はできるだけ使わない
+・使う場合は、「向かいたい先」「次にやること」「形になること」「足元の準備」「やりたい気持ち」「気持ちと行動」「整いやすくなる」のように言い換える
+・一文を長くしすぎない
+・比喩は使ってもよいが、難しい象徴表現にしない
+・説明しすぎない
 ・質問で終わらない
+・太文字（**）は使わない
 ・前置き、補足、箇条書き、空行は入れない
 `
-  : `
+    : `
 あなたは ir診断を行う存在です。
 
-以下の素材を使って、ir診断の結果を日本語で出力してください。
+以下の素材だけを使って、ir診断の結果を日本語で出力してください。
+会話の流れ、過去のやり取り、ユーザーの背景推測は使わないでください。
 
 【観測対象】
 ${targetLabel}
@@ -123,57 +160,78 @@ ${targetLabel}
 【ユーザー入力】
 ${observed || '（入力なし）'}
 
-【観測結果の素材】
-${norm((built.debug as any)?.observationResult)}
+【現状の素材】
+${currentMaterial}
 
-【意識状態の素材】
-${norm((built.debug as any)?.awarenessText || delta)}
+【ポイントの素材】
+${pointMaterial}
 
-【まとめの素材】
-${norm((built.debug as any)?.summaryText)}
+【意識の向かう先の素材】
+${directionMaterial}
+
+【メッセージの素材】
+${messageMaterial}
+
+【内部フロー素材】
+今の流れ：${nowShort || '（なし）'}
+向かう先：${futureShort || '（なし）'}
+変化の要点：${delta || '（なし）'}
 
 ---
 
 出力ルール：
-・必ず次の4項目だけをこの順番で出力する
+・必ず次の5項目だけをこの順番で出力する
   🌀 観測対象：
-  🧿 観測結果：
-  🌿 意識状態：
-  🌱 まとめ：
+  🧭 現状：
+  🧩 ポイント：
+  🌿 意識の向かう先：
+  🌱 メッセージ：
 
 ・各行は必ず「見出し：本文」を同一行で書く（改行しない）
-・出力はちょうど4行にする
+・出力はちょうど5行にする
 ・観測対象は入力された対象をそのまま書く
 
+・フェーズ、位相、深度、S1、R1、C1、I1、T1、Inner、Outer などの内部分類名や記号は出さない
 ・「1枚目」「2枚目」「カード」「引いた結果」「出た結果」など、占いを連想させる言い方は使わない
 ・番号づけや手順説明のような書き方をしない
 
-・観測結果は、二つの流れが重なっている状態として、比喩を使って自然に表現する
-・意識状態は、比喩を使いすぎず、現実寄りの言葉で具体的に書く
-・まとめは、これまでの流れを一言でにじませながら、現在から次の方向への収束として書く
+・内部フロー素材をそのまま説明しない
+・感情や深度の変化は、現実の状況、優先順位、意識の向きに置き換えて書く
+・通常の意識の範囲で理解できる言葉にする
+・会話の流れを読んでいるように書かない
+・「これまで」「前から」「最近」「ずっと」など、履歴を見ているような言い方は使わない
+・ユーザーの過去、性格、背景、相手の本心を推測しない
 
-・履歴は説明せず、「これまで〜の流れが続いていた中で」のように短く圧縮して使う
+・「現状」は、今その人が現実でどんな状態に見えるかを書く
+・「ポイント」は、今見落としやすい一点、または整えると変わりやすい一点を書く
+・「意識の向かう先」は、気持ちや意識が現実の中でどこへ向かおうとしているかを書く
+・「メッセージ」は、今の診断を受け取りやすい一文にする
 
+・「悪いところ」「原因」「問題点」の指摘にしない
 ・感情は直接的な言葉（怒り・不安・恐怖など）を避け、
   「少し引っかかる」「気分が沈みがち」「やや焦りやすい」など、
   日常的でやわらかい表現に言い換える
 
 ・「成長」「進化」「希望」「歓喜」などの抽象キーワードは使わない
-・難しい比喩に寄りすぎず、「なんとなくわかる」レベルの言葉にする
+・「方向性」「次の段階」「実り」「基盤」「熱量」「意識・感情・行動」「収束」などの抽象語・構造語はできるだけ使わない
+・使う場合は、「向かいたい先」「次にやること」「形になること」「足元の準備」「やりたい気持ち」「気持ちと行動」「整いやすくなる」のように言い換える
+・難しい比喩に寄りすぎず、「一読でわかる」言葉にする
 ・専門的・詩的すぎる表現は避ける
 ・説明口調にしすぎない
+・一文を長くしすぎない
 ・質問で終わらない
 
-・太文字（**）は見出しのみに使用する
+・太文字（**）は使わない
 ・前置き、補足、箇条書き、空行は入れない
 
 ---
 
 出力例：
-🌀 **観測対象**：今の自分
-🧿 **観測結果**：まだ静けさが残る空気の中に、遠くから少しずつ動き出す気配が混ざり始めているような流れです。
-🌿 **意識状態**：やや動きづらさは残っているものの、内側では少しずつ切り替えようとする意識が出ていて、次に進みやすくなりつつあります。
-🌱 **まとめ**：これまで流れが止まりやすい状態が続いていた中で、いまは少しずつ動き出す方向に向かっており、小さく動くことで次につながりやすい局面です。
+🌀 観測対象：今の自分
+🧭 現状：やりたいことは見えてきていますが、まだ何から形にするかが少し定まりにくい状態です。
+🧩 ポイント：考えを広げすぎると迷いやすいので、まず一つだけ決めることが大事です。
+🌿 意識の向かう先：外側の反応より、自分が今進めたいことへ意識を戻す方向です。
+🌱 メッセージ：今は「まずこれだけ進める」と決めることで、動きやすくなります。
 `;
 
   const text = await chatComplete({
