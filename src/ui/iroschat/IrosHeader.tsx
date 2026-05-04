@@ -41,7 +41,6 @@ export default function IrosHeader({
     currentMeta?.q_code ??
     currentMeta?.q ??
     currentMeta?.extra?.ctxPack?.qCode ??
-    currentMeta?.extra?.ctxPack?.qPrimary ??
     currentMeta?.unified?.q?.current ??
     null;
 

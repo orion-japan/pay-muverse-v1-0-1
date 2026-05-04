@@ -27,34 +27,251 @@ export type BandV1 = 'S' | 'F' | 'R' | 'C' | 'I' | 'T';
 // e_turn: instant emotion energy (turn-only)
 export type ETurnV1 = 'e1' | 'e2' | 'e3' | 'e4' | 'e5';
 
+export type ETurnV2 = {
+  base: 'E1' | 'E2' | 'E3' | 'E4' | 'E5';
+  action: 'control' | 'push' | 'confirm' | 'avoid' | 'fill';
+  polarity: 'pos' | 'neg' | null;
+};
+
+export type EmotionTextureV1 = {
+  surface: string;
+  inner: string;
+  need: string;
+  block: string;
+} | null;
+
 export type MirrorMetaV1 = {
   e_turn: ETurnV1 | null;
-  polarity: PolarityV1 | null;
+  e_turn_v2: ETurnV2 | null;
+  emotionTexture: EmotionTextureV1;
+  emotionProfile?: {
+    primary: string;
+    secondary: string[];
+    balance: Record<string, number>;
+  } | null;
+  polarity: {
+    in: PolarityV1 | null;
+    out: PolarityV1 | null;
+    metaBand: string | null;
+  } | null;
 
   // confidence: stability of observation (info-based)
-  confidence: number; // 0..1
+  confidence: number;
 
   // intensity: energy of emotion on this turn (signal-based)
-  intensity: number; // 0..1
+  intensity: number;
 
-  meaningKey: string | null; // e.g. "C12_e3_yin"
+  meaningKey: string | null;
   field: {
-    colorKey: string | null; // e.g. "e3_yin"
-    alpha: number; // 0..1 (usually = confidence)
-    size: number; // 0..1 (energy proxy, length-ish)
-    intensity: number; // 0..1 (usually = mirror.intensity)
+    colorKey: string | null;
+    alpha: number;
+    size: number;
+    intensity: number;
   };
 };
 
+function mapToETurnV2(e: ETurnV1 | null, polarity: PolarityV1 | null): ETurnV2 | null {
+  if (!e) return null;
+
+  const baseMap = {
+    e1: 'E1',
+    e2: 'E2',
+    e3: 'E3',
+    e4: 'E4',
+    e5: 'E5',
+  } as const;
+
+  const actionMap = {
+    e1: 'control',
+    e2: 'push',
+    e3: 'confirm',
+    e4: 'avoid',
+    e5: 'fill',
+  } as const;
+
+  return {
+    base: baseMap[e],
+    action: actionMap[e],
+    polarity: polarity === 'yang' ? 'pos' : polarity === 'yin' ? 'neg' : null,
+  };
+}
+
+function buildEmotionTexture(args: {
+  userText: string;
+  e: ETurnV2 | null;
+}): EmotionTextureV1 {
+  const text = stripSpaces(normText(args.userText)).toLowerCase();
+  const e = args.e;
+
+  if (!text && !e) return null;
+
+  const profile = buildEmotionProfile(args.userText);
+
+  const contextPrimary = (() => {
+    if (/iros|能力|一段|アップ|改善|修正|実装|精度|writer|seed|flow|q_code|e_turn|emotion|発揮|新しい/i.test(text)) {
+      return 'e2_pos';
+    }
+
+    if (/彼|彼女|相手|恋愛|連絡|返信|既読|未読|好き|不安|心配|会えない|距離|関係/.test(text)) {
+      return 'e3_neg';
+    }
+
+    return '';
+  })();
+
+  const fallbackPrimary =
+    e?.base && e?.polarity ? `${String(e.base).toLowerCase()}_${e.polarity}` : '';
+
+  const primary = String(
+    contextPrimary ||
+      profile?.primary ||
+      fallbackPrimary ||
+      '',
+  ).trim();
+  if (contextPrimary === 'e2_pos') {
+    return {
+      surface: '開発前進',
+      inner: 'irosを、表面の言葉ではなく感情エネルギーから返答できる形に進めたい',
+      need: 'emotion_primaryからe_turnと表示までつながった変化を、わかる言葉で出したい',
+      block: '仕組みは動いているのに、返答が抽象化して変化が伝わりにくくなる',
+    };
+  }
+  const textures: Record<string, Exclude<EmotionTextureV1, null>> = {
+    e1_pos: {
+      surface: '整理',
+      inner: 'ばらついているものを、扱える順番に整えたい',
+      need: '安全に確認しながら進めたい',
+      block: '急に広げると崩れそうな感じがある',
+    },
+    e1_neg: {
+      surface: '抑制',
+      inner: 'ちゃんと保とうとして、内側が固まりやすくなっている',
+      need: '崩さずに力を抜ける形がほしい',
+      block: '緩めると乱れる感じがある',
+    },
+
+    e2_pos: {
+      surface: '前進',
+      inner: '今あるものを、もう一段動く形に進めたい',
+      need: '止まっている材料を実際に動かしたい',
+      block: '材料はあるのに、出力や形で浅くなる感じが残る',
+    },
+    e2_neg: {
+      surface: '反発',
+      inner: 'このまま流されることに納得できない',
+      need: '止まっている状況をちゃんと動かしたい',
+      block: '強く出すぎて壊したくない',
+    },
+
+    e3_pos: {
+      surface: '確認',
+      inner: 'つながりや安定を確かめながら進めたい',
+      need: '関係や場の温度を見ながら安心して動きたい',
+      block: '確かめきれないまま進むと揺れやすい',
+    },
+    e3_neg: {
+      surface: '不安',
+      inner: '曖昧なまま置かれるのがつらい',
+      need: '関係や状況の温度を確かめたい',
+      block: '重く見られたくない',
+    },
+
+    e4_pos: {
+      surface: '保護',
+      inner: '大事なものを守りながら慎重に進めたい',
+      need: '無理に踏み込まず、安全な距離で見極めたい',
+      block: '急に近づくと壊れそうな感じがある',
+    },
+    e4_neg: {
+      surface: '怖さ',
+      inner: '失敗したくない・傷つきたくない',
+      need: '安全に進める形がほしい',
+      block: '判断ミスへの恐れ',
+    },
+
+    e5_pos: {
+      surface: '熱量',
+      inner: '好きなものや情熱を、もっと素直に出したい',
+      need: '内側の火を消さずに表に出したい',
+      block: '強く出すと浮いてしまう感じがある',
+    },
+    e5_neg: {
+      surface: '空虚',
+      inner: '意味や熱が見えにくくなっている',
+      need: 'もう一度、内側に火が戻る接点がほしい',
+      block: '動いても満たされない感じが残る',
+    },
+  };
+
+  return textures[primary] ?? null;
+}
+
+function buildEmotionProfile(userText: string): {
+  primary: string;
+  secondary: string[];
+  balance: Record<string, number>;
+} | null {
+  const text = stripSpaces(normText(userText)).toLowerCase();
+  if (!text) return null;
+
+  const scores: Record<string, number> = {
+    e1_pos: 0,
+    e1_neg: 0,
+    e2_pos: 0,
+    e2_neg: 0,
+    e3_pos: 0,
+    e3_neg: 0,
+    e4_pos: 0,
+    e4_neg: 0,
+    e5_pos: 0,
+    e5_neg: 0,
+  };
+
+  if (/整理|整え|確認|検証|順番|一つずつ|1つずつ|安全に|慎重/.test(text)) scores.e1_pos += 2;
+  if (/我慢|抑え|耐え|ちゃんとしないと|固ま|張りつめ|緩めない/.test(text)) scores.e1_neg += 2;
+
+  if (/iros|能力|一段|アップ|改善|修正|実装|精度|writer|seed|flow|q_code|e_turn|emotion|発揮|新しい|進めたい|作りたい|直したい|動かしたい|突破/i.test(text)) scores.e2_pos += 2;
+  if (/怒|ムカ|イラ|腹立|納得いか|許せ|おかしい|なんで|なぜ/.test(text)) scores.e2_neg += 2;
+
+  if (/つなげたい|関係を整えたい|安定|大丈夫|確かめたい/.test(text)) scores.e3_pos += 2;
+  if (/不安|心配|迷|どうしよう|大丈夫かな|曖昧|もや|モヤ/.test(text)) scores.e3_neg += 2;
+
+  if (/守りたい|慎重に見たい|距離を置く|様子を見る/.test(text)) scores.e4_pos += 2;
+  if (/怖|こわ|恐|無理|逃げ|避け|緊張|パニック/.test(text)) scores.e4_neg += 2;
+
+  if (/情熱|燃える|やりたい|ワクワク|楽しい|好き/.test(text)) scores.e5_pos += 2;
+  if (/虚無|空虚|空っぽ|意味ない|無意味|疲れた|しんどい|つらい|辛い|きつい/.test(text)) scores.e5_neg += 2;
+
+  const entries = Object.entries(scores)
+    .filter(([, value]) => value > 0)
+    .sort((a, b) => b[1] - a[1]);
+
+  if (entries.length === 0) return null;
+
+  const total = entries.reduce((sum, [, value]) => sum + value, 0);
+  const top = entries.slice(0, 3);
+
+  const balance: Record<string, number> = {};
+  for (const [key, value] of top) {
+    balance[key] = Math.round((value / total) * 100) / 100;
+  }
+
+  return {
+    primary: top[0][0],
+    secondary: top.slice(1).map(([key]) => key),
+    balance,
+  };
+}
+
 export type FlowMetaV1 = {
-  delta: FlowDeltaV1 | null; // upstream may pass null, we preserve
+  delta: FlowDeltaV1 | null;
   returnStreak: number | null;
   sessionBreak: boolean | null;
   micro: boolean;
 };
 
 export type CoordMetaV1 = {
-  stage: number | null; // 1..18
+  stage: number | null;
   band: BandV1 | null;
 };
 
@@ -67,13 +284,9 @@ export type MirrorFlowResultV1 = {
 
 export type MirrorFlowInputV1 = {
   userText: string;
-
-  // upstream（推定は禁止：未提供なら null）
   stage?: number | null;
   band?: BandV1 | null;
   polarity?: PolarityV1 | null;
-
-  // flow は既存正本を渡す想定（未提供なら null で保持）
   flow?: {
     delta?: FlowDeltaV1 | null;
     returnStreak?: number | null;
@@ -111,7 +324,6 @@ function nonWordRatio(s: string): number {
 }
 
 // ---- e_turn normalization ----
-// E/e, Q/q, 1..5 を e1..e5 に正規化する（入力の互換用）
 export function normalizeETurnV1(raw: any): ETurnV1 | null {
   if (raw == null) return null;
 
@@ -119,15 +331,12 @@ export function normalizeETurnV1(raw: any): ETurnV1 | null {
     const s0 = raw.trim();
     if (!s0) return null;
 
-    // accept e1..e5
     const m1 = s0.match(/^e([1-5])$/i);
     if (m1) return (`e${m1[1]}` as ETurnV1);
 
-    // accept Q1..Q5 / q1..q5 / E1..E5
     const m2 = s0.match(/^[QqEe]([1-5])$/);
     if (m2) return (`e${m2[1]}` as ETurnV1);
 
-    // accept bare digit "1".."5"
     const m3 = s0.match(/^([1-5])$/);
     if (m3) return (`e${m3[1]}` as ETurnV1);
 
@@ -151,35 +360,28 @@ export function detectMirrorMicroV1(userText: string): boolean {
 
   if (!t) return true;
 
-  // strong signal: short but meaningful -> NOT micro
   const strongSignal =
-    /(?:無理|怖|こわ|恐|パニック|詰ん|怒|ムカ|イラ|腹立|許せ|最悪|不安|心配|悩|迷|自信ない|虚無|空虚|意味ない|つらい|辛い|しんどい|きつい)/.test(
-      t
-    ) || /[!！]{2,}/.test(t);
+    /(?:無理|怖|こわ|恐|パニック|詰ん|怒|ムカ|イラ|腹立|許せ|最悪|不安|心配|悩|迷|自信ない|虚無|空虚|意味ない|つらい|辛い|しんどい|きつい)/.test(t) ||
+    /[!！]{2,}/.test(t);
 
-  // micro dictionary
   if (MICRO_WORDS.has(t.toLowerCase())) return true;
 
-  // only emoji/punct/symbol
   if (/^[\p{Extended_Pictographic}\p{P}\p{S}]+$/u.test(t)) return true;
 
-  // 1..3 chars: micro unless strong signal
   if (len <= 3) return !strongSignal;
 
-  // 4..10 chars: decide by symbol ratio unless strong signal
   if (len <= 10) {
     if (strongSignal) return false;
     if (nonWordRatio(t) >= 0.7) return true;
     return false;
   }
 
-  // mostly symbols
   if (nonWordRatio(t) >= 0.6) return true;
 
   return false;
 }
 
-// ---- v1 confidence (stability) ----
+// ---- v1 confidence ----
 
 function infoScoreByLen(lenTrim: number): number {
   if (lenTrim <= 10) return 0.20;
@@ -213,9 +415,10 @@ export function calcMirrorConfidenceV1(userText: string, micro: boolean): number
 
   const vaguePatterns = [/なんか/, /たぶん/, /よくわからない/, /微妙/, /適当/, /いろいろ/];
   const vagueHits = countHits(t, vaguePatterns);
+
   let pen = 0;
   if (vagueHits >= 1) pen += 0.05;
-  if (vagueHits >= 3) pen += 0.07; // total 0.12
+  if (vagueHits >= 3) pen += 0.07;
 
   if (lenTrim <= 25 && /^(?:すごい|やばい|最高|無理|きつい|助かる|ありがとう)[!！]*$/.test(t)) {
     pen += 0.08;
@@ -226,32 +429,27 @@ export function calcMirrorConfidenceV1(userText: string, micro: boolean): number
   let c = info + clue - pen;
 
   if (micro) {
-    // micro is low-stability by definition
     c = Math.min(0.45, c);
     c = clamp(c, 0.05, 0.45);
   } else {
     c = clamp(c, 0.10, 0.95);
   }
+
   return c;
 }
 
-// ---- v1 energy size (proxy, mostly length) ----
+// ---- v1 energy size ----
 
 export function calcMirrorEnergySizeV1(userText: string): number {
   const t = stripSpaces(normText(userText));
   const len = Array.from(t).length;
   const x = len / 180;
-  const size = 1 - Math.exp(-x); // smooth saturation
+  const size = 1 - Math.exp(-x);
   return clamp(size, 0, 1);
 }
 
-// ---- v1 e_turn detection (rule-based, turn-only) ----
-// NOTE: v1 は「再現性優先」なので、軽いキーワード/記号ベースで推定。
-// - e1: 抑圧/我慢/秩序（固さ・義務・抑え）
-// - e2: 怒り/対立/成長（イライラ・反発・攻め）
-// - e3: 不安/心配/安定（迷い・心配・確認）
-// - e4: 恐怖/萎縮/浄化（怖い・無理・震え・回避）
-// - e5: 虚無/落差/火種（空虚・燃えない・無意味・飽き）
+// ---- v1 e_turn detection ----
+
 export function detectETurnV1(userText: string, micro: boolean): ETurnV1 | null {
   const t0 = normText(userText);
   const t = stripSpaces(t0).toLowerCase();
@@ -261,216 +459,61 @@ export function detectETurnV1(userText: string, micro: boolean): ETurnV1 | null 
   const hasExcl = /[!！]/.test(t);
   const hasQuest = /[?？]/.test(t);
 
-  // ------------------------------------------------------------
-  // 1) 強い感情シグナルは先に即決
-  //    いまは「文脈」より「感情の生っぽさ」を優先する
-  // ------------------------------------------------------------
-
-  // e5: 空虚 / 虚無 / 消耗
-  if (
-    /空っぽ|空虚|虚無|虚しい|むなしい|意味ない|無意味|どうでもいい|燃えない|やる気ない|飽きた|疲れた|しんどい|つらい|辛い|きつい/.test(
-      t
-    )
-  ) {
+  if (/空っぽ|空虚|虚無|虚しい|むなしい|意味ない|無意味|どうでもいい|燃えない|やる気ない|飽きた|疲れた|しんどい|つらい|辛い|きつい/.test(t)) {
     return 'e5';
   }
 
-  // e4: 怖さ / 回避 / 萎縮 / 緊張
-  if (
-    /怖い|こわい|怖さ|こわさ|怖|こわ|恐れ|恐い|無理|無理だ|無理かも|萎縮|逃げたい|避けたい|震え|緊張|パニック|詰ん/.test(
-      t
-    )
-  ) {
+  if (/怖い|こわい|怖さ|こわさ|怖|こわ|恐れ|恐い|無理|無理だ|無理かも|萎縮|逃げたい|避けたい|震え|緊張|パニック|詰ん/.test(t)) {
     return 'e4';
   }
 
-  // e2: 怒り / 反発 / 押し返し / 違和感の強さ
-  if (
-    /なんで|なぜ|納得いか|許せ|ムカ|イラ|腹立|ふざけ|舐め|キレ|最悪|違う気がする|おかしい|それは違う|やってられない/.test(
-      t
-    )
-  ) {
+  if (/なんで|なぜ|納得いか|許せ|ムカ|イラ|腹立|ふざけ|舐め|キレ|最悪|違う気がする|おかしい|それは違う|やってられない/.test(t)) {
     return 'e2';
   }
 
-  // e1: 張りつめ / 固める / 整える / 我慢
-  if (
-    /張りつめ|張り詰め|張ってる|こわば|力が入|力ん|固まってる|固い|緩めない|ちゃんとして|ちゃんとしないと|我慢|抑え|耐え|整えたい|整理したい|確認したい|順番に|一つずつ|1つずつ/.test(
-      t
-    )
-  ) {
+  if (/張りつめ|張り詰め|張ってる|こわば|力が入|力ん|固まってる|固い|緩めない|ちゃんとして|ちゃんとしないと|我慢|抑え|耐え|整えたい|整理したい|確認したい|順番に|一つずつ|1つずつ/.test(t)) {
     return 'e1';
   }
 
-  // ------------------------------------------------------------
-  // 2) 通常スコアリング
-  // ------------------------------------------------------------
-
-  // e1: 整える / 守る / 固める / 抑える
   const p1 = [
-    /我慢/,
-    /抑え/,
-    /抑圧/,
-    /耐え/,
-    /義務/,
-    /べき/,
-    /ちゃんと/,
-    /正しく/,
-    /ルール/,
-    /秩序/,
-    /仕様/,
-    /規約/,
-    /制約/,
-    /守ら/,
-    /固定/,
-    /禁止/,
-    /許可/,
-    /整理/,
-    /整え/,
-    /確認したい/,
-    /確認して/,
-    /確かめ/,
-    /検証/,
-    /実在確認/,
-    /存在確認/,
-    /一つずつ/,
-    /1つずつ/,
-    /順番/,
-    /安全に/,
-    /慎重/,
-    /根拠を見たい/,
-    /張りつめ/,
-    /張り詰め/,
-    /こわば/,
-    /力が入/,
-    /固ま/,
-    /緩めない/,
+    /我慢/, /抑え/, /抑圧/, /耐え/, /義務/, /べき/, /ちゃんと/, /正しく/,
+    /ルール/, /秩序/, /仕様/, /規約/, /制約/, /守ら/, /固定/, /禁止/, /許可/,
+    /整理/, /整え/, /確認したい/, /確認して/, /確かめ/, /検証/, /実在確認/,
+    /存在確認/, /一つずつ/, /1つずつ/, /順番/, /安全に/, /慎重/, /根拠を見たい/,
+    /張りつめ/, /張り詰め/, /こわば/, /力が入/, /固ま/, /緩めない/,
   ];
 
-  // e2: 怒り / 反発 / 押す / 突破
   const p2 = [
-    /怒/,
-    /ムカ/,
-    /イラ/,
-    /腹立/,
-    /許せ/,
-    /対立/,
-    /反発/,
-    /喧嘩/,
-    /キレ/,
-    /最悪/,
-    /ふざけ/,
-    /舐め/,
-    /ぶち/,
-    /ダメダメ/,
-    /何やってきた/,
-    /できてないじゃん/,
-    /なんで/,
-    /なぜ/,
-    /納得いか/,
-    /違う気がする/,
-    /それは違う/,
-    /おかしい/,
-    /やる/,
-    /進めたい/,
-    /進もう/,
-    /進める/,
-    /試したい/,
-    /試す/,
-    /直したい/,
-    /直す/,
-    /修正/,
-    /実装/,
-    /作りたい/,
-    /作る/,
-    /見たい/,
-    /見てほしい/,
-    /貼る/,
-    /出したい/,
-    /突破/,
-    /動かしたい/,
-    /回したい/,
-    /確認するぞ/,
+    /怒/, /ムカ/, /イラ/, /腹立/, /許せ/, /対立/, /反発/, /喧嘩/, /キレ/,
+    /最悪/, /ふざけ/, /舐め/, /ぶち/, /ダメダメ/, /何やってきた/,
+    /できてないじゃん/, /なんで/, /なぜ/, /納得いか/, /違う気がする/,
+    /それは違う/, /おかしい/, /やる/, /進めたい/, /進もう/, /進める/,
+    /試したい/, /試す/, /直したい/, /直す/, /修正/, /実装/, /作りたい/,
+    /作る/, /見たい/, /見てほしい/, /貼る/, /出したい/, /突破/, /動かしたい/,
+    /回したい/, /確認するぞ/,
   ];
 
-  // e3: 不安 / 迷い / 確認 / どうしたら
   const p3 = [
-    /不安/,
-    /心配/,
-    /迷/,
-    /どうしよう/,
-    /どうしたら/,
-    /大丈夫かな/,
-    /このままで大丈夫/,
-    /恐らく/,
-    /たぶん/,
-    /微妙/,
-    /悩/,
-    /もや/,
-    /モヤ/,
-    /自信ない/,
-    /確証/,
-    /本当に/,
-    /これでok/,
-    /これで大丈夫/,
-    /なんだっけ/,
-    /思い出せ/,
-    /あれって/,
-    /どうだったっけ/,
+    /不安/, /心配/, /迷/, /どうしよう/, /どうしたら/, /大丈夫かな/,
+    /このままで大丈夫/, /恐らく/, /たぶん/, /微妙/, /悩/, /もや/, /モヤ/,
+    /自信ない/, /確証/, /本当に/, /これでok/, /これで大丈夫/,
+    /なんだっけ/, /思い出せ/, /あれって/, /どうだったっけ/,
   ];
 
-  // e4: 怖さ / 回避 / 萎縮
   const p4 = [
-    /怖/,
-    /こわ/,
-    /恐/,
-    /無理/,
-    /無理だ/,
-    /無理かも/,
-    /萎縮/,
-    /逃げ/,
-    /避け/,
-    /震え/,
-    /緊張/,
-    /焦り/,
-    /パニック/,
-    /詰ん/,
-    /無理ゲー/,
+    /怖/, /こわ/, /恐/, /無理/, /無理だ/, /無理かも/, /萎縮/, /逃げ/,
+    /避け/, /震え/, /緊張/, /焦り/, /パニック/, /詰ん/, /無理ゲー/,
   ];
 
-  // e5: 虚無 / 消耗 / 燃えない
   const p5 = [
-    /虚無/,
-    /空虚/,
-    /空っぽ/,
-    /虚しい/,
-    /むなしい/,
-    /意味ない/,
-    /無意味/,
-    /どうでも/,
-    /燃え/,
-    /やる気ない/,
-    /飽き/,
-    /しんどい/,
-    /つらい/,
-    /辛い/,
-    /落ち込/,
-    /疲れた/,
-    /きつい/,
+    /虚無/, /空虚/, /空っぽ/, /虚しい/, /むなしい/, /意味ない/, /無意味/,
+    /どうでも/, /燃え/, /やる気ない/, /飽き/, /しんどい/, /つらい/, /辛い/,
+    /落ち込/, /疲れた/, /きつい/,
   ];
 
-  // 弱い揺れは e3 に“少しだけ”
   const softUncertain = [
-    /…+/,
-    /\.{2,}/,
-    /うーん/,
-    /んー/,
-    /えー/,
-    /えっと/,
-    /なんか/,
-    /微妙/,
-    /よくわからない/,
-    /たぶん/,
+    /…+/, /\.{2,}/, /うーん/, /んー/, /えー/, /えっと/, /なんか/,
+    /微妙/, /よくわからない/, /たぶん/,
   ];
 
   let s1 = countHits(t, p1);
@@ -479,28 +522,18 @@ export function detectETurnV1(userText: string, micro: boolean): ETurnV1 | null 
   let s4 = countHits(t, p4);
   let s5 = countHits(t, p5);
 
-  // 記号補正
-  // ! は e2 を少し押す
   s2 += /[!！]{2,}/.test(t) ? 2 : hasExcl ? 1 : 0;
 
-  // ? は e3 を“軽く”押すだけ
-  // ただし他の感情が立っている時は押しすぎない
   const emotionalBase = s1 + s2 + s4 + s5;
   if (emotionalBase === 0) {
     s3 += /[?？]{2,}/.test(t) ? 2 : hasQuest ? 1 : 0;
   }
 
-  // 弱い揺れは、他感情が立っていない時だけ e3 に加点
   const soft = countHits(t, softUncertain);
   if (soft >= 1 && emotionalBase === 0) s3 += 1;
 
-  // 開発系の「確認」「根拠」は e1 側へ
   if (/確認|根拠|検証|存在確認|実在確認/.test(t)) s1 += 1;
-
-  // 進行意図は e2 側へ
   if (/進めたい|直したい|修正したい|見たい|試したい|作りたい|やりたい/.test(t)) s2 += 1;
-
-  // 消耗語は e5 優先
   if (/疲れた|しんどい|つらい|辛い|きつい/.test(t)) s5 += 1;
 
   const scores: Array<[ETurnV1, number]> = [
@@ -510,24 +543,22 @@ export function detectETurnV1(userText: string, micro: boolean): ETurnV1 | null 
     ['e4', s4],
     ['e5', s5],
   ];
+
   scores.sort((a, b) => b[1] - a[1]);
 
   const [best, bestScore] = scores[0];
 
-  // 全ゼロ時の安全デフォルト
   if (!bestScore || bestScore <= 0) {
     if (/疲れた|しんどい|つらい|辛い|きつい|空っぽ|虚無/.test(t)) return 'e5';
     if (/怖い|こわい|怖|こわ|恐|無理|震え|緊張/.test(t)) return 'e4';
     if (/なんで|なぜ|違う気がする|それは違う|ムカ|イラ|腹立/.test(t)) return 'e2';
-    if (/張りつめ|張り詰め|こわば|力が入|整理|整え|確認|検証|順番|一つずつ|1つずつ/.test(t))
-      return 'e1';
+    if (/張りつめ|張り詰め|こわば|力が入|整理|整え|確認|検証|順番|一つずつ|1つずつ/.test(t)) return 'e1';
     if (/どうしよう|どうしたら|大丈夫かな|不安|心配/.test(t)) return 'e3';
     if (hasExcl) return 'e2';
     if (hasQuest) return 'e3';
     return 'e3';
   }
 
-  // tie-break: 感情の強いものを優先
   const top = scores.filter(([, v]) => v === bestScore).map(([k]) => k);
 
   if (top.length >= 2) {
@@ -541,10 +572,8 @@ export function detectETurnV1(userText: string, micro: boolean): ETurnV1 | null 
   return best;
 }
 
-// ---- v1 intensity (energy on this turn; signal-based) ----
-// NOTE:
-// - confidence と違い、短文でも強信号なら上がる
-// - micro でも上がり得る（ただし上限は抑えめ）
+// ---- v1 intensity ----
+
 export function calcMirrorIntensityV1(args: {
   userText: string;
   micro: boolean;
@@ -552,6 +581,7 @@ export function calcMirrorIntensityV1(args: {
 }): number {
   const t0 = normText(args.userText);
   const t = stripSpaces(t0).toLowerCase();
+
   if (!t) return 0;
 
   const micro = args.micro;
@@ -562,7 +592,6 @@ export function calcMirrorIntensityV1(args: {
   const hasExcl = /[!！]/.test(t);
   const hasQuest = /[?？]/.test(t);
 
-  // strong phrase set (fixed, reproducible)
   const strongWords = [
     /無理/, /怖|こわ|恐/, /パニック/, /詰ん/,
     /最悪/, /許せ/, /キレ/, /ふざけ/,
@@ -570,10 +599,9 @@ export function calcMirrorIntensityV1(args: {
     /虚無|空虚|無意味|意味ない/,
     /つらい|辛い|しんどい|きつい/,
   ];
+
   const strongHits = countHits(t, strongWords);
 
-  // base by e_turn kind (turn energy bias)
-  // e2/e4/e5 tends to feel higher pressure than e1/e3 in moment
   const baseByKind: Record<ETurnV1, number> = {
     e1: 0.35,
     e2: 0.60,
@@ -587,18 +615,15 @@ export function calcMirrorIntensityV1(args: {
   if (e) x += baseByKind[e];
   x += Math.min(0.25, strongHits * 0.12);
 
-  // punctuation pressure
   if (excl2) x += 0.20;
   else if (hasExcl) x += 0.10;
 
   if (quest2) x += 0.10;
   else if (hasQuest) x += 0.05;
 
-  // length gives a tiny support but not dominant (intensity ≠ info)
   const len = Array.from(t).length;
   x += clamp(len / 200, 0, 0.10);
 
-  // micro cap (still can be strong, but not max)
   if (micro) x = Math.min(x, 0.75);
 
   return clamp(x, 0, 1);
@@ -625,23 +650,30 @@ export function buildMirrorFlowV1(input: MirrorFlowInputV1): MirrorFlowResultV1 
   const userText = input.userText ?? '';
   const micro = detectMirrorMicroV1(userText);
 
-  // confidence = stability (info-based)
   const confidence = calcMirrorConfidenceV1(userText, micro);
-
-  // size = energy proxy (length-ish)
   const size = calcMirrorEnergySizeV1(userText);
 
   const stage = input.stage ?? null;
   const band = input.band ?? null;
 
-  // e_turn: turn-only (instant)
-  const e_turn = detectETurnV1(userText, micro);
+  const emotionProfile = buildEmotionProfile(userText);
 
-  // intensity: energy (signal-based)
+  const eTurnFromEmotionPrimary: ETurnV1 | null = (() => {
+    const primary = String(emotionProfile?.primary ?? '').trim().toLowerCase();
+    const matched = primary.match(/^(e[1-5])_(pos|neg)$/u);
+    return matched ? (matched[1] as ETurnV1) : null;
+  })();
+
+  const polarityFromEmotionPrimary: PolarityV1 | null = (() => {
+    const primary = String(emotionProfile?.primary ?? '').trim().toLowerCase();
+    if (/_pos$/u.test(primary)) return 'yang';
+    if (/_neg$/u.test(primary)) return 'yin';
+    return null;
+  })();
+
+  const e_turn = eTurnFromEmotionPrimary ?? detectETurnV1(userText, micro);
   const intensity = calcMirrorIntensityV1({ userText, micro, e_turn });
-
-  // ---- polarity normalization (for key stability) ----
-  const normPol = (raw: any): 'yin' | 'yang' | null => {
+  const normPol = (raw: any): PolarityV1 | null => {
     if (raw == null) return null;
 
     if (typeof raw === 'string') {
@@ -670,49 +702,58 @@ export function buildMirrorFlowV1(input: MirrorFlowInputV1): MirrorFlowResultV1 
 
   const polarity_metaBand: string | null =
     typeof polarityRaw === 'string'
-      ? (polarityRaw.trim() ? polarityRaw.trim() : null)
-      : (typeof (polarityRaw as any)?.metaBand === 'string' && (polarityRaw as any).metaBand.trim()
-          ? (polarityRaw as any).metaBand.trim()
-          : null);
+      ? polarityRaw.trim() || null
+      : typeof (polarityRaw as any)?.metaBand === 'string' && (polarityRaw as any).metaBand.trim()
+        ? (polarityRaw as any).metaBand.trim()
+        : null;
 
-  const polarity_in = normPol(polarityRaw);
-  const polarity_out =
-    normPol((polarityRaw as any)?.out) ||
-    normPol((polarityRaw as any)?.in) ||
-    polarity_in;
+        const polarity_in = polarityFromEmotionPrimary ?? normPol(polarityRaw);
+        const polarity_out =
+          polarityFromEmotionPrimary ||
+          normPol((polarityRaw as any)?.out) ||
+          normPol((polarityRaw as any)?.in) ||
+          polarity_in;
 
   const polarityForKey = polarity_in;
+  const e_turn_v2 = mapToETurnV2(e_turn, polarity_in);
+  const emotionTexture = buildEmotionTexture({ userText, e: e_turn_v2 });
 
   const meaningKey = makeMirrorMeaningKeyV1({
     stage,
     band,
     e_turn,
-    polarity: polarityForKey as any,
+    polarity: polarityForKey,
     confidence,
   });
 
   const colorKey = e_turn
-    ? (polarityForKey ? `${e_turn}_${polarityForKey}` : `${e_turn}`)
+    ? polarityForKey
+      ? `${e_turn}_${polarityForKey}`
+      : `${e_turn}`
     : null;
 
   const flowDelta = input.flow?.delta ?? null;
   const returnStreak =
     typeof input.flow?.returnStreak === 'number'
-      ? input.flow!.returnStreak!
-      : (input.flow?.returnStreak ?? null);
+      ? input.flow.returnStreak
+      : input.flow?.returnStreak ?? null;
+
   const sessionBreak =
     typeof input.flow?.sessionBreak === 'boolean'
-      ? input.flow!.sessionBreak!
-      : (input.flow?.sessionBreak ?? null);
+      ? input.flow.sessionBreak
+      : input.flow?.sessionBreak ?? null;
 
   return {
     mirror: {
       e_turn,
+      e_turn_v2,
+      emotionTexture,
+      emotionProfile,
       polarity: {
         in: polarity_in,
         out: polarity_out,
         metaBand: polarity_metaBand,
-      } as any,
+      },
       confidence,
       intensity,
       meaningKey,

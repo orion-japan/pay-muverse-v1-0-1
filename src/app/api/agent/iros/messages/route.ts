@@ -515,7 +515,7 @@ export async function GET(req: NextRequest) {
       const idVal = m.message_id ?? m.id ?? '';
       const rawContent = (m.text ?? m.content ?? '').toString();
       const contentVal = stripDirectivesForApi(rawContent);
-      const qAny = (m.q_primary ?? m.q_code ?? null) as any;
+      const qAny = (m.q_code ?? null) as any;
 
       return {
         id: String(idVal),
@@ -713,8 +713,6 @@ export async function POST(req: NextRequest) {
     const q_code_from_body =
       toNonEmptyTrimmedString(body?.q_code) ??
       toNonEmptyTrimmedString(body?.qCode) ??
-      toNonEmptyTrimmedString(body?.q_primary) ??
-      toNonEmptyTrimmedString(body?.qPrimary) ??
       toNonEmptyTrimmedString((body as any)?.q) ??
       null;
 
@@ -729,9 +727,9 @@ export async function POST(req: NextRequest) {
       toNonEmptyTrimmedString(body?.intentLayer) ??
       null;
 
-    const q_code_from_meta_raw =
-      pickMetaValue(metaFilled as any, ['qCode', 'q_code', 'qPrimary', 'q_code_primary']) ??
-      pickMetaValue(metaAugRaw as any, ['qCode', 'q_code', 'qPrimary', 'q_code_primary']) ??
+      const q_code_from_meta_raw =
+      pickMetaValue(metaFilled as any, ['qCode', 'q_code', 'q']) ??
+      pickMetaValue(metaAugRaw as any, ['qCode', 'q_code', 'q']) ??
       null;
 
     const depth_stage_from_meta_raw =
@@ -758,11 +756,13 @@ export async function POST(req: NextRequest) {
         : null;
 
     // memory fallback (last resort)
-    const q_from_state = msRow ? (toNonEmptyTrimmedString(msRow.q_primary) ?? null) : null;
+    // ✅ Q_code / q_primary 分離
+    // - q_primary は e_turn 蓄積から出る状態Qなので、messages.q_code へは流さない
+    // - q_code は body / meta に明示された固定寄りQだけを使う
     const depth_from_state = msRow ? (toNonEmptyTrimmedString(msRow.depth_stage) ?? null) : null;
     const layer_from_state = msRow ? (toNonEmptyTrimmedString(msRow.intent_layer) ?? null) : null;
 
-    const q_code_final = q_code_from_body ?? q_code_from_meta ?? q_from_state ?? null;
+    const q_code_final = q_code_from_body ?? q_code_from_meta ?? null;
     const depth_stage_final = depth_stage_from_body ?? depth_stage_from_meta ?? depth_from_state ?? null;
 
     const intent_layer_from_depth = normalizeIntentLayerFromDepth(depth_stage_final);

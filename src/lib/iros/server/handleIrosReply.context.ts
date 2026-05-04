@@ -415,11 +415,9 @@ export async function buildTurnContext(
         baseMetaForTurn?.depth ??
         null,
 
-      qPrimary:
+        qPrimary:
         baseMetaForTurn?.qPrimary ??
         baseMetaForTurn?.q_primary ??
-        baseMetaForTurn?.q_code ??
-        baseMetaForTurn?.qCode ??
         null,
 
       selfAcceptance:
@@ -720,9 +718,7 @@ export async function buildTurnContext(
           (baseMetaForTurn as any)?.depth ??
           null;
 
-        const qNow =
-          (baseMetaForTurn as any)?.qPrimary ??
-          (baseMetaForTurn as any)?.q_primary ??
+          const qNow =
           (baseMetaForTurn as any)?.q_code ??
           (baseMetaForTurn as any)?.qCode ??
           null;

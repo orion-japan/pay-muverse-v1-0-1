@@ -314,11 +314,6 @@ export async function persistQCodeSnapshotIfAny(args: {
     const q: any =
       core?.qCode ??
       core?.q_code ??
-      core?.qPrimary ??
-      core?.q_now ??
-      core?.qTraceUpdated?.qNow ??
-      core?.qTrace?.qNow ??
-      core?.q_counts?.q_trace?.qNow ??
       unified?.q?.current ??
       unified?.qCode ??
       null;
@@ -554,7 +549,6 @@ export async function persistMemoryStateIfAny(args: {
       const qCodeInput: any =
       unified?.q?.current ??
       unified?.qCode ??
-      core?.qPrimary ??
       core?.q_now ??
       core?.q_code ??
       core?.qCode ??

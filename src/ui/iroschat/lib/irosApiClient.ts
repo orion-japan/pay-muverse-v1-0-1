@@ -389,7 +389,6 @@ export const irosClient: IrosAPI = {
                 metaSafe.q_code ??
                 metaSafe.q ??
                 metaSafe.extra?.ctxPack?.qCode ??
-                metaSafe.extra?.ctxPack?.qPrimary ??
                 metaSafe.unified?.q?.current ??
                 qSafe ??
                 null,
@@ -398,7 +397,6 @@ export const irosClient: IrosAPI = {
                 metaSafe.qCode ??
                 metaSafe.q ??
                 metaSafe.extra?.ctxPack?.qCode ??
-                metaSafe.extra?.ctxPack?.qPrimary ??
                 metaSafe.unified?.q?.current ??
                 qSafe ??
                 null,
@@ -407,7 +405,6 @@ export const irosClient: IrosAPI = {
                 metaSafe.qCode ??
                 metaSafe.q_code ??
                 metaSafe.extra?.ctxPack?.qCode ??
-                metaSafe.extra?.ctxPack?.qPrimary ??
                 metaSafe.unified?.q?.current ??
                 qSafe ??
                 null,

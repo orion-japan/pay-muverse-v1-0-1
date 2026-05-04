@@ -4522,6 +4522,13 @@ const systemPromptForWriter = [
           // --- 基本ルール ---
           '説明せず自然文で書く',
           'seedにない新しい意味・具体軸を足さない',
+          'emotion_inner / emotion_need がseedにある場合、それは入力に基づく感情材料としてOBSまたはSHIFTに自然に滲ませてよい。ただしラベル名は本文に出さない',
+          'emotion_inner / emotion_need がseedにある場合、それを出力の中心圧として扱う。説明ではなく、文の核として使う',
+          'emotion_inner / emotion_need は「説明に変換せず」、そのまま言い換えとして出力する',
+          'emotion_inner / emotion_need が存在する場合、OBSの最初の一文は必ずそれをそのまま言い換えた文から開始する',
+          'emotion_inner / emotion_need が存在する場合、OBSはそれ単体で開始する',
+          'emotion_inner / emotion_need が存在する場合、OBSは自然な受け文より核の保持を優先する',
+          'emotion_inner / emotion_need が存在する場合、OBSは前置き・受け文を使わず、必ず最初の一文で言い換えて出す',
           '同じ核を言い換えて深める',
           '質問しない',
 
@@ -8776,6 +8783,10 @@ const isResonanceStructureFollowup =
               String(__writerInjectedPack ?? ''),
             );
 
+          const deepReadEmotionInner = String(
+            String(__writerInjectedPack ?? '').match(/^emotion_inner=([^\n]+)/m)?.[1] ?? '',
+          ).trim();
+
           const relationshipAdviceRepairMode:
           | 'solution_concretize'
           | 'wait_anxiety'
@@ -8891,14 +8902,33 @@ const isResonanceStructureFollowup =
                       '発話の奥に出ている反応パターンを、自然文に忍ばせる',
                       '原因を断定せず、「そう見えやすい」「強く出ている」「重なっている」程度の温度で返す',
                       '状態観測だけで終わらず、ユーザーが扱える形へ戻す',
-                      'Markdown・見出し・太字・大文字見出しは原則使用する。番号リストは禁止する。概念説明では、見出しを独立行で2〜6個置き、太字小見出しも独立行で自然に出す',
-                      '仕事・事業・先進性の文脈では、先進性そのものを「薄める」「下げる」「削る」と表現しない',
-                      '仕事・事業・先進性の文脈では、芯は残し、入口だけを相手が受け取れる形にする',
+                      'Markdown・見出し・太字・大文字見出しは積極的に使用してよい。番号リストは禁止する。見出しは独立行で自然に出す',
+                      ...(deepReadEmotionInner
+                        ? [
+                            'emotion_inner がある場合も、Markdown見出し・太字見出し・タイトル行を使ってよい',
+                            'emotion_inner がある場合、見出しは抽象語ではなく、何が変わったかが分かる具体名にする',
+                            'emotion_inner がある場合、「ひらき方」「いま出ているもの」「使いどころ」「ひとつの置き方」など、意味がぼやける見出しだけで逃がさない',
+                            'emotion_inner がある場合、見出しの直後の本文では、何ができるようになったか・どこで使えるか・何が変わったかを日常語で書く',
+                            'emotion_inner がある場合、開発文脈では emotion_primary / e_turn / currentFlow / 表示 など、seedにある実装上の変化を必要に応じて自然文で使ってよい',
+                          ]
+                        : []),
+                      ...(deepReadEmotionInner
+                        ? [
+                            `emotion_inner 実値: ${deepReadEmotionInner}`,
+                            'emotion_inner がある場合、タイトル見出しの後の最初の本文は、必ず emotion_inner 実値の自然な言い換えから開始する',
+                            'emotion_inner がある場合、「その言葉には」「その一言は」「まず表の相談内容」などの受け文から始めない',
+                            'emotion_inner がある場合、最初の本文では userText / CONTEXT / FOCUS の文面をそのまま引用しない',
+                            'emotion_inner がある場合、最初の本文は emotion_inner 実値を中心にし、見出しだけで意味を作らない',
+                          ]
+                        : []),
+                      '仕事・事業・開発文脈では、先進性そのものを大きく見せるより、何ができるようになったかを具体的に書く',
+                      '仕事・事業・開発文脈では、「入口」「受け皿」「届く」などの抽象語に逃がさず、使い方・変化・実装上の意味へ戻す',
                       '理解されない原因を、ユーザー側の説明不足だけにしない',
-                      '相手側の受け皿・必要な場所・届く入口のズレとして自然に扱う',
+                      '相手にどう見えるかを書く場合も、何を見せれば伝わるかまで日常語で書く',
                     ],
-                    block_deep_read_surface:
-                      'まず表の相談内容を自然に受ける。',
+                    block_deep_read_surface: deepReadEmotionInner
+                      ? `まず表の相談内容ではなく、この内容の言い換えから開始する: ${deepReadEmotionInner}`
+                      : 'まず表の相談内容を自然に受ける。',
                     block_deep_read_under:
                       '次に、言葉の奥で強くなっている反応パターンを、断定せず自然文で一段だけ触れる。',
                     block_deep_read_return:
@@ -9052,36 +9082,44 @@ const finalWriterDirectivesMsg =
           content:
             writerPatternKey === 'NORMAL_COMPRESSED_V1'
               ? [
-                  'PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):',
-                  'exact_paragraphs=4',
-                  'paragraph1=OBS',
-                  'paragraph2=SHIFT',
-                  'paragraph3=NEXT',
-                  `paragraph4=${answerSafeMode ? 'SAFE' : 'RESIDUE'}`,
-                  'never_stop_at_paragraph3=true',
-                  'never_leave_paragraph4_empty=true',
-                  'use_only_OBS_LINE_and_SHIFT_LINE=false',
-                  'do_not_add_new_words=true',
-                  'do_not_expand_meaning=true',
-                  'paragraph4_must_not_include_cause=true',
-                  'paragraph4_must_not_include_explanation=true',
-                  'paragraph4_must_not_include_evidence=true',
-                  ...(answerSafeMode
-                    ? []
-                    : [
-                        'paragraph4_role=OPEN_END',
-                        'paragraph4_must_not_close=true',
-                        'paragraph4_extend_unresolved_state=true',
-                        'paragraphs_focus_on_state_density=true',
-                        'paragraphs_keep_ambiguity_without_resolving=true',
-                        'paragraphs_hold_unformed_direction=true',
-                        'paragraphs_expand_how_the_state_is_present=true',
-                        'paragraphs_describe_remaining_shape_and_texture=true',
-                        'allow_expression_variation=true',
-                        'avoid_repeating_same_words_across_paragraphs=true',
-                        'prefer_words_like_trace_presence_residue_over_evidence=true',
-                      ]),
-                ].join('\n')
+                'PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):',
+                'exact_paragraphs=4',
+                'paragraph1=OBS',
+                'paragraph2=SHIFT',
+                'paragraph3=NEXT',
+                `paragraph4=${answerSafeMode ? 'SAFE' : 'RESIDUE'}`,
+                'never_stop_at_paragraph3=true',
+                'never_leave_paragraph4_empty=true',
+                'use_only_OBS_LINE_and_SHIFT_LINE=false',
+                ...(deepReadEmotionInner
+                  ? [
+                      `FIRST_SENTENCE_SEED=${deepReadEmotionInner}`,
+                      'paragraph1_first_sentence=FIRST_SENTENCE_SEED',
+                      'paragraph1_must_start_with_FIRST_SENTENCE_SEED=true',
+                      'do_not_rephrase_FIRST_SENTENCE_SEED_beyond_minor_naturalization=true',
+                    ]
+                  : []),
+                'do_not_add_new_words=true',
+                'do_not_expand_meaning=true',
+                'paragraph4_must_not_include_cause=true',
+                'paragraph4_must_not_include_explanation=true',
+                'paragraph4_must_not_include_evidence=true',
+                ...(answerSafeMode
+                  ? []
+                  : [
+                      'paragraph4_role=OPEN_END',
+                      'paragraph4_must_not_close=true',
+                      'paragraph4_extend_unresolved_state=true',
+                      'paragraphs_focus_on_state_density=true',
+                      'paragraphs_keep_ambiguity_without_resolving=true',
+                      'paragraphs_hold_unformed_direction=true',
+                      'paragraphs_expand_how_the_state_is_present=true',
+                      'paragraphs_describe_remaining_shape_and_texture=true',
+                      'allow_expression_variation=true',
+                      'avoid_repeating_same_words_across_paragraphs=true',
+                      'prefer_words_like_trace_presence_residue_over_evidence=true',
+                    ]),
+              ].join('\n')
               : shouldUseMarkdownStructureContract
                 ? [
                   'PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):',
@@ -9189,11 +9227,10 @@ const finalWriterDirectivesMsg =
           next = next
             .replace(/(CONTEXT:\n)[^\n]*/u, `$1${seedDraftForWriter}`)
             .replace(/(FOCUS:\n)[^\n]*/u, `$1${seedDraftForWriter}`)
-            .replace(/(OBS=)[^\n]*/u, '$1いま出ている体感や報告を、丸写しせず自然に受ける')
+            .replace(/(OBS=)[^\n]*/u, '$1emotion_inner / emotion_need が存在する場合は核の保持を優先する。存在しない場合のみ、いま出ている体感や報告を丸写しせず自然に受ける')
             .replace(/(NEXT=)[^\n]*/u, '$1必要以上に構造化せず、会話として少しだけ返す')
-            .replace(/(OBS_LINE=)[^\n]*/u, '$1まず自然な受け文で返す。ユーザー文をそのまま復唱しない。')
+            .replace(/(OBS_LINE=)[^\n]*/u, '$1emotion_inner / emotion_need が存在する場合は、前置き・受け文を使わず、それを最優先で言い換えて開始する。存在しない場合のみ、自然な受け文で返す。')
             .replace(/(NEXT_LINE=)[^\n]*/u, '$1丸写しではなく、感じ取った強さだけを短く返す。');
-
           return next;
         };
 

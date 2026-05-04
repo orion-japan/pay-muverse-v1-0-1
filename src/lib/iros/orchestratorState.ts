@@ -200,16 +200,14 @@ export async function loadBaseMetaFromMemoryState(args: {
     mergedBaseMeta = {
       ...(mergedBaseMeta ?? {}),
 
-      // depth / qCode：baseMeta が優先。無ければ MemoryState で補完
+      // depth：baseMeta が優先。無ければ MemoryState で補完
+      // ✅ Q_code / qPrimary 分離
+      // - memoryState.qPrimary は e_turn 蓄積から出る状態Q
+      // - ここでは memoryState.qPrimary を qCode に変換しない
       ...(mergedBaseMeta?.depth
         ? {}
         : memoryState.depthStage
           ? { depth: memoryState.depthStage as Depth }
-          : {}),
-      ...(mergedBaseMeta?.qCode
-        ? {}
-        : memoryState.qPrimary
-          ? { qCode: memoryState.qPrimary as QCode }
           : {}),
 
       // ✅ intentLayer：baseMeta が無いときだけ補完

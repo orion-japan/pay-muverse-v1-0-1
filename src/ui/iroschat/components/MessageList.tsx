@@ -578,12 +578,12 @@ const shouldShowDiagnosisNotice =
               }
             : null,
         });
-        // ✅ 表示用Qコードは「現在Q」を優先して拾う（targetQ / goalTargetQ は表示に使わない）
+        // ✅ 表示用Qコードは「固定寄りのQ」を優先して拾う
+        // - qPrimary は e_turn 蓄積から出る状態Qなので、ここでは表示Qに混ぜない
         const qToShowRaw =
           (m.meta?.qCode as any) ??
           (m.meta?.q as any) ??
           (m.meta?.extra?.ctxPack?.qCode as any) ??
-          (m.meta?.extra?.ctxPack?.qPrimary as any) ??
           (m.meta?.unified?.q?.current as any) ??
           ((m as any)?.q_code as any) ??
           ((m as any)?.q as any) ??
@@ -595,12 +595,14 @@ const shouldShowDiagnosisNotice =
             : null;
 
         // ✅ 表示用 e_turn を拾う
+        // 正本は mirrorFlowV1。旧経路の extra.e_turn / mirror.e_turn は最後に見る。
         const eTurnToShowRaw =
-          (m.meta?.extra?.e_turn as any) ??
-          (m.meta?.extra?.mirror?.e_turn as any) ??
           (m.meta?.extra?.mirrorFlowV1?.mirror?.e_turn as any) ??
-          (m.meta?.extra?.ctxPack?.e_turn as any) ??
+          (m.meta?.extra?.ctxPack?.mirrorFlowV1?.mirror?.e_turn as any) ??
+          (m.meta?.extra?.mirror?.e_turn as any) ??
           (m.meta?.extra?.ctxPack?.mirror?.e_turn as any) ??
+          (m.meta?.extra?.ctxPack?.e_turn as any) ??
+          (m.meta?.extra?.e_turn as any) ??
           ((m.meta as any)?.e_turn as any) ??
           ((m as any)?.e_turn as any) ??
           null;

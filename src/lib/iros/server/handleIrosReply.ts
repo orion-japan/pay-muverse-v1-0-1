@@ -405,18 +405,30 @@ function ensureMetaFilled(args: { meta: any; ctx: any; orch: any }): any {
   const ctx = args.ctx ?? {};
   const orch = args.orch ?? {};
 
-  // ==== Q（qPrimary / q_code を必ず埋める）====
-  const qFromMeta = pickFirstString(m.qPrimary, m.q_code, m.qCode, m.currentQ);
-  const qFromCtx = pickFirstString(
+  // ==== Q_code / qPrimary 分離 ====
+  // - q_code / qCode は固定寄りの個人Qとして扱う
+  // - qPrimary / q_primary は e_turn 蓄積から出る状態Qとして扱う
+  // - ここでは qPrimary を q_code に混ぜない
+  // - ここでは q_code を qPrimary に混ぜない
+  const qPrimaryFinal = pickFirstString(
+    m.qPrimary,
+    m.q_primary,
     ctx?.baseMetaForTurn?.qPrimary,
+    ctx?.baseMetaForTurn?.q_primary,
+  );
+
+  const qCodeFinal = pickFirstString(
+    m.q_code,
+    m.qCode,
+    m.q,
     ctx?.baseMetaForTurn?.q_code,
     ctx?.baseMetaForTurn?.qCode,
     ctx?.requestedQCode,
   );
-  const qFinal = qFromMeta ?? qFromCtx ?? 'unknown';
 
-  if (!m.qPrimary) m.qPrimary = qFinal;
-  if (!m.q_code) m.q_code = qFinal;
+  if (!m.qPrimary && qPrimaryFinal) m.qPrimary = qPrimaryFinal;
+  if (!m.q_code && qCodeFinal) m.q_code = qCodeFinal;
+  if (!m.qCode && qCodeFinal) m.qCode = qCodeFinal;
 
   // ==== Phase（Inner/Outer：不明なら埋めない）====
   const phaseFromMeta = normalizePhaseIO(m.phase) ?? normalizePhaseIO(m.phaseIO);
@@ -7561,8 +7573,7 @@ if (shouldRunWriter) {
     // q/depth/phase を毎回 stamp して「Inner 混入」を止める
     try {
       const qCanon =
-        (out.metaForSave as any)?.qPrimary ??
-        (out.metaForSave as any)?.q_primary ??
+        (out.metaForSave as any)?.q_code ??
         (out.metaForSave as any)?.qCode ??
         (out.metaForSave as any)?.q ??
         ctxPack.qCode ??

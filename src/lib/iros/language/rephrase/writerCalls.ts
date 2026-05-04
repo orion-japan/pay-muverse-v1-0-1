@@ -724,7 +724,73 @@ const mirrorFlowV1ForSeed: any =
           '',
         ) ?? '',
       ).trim();
+      const emotionInnerSeed = String(
+        pick(
+          mirror?.emotionTexture?.inner,
+          mf?.emotionTexture?.inner,
+          (ctxPack as any)?.mirror?.emotionTexture?.inner,
+          (extra as any)?.mirror?.emotionTexture?.inner,
+          '',
+        ) ?? '',
+      ).trim();
 
+      const emotionNeedSeed = String(
+        pick(
+          mirror?.emotionTexture?.need,
+          mf?.emotionTexture?.need,
+          (ctxPack as any)?.mirror?.emotionTexture?.need,
+          (extra as any)?.mirror?.emotionTexture?.need,
+          '',
+        ) ?? '',
+      ).trim();
+
+      const emotionProfileObj = firstNonNull<any>(
+        mirror?.emotionProfile,
+        mf?.emotionProfile,
+        mf?.mirror?.emotionProfile,
+        mf?.mirrorFlow?.emotionProfile,
+        mf?.mirror_flow?.emotionProfile,
+        mf?.meta?.mirror?.emotionProfile,
+        (ctxPack as any)?.mirror?.emotionProfile,
+        (ctxPack as any)?.mirrorFlowV1?.mirror?.emotionProfile,
+        (extra as any)?.mirror?.emotionProfile,
+        (extra as any)?.mirrorFlowV1?.mirror?.emotionProfile,
+        (extra as any)?.ctxPack?.mirror?.emotionProfile,
+        (extra as any)?.ctxPack?.mirrorFlowV1?.mirror?.emotionProfile,
+        userContextExtraForSeed?.ctxPack?.mirror?.emotionProfile,
+        userContextExtraForSeed?.ctxPack?.mirrorFlowV1?.mirror?.emotionProfile,
+        userContextExtraForSeed?.mirrorFlowV1?.mirror?.emotionProfile,
+        null,
+      ) as any;
+
+      const emotionPrimarySeed = String(
+        pick(emotionProfileObj?.primary, '') ?? '',
+      ).trim();
+
+      const emotionSecondarySeed = Array.isArray(emotionProfileObj?.secondary)
+        ? emotionProfileObj.secondary.join(',')
+        : '';
+
+      const emotionBalanceSeed =
+        emotionProfileObj?.balance && typeof emotionProfileObj.balance === 'object'
+          ? JSON.stringify(emotionProfileObj.balance)
+          : '';
+          console.log(
+            '[IROS/writerCalls][EMOTION_PROFILE_SEED_DIAG]',
+            JSON.stringify({
+              hasEmotionProfileObj: !!emotionProfileObj,
+              primary: emotionPrimarySeed,
+              secondary: emotionSecondarySeed,
+              balance: emotionBalanceSeed,
+              hasMirrorEmotionProfile: !!mirror?.emotionProfile,
+              hasMfEmotionProfile: !!mf?.emotionProfile,
+              hasMfMirrorEmotionProfile: !!mf?.mirror?.emotionProfile,
+              hasCtxMirrorEmotionProfile: !!((ctxPack as any)?.mirror?.emotionProfile),
+              hasCtxMirrorFlowEmotionProfile: !!((ctxPack as any)?.mirrorFlowV1?.mirror?.emotionProfile),
+              hasExtraMirrorEmotionProfile: !!((extra as any)?.mirror?.emotionProfile),
+              hasExtraMirrorFlowEmotionProfile: !!((extra as any)?.mirrorFlowV1?.mirror?.emotionProfile),
+            }),
+          );
       const polarityObj = pick(
         mirror?.polarity,
         mf?.polarity,
@@ -849,6 +915,11 @@ const mirrorFlowV1ForSeed: any =
       const lines: string[] = ['MIRROR_FLOW_SEED_V1:'];
       if (currentFlowSeed) lines.push(`current=${currentFlowSeed}`);
       if (eTurnSeed) lines.push(`e_turn=${eTurnSeed}`);
+      if (emotionInnerSeed) lines.push(`emotion_inner=${emotionInnerSeed}`);
+      if (emotionNeedSeed) lines.push(`emotion_need=${emotionNeedSeed}`);
+      if (emotionPrimarySeed) lines.push(`emotion_primary=${emotionPrimarySeed}`);
+      if (emotionSecondarySeed) lines.push(`emotion_secondary=${emotionSecondarySeed}`);
+      if (emotionBalanceSeed) lines.push(`emotion_balance=${emotionBalanceSeed}`);
       if (polaritySeed) lines.push(`polarity=${polaritySeed}`);
       if (intensitySeed) lines.push(`intensity=${intensitySeed}`);
       if (confidenceSeed) lines.push(`confidence=${confidenceSeed}`);
@@ -859,7 +930,6 @@ const mirrorFlowV1ForSeed: any =
       if (coordBandSeed) lines.push(`coordBand=${coordBandSeed}`);
       if (basedOnKeySeed) lines.push(`basedOnKey=${basedOnKeySeed}`);
       if (basedOnValueSeed) lines.push(`basedOnValue=${basedOnValueSeed}`);
-
       try {
         console.log(
           '[IROS/writerCalls][MIRROR_FLOW_SEED_ENTER]',
@@ -3689,18 +3759,34 @@ const diagnosisFollowupBlock = (() => {
       if (seed.length > 240) return content;
       if (/^ユーザーの最後の発話に/.test(seed)) return content;
       if (/^@/.test(seed)) return content;
+      const emotionInnerForPack = String(
+        String(mirrorFlowSeedText ?? '').match(/^emotion_inner=([^\n]+)/m)?.[1] ?? '',
+      ).trim();
+
+      const obsCoreForPack = emotionInnerForPack
+        ? `emotion_innerをOBSの中心にする: ${emotionInnerForPack}`
+        : 'emotion_inner / emotion_need が存在する場合は核の保持を優先する。存在しない場合のみ、いま出ている体感や報告を丸写しせず自然に受ける';
+
+      const obsLineForPack = emotionInnerForPack
+        ? `前置き・受け文を使わず、最初の一文は必ずこの内容の言い換えから開始する: ${emotionInnerForPack}`
+        : 'emotion_inner / emotion_need が存在する場合は、前置き・受け文を使わず、それを最優先で言い換えて開始する。存在しない場合のみ、自然な受け文で返す。';
 
       return String(content ?? '')
         .replace(/(CONTEXT:\n)[^\n]*/u, `$1${seed}`)
         .replace(/(FOCUS:\n)[^\n]*/u, `$1${seed}`)
-        .replace(/(OBS=)[^\n]*/u, '$1いま出ている体感や報告を、丸写しせず自然に受ける')
+        .replace(/(OBS=)[^\n]*/u, `$1${obsCoreForPack}`)
         .replace(/(NEXT=)[^\n]*/u, '$1必要以上に構造化せず、会話として少しだけ返す')
-        .replace(/(OBS_LINE=)[^\n]*/u, '$1まず自然な受け文で返す。ユーザー文をそのまま復唱しない。')
+        .replace(/(OBS_LINE=)[^\n]*/u, `$1${obsLineForPack}`)
         .replace(/(NEXT_LINE=)[^\n]*/u, '$1丸写しではなく、感じ取った強さだけを短く返す。');
     };
 
     let base = [
-      rewritePackWithSeedInstructionCore(String(internalPackForWriterSource ?? '')),
+      [
+        mirrorFlowSeedText,
+        rewritePackWithSeedInstructionCore(String(internalPackForWriterSource ?? '')),
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
       irMetaBlock,
       diagnosisFollowupBlock,
 

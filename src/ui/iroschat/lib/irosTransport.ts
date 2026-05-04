@@ -379,7 +379,6 @@ export async function fetchMessages(conversationId: string): Promise<IrosMessage
             metaSafe.q_code ??
             metaSafe.q ??
             metaSafe.extra?.ctxPack?.qCode ??
-            metaSafe.extra?.ctxPack?.qPrimary ??
             metaSafe.unified?.q?.current ??
             qSafe ??
             null,
@@ -388,7 +387,6 @@ export async function fetchMessages(conversationId: string): Promise<IrosMessage
             metaSafe.qCode ??
             metaSafe.q ??
             metaSafe.extra?.ctxPack?.qCode ??
-            metaSafe.extra?.ctxPack?.qPrimary ??
             metaSafe.unified?.q?.current ??
             qSafe ??
             null,
@@ -397,7 +395,6 @@ export async function fetchMessages(conversationId: string): Promise<IrosMessage
             metaSafe.qCode ??
             metaSafe.q_code ??
             metaSafe.extra?.ctxPack?.qCode ??
-            metaSafe.extra?.ctxPack?.qPrimary ??
             metaSafe.unified?.q?.current ??
             qSafe ??
             null,
