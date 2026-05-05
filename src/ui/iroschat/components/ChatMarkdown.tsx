@@ -72,10 +72,16 @@ function fixUnmatchedBold(text: string): string {
 }
 
 function normalizeBold(text: string): string {
-  const tightened = text.replace(
+  const quoteSafe = String(text ?? '').replace(
+    /\*\*「([^*\n]+?)」\*\*/g,
+    (_match, inner: string) => `「**${String(inner).trim()}**」`,
+  );
+
+  const tightened = quoteSafe.replace(
     /\*\*\s+([^*][^*]*?)\s*\*\*/g,
     (_match, inner: string) => `**${String(inner).trim()}**`,
   );
+
   return tightened.replace(/^\s*-\s*$/gm, '');
 }
 

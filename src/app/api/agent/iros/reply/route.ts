@@ -1847,17 +1847,18 @@ const contentForPersist = (() => {
     )
   ).trim();
 
-  // 🔥 主役を逆転
-  if (!isEffectivelyEmptyText(fromBlocks) && fromBlocks.length > 0) {
-    return fromBlocks;
-  }
-
+  // ✅ UIに返す正本を最優先にする
+  // renderGateway / styleNorm 後の本文を優先し、rephraseBlocks は救済に戻す。
   if (!isEffectivelyEmptyText(uiReturnText) && uiReturnText.length > 0) {
     return uiReturnText;
   }
 
   if (!isEffectivelyEmptyText(uiResolvedText) && uiResolvedText.length > 0) {
     return uiResolvedText;
+  }
+
+  if (!isEffectivelyEmptyText(fromBlocks) && fromBlocks.length > 0) {
+    return fromBlocks;
   }
 
   return '……';

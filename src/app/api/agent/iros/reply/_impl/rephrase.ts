@@ -1039,10 +1039,67 @@ const intentBandForCtx =
     (typeof (meta as any)?.unified?.depth?.stage === 'string' && TRIM((meta as any).unified.depth.stage)) ||
     null;
 
+  const selfAcceptanceForCtx = (() => {
+    const candidates = [
+      (memoryStateForCtx as any)?.selfAcceptance,
+      (memoryStateForCtx as any)?.self_acceptance,
+      (memoryStateForCtx as any)?.sa,
+      (extraMerged as any)?.selfAcceptance,
+      (extraMerged as any)?.self_acceptance,
+      (extraMerged as any)?.sa,
+      (extraMerged as any)?.ctxPack?.selfAcceptance,
+      (extraMerged as any)?.ctxPack?.self_acceptance,
+      (extraMerged as any)?.ctxPack?.sa,
+      (meta as any)?.selfAcceptance,
+      (meta as any)?.self_acceptance,
+      (meta as any)?.sa,
+      (meta as any)?.extra?.selfAcceptance,
+      (meta as any)?.extra?.self_acceptance,
+      (meta as any)?.extra?.sa,
+      (meta as any)?.extra?.ctxPack?.selfAcceptance,
+      (meta as any)?.extra?.ctxPack?.self_acceptance,
+      (meta as any)?.extra?.ctxPack?.sa,
+      (meta as any)?.unified?.selfAcceptance,
+      (meta as any)?.unified?.self_acceptance,
+    ];
+
+    for (const v of candidates) {
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+      if (typeof v === 'string' && v.trim().length > 0) {
+        const n = Number(v);
+        if (Number.isFinite(n)) return n;
+      }
+    }
+
+    const reasonCandidates = [
+      (meta as any)?.descentGateReason,
+      (meta as any)?.extra?.descentGateReason,
+      (meta as any)?.frameDebug_containerDecision?.dg?.reason,
+      (meta as any)?.extra?.frameDebug_containerDecision?.dg?.reason,
+    ];
+
+    for (const raw of reasonCandidates) {
+      const s = String(raw ?? '');
+      const m = s.match(/(?:^|[\\s,])sa=([0-9]+(?:\\.[0-9]+)?)/);
+      if (m?.[1]) {
+        const n = Number(m[1]);
+        if (Number.isFinite(n)) return n;
+      }
+    }
+
+    return null;
+  })();
+
   // ★ここが本丸：rephraseEngine が拾う “3点セット” を ctxPack にも載せる
   if (isBlankLike(ctxPack.phase)) ctxPack.phase = phaseForCtx;
   if (isBlankLike(ctxPack.depthStage)) ctxPack.depthStage = depthForCtx;
   if (isBlankLike(ctxPack.qCode)) ctxPack.qCode = qCodeForCtx;
+
+  if (selfAcceptanceForCtx != null) {
+    if (isBlankLike((ctxPack as any).selfAcceptance)) (ctxPack as any).selfAcceptance = selfAcceptanceForCtx;
+    if (isBlankLike((ctxPack as any).self_acceptance)) (ctxPack as any).self_acceptance = selfAcceptanceForCtx;
+    if (isBlankLike((ctxPack as any).sa)) (ctxPack as any).sa = selfAcceptanceForCtx;
+  }
 
   // flowDigest は既存 util を使う（upstream の flow があれば触らない）
   if (ctxPack.flowDigest == null) ctxPack.flowDigest = buildFlowDigest();
@@ -1084,6 +1141,10 @@ const intentBandForCtx =
       (meta as any)?.extra?.memoryStateSnapshot ??
       null,
 
+    selfAcceptance: selfAcceptanceForCtx,
+    self_acceptance: selfAcceptanceForCtx,
+    sa: selfAcceptanceForCtx,
+
     // ✅ 継承＋補完済みの ctxPack を使う（上書き生成しない）
     ctxPack: {
       ...(ctxPack && typeof ctxPack === 'object' ? ctxPack : {}),
@@ -1102,6 +1163,10 @@ const intentBandForCtx =
         (extraMerged as any)?.memoryStateSnapshot ??
         (meta as any)?.extra?.memoryStateSnapshot ??
         null,
+
+      selfAcceptance: selfAcceptanceForCtx,
+      self_acceptance: selfAcceptanceForCtx,
+      sa: selfAcceptanceForCtx,
     },
 
     historyMessages: normalizedHistory.length ? normalizedHistory : undefined,
@@ -1818,6 +1883,9 @@ try {
 
       extra: {
         ...(((extraMerged as any) && typeof extraMerged === 'object') ? extraMerged : {}),
+        selfAcceptance: selfAcceptanceForCtx,
+        self_acceptance: selfAcceptanceForCtx,
+        sa: selfAcceptanceForCtx,
         question:
           (extraMerged as any)?.question ??
           (meta as any)?.extra?.question ??

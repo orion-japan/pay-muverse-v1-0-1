@@ -465,12 +465,36 @@
    }
 
    /* リストにも iros の整い感 */
+   .sof-msgs .msgBody .iros-list,
+   .msgBody .iros-list,
+   .sof-msgs .msgBody ul,
+   .sof-msgs .msgBody ol,
+   .msgBody ul,
+   .msgBody ol {
+     margin: 0.45em 0 0.95em 0 !important;
+     padding-left: 1.35em !important;
+     line-height: 1.78 !important;
+     white-space: normal !important;
+   }
+
+   .sof-msgs .msgBody .iros-li,
+   .msgBody .iros-li,
+   .sof-msgs .msgBody li,
+   .msgBody li {
+     margin: 0.22em 0 !important;
+     padding-left: 0.15em !important;
+     line-height: 1.78 !important;
+     white-space: normal !important;
+     word-break: break-word;
+   }
+
    .sof-msgs .msgBody ul li::marker,
    .sof-msgs .msgBody ol li::marker,
    .msgBody ul li::marker,
    .msgBody ol li::marker {
      color: rgba(96, 76, 210, 0.78);
      font-weight: 700;
+     font-size: 1em;
    }
 
 
@@ -500,7 +524,11 @@
   .sof-msgs .msgBody .iros-ptext,
   .msgBody .iros-ptext,
   .sof-msgs .msgBody p,
-  .msgBody p {
+  .msgBody p,
+  .sof-msgs .msgBody li,
+  .msgBody li,
+  .sof-msgs .msgBody .iros-li,
+  .msgBody .iros-li {
     font-size: 18px !important;
     line-height: 1.82 !important;
   }
@@ -671,7 +699,9 @@
   }
   .msgBody,
   .msgBody .iros-p,
-  .msgBody .iros-ptext {
+  .msgBody .iros-ptext,
+  .msgBody li,
+  .msgBody .iros-li {
     font-size: 17px;
     line-height: 1.85;
     letter-spacing: 0.02em;

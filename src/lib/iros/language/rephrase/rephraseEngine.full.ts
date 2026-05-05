@@ -478,7 +478,7 @@ const obsCard = (() => {
     '- obsPick は「核」として参照してよいが、原文引用や言い直しはしない。',
     echoRuleLine,
     '- 説明で埋めず、会話として短く返す。',
-    '- 箇条書き・番号列挙・チェックリストで出力しない（必要なら1〜2文に畳む）。',
+    '- 番号列挙・チェックリストで出力しない。ユーザーが例を求めた場合のみ、番号ではなく「- 」の箇条書きを独立行で使ってよい。',
     ...forbidLines,
     questionRuleLine,
   ].join('\n');
@@ -605,6 +605,14 @@ const obsCard = (() => {
     return lines.length ? lines.join('\n') : '';
   })();
 
+  const mergedMetaTextForInternalPack = [
+    String((args as any)?.metaText ?? '').trim(),
+    String(metaText ?? '').trim(),
+  ]
+    .filter((v) => typeof v === 'string' && v.trim().length > 0)
+    .join('\n')
+    .trim();
+
   // --- assemble (V3 minimal) ---
   // ✅ internalPack を太らせない（system/contract 側に寄せる）
   // - HISTORY_HINT / FLOW_TAPE / SEED_DRAFT / obsCard は pack から外す
@@ -647,8 +655,8 @@ const obsCard = (() => {
   parts.push('', `STATE: depthStage=${depthStage} phase=${phase} qCode=${qCode}`);
 
   // META（さらに短く）※STATEはここに入れない
-  if (metaText && String(metaText).trim()) {
-    parts.push('', 'META:', clampLines(String(metaText), 8));
+  if (mergedMetaTextForInternalPack && String(mergedMetaTextForInternalPack).trim()) {
+    parts.push('', 'META:', clampLines(String(mergedMetaTextForInternalPack), 12));
   }
 
   // FLOW（短く）※生文/オブジェクト事故を落とす
@@ -1284,15 +1292,18 @@ function stripHedgeLite(text: string): string {
   t = t.replace(/でしょう/g, '。');
   t = t.replace(/\bかも\b/g, '');
 
+  // 通常会話では Markdown 太字を表に残さない。
+  t = t.replace(/\*\*/g, '');
+
   // 概念説明の末尾に出やすい「次回案内」「追加できます」系は削る。
   // 本文の途中にある能力説明までは削らず、段落末尾だけを対象にする。
   t = t.replace(
-    /(?:\n\n|\n|^)?必要なら次に、?[^\n。]*(?:できます|できる|ほどけます|深められます|整理できます|説明できます)[。.!！]?$/u,
+    /(?:\n\n|\n|^)?必要なら次に、?[^\n。]*(?:できます|できる|出せます|出せる|ほどけます|深められます|整理できます|説明できます)[。.!！]?$/u,
     ''
   );
 
   t = t.replace(
-    /(?:\n\n|\n|^)?(?:必要なら|次に|もっと詳しく|さらに詳しく)[^\n。]*(?:できます|できる|ほどけます|深められます|整理できます|説明できます)[。.!！]?$/u,
+    /(?:\n\n|\n|^)?(?:必要なら|次に|もっと詳しく|さらに詳しく)[^\n。]*(?:できます|できる|出せます|出せる|ほどけます|深められます|整理できます|説明できます)[。.!！]?$/u,
     ''
   );
 
@@ -2457,23 +2468,42 @@ const toRephraseBlocks = (s: string): string[] => {
     return [src];
   };
 
+  const paragraphHasBullet = (value: string): boolean =>
+    String(value ?? '')
+      .split('\n')
+      .map(cleanLine)
+      .some((line) => isBulletLike(line));
+
+  const normalizeParagraphForBlock = (value: string): string => {
+    const lines = String(value ?? '')
+      .split('\n')
+      .map(cleanLine)
+      .filter(Boolean);
+
+    if (lines.length === 0) return '';
+
+    // Markdown箇条書きを含む段落は、見出しと「- 」行の改行を保持する。
+    if (lines.some((line) => isBulletLike(line))) {
+      return lines.join('\n').trim();
+    }
+
+    return cleanLine(lines.join(' '));
+  };
+
   const paragraphs = text
     .split(/\n{2,}/)
-    .map((p) => p.split('\n').map(cleanLine).filter(Boolean).join(' '))
-    .map(cleanLine)
-    .filter(Boolean)
-    .filter((p) => !isBulletLike(p));
+    .map(normalizeParagraphForBlock)
+    .filter(Boolean);
 
   let blocks: string[] = [];
 
   if (paragraphs.length >= 2) {
-    blocks = paragraphs.flatMap((p) => splitLongBlock(p));
+    blocks = paragraphs.flatMap((p) => (paragraphHasBullet(p) ? [p] : splitLongBlock(p)));
   } else {
     const lines = text
       .split('\n')
       .map(cleanLine)
-      .filter(Boolean)
-      .filter((p) => !isBulletLike(p));
+      .filter(Boolean);
 
     if (lines.length >= 4) {
       blocks = lines;
@@ -2531,22 +2561,204 @@ return blocks;
   const userText = norm(opts?.userText ?? '');
   const metaTextBase = safeContextToText(opts?.userContext ?? null);
 
+  const extraForUnderstanding: any =
+    (opts as any)?.extra && typeof (opts as any).extra === 'object'
+      ? (opts as any).extra
+      : {};
+
+  const directCtxPackForUnderstanding: any =
+    (opts as any)?.ctxPack && typeof (opts as any).ctxPack === 'object'
+      ? (opts as any).ctxPack
+      : {};
+
+  const userCtxForUnderstanding: any = {
+    ...extraForUnderstanding,
+    ...((opts as any)?.userContext ?? {}),
+  };
+
+  const ctxPackForUnderstanding: any =
+    userCtxForUnderstanding?.ctxPack && typeof userCtxForUnderstanding.ctxPack === 'object'
+      ? {
+          ...directCtxPackForUnderstanding,
+          ...userCtxForUnderstanding.ctxPack,
+        }
+      : directCtxPackForUnderstanding;
+
+  const memoryStateSnapshotForUnderstanding: any =
+    userCtxForUnderstanding?.memoryStateSnapshot ??
+    ctxPackForUnderstanding?.memoryStateSnapshot ??
+    null;
+
+  const pickUnderstandingText = (...values: any[]): string | null => {
+    for (const value of values) {
+      if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+      if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    }
+    return null;
+  };
+
+  const pickUnderstandingNumber = (...values: any[]): number | null => {
+    for (const value of values) {
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+      if (typeof value === 'string' && value.trim().length > 0) {
+        const n = Number(value.trim());
+        if (Number.isFinite(n)) return n;
+      }
+    }
+    return null;
+  };
+
+  const baseQCodeForUnderstanding = pickUnderstandingText(
+    userCtxForUnderstanding?.qCode,
+    userCtxForUnderstanding?.q_code,
+    ctxPackForUnderstanding?.qCode,
+    ctxPackForUnderstanding?.q_code,
+  );
+
+  const stateQPrimaryForUnderstanding = pickUnderstandingText(
+    memoryStateSnapshotForUnderstanding?.qPrimary,
+    memoryStateSnapshotForUnderstanding?.q_primary,
+    ctxPackForUnderstanding?.qPrimary,
+    ctxPackForUnderstanding?.q_primary,
+  );
+
+  const depthStageForUnderstanding = pickUnderstandingText(
+    memoryStateSnapshotForUnderstanding?.depthStage,
+    memoryStateSnapshotForUnderstanding?.depth_stage,
+    userCtxForUnderstanding?.depthStage,
+    userCtxForUnderstanding?.depth_stage,
+    ctxPackForUnderstanding?.depthStage,
+    ctxPackForUnderstanding?.depth_stage,
+  );
+
+  const phaseForUnderstanding = pickUnderstandingText(
+    memoryStateSnapshotForUnderstanding?.phase,
+    userCtxForUnderstanding?.phase,
+    ctxPackForUnderstanding?.phase,
+  );
+
+  const selfAcceptanceForUnderstanding = pickUnderstandingNumber(
+    memoryStateSnapshotForUnderstanding?.selfAcceptance,
+    memoryStateSnapshotForUnderstanding?.self_acceptance,
+    memoryStateSnapshotForUnderstanding?.sa,
+    userCtxForUnderstanding?.selfAcceptance,
+    userCtxForUnderstanding?.self_acceptance,
+    userCtxForUnderstanding?.sa,
+    ctxPackForUnderstanding?.selfAcceptance,
+    ctxPackForUnderstanding?.self_acceptance,
+    ctxPackForUnderstanding?.sa,
+    (opts as any)?.sa,
+  );
+
+  const sentimentLevelForUnderstanding = pickUnderstandingText(
+    memoryStateSnapshotForUnderstanding?.sentimentLevel,
+    memoryStateSnapshotForUnderstanding?.sentiment_level,
+    userCtxForUnderstanding?.sentimentLevel,
+    userCtxForUnderstanding?.sentiment_level,
+    ctxPackForUnderstanding?.sentimentLevel,
+    ctxPackForUnderstanding?.sentiment_level,
+  );
+
+  const currentETurnForUnderstanding = pickUnderstandingText(
+    userCtxForUnderstanding?.e_turn,
+    ctxPackForUnderstanding?.e_turn,
+    userCtxForUnderstanding?.mirrorFlowV1?.mirror?.e_turn,
+    ctxPackForUnderstanding?.mirrorFlowV1?.mirror?.e_turn,
+    userCtxForUnderstanding?.mirror?.e_turn,
+    ctxPackForUnderstanding?.mirror?.e_turn,
+  );
+
+  const polarityForUnderstanding = pickUnderstandingText(
+    userCtxForUnderstanding?.polarity?.out,
+    userCtxForUnderstanding?.polarity?.in,
+    ctxPackForUnderstanding?.polarity?.out,
+    ctxPackForUnderstanding?.polarity?.in,
+    userCtxForUnderstanding?.mirrorFlowV1?.mirror?.polarity?.out,
+    ctxPackForUnderstanding?.mirrorFlowV1?.mirror?.polarity?.out,
+    userCtxForUnderstanding?.mirror?.polarity?.out,
+    ctxPackForUnderstanding?.mirror?.polarity?.out,
+  );
+
+  const returnStreakForUnderstanding = pickUnderstandingNumber(
+    userCtxForUnderstanding?.flow?.returnStreak,
+    ctxPackForUnderstanding?.flow?.returnStreak,
+    userCtxForUnderstanding?.mirrorFlowV1?.flow?.returnStreak,
+    ctxPackForUnderstanding?.mirrorFlowV1?.flow?.returnStreak,
+  );
+
+  const interpretationHintForUnderstanding = (() => {
+    const depth = String(depthStageForUnderstanding ?? '').trim().toUpperCase();
+    const polarity = String(polarityForUnderstanding ?? '').trim().toLowerCase();
+    const sentiment = String(sentimentLevelForUnderstanding ?? '').trim().toLowerCase();
+
+    if (selfAcceptanceForUnderstanding != null && selfAcceptanceForUnderstanding < 0.45) {
+      return '受け取り可能度が低め。断定や深掘りを抑え、短く扱える言葉へ戻す。';
+    }
+
+    if (depth.startsWith('S') && (polarity === 'yin' || polarity === 'neg' || sentiment.includes('neg'))) {
+      return 'S帯域で反応が内向き。意味を広げすぎず、今扱える一点に絞る。';
+    }
+
+    if (depth.startsWith('C') || depth.startsWith('I') || depth.startsWith('T')) {
+      return '創造・意図側まで扱える。根拠のある意味展開は許可し、ただし飛躍は避ける。';
+    }
+
+    return '状態メタを本文に露出せず、返答の深さ・温度・具体度の調整に使う。';
+  })();
+
+  const userUnderstandingStateText = [
+    'USER_UNDERSTANDING_STATE:',
+    baseQCodeForUnderstanding ? `- base_q_code: ${baseQCodeForUnderstanding}` : null,
+    stateQPrimaryForUnderstanding ? `- state_q_primary: ${stateQPrimaryForUnderstanding}` : null,
+    depthStageForUnderstanding ? `- depth_stage: ${depthStageForUnderstanding}` : null,
+    phaseForUnderstanding ? `- phase: ${phaseForUnderstanding}` : null,
+    selfAcceptanceForUnderstanding != null
+      ? `- self_acceptance: ${selfAcceptanceForUnderstanding}`
+      : null,
+    sentimentLevelForUnderstanding ? `- sentiment_level: ${sentimentLevelForUnderstanding}` : null,
+    currentETurnForUnderstanding ? `- current_e_turn: ${currentETurnForUnderstanding}` : null,
+    polarityForUnderstanding ? `- polarity: ${polarityForUnderstanding}` : null,
+    returnStreakForUnderstanding != null ? `- return_streak: ${returnStreakForUnderstanding}` : null,
+    `- interpretation_hint: ${interpretationHintForUnderstanding}`,
+  ]
+    .filter((v) => typeof v === 'string' && v.trim().length > 0)
+    .join('\n')
+    .trim();
+
   const memoryStateNoteText = String(
-    (opts as any)?.userContext?.memoryStateNoteText ??
-    (opts as any)?.userContext?.ctxPack?.memoryStateNoteText ??
+    userCtxForUnderstanding?.memoryStateNoteText ??
+    ctxPackForUnderstanding?.memoryStateNoteText ??
     '',
   ).trim();
 
   const longTermMemoryNoteText = String(
-    (opts as any)?.userContext?.longTermMemoryNoteText ??
-    (opts as any)?.userContext?.ctxPack?.longTermMemoryNoteText ??
+    userCtxForUnderstanding?.longTermMemoryNoteText ??
+    ctxPackForUnderstanding?.longTermMemoryNoteText ??
     '',
   ).trim();
 
-  const metaText = [metaTextBase, memoryStateNoteText, longTermMemoryNoteText]
+  const metaText = [userUnderstandingStateText, metaTextBase, memoryStateNoteText, longTermMemoryNoteText]
     .filter((v) => typeof v === 'string' && v.trim().length > 0)
     .join('\n')
     .trim();
+
+  console.log(
+    '[IROS/rephraseEngine][USER_UNDERSTANDING_STATE_JSON]',
+    JSON.stringify({
+      hasUserUnderstandingState: userUnderstandingStateText.length > 0,
+      userUnderstandingStateText,
+      metaTextHasUserUnderstandingState: metaText.includes('USER_UNDERSTANDING_STATE:'),
+      baseQCodeForUnderstanding,
+      stateQPrimaryForUnderstanding,
+      depthStageForUnderstanding,
+      phaseForUnderstanding,
+      selfAcceptanceForUnderstanding,
+      sentimentLevelForUnderstanding,
+      currentETurnForUnderstanding,
+      polarityForUnderstanding,
+      returnStreakForUnderstanding,
+    }),
+  );
 
   const inputKindFromOpts = String(opts?.inputKind ?? '').trim().toLowerCase();
   const inputKindFromDebug = String((opts as any)?.debug?.inputKind ?? '').trim().toLowerCase();
@@ -4513,8 +4725,8 @@ const systemPromptForWriter = [
           // --- 各段落の役割 ---
           'OBSは今いちばん前にある状態だけを書く',
           'SHIFTは流れが止まっている一点だけを書く',
-          'NEXTは未解決のまま残っている状態だけを書く',
-          'SAFEは許可・励まし・安心づけにしない。中心・余白・分岐・揺れのどれかを、構造の残りとして短く置く',
+          'NEXTは「残っているのは〜」で始めない。まだ決める前に、今どこまで確認すればよいかを日常語で短く書く',
+          'SAFEは許可・励まし・安心づけにしない。抽象語で余韻に逃がさず、読んだ人が分かる日常語で、まだ決めきれていない点・今確認できている点を短く置く',
           'SAFEは「〜していい」「無理に〜しなくていい」「十分です」「落ち着いていきます」で閉じない',
 
           // --- 基本ルール ---
@@ -4523,13 +4735,17 @@ const systemPromptForWriter = [
           '説明せず自然文で書く',
           'seedにない新しい意味・具体軸を足さない',
           'emotion_inner / emotion_need がseedにある場合、それは入力に基づく感情材料としてOBSまたはSHIFTに自然に滲ませてよい。ただしラベル名は本文に出さない',
-          'emotion_inner / emotion_need がseedにある場合、それを出力の中心圧として扱う。説明ではなく、文の核として使う',
-          'emotion_inner / emotion_need は「説明に変換せず」、そのまま言い換えとして出力する',
-          'emotion_inner / emotion_need が存在する場合、OBSの最初の一文は必ずそれをそのまま言い換えた文から開始する',
-          'emotion_inner / emotion_need が存在する場合、OBSはそれ単体で開始する',
-          'emotion_inner / emotion_need が存在する場合、OBSは自然な受け文より核の保持を優先する',
-          'emotion_inner / emotion_need が存在する場合、OBSは前置き・受け文を使わず、必ず最初の一文で言い換えて出す',
-          '同じ核を言い換えて深める',
+          'emotion_inner / emotion_need がseedにある場合でも、OBSの先頭は感情の言い換えだけで開始しない',
+          'OBSの最初の一文は、質問への定義・軸・見取り図を短く置く',
+          'emotion_inner / emotion_need は、定義のあとに必要な範囲で自然に反映する',
+          '具体例を求められた場合は、OBSで定義し、その後に3〜5個の具体例を出す',
+          '具体例を求められた場合は、「必要なら例を出せます」で終えず、その場で具体例を出す',
+          '「どう通すか」「どう通す」の具体例では、単なる日本語用例ではなく、感情・受け取ったもの・判断・意図をどの出口に変えるかで例を出す',
+          '「どう通すか」「どう通す」の具体例では、「話を通す」「申請を通す」「予定を通す」だけに寄せない',
+          '「どう通すか」「どう通す」の具体例では、「言葉として通す」「行動として通す」「作品として通す」「境界として通す」「意図として通す」「受け取らないことで通す」のような出口分類を優先する',
+          '具体例は番号ではなく「- 」の箇条書きで独立行にする',
+          '具体例の箇条書きは、1項目1行で「- 見出し：説明。例: ...」の形にする',
+          '同じ核を、日常語で分かりやすく言い換えて深める',
           '質問しない',
 
           // --- 意味制御（最重要） ---
@@ -4542,7 +4758,7 @@ const systemPromptForWriter = [
           '評価・肯定・安心させる表現を書かない',
           '未来予測や変化の示唆を書かない',
           '「〜と思います」「〜かもしれません」を使わない',
-          '「だから」で文を始めない',
+          '「だから」で文を始めない。必要なら「そのため」「ここでは」「今は」に言い換える',
           '断定的なまとめ表現で締めない（〜だけです等）',
         ]
       };
@@ -4740,10 +4956,10 @@ const systemPromptForWriter = [
               '「詳しく」「階層」「構造」「層」「段階」が含まれる問いでは、対象物に固有の層・段階・部位・中心軸がある場合、それを省略せず展開する',
               '対象物が五重塔なら、第一層〜第五層と中心軸までを自然に展開する。山岳修行なら、欲求・浄化・覚悟・奉仕・一体化など、問いに即した段階を展開する',
               'Markdown見出しは原則として2〜6個使う。見出しは独立行で出す',
-              '見出し例：「## 山岳修行とは何か」「## 意図の階層で見ると」「## ズレが起きる場所」「## 相手にはどう見えるか」「## IROS的に見るなら」「## 意図の階層としてまとめると」',
+              '見出し例は固定しない。対象や問いに合わせて日常語で自然に作る。例：「## 好き嫌いより先に動いているもの」「## 関係が重くなるところ」「## 届き方を整える」「## いま見ている芯」',
               '対象物に層・部位・段階・中心軸などの固有構造がある場合は、その構造に沿って意味を展開する',
               '説明だけで終わらず、表の理解と奥の意図、ユーザー側の見え方と相手側に届く見え方、行為の外形と内側の意味の間に起きるズレを表面化する',
-              'そのズレが相手にはどう見えるか、どこで受け取り違いが起きるか、どう再配置すれば届くかまで書く',
+              'そのズレが相手側ではどんな受け取りになるか、どこで受け取り違いが起きるか、どう再配置すれば届くかまで書く',
               'そのズレがなぜ刺さるのか、どこに階層差・受け取り違い・意図の不一致があるのかを、問いの範囲内で深く意味付けする',
               'ただし、根拠のない個人背景・過去原因・相手の本心・事実確認できない断定は足さない',
               '番号リストは使わない。1. / 2. / 3. の形式は禁止する',
@@ -5919,7 +6135,8 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
       .filter(Boolean);
 
     const sentenceUnitsForCompressed =
-      normalizedParagraphsForCompressed.length === 2
+      normalizedParagraphsForCompressed.length > 0 &&
+      normalizedParagraphsForCompressed.length < 4
         ? normalizedParagraphsForCompressed
             .flatMap((p) =>
               String(p)
@@ -5929,9 +6146,19 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
             )
         : [];
 
+    const compressedFourBlocksFromSentences =
+      sentenceUnitsForCompressed.length >= 4
+        ? [
+            sentenceUnitsForCompressed[0],
+            sentenceUnitsForCompressed[1],
+            sentenceUnitsForCompressed[2],
+            sentenceUnitsForCompressed.slice(3).join(' '),
+          ].filter((x) => String(x ?? '').trim().length > 0)
+        : [];
+
     let blocksText =
-      normalizedParagraphsForCompressed.length === 2 && sentenceUnitsForCompressed.length === 4
-        ? sentenceUnitsForCompressed.slice(0, 4)
+      compressedFourBlocksFromSentences.length === 4
+        ? compressedFourBlocksFromSentences
         : toRephraseBlocks(normalizedText);
 
     if (!Array.isArray(blocksText) || blocksText.length === 0) {
@@ -5995,6 +6222,10 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
   }
 
   const s = String(v ?? '').trim();
+
+  if (/どう通すか|どう通す/u.test(s)) {
+    return 'intent';
+  }
 
   if (
     /どうしたら良い|どうしたらいい|どうすれば良い|どうすればいい|良い方法|いい方法|方法はありますか|どう進めたら良い|どう進めたらいい|どう進めれば良い|どう進めればいい|最終的にどうしたら|最終的にどうすれば|協調する方法|打ち解けるには/u.test(
@@ -8621,7 +8852,7 @@ const isResonanceStructureFollowup =
               '相手の本心や事実を断定しない。「そう映っている」「そう見えやすい」という温度で返す',
               '仕事など既出文脈がある場合だけ、相手側の余裕の薄さとして自然に一度だけ触れてよい',
               '最後は、追いすぎず離れすぎない距離感、または送るなら短い一言まで落としてよい',
-              '番号・見出し・箇条書きにはせず、自然な3〜4段落で返す',
+              '番号・見出しは避け、自然な3〜4段落で返す。ただしユーザーが例を求めた場合のみ、番号ではなく「- 」の箇条書きを独立行で使ってよい',
               '短く切りすぎない。少なくとも5文以上で、受け止め→相手側の見え方→ユーザー側の反映→距離感の順に自然に展開する',
               '「前にある」「残る」「置く」「空白」「ほどく」「気配」「余白」を使わない',
             ],
@@ -8732,9 +8963,9 @@ const isResonanceStructureFollowup =
                 slot_emphasis_safe: '1',
                 slot_weight_safe: '0.45',
                 block_conclusion:
-                  'SAFEは許可・励まし・安心づけにしない。最後は、中心・余白・分岐・揺れのどれかを、構造の残りとして短く置く。',
+                  'SAFEは許可・励まし・安心づけにしない。最後は抽象語で余韻に逃がさず、読んだ人が分かる日常語で、まだ決めきれていない点・今確認できている点を短く置く。',
                 block_closing_line:
-                  '「〜していい」「無理に〜しなくていい」「十分です」「落ち着いていきます」で閉じない。構造の残りだけで閉じる。',
+                  '「〜していい」「無理に〜しなくていい」「十分です」「落ち着いていきます」で閉じない。抽象語で余韻に逃がさず、今確認できていることを日常語で短く残す。',
               }
             : {}),
 
@@ -8830,7 +9061,7 @@ const isResonanceStructureFollowup =
                   '鏡のように映っていた相手像も、ユーザーの見方や反応が変わることで、拒絶ではなく余地として見え方が変わることを説明する',
                   'ユーザーの状態が「彼を変えたい」から「自分の位置を変えると関係の場が変わる」に移るように返す',
                   '必要なら、「彼を変えたい」ではなく「私は不安から追わない位置に戻る」という具体的な変換文を出す',
-                  '番号・見出し・箇条書きにはせず、普通の会話文で返す',
+                  '番号・見出しは避け、普通の会話文で返す。ただしユーザーが例を求めた場合のみ、番号ではなく「- 」の箇条書きを独立行で使ってよい',
                 ],
                 block_repair_receive:
                   'まず、気持ちが変わると関係の空気が変わることはあるが、彼自身を直接変えるとは言い切れないと返す。',
@@ -8867,7 +9098,7 @@ const isResonanceStructureFollowup =
                       '一通で止めることは我慢ではなく、その一通に役割を渡すことだと説明する',
                       '追いかけたい気持ちは否定せず、重く送らせない',
                       'ユーザーの状態が「何もできない」から「一手は打てた」に変わるように返す',
-                      '番号・見出し・箇条書きにはせず、普通の会話文で返す',
+                      '番号・見出しは避け、普通の会話文で返す。ただしユーザーが例を求めた場合のみ、番号ではなく「- 」の箇条書きを独立行で使ってよい',
                     ],
                     block_repair_receive:
                       'まず「それだと分かりにくいですね」と受ける。',
@@ -8915,10 +9146,10 @@ const isResonanceStructureFollowup =
                       ...(deepReadEmotionInner
                         ? [
                             `emotion_inner 実値: ${deepReadEmotionInner}`,
-                            'emotion_inner がある場合、タイトル見出しの後の最初の本文は、必ず emotion_inner 実値の自然な言い換えから開始する',
-                            'emotion_inner がある場合、「その言葉には」「その一言は」「まず表の相談内容」などの受け文から始めない',
-                            'emotion_inner がある場合、最初の本文では userText / CONTEXT / FOCUS の文面をそのまま引用しない',
-                            'emotion_inner がある場合、最初の本文は emotion_inner 実値を中心にし、見出しだけで意味を作らない',
+                            'emotion_inner がある場合でも、タイトル見出しの後の最初の本文を emotion_inner 実値の言い換えだけで開始しない',
+                            'emotion_inner がある場合も、最初の本文は問いへの定義・軸・見取り図を優先する',
+                            'emotion_inner は、定義のあとに必要な範囲で自然に反映する',
+                            '最初の本文では userText / CONTEXT / FOCUS の文面をそのまま引用しない',
                           ]
                         : []),
                       '仕事・事業・開発文脈では、先進性そのものを大きく見せるより、何ができるようになったかを具体的に書く',
@@ -8927,8 +9158,8 @@ const isResonanceStructureFollowup =
                       '相手にどう見えるかを書く場合も、何を見せれば伝わるかまで日常語で書く',
                     ],
                     block_deep_read_surface: deepReadEmotionInner
-                      ? `まず表の相談内容ではなく、この内容の言い換えから開始する: ${deepReadEmotionInner}`
-                      : 'まず表の相談内容を自然に受ける。',
+                      ? `まず問いへの定義・軸・見取り図から開始する。emotion_innerは必要な範囲で後続に自然に反映する: ${deepReadEmotionInner}`
+                      : 'まず問いへの定義・軸・見取り図から開始する。',
                     block_deep_read_under:
                       '次に、言葉の奥で強くなっている反応パターンを、断定せず自然文で一段だけ触れる。',
                     block_deep_read_return:
@@ -8958,14 +9189,121 @@ const isResonanceStructureFollowup =
                     }
                   : baseWriterDirectivesForFinal;
 
+              const userStateWriterDirectivesForFinal = (() => {
+                const depth = String(depthStageForUnderstanding ?? '').trim().toUpperCase();
+                const phase = String(phaseForUnderstanding ?? '').trim();
+                const q = String(baseQCodeForUnderstanding ?? stateQPrimaryForUnderstanding ?? '').trim().toUpperCase();
+                const eTurn = String(currentETurnForUnderstanding ?? '').trim().toLowerCase();
+                const polarity = String(polarityForUnderstanding ?? '').trim().toLowerCase();
+                const sa =
+                  typeof selfAcceptanceForUnderstanding === 'number' &&
+                  Number.isFinite(selfAcceptanceForUnderstanding)
+                    ? selfAcceptanceForUnderstanding
+                    : null;
+                const returnStreak =
+                  typeof returnStreakForUnderstanding === 'number' &&
+                  Number.isFinite(returnStreakForUnderstanding)
+                    ? returnStreakForUnderstanding
+                    : null;
+
+                const writeConstraints: string[] = [
+                  'USER_STATE: 状態メタ(Q/depth/phase/SA/e_turn/polarity/returnStreak)は本文に露出しない',
+                  'USER_STATE: 状態メタは返答の深さ・温度・具体度・踏み込み量の調整にだけ使う',
+                ];
+
+                if (sa != null && sa >= 0.45 && sa <= 0.65) {
+                  writeConstraints.push(
+                    'USER_STATE: SAが中間帯なので、強く断定しすぎず、ただし薄い一般論にも逃がさない'
+                  );
+                }
+
+                if (sa != null && sa < 0.45) {
+                  writeConstraints.push(
+                    'USER_STATE: SAが低めなので、深掘りより短く扱える言葉へ戻す'
+                  );
+                }
+
+                if (depth.startsWith('S')) {
+                  writeConstraints.push(
+                    'USER_STATE: S帯域なので、深掘りより先に、読んだ人が分かる日常語で、今確認できていることと、まだ決めきれていないことを分けて返す'
+                  );
+                  writeConstraints.push(
+                    'USER_STATE: S帯域のNEXTでは、「残っているのは」「言葉の置き方」「どこまでを今回の確認に含めるか」を使わず、「今は、確認したい範囲を少し絞るところです」のように日常語で返す'
+                  );
+                  writeConstraints.push(
+                    'USER_STATE: S帯域のSAFEでは、「未整理」「輪郭」「中心」「余白」「揺れ」「閉じる」「閉じず」「置く」「置いている」「残しているところ」「状態です」「成り立っています」「状態を測る線」「線は見えています」「散っていない」を使わず、会話として意味が通る文にする'
+                  );
+                  writeConstraints.push(
+                    'USER_STATE: S帯域のSAFEは「まだ決めきれていないところはあります。でも、今確認したいことは見えています。」のように、日常語で分かる2文以内にする'
+                  );
+                }
+
+                if (returnStreak != null && returnStreak >= 3) {
+                  writeConstraints.push(
+                    'USER_STATE: RETURN継続なので、同じ説明を繰り返さず、前回との差分を一つだけ出す'
+                  );
+                }
+
+                if (q === 'Q1' || eTurn === 'e1') {
+                  writeConstraints.push(
+                    'USER_STATE: Q1/e1傾向なので、感情を広げすぎず、整理・順序・確認に寄せる'
+                  );
+                }
+
+                if (phase === 'Outer' || polarity === 'yang') {
+                  writeConstraints.push(
+                    'USER_STATE: Outer/yang傾向なので、内面解説に寄せすぎず、表に出る言葉・動き・判断へ寄せる'
+                  );
+                }
+
+                return {
+                  user_state_mode: 'enabled',
+                  user_state_summary: [
+                    q ? `q=${q}` : null,
+                    depth ? `depth=${depth}` : null,
+                    phase ? `phase=${phase}` : null,
+                    sa != null ? `sa=${sa}` : null,
+                    eTurn ? `e_turn=${eTurn}` : null,
+                    polarity ? `polarity=${polarity}` : null,
+                    returnStreak != null ? `returnStreak=${returnStreak}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' / '),
+                  writeConstraints,
+                };
+              })();
+
+              const mergeUserStateWriterDirectives = (base: any) => {
+                const baseObj =
+                  base && typeof base === 'object'
+                    ? { ...base }
+                    : {};
+
+                const baseWriteConstraints = Array.isArray(baseObj.writeConstraints)
+                  ? baseObj.writeConstraints
+                      .map((x: any) => String(x ?? '').trim())
+                      .filter(Boolean)
+                  : [];
+
+                return {
+                  ...baseObj,
+                  user_state_mode: userStateWriterDirectivesForFinal.user_state_mode,
+                  user_state_summary: userStateWriterDirectivesForFinal.user_state_summary,
+                  writeConstraints: [
+                    ...baseWriteConstraints,
+                    ...userStateWriterDirectivesForFinal.writeConstraints,
+                  ],
+                };
+              };
+
               const writerDirectivesForFinal =
                 writerPatternKey === 'IR_DETAIL_V1'
                   ? {
-                      ...writerDirectivesForFinalRaw,
+                      ...mergeUserStateWriterDirectives(writerDirectivesForFinalRaw),
                       pattern_key: 'IR_DETAIL_V1',
                       pattern_mode: 'diagnosis_detail',
                     }
-                  : writerDirectivesForFinalRaw;
+                  : mergeUserStateWriterDirectives(writerDirectivesForFinalRaw);
 console.log(
   '[IROS/rephraseEngine][CALL_WRITER_ARGS]',
   JSON.stringify({
@@ -9129,14 +9467,25 @@ const finalWriterDirectivesMsg =
                   'min_markdown_headings=3',
                   'max_markdown_headings=7',
                   'first_heading_must_start_with=## ',
-                  'must_include_heading=## 意図の階層で見ると',
-                  'prefer_heading=## ズレが起きる場所',
-                  'prefer_heading=## 相手にはどう見えるか',
-                  'prefer_heading=## IROS的に見るなら',
-                  'prefer_heading=## 意図の階層としてまとめると',
+                  'do_not_use_fixed_template_headings=true',
+                  'do_not_use_heading=## 意図の階層で見ると',
+                  'do_not_use_heading=## ズレが起きる場所',
+                  'do_not_use_heading=## 相手にはどう見えるか',
+                  'do_not_use_heading=## IROS的に見るなら',
+                  'do_not_use_heading=## 意図の階層としてまとめると',
+                  'heading_style=内容に合わせて、日常語で自然な見出しを作る',
+                  'heading_examples=## 好き嫌いより先に動いているもの / ## 関係が重くなるところ / ## 届き方を整える / ## いま見ている芯',
                   'heading_lines_must_be_independent=true',
                   'do_not_merge_heading_and_body=true',
                   'do_not_use_numbered_list=true',
+                  'bullets_allowed_when_user_asks_examples=true',
+                  'bullet_format=箇条書きは番号ではなく、各行を「- 」で開始する',
+                  'when_user_asks_examples_use_3_to_5_bullets=true',
+                  'when_user_asks_examples_do_not_say_more_examples_available=true',
+                  'example_bullet_format=1項目1行で「- 見出し：説明。例: ...」の形にする',
+                  'bullet_lines_must_be_independent=true',
+                  'blank_line_required_before_bullets=true',
+                  'do_not_inline_bullets_inside_sentence=true',
                   'do_not_emit_fixed_obs_shift_next_safe_paragraphs=true',
                   'if_user_asks_detail_or_hierarchy_expand_native_layers=true',
                   'if_subject_has_native_layers_do_not_collapse_them=true',
@@ -9227,9 +9576,9 @@ const finalWriterDirectivesMsg =
           next = next
             .replace(/(CONTEXT:\n)[^\n]*/u, `$1${seedDraftForWriter}`)
             .replace(/(FOCUS:\n)[^\n]*/u, `$1${seedDraftForWriter}`)
-            .replace(/(OBS=)[^\n]*/u, '$1emotion_inner / emotion_need が存在する場合は核の保持を優先する。存在しない場合のみ、いま出ている体感や報告を丸写しせず自然に受ける')
+            .replace(/(OBS=)[^\n]*/u, '$1まず質問への定義・軸を短く置く。emotion_inner / emotion_need が存在しても、OBSの先頭を感情の言い換えだけで開始しない')
             .replace(/(NEXT=)[^\n]*/u, '$1必要以上に構造化せず、会話として少しだけ返す')
-            .replace(/(OBS_LINE=)[^\n]*/u, '$1emotion_inner / emotion_need が存在する場合は、前置き・受け文を使わず、それを最優先で言い換えて開始する。存在しない場合のみ、自然な受け文で返す。')
+            .replace(/(OBS_LINE=)[^\n]*/u, '$1最初の一文は、感情の受け文ではなく、問いに対する分かりやすい定義または見取り図から開始する')
             .replace(/(NEXT_LINE=)[^\n]*/u, '$1丸写しではなく、感じ取った強さだけを短く返す。');
           return next;
         };
@@ -10206,6 +10555,20 @@ userContext: {
       .map((line) => replaceLineTail(line))
       .join('\n')
       .trim();
+
+    out = out
+      .replace(
+        /まだ言い切らずに残しているところがあって、そこを無理に閉じずに置いている状態です。/gu,
+        'まだ決めきれていないところはあります。でも、今確認したいことは見えています。'
+      )
+      .replace(
+        /まだ言い切らずに残しているところがあります。そこを無理に閉じずに置いている状態です。/gu,
+        'まだ決めきれていないところはあります。でも、今確認したいことは見えています。'
+      )
+      .replace(
+        /そこを無理に閉じずに置いている状態です。/gu,
+        '今確認したいことは見えています。'
+      );
 
     return out;
   };

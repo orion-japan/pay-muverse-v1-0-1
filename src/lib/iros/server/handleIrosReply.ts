@@ -8221,6 +8221,9 @@ try {
           memoryStateSnapshot.phase
             ? `- phase: ${memoryStateSnapshot.phase}`
             : null,
+          typeof memoryStateSnapshot.selfAcceptance === 'number'
+            ? `- self_acceptance: ${memoryStateSnapshot.selfAcceptance}`
+            : null,
           memoryStateSnapshot.intentLayer
             ? `- intent_layer: ${memoryStateSnapshot.intentLayer}`
             : null,
@@ -8458,6 +8461,9 @@ try {
           normalizedMemoryStateSnapshot.phase
             ? `- phase: ${normalizedMemoryStateSnapshot.phase}`
             : null,
+          typeof normalizedMemoryStateSnapshot.selfAcceptance === 'number'
+            ? `- self_acceptance: ${normalizedMemoryStateSnapshot.selfAcceptance}`
+            : null,
           normalizedMemoryStateSnapshot.intentLayer
             ? `- intent_layer: ${normalizedMemoryStateSnapshot.intentLayer}`
             : null,
@@ -8610,6 +8616,59 @@ try {
         prev_ctxPack_flow: (ctxPackPrev as any)?.flow ?? null,
       });
     } catch {}
+
+    const selfAcceptanceForRephrase = (() => {
+      const mf: any = (out as any)?.metaForSave ?? {};
+      const ex: any = mf?.extra ?? {};
+      const cp: any = ex?.ctxPack ?? {};
+      const unified: any = mf?.unified ?? {};
+      const cpUnified: any = cp?.unified ?? {};
+
+      const candidates = [
+        mf?.selfAcceptance,
+        mf?.self_acceptance,
+        mf?.sa,
+        ex?.selfAcceptance,
+        ex?.self_acceptance,
+        ex?.sa,
+        cp?.selfAcceptance,
+        cp?.self_acceptance,
+        cp?.sa,
+        unified?.selfAcceptance,
+        unified?.self_acceptance,
+        cpUnified?.selfAcceptance,
+        cpUnified?.self_acceptance,
+      ];
+
+      for (const v of candidates) {
+        if (typeof v === 'number' && Number.isFinite(v)) return v;
+        if (typeof v === 'string' && v.trim().length > 0) {
+          const n = Number(v);
+          if (Number.isFinite(n)) return n;
+        }
+      }
+
+      const reasonCandidates = [
+        mf?.descentGateReason,
+        ex?.descentGateReason,
+        mf?.frameDebug_containerDecision?.dg?.reason,
+        ex?.frameDebug_containerDecision?.dg?.reason,
+        cp?.descentGateReason,
+        cp?.frameDebug_containerDecision?.dg?.reason,
+      ];
+
+      for (const raw of reasonCandidates) {
+        const s = String(raw ?? '');
+        const m = s.match(/(?:^|[\\s,])sa=([0-9]+(?:\\.[0-9]+)?)/);
+        if (m?.[1]) {
+          const n = Number(m[1]);
+          if (Number.isFinite(n)) return n;
+        }
+      }
+
+      return null;
+    })();
+
     return {
       conversationId: _conversationId ?? null,
       userCode: _userCode ?? null,
@@ -8643,6 +8702,10 @@ try {
       memoryStateSnapshot,
       memoryStateNoteText,
 
+      selfAcceptance: selfAcceptanceForRephrase,
+      self_acceptance: selfAcceptanceForRephrase,
+      sa: selfAcceptanceForRephrase,
+
       // ここは UI 向けだけ隠す
       historyForWriter: historyForWriterForResponse,
       historyForWriterAt: historyForWriterAtInternal,
@@ -8665,6 +8728,10 @@ try {
         inputKind: inputKindCanon,
         style: style ?? (userProfile as any)?.style ?? null,
 
+        selfAcceptance: selfAcceptanceForRephrase,
+        self_acceptance: selfAcceptanceForRephrase,
+        sa: selfAcceptanceForRephrase,
+
         // UIでは隠しても、次ターン内部用は保持する
         historyForWriter: historyForWriterInternal,
         historyForWriterAt: historyForWriterAtInternal,
@@ -8677,6 +8744,54 @@ try {
       },
     };
       })();
+
+  const selfAcceptanceForRephraseSlots = (() => {
+    const uc: any = userContextValue as any;
+    const candidates = [
+      uc?.selfAcceptance,
+      uc?.self_acceptance,
+      uc?.sa,
+      uc?.ctxPack?.selfAcceptance,
+      uc?.ctxPack?.self_acceptance,
+      uc?.ctxPack?.sa,
+    ];
+
+    for (const v of candidates) {
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+      if (typeof v === 'string' && v.trim().length > 0) {
+        const n = Number(v);
+        if (Number.isFinite(n)) return n;
+      }
+    }
+
+    return null;
+  })();
+
+  try {
+    const mfAny: any = (out as any)?.metaForSave ?? {};
+    console.log('[IROS/SA_BRIDGE][BEFORE_REPHRASE]', {
+      traceId: traceIdCanon,
+      conversationId: _conversationId ?? null,
+      userCode: _userCode ?? null,
+      selfAcceptanceForRephraseSlots,
+      userContext_selfAcceptance: (userContextValue as any)?.selfAcceptance ?? null,
+      userContext_self_acceptance: (userContextValue as any)?.self_acceptance ?? null,
+      userContext_sa: (userContextValue as any)?.sa ?? null,
+      userContext_ctxPack_selfAcceptance: (userContextValue as any)?.ctxPack?.selfAcceptance ?? null,
+      userContext_ctxPack_self_acceptance: (userContextValue as any)?.ctxPack?.self_acceptance ?? null,
+      userContext_ctxPack_sa: (userContextValue as any)?.ctxPack?.sa ?? null,
+      metaForSave_selfAcceptance: mfAny?.selfAcceptance ?? null,
+      metaForSave_self_acceptance: mfAny?.self_acceptance ?? null,
+      metaForSave_sa: mfAny?.sa ?? null,
+      metaForSave_descentGateReason: mfAny?.descentGateReason ?? null,
+      extra_selfAcceptance: mfAny?.extra?.selfAcceptance ?? null,
+      extra_self_acceptance: mfAny?.extra?.self_acceptance ?? null,
+      extra_sa: mfAny?.extra?.sa ?? null,
+      extra_ctxPack_selfAcceptance: mfAny?.extra?.ctxPack?.selfAcceptance ?? null,
+      extra_ctxPack_self_acceptance: mfAny?.extra?.ctxPack?.self_acceptance ?? null,
+      extra_ctxPack_sa: mfAny?.extra?.ctxPack?.sa ?? null,
+    });
+  } catch {}
 
   const rr = await rephraseSlotsFinal(
     extracted,
@@ -8764,6 +8879,10 @@ try {
       extra: {
         ...(((out.metaForSave as any)?.extra ?? {}) as any),
 
+        selfAcceptance: selfAcceptanceForRephraseSlots,
+        self_acceptance: selfAcceptanceForRephraseSlots,
+        sa: selfAcceptanceForRephraseSlots,
+
         // ❌ extra内のctxPackは削除（top-levelで渡すため）
         // ctxPack: ((out.metaForSave as any)?.extra?.ctxPack ?? null),
 
@@ -8823,6 +8942,10 @@ try {
 
         return {
           ...baseCtx,
+
+          selfAcceptance: selfAcceptanceForRephraseSlots,
+          self_acceptance: selfAcceptanceForRephraseSlots,
+          sa: selfAcceptanceForRephraseSlots,
 
           ...(isDiagnosisFollowupCtx
             ? {

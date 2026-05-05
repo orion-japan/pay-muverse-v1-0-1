@@ -179,11 +179,122 @@ function joinRenderBlocksPreserveSpacing(
   const out: string[] = [];
   let prevWasBlank = false;
 
+  const isBulletLine = (value: string): boolean =>
+    /^[-*•・◯]\s+/u.test(String(value ?? '').trim());
+
+  const compactBulletBlockLines = (inputLines: string[]): string[] => {
+    const lines = inputLines
+      .map((line) => line.replace(/[ \t]+$/g, ''))
+      .filter((line) => line.trim().length > 0);
+
+    if (lines.length <= 1) return inputLines.map((line) => line.replace(/[ \t]+$/g, ''));
+
+    if (!lines.some((line) => isBulletLine(line))) {
+      return inputLines.map((line) => line.replace(/[ \t]+$/g, ''));
+    }
+
+    const out: string[] = [];
+    let currentTitle = '';
+    let currentBody: string[] = [];
+
+    const flush = () => {
+      const title = currentTitle.trim();
+      if (!title) return;
+
+      const body = currentBody.map((line) => line.trim()).filter(Boolean).join(' ');
+      const needsColon = /^[-*•・◯]\s+\*\*[^*]+\*\*$|^[-*•・◯]\s+[^：:。]+$/u.test(title);
+      out.push(`${title}${body ? (needsColon ? '：' : ' ') + body : ''}`.trim());
+
+      currentTitle = '';
+      currentBody = [];
+    };
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      if (isBulletLine(trimmed)) {
+        flush();
+        currentTitle = trimmed;
+        currentBody = [];
+        continue;
+      }
+
+      if (currentTitle) {
+        currentBody.push(trimmed);
+      } else {
+        out.push(trimmed);
+      }
+    }
+
+    flush();
+
+    return out.length > 0 ? out : inputLines.map((line) => line.replace(/[ \t]+$/g, ''));
+  };
+
+  const compactNumberedBoldExampleBlockLines = (inputLines: string[]): string[] => {
+    const lines = inputLines
+      .map((line) => line.replace(/[ \t]+$/g, ''))
+      .filter((line) => line.trim().length > 0);
+
+    if (lines.length <= 1) return inputLines.map((line) => line.replace(/[ \t]+$/g, ''));
+
+    const hasNumberedBoldTitle = lines.some((line) =>
+      /^\*\*\s*\d+[.．、]\s*[^*]+\*\*$/u.test(line.trim())
+    );
+
+    if (!hasNumberedBoldTitle) {
+      return inputLines.map((line) => line.replace(/[ \t]+$/g, ''));
+    }
+
+    const out: string[] = [];
+    let currentTitle = '';
+    let currentBody: string[] = [];
+
+    const flush = () => {
+      const rawTitle = currentTitle.trim();
+      if (!rawTitle) return;
+
+      const title = rawTitle
+        .replace(/^\*\*\s*\d+[.．、]\s*/u, '')
+        .replace(/\*\*$/u, '')
+        .trim();
+
+      const body = currentBody.map((line) => line.trim()).filter(Boolean).join(' ');
+      out.push(`- ${title}${body ? '：' + body : ''}`.trim());
+
+      currentTitle = '';
+      currentBody = [];
+    };
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      if (/^\*\*\s*\d+[.．、]\s*[^*]+\*\*$/u.test(trimmed)) {
+        flush();
+        currentTitle = trimmed;
+        currentBody = [];
+        continue;
+      }
+
+      if (currentTitle) {
+        currentBody.push(trimmed);
+      } else {
+        out.push(trimmed);
+      }
+    }
+
+    flush();
+
+    return out.length > 0 ? out : inputLines.map((line) => line.replace(/[ \t]+$/g, ''));
+  };
+
   for (const block of blocks) {
     const raw = String(block?.text ?? block?.content ?? block ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
     // block 内の右端空白だけ落とす。空行は意味として保持。
-    const lines = raw.split('\n').map((line) => line.replace(/[ \t]+$/g, ''));
+    const lines = compactNumberedBoldExampleBlockLines(
+      compactBulletBlockLines(raw.split('\n'))
+    );
 
     for (const line of lines) {
       const trimmed = line.trim();
@@ -201,6 +312,10 @@ function joinRenderBlocksPreserveSpacing(
         continue;
       }
 
+      if (isBulletLine(trimmed) && out.length > 0 && out[out.length - 1] !== '') {
+        out.push('');
+      }
+
       out.push(trimmed);
       prevWasBlank = false;
     }
@@ -211,7 +326,7 @@ function joinRenderBlocksPreserveSpacing(
     while (out.length > 0 && out[out.length - 1] === '') out.pop();
   }
 
-  return out.join('\n');
+  return out.join('\n').replace(/\*\*/g, '');
 }
 type SlotExtracted = { blocks: RenderBlock[]; source: string; keys: string[] } | null;
 

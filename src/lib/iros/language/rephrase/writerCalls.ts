@@ -2706,7 +2706,7 @@ const isNormalCompressedPattern =
             'ユーザーの不安・投影・思い込みが、相手の沈黙や反応をどう重く見せているかを自然に含める',
             '相手の本心や事実を断定しない。「そう映っている」「そう見えやすい」という温度で返す',
             '最後は、追いすぎず離れすぎない距離感、または送るなら短い一言まで落としてよい',
-            '番号・見出し・箇条書きにはせず、自然な2〜4段落で返す',
+            '番号・見出しは避け、自然な2〜4段落で返す。ただしユーザーが例を求めた場合のみ、番号ではなく「- 」の箇条書きを独立行で使ってよい',
             'このケースでは短く切りすぎない。少なくとも5文以上で、受け止め→相手側の見え方→ユーザー側の反映→距離感の順に自然に展開する',
           ]
         : []),
@@ -3470,7 +3470,16 @@ return {
                 .filter((x) => norm(x))
                 .join('\n\n');
 
-              const internalPackFixed = injectedHead.trim();
+              const originalInternalPackForWriter = String(args?.internalPack ?? '').trim();
+
+              const internalPackFixed = [
+                injectedHead.trim(),
+                originalInternalPackForWriter,
+              ]
+                .filter((x) => String(x ?? '').trim().length > 0)
+                .join('\n\n')
+                .trim();
+
               if (internalPackFixed.includes('FLOW_V2')) {
                 const mCurrent = internalPackFixed.match(/current=([^\n]+)/);
                 const mPrev = internalPackFixed.match(/prev=([^\n]+)/);
@@ -3764,12 +3773,12 @@ const diagnosisFollowupBlock = (() => {
       ).trim();
 
       const obsCoreForPack = emotionInnerForPack
-        ? `emotion_innerをOBSの中心にする: ${emotionInnerForPack}`
-        : 'emotion_inner / emotion_need が存在する場合は核の保持を優先する。存在しない場合のみ、いま出ている体感や報告を丸写しせず自然に受ける';
+        ? `まず質問への定義・軸を短く置く。emotion_innerは必要な範囲で後続に自然に反映する: ${emotionInnerForPack}`
+        : 'まず質問への定義・軸を短く置く。emotion_inner / emotion_need が存在しても、OBSの先頭を感情の言い換えだけで開始しない';
 
       const obsLineForPack = emotionInnerForPack
-        ? `前置き・受け文を使わず、最初の一文は必ずこの内容の言い換えから開始する: ${emotionInnerForPack}`
-        : 'emotion_inner / emotion_need が存在する場合は、前置き・受け文を使わず、それを最優先で言い換えて開始する。存在しない場合のみ、自然な受け文で返す。';
+        ? `最初の一文は、感情の受け文ではなく、問いに対する分かりやすい定義または見取り図から開始する。emotion_innerは必要なら後続で自然に反映する: ${emotionInnerForPack}`
+        : '最初の一文は、感情の受け文ではなく、問いに対する分かりやすい定義または見取り図から開始する';
 
       return String(content ?? '')
         .replace(/(CONTEXT:\n)[^\n]*/u, `$1${seed}`)
@@ -4504,7 +4513,7 @@ const diagnosisFollowupBlock = (() => {
                     '彼/彼女/相手側の様子を、事実断定ではなく「今こちらにそう映っている可能性」として会話文で返してください。',
                     '相手側だけを読むのではなく、ユーザー側の不安・投影・思い込みがどこに重なっているかも、自然に一文で含めてください。',
                     '解決や「どうしたら」に関わる場合は、最後に今こちらが取る距離感を短く置いてください。',
-                    'ただし番号・見出し・箇条書きにはせず、自然な2〜3段落で返してください。',
+                    'ただし番号・見出しは避け、自然な2〜3段落で返してください。ユーザーが例を求めた場合のみ、番号ではなく「- 」の箇条書きを独立行で使ってよい。',
                     '彼/彼女/相手の本心や事実を断定しないでください。',
                   ].join('\n');
                 }
