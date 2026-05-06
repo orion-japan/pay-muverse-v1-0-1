@@ -271,11 +271,39 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const { data: rows, error: detailError } = await supabase
-    .from('iros_messages')
-    .select('id, conversation_id, user_code, role, text, q_code, depth_stage, meta, created_at, trace_id')
-    .eq('conversation_id', convId)
-    .order('created_at', { ascending: true });
+  // ✅ 1000件超え対策:
+  // Supabase/PostgREST は range 指定なしだと大量行で詰まりやすいので、
+  // 会話詳細は 1000件ずつ分割取得する。
+  // ✅ ログ画面の大量表示対策:
+  // meta は1行ごとに巨大化しやすく、1000件近くでAPIレスポンス/ブラウザ描画が重くなる。
+  // 会話詳細の一覧表示では meta を取得せず、必要な列だけ返す。
+  const detailSelect =
+    'id, conversation_id, user_code, role, text, q_code, depth_stage, created_at, trace_id';
+
+  const detailPageSize = 1000;
+  const detailMaxRows = 10000;
+
+  let rows: any[] = [];
+  let detailError: any = null;
+
+  for (let from = 0; from < detailMaxRows; from += detailPageSize) {
+    const { data: pageRows, error: pageErr } = await supabase
+      .from('iros_messages')
+      .select(detailSelect)
+      .eq('conversation_id', convId)
+      .order('created_at', { ascending: true })
+      .range(from, from + detailPageSize - 1);
+
+    if (pageErr) {
+      detailError = pageErr;
+      break;
+    }
+
+    const chunk = Array.isArray(pageRows) ? pageRows : [];
+    rows = rows.concat(chunk);
+
+    if (chunk.length < detailPageSize) break;
+  }
 
   if (detailError) {
     console.error('[IROS-LOGS][DETAIL] Supabase error:', detailError);
@@ -323,17 +351,6 @@ export async function GET(req: NextRequest) {
         ? row.role
         : row.role ?? 'assistant';
 
-    const metaNorm = normalizeMetaForViewer(row.meta);
-    const sa = extractSelfAcceptance(metaNorm);
-
-    // ✅ trace_id は DB列が空のことが多いので meta 側も拾う
-    const traceFromMeta =
-      (metaNorm as any)?.traceId ??
-      (metaNorm as any)?.trace_id ??
-      (metaNorm as any)?.extra?.traceId ??
-      (metaNorm as any)?.extra?.trace_id ??
-      null;
-
       return {
         id: String(row.id),
         conv_id: String(row.conversation_id),
@@ -342,11 +359,11 @@ export async function GET(req: NextRequest) {
         content: row.text ?? null,
         q_code: row.q_code ?? null,
         depth_stage: row.depth_stage ?? null,
-        self_acceptance: sa ?? null,
-        meta: metaNorm,
+        self_acceptance: null,
+        meta: null,
         used_credits: null,
         created_at: row.created_at ?? null,
-        trace_id: (row as any).trace_id ?? traceFromMeta,
+        trace_id: (row as any).trace_id ?? null,
       };
   });
 
