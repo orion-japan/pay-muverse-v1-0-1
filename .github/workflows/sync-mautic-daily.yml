@@ -33,8 +33,8 @@ jobs:
           import urllib.request
           import urllib.error
 
-          supabase_url = os.environ["SUPABASE_URL"]
-          anon_key = os.environ["SUPABASE_ANON_KEY"]
+          supabase_url = os.environ["SUPABASE_URL"].strip()
+          anon_key = os.environ["SUPABASE_ANON_KEY"].strip()
 
           fn_url = supabase_url.rstrip("/") + "/functions/v1/sync-mautic"
 
