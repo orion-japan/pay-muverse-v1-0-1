@@ -10,8 +10,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const SB_URL = Deno.env.get('SUPABASE_URL')!; // プロジェクトURL
 const SB_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!; // SRK（必須）
 const MAUTIC = (Deno.env.get('MAUTIC_BASE') ?? '').replace(/\/+$/, '');
-const M_ID = Deno.env.get('MAUTIC_CLIENT_ID') ?? '';
-const M_SEC = Deno.env.get('MAUTIC_CLIENT_SECRET') ?? '';
+const M_USER = Deno.env.get('MAUTIC_USERNAME') ?? '';
+const M_PASS = Deno.env.get('MAUTIC_PASSWORD') ?? '';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -43,6 +43,7 @@ serve(async (req: Request) => {
     const page = clampInt(body?.page, 0, 1_000_000, 0);
     const dryRun = !!body?.dryRun;
     const previewCount = clampInt(body?.limit, 1, 50, 3);
+    const maxPages = body?.maxPages == null ? null : clampInt(body?.maxPages, 1, 10_000, 1);
 
     // 簡易ヘルスチェック
     if (action === 'ping') return json({ ok: true, pong: true });
@@ -78,6 +79,7 @@ serve(async (req: Request) => {
       let totalCreated = 0;
       let totalUpdated = 0;
       let totalSkipped = 0;
+      let processedPages = 0;
 
       while (true) {
         const from = cur * pageSize;
@@ -118,7 +120,11 @@ serve(async (req: Request) => {
           }
         }
 
+        processedPages++;
+
         if (users.length < pageSize) break;
+        if (maxPages !== null && processedPages >= maxPages) break;
+
         cur++;
         await sleep(150);
       }
@@ -132,6 +138,8 @@ serve(async (req: Request) => {
           dryRun,
           pageStart: page,
           pageSize,
+          maxPages,
+          processedPages,
         },
       });
     }
@@ -176,27 +184,14 @@ async function fetchUsersPage(sb: any, from: number, limit: number): Promise<Use
   return (data ?? []) as UserRow[];
 }
 
-// —— Mautic: client_credentials でトークン ——
+// —— Mautic: Basic認証ヘッダー生成 ——
 // 失敗時はエラー文を含めて throw
 async function getMauticToken(): Promise<string> {
-  if (!MAUTIC || !M_ID || !M_SEC) {
-    throw new Error('[mautic] env not set: MAUTIC_BASE / MAUTIC_CLIENT_ID / MAUTIC_CLIENT_SECRET');
+  if (!MAUTIC || !M_USER || !M_PASS) {
+    throw new Error('[mautic] env not set: MAUTIC_BASE / MAUTIC_USERNAME / MAUTIC_PASSWORD');
   }
-  const url = `${MAUTIC}/oauth/v2/token`;
-  const params = new URLSearchParams({
-    grant_type: 'client_credentials',
-    client_id: M_ID,
-    client_secret: M_SEC,
-  });
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-    body: params,
-  });
-  if (!res.ok) throw new Error(`[mautic] token failed: ${res.status} ${await res.text()}`);
-  const j = await res.json();
-  if (!j?.access_token) throw new Error('[mautic] token missing access_token');
-  return j.access_token as string;
+
+  return `Basic ${btoa(`${M_USER}:${M_PASS}`)}`;
 }
 
 async function safeFind(token: string, email: string, dryRun: boolean) {
@@ -212,7 +207,7 @@ async function safeFind(token: string, email: string, dryRun: boolean) {
 async function findContactByEmail(token: string, email: string) {
   const url = `${MAUTIC}/api/contacts?search=${encodeURIComponent('email:' + email)}&limit=1`;
   const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    headers: { Authorization: token, Accept: 'application/json' },
   });
   if (!res.ok) throw new Error(`[mautic] search failed: ${res.status} ${await res.text()}`);
   const j = await res.json();
@@ -243,7 +238,7 @@ async function createContact(token: string, payload: any) {
   const res = await fetch(url, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: token,
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
@@ -257,7 +252,7 @@ async function updateContact(token: string, id: string | number, payload: any) {
   const res = await fetch(url, {
     method: 'PATCH',
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: token,
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },

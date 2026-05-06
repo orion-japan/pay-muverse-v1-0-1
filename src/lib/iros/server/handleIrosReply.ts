@@ -2567,6 +2567,13 @@ function normForRecall(v: any): string {
         (extra as any)?.followupKind ??
         null;
 
+      const diagnosisFollowupInputText = String(text ?? '').trim();
+
+      const isDiagnosisConsultTimingFollowup =
+        /今|まだ|早い|タイミング|時期|今じゃない|今ではない|使う|使用|シェア|共有|渡す|出す/u.test(
+          diagnosisFollowupInputText,
+        );
+
       const continuityKind = String(
         diagnosisFollowup
           ? 'diagnosis_followup'
@@ -2585,12 +2592,18 @@ function normForRecall(v: any): string {
             if (diagnosisFollowup) {
               preOrchCtxPack.diagnosisFollowup = true;
               preOrchCtxPack.followupKind =
-                diagnosisFollowupKind ?? 'concretize';
+                isDiagnosisConsultTimingFollowup
+                  ? 'consult_timing'
+                  : diagnosisFollowupKind ?? 'concretize';
               preOrchCtxPack.lastIrDiagnosis = lastIrDiagnosis;
               preOrchCtxPack.topicHint = diagnosisTopicHint;
               preOrchCtxPack.continuityKind = 'diagnosis_followup';
               preOrchCtxPack.goalKind =
-                preOrchCtxPack.followupKind === 'action' ? 'action' : 'clarify';
+                preOrchCtxPack.followupKind === 'action'
+                  ? 'action'
+                  : preOrchCtxPack.followupKind === 'consult_timing'
+                    ? 'resonate'
+                    : 'clarify';
 
               // user の短い followup 文そのものをトピック正本にしない
               preOrchCtxPack.conversationLine = diagnosisTopicHint;
@@ -2602,7 +2615,11 @@ function normForRecall(v: any): string {
               preOrchCtxPack.question = null;
               preOrchCtxPack.replyGoal = {
                 kind:
-                  preOrchCtxPack.followupKind === 'action' ? 'action' : 'clarify',
+                  preOrchCtxPack.followupKind === 'action'
+                    ? 'action'
+                    : preOrchCtxPack.followupKind === 'consult_timing'
+                      ? 'resonate'
+                      : 'clarify',
               };
 
               if (histCtx && typeof histCtx === 'object') {
@@ -2981,12 +2998,34 @@ function normForRecall(v: any): string {
           : null;
 
       if (diagnosisFollowupAfterOrch) {
+        const diagnosisFollowupInputTextAfterOrch = String(text ?? '').trim();
+
+        const normalizedFollowupKind =
+          /今|まだ|早い|タイミング|時期|今じゃない|今ではない|使う|使用|シェア|共有|渡す|出す/u.test(
+            diagnosisFollowupInputTextAfterOrch,
+          )
+            ? 'consult_timing'
+            : diagnosisFollowupKindAfterOrch;
+
+        const isDiagnosisConsultTimingFollowupAfterOrch =
+          normalizedFollowupKind === 'consult_timing';
+
+        const normalizedPresentationKind =
+          isDiagnosisConsultTimingFollowupAfterOrch ? 'consult' : 'diagnosis';
+
         const normalizedGoalKind =
-          diagnosisFollowupKindAfterOrch === 'action' ? 'action' : 'clarify';
+          normalizedFollowupKind === 'action'
+            ? 'action'
+            : isDiagnosisConsultTimingFollowupAfterOrch
+              ? 'resonate'
+              : 'clarify';
+
         const normalizedShiftKind =
-          diagnosisFollowupKindAfterOrch === 'action'
+          normalizedFollowupKind === 'action'
             ? 'diagnosis_action_shift'
-            : 'diagnosis_followup_shift';
+            : isDiagnosisConsultTimingFollowupAfterOrch
+              ? 'diagnosis_consult_timing_shift'
+              : 'diagnosis_followup_shift';
 
         const resolvedDiagnosisTargetForWriter =
           diagnosisTargetAfterOrch ||
@@ -2999,9 +3038,10 @@ function normForRecall(v: any): string {
           null;
 
         orchCtxPack.diagnosisFollowup = true;
-        orchCtxPack.followupKind = diagnosisFollowupKindAfterOrch;
+        orchCtxPack.followupKind = normalizedFollowupKind;
         orchCtxPack.continuityKind = 'diagnosis_followup';
-        orchCtxPack.presentationKind = 'diagnosis';
+        orchCtxPack.presentationKind = normalizedPresentationKind;
+        orchCtxPack.detailMode = !isDiagnosisConsultTimingFollowupAfterOrch;
         orchCtxPack.goalKind = normalizedGoalKind;
         orchCtxPack.targetKind = normalizedGoalKind;
         orchCtxPack.shiftKind = normalizedShiftKind;
@@ -3021,8 +3061,9 @@ function normForRecall(v: any): string {
 
         if (orchExtra && typeof orchExtra === 'object') {
           (orchExtra as any).diagnosisFollowup = true;
-          (orchExtra as any).presentationKind = 'diagnosis';
-          (orchExtra as any).followupKind = diagnosisFollowupKindAfterOrch;
+          (orchExtra as any).presentationKind = normalizedPresentationKind;
+          (orchExtra as any).detailMode = !isDiagnosisConsultTimingFollowupAfterOrch;
+          (orchExtra as any).followupKind = normalizedFollowupKind;
           (orchExtra as any).goalKind = normalizedGoalKind;
           (orchExtra as any).targetKind = normalizedGoalKind;
           (orchExtra as any).shiftKind = normalizedShiftKind;
@@ -3046,16 +3087,18 @@ function normForRecall(v: any): string {
             : {};
 
         (extraLocal as any).diagnosisFollowup = true;
-        (extraLocal as any).presentationKind = 'diagnosis';
-        (extraLocal as any).followupKind = diagnosisFollowupKindAfterOrch;
+        (extraLocal as any).presentationKind = normalizedPresentationKind;
+        (extraLocal as any).detailMode = !isDiagnosisConsultTimingFollowupAfterOrch;
+        (extraLocal as any).followupKind = normalizedFollowupKind;
 
         if (resolvedDiagnosisTargetForWriter) {
           (extraLocal as any).targetLabel = resolvedDiagnosisTargetForWriter;
         }
 
         (extraLocal as any).ctxPack.diagnosisFollowup = true;
-        (extraLocal as any).ctxPack.presentationKind = 'diagnosis';
-        (extraLocal as any).ctxPack.followupKind = diagnosisFollowupKindAfterOrch;
+        (extraLocal as any).ctxPack.presentationKind = normalizedPresentationKind;
+        (extraLocal as any).ctxPack.detailMode = !isDiagnosisConsultTimingFollowupAfterOrch;
+        (extraLocal as any).ctxPack.followupKind = normalizedFollowupKind;
         (extraLocal as any).ctxPack.continuityKind = 'diagnosis_followup';
         (extraLocal as any).ctxPack.goalKind = normalizedGoalKind;
         (extraLocal as any).ctxPack.targetKind = normalizedGoalKind;
@@ -3099,7 +3142,11 @@ function normForRecall(v: any): string {
 
       if (diagnosisFollowupForWriter) {
         const writerGoalKind =
-          diagnosisFollowupKindForWriter === 'action' ? 'action' : 'clarify';
+          diagnosisFollowupKindForWriter === 'action'
+            ? 'action'
+            : diagnosisFollowupKindForWriter === 'consult_timing'
+              ? 'resonate'
+              : 'clarify';
 
         (extraLocal as any).goalKind = writerGoalKind;
         (extraLocal as any).targetKind = writerGoalKind;
@@ -3108,16 +3155,25 @@ function normForRecall(v: any): string {
           kind:
             diagnosisFollowupKindForWriter === 'action'
               ? 'diagnosis_action_shift'
-              : 'diagnosis_followup_shift',
-          intent: 'diagnosis_followup',
+              : diagnosisFollowupKindForWriter === 'consult_timing'
+                ? 'diagnosis_consult_timing_shift'
+                : 'diagnosis_followup_shift',
+          intent:
+            diagnosisFollowupKindForWriter === 'consult_timing'
+              ? 'diagnosis_consult_timing'
+              : 'diagnosis_followup',
           hint:
             diagnosisFollowupKindForWriter === 'action'
               ? 'diagnosis_action_v1'
-              : 'diagnosis_concretize_v1',
+              : diagnosisFollowupKindForWriter === 'consult_timing'
+                ? 'diagnosis_consult_timing_v1'
+                : 'diagnosis_concretize_v1',
           line:
             diagnosisFollowupKindForWriter === 'action'
               ? '直前の診断から次の一手を一つ返す'
-              : '直前の診断文をそのまま具体化して返す',
+              : diagnosisFollowupKindForWriter === 'consult_timing'
+                ? '直前の診断を材料にして、今かまだか・渡し方・温度を相談として返す'
+                : '直前の診断文をそのまま具体化して返す',
           source: 'diagnosis_followup',
           contract: ['answer_in_one_shot', 'plain_words'],
           rules: {

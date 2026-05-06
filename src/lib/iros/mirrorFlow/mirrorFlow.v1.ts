@@ -171,9 +171,9 @@ function buildEmotionTexture(args: {
     },
     e3_neg: {
       surface: '不安',
-      inner: '曖昧なまま置かれるのがつらい',
-      need: '関係や状況の温度を確かめたい',
-      block: '重く見られたくない',
+      inner: '曖昧なままにせず、分かる形で確かめたい',
+      need: '状況の手触りを確かめたい',
+      block: '重く見えすぎることを避けたい',
     },
 
     e4_pos: {

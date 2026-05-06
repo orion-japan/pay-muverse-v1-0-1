@@ -915,8 +915,11 @@ const mirrorFlowV1ForSeed: any =
       const lines: string[] = ['MIRROR_FLOW_SEED_V1:'];
       if (currentFlowSeed) lines.push(`current=${currentFlowSeed}`);
       if (eTurnSeed) lines.push(`e_turn=${eTurnSeed}`);
-      if (emotionInnerSeed) lines.push(`emotion_inner=${emotionInnerSeed}`);
-      if (emotionNeedSeed) lines.push(`emotion_need=${emotionNeedSeed}`);
+      // emotion_inner / emotion_need は内部推定の生値なので、
+      // Writer本文に丸写しされないよう、最終Writer用 pack には実値を入れない。
+      // 表現の温度調整は emotion_primary / polarity / intensity / flowDelta 側で扱う。
+      // if (emotionInnerSeed) lines.push(`emotion_inner=${emotionInnerSeed}`);
+      // if (emotionNeedSeed) lines.push(`emotion_need=${emotionNeedSeed}`);
       if (emotionPrimarySeed) lines.push(`emotion_primary=${emotionPrimarySeed}`);
       if (emotionSecondarySeed) lines.push(`emotion_secondary=${emotionSecondarySeed}`);
       if (emotionBalanceSeed) lines.push(`emotion_balance=${emotionBalanceSeed}`);
@@ -3772,13 +3775,11 @@ const diagnosisFollowupBlock = (() => {
         String(mirrorFlowSeedText ?? '').match(/^emotion_inner=([^\n]+)/m)?.[1] ?? '',
       ).trim();
 
-      const obsCoreForPack = emotionInnerForPack
-        ? `まず質問への定義・軸を短く置く。emotion_innerは必要な範囲で後続に自然に反映する: ${emotionInnerForPack}`
-        : 'まず質問への定義・軸を短く置く。emotion_inner / emotion_need が存在しても、OBSの先頭を感情の言い換えだけで開始しない';
+      const obsCoreForPack =
+        'まず質問への定義・軸を短く置く。emotion_inner / emotion_need が存在しても、OBSの先頭を感情の言い換えだけで開始しない。emotion_inner の実値は本文に丸出しせず、必要な場合だけ後続文の温度調整に使う';
 
-      const obsLineForPack = emotionInnerForPack
-        ? `最初の一文は、感情の受け文ではなく、問いに対する分かりやすい定義または見取り図から開始する。emotion_innerは必要なら後続で自然に反映する: ${emotionInnerForPack}`
-        : '最初の一文は、感情の受け文ではなく、問いに対する分かりやすい定義または見取り図から開始する';
+      const obsLineForPack =
+        '最初の一文は、感情の受け文ではなく、問いに対する分かりやすい定義または見取り図から開始する。emotion_inner の実値をそのまま書かない';
 
       return String(content ?? '')
         .replace(/(CONTEXT:\n)[^\n]*/u, `$1${seed}`)
@@ -3789,6 +3790,208 @@ const diagnosisFollowupBlock = (() => {
         .replace(/(NEXT_LINE=)[^\n]*/u, '$1丸写しではなく、感じ取った強さだけを短く返す。');
     };
 
+    const userIntentBridgeBlock = (() => {
+      const userTextRaw = String(
+        (args as any)?.userText ??
+          (args as any)?.followupText ??
+          (args as any)?.inputText ??
+          (args as any)?.currentUserText ??
+          '',
+      ).trim();
+
+      const normalizeLabel = (value: unknown): string => {
+        return String(value ?? '')
+          .replace(/さん|様|先生|くん|ちゃん/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      };
+
+      const lastIrDiagnosis =
+        ((ctxPack as any)?.lastIrDiagnosis && typeof (ctxPack as any).lastIrDiagnosis === 'object')
+          ? (ctxPack as any).lastIrDiagnosis
+          : ((extra as any)?.lastIrDiagnosis && typeof (extra as any).lastIrDiagnosis === 'object')
+            ? (extra as any).lastIrDiagnosis
+            : ((args as any)?.userContext?.ctxPack?.lastIrDiagnosis &&
+                typeof (args as any).userContext.ctxPack.lastIrDiagnosis === 'object')
+              ? (args as any).userContext.ctxPack.lastIrDiagnosis
+              : null;
+
+      const targetRaw =
+        (irMeta as any)?.targetLabel ??
+        (irMeta as any)?.target ??
+        (lastIrDiagnosis as any)?.targetLabel ??
+        (lastIrDiagnosis as any)?.target ??
+        (ctxPack as any)?.targetLabel ??
+        (extra as any)?.targetLabel ??
+        null;
+
+      const targetLabel = normalizeLabel(targetRaw);
+
+      const targetMentioned =
+        !!targetLabel &&
+        normalizeLabel(userTextRaw).includes(targetLabel);
+
+      const objectLabel = (() => {
+        const t = userTextRaw;
+        if (/製品シェア/u.test(t)) return '製品シェア';
+        if (/シェア|共有/u.test(t)) return 'シェア';
+        if (/LINE|ライン/u.test(t)) return 'LINE';
+        if (/連絡/u.test(t)) return '連絡';
+        if (/返信|返事/u.test(t)) return '返信';
+        if (/診断結果|診断内容|診断/u.test(t)) return '診断結果';
+        if (/共鳴/u.test(t)) return '共鳴';
+        return null;
+      })();
+
+      const hasDiagnosisContext =
+        diagnosisFollowup === true ||
+        (
+          targetMentioned &&
+          (
+            ((irMeta as any) && typeof (irMeta as any) === 'object') ||
+            !!lastIrDiagnosis
+          )
+        );
+
+      const intentKind = (() => {
+        const t = userTextRaw;
+
+        const asksTiming =
+          /今|まだ|早い|タイミング|時期|今じゃない|今ではない|今すぐ|あとで|後で/u.test(t) &&
+          /いい|良い|どう|使う|使用|シェア|共有|渡す|出す|送る|連絡|返信|返事|始める|進める/u.test(t);
+
+        if (asksTiming) {
+          return 'ask_timing';
+        }
+
+        if (/どう渡|渡し方|伝え方|言い方|送れば|共有の仕方|シェアの仕方/u.test(t)) {
+          return 'ask_how_to_deliver';
+        }
+
+        if (/いいですか|良いですか|べき|判断|どちら|迷って|ありですか|やめた方|した方/u.test(t)) {
+          return 'ask_judgement';
+        }
+
+        if (/とは|意味|状態|示します|どんな|何ですか|なんですか|出来ますか|できますか/u.test(t)) {
+          return 'ask_definition';
+        }
+
+        if (hasDiagnosisContext) return 'diagnosis_followup';
+
+        return 'continue';
+      })();
+
+      const sourceContext =
+        hasDiagnosisContext
+          ? 'last_ir_diagnosis'
+          : ((ctxPack as any)?.historyDigestV1 || (extra as any)?.historyDigestV1)
+            ? 'history'
+            : 'current_text';
+
+      const targetPart = targetLabel ? `${targetLabel}さん` : 'この相手';
+      const objectPart = objectLabel ?? '今回の話';
+
+      const userWants = (() => {
+        if (intentKind === 'ask_timing') {
+          return `${targetPart}に${objectPart}を今出してよいか、まだ早いかを判断してほしい`;
+        }
+        if (intentKind === 'ask_how_to_deliver') {
+          return `${targetPart}に${objectPart}をどう渡せば届きやすいかを見てほしい`;
+        }
+        if (intentKind === 'ask_judgement') {
+          return `${objectPart}について、進めてよいか・控えるべきかを判断してほしい`;
+        }
+        if (intentKind === 'ask_definition') {
+          return `${objectPart}の意味や状態を、分かる形で説明してほしい`;
+        }
+        if (intentKind === 'diagnosis_followup') {
+          return `${targetPart}の診断結果を前提に、今の相談へつなげて見てほしい`;
+        }
+        return '直前までの流れを踏まえて、今の発話の用事に合う形で返してほしい';
+      })();
+
+      const answerShould = (() => {
+        if (intentKind === 'ask_timing') {
+          return '1文目で「送って大丈夫です。ただし、短く軽くが合います」または「今は送らない方がいいです」のように、可否を先に答える。理由は診断や文脈から1〜2点だけに絞り、最後は具体的な渡し方・言い方で閉じる';
+        }
+        if (intentKind === 'ask_how_to_deliver') {
+          return '具体的な渡し方・言い方・距離感まで落とす';
+        }
+        if (intentKind === 'ask_judgement') {
+          return '判断を曖昧にせず、進める/控える/軽く試すのどれに寄るかを返す';
+        }
+        if (intentKind === 'ask_definition') {
+          return '定義から入り、説明だけで終わらず、見分け方や使える入口まで返す';
+        }
+        if (intentKind === 'diagnosis_followup') {
+          return '診断結果の内容を材料にして、今の相談に直接答える';
+        }
+        return '入力文の整理ではなく、ユーザーが今してほしいことへ直接返す';
+      })();
+
+      const isConsultAnswerIntent =
+        intentKind === 'ask_timing' ||
+        intentKind === 'ask_judgement' ||
+        intentKind === 'ask_how_to_deliver';
+
+      const avoid = [
+        '入力文の構造整理だけで終わらない',
+        'ユーザーの用事を聞き返さない',
+        '一般論にしない',
+        hasDiagnosisContext ? '診断結果を無視しない' : '',
+        intentKind === 'ask_timing' ? '今かまだかをぼかさない' : '',
+        intentKind === 'ask_judgement' ? '判断をぼかさない' : '',
+        intentKind === 'ask_how_to_deliver' ? '渡し方を抽象語だけで終わらせない' : '',
+        isConsultAnswerIntent ? '見出しを使わない' : '',
+        isConsultAnswerIntent ? '「いま見えていること」「いま分けて見たいこと」「ここから整理する順番」「いまのまとめ」のような分析レポート型にしない' : '',
+        isConsultAnswerIntent ? '同じ意味を「渡る」「届く」「温度」「順番」「置き方」などで何度も言い換えない' : '',
+        isConsultAnswerIntent ? '「静かに」「場」「流れ」「素直になります」で締めない' : '',
+      ].filter(Boolean);
+
+      return [
+        'USER_INTENT_BRIDGE_V1 (DO NOT OUTPUT):',
+        `intentKind=${intentKind}`,
+        targetLabel ? `targetLabel=${targetLabel}` : '',
+        objectLabel ? `objectLabel=${objectLabel}` : '',
+        `sourceContext=${sourceContext}`,
+        `userWants=${userWants}`,
+        `answerShould=${answerShould}`,
+        isConsultAnswerIntent ? 'consultAnswerMode=enabled' : '',
+        isConsultAnswerIntent
+          ? 'outputContract=見出しなしの3〜4段落。1段落目で結論、2段落目で理由、3段落目で具体的な行動・渡し方・言い方、最後はユーザーがそのまま使える判断または文例に近い形で閉じる'
+          : '',
+        `avoid=${avoid.join(' / ')}`,
+      ]
+        .filter(Boolean)
+        .join('\n');
+    })();
+
+    const consultAnswerContractBlock = (() => {
+      const bridge = String(userIntentBridgeBlock ?? '');
+
+      const enabled =
+        /consultAnswerMode=enabled/u.test(bridge) ||
+        /intentKind=(ask_timing|ask_judgement|ask_how_to_deliver)/u.test(bridge);
+
+      if (!enabled) return '';
+
+      return [
+        'CONSULT_ANSWER_CONTRACT (DO NOT OUTPUT):',
+        'priority=highest',
+        'purpose=ユーザーの相談に、整理ではなく答えとして返す',
+        'format=見出しなしの自然文3〜4段落',
+        'paragraph1=最初の1文で可否を答える。「送って大丈夫です。ただし、短く軽くが合います」「今は送らない方がいいです」のように判断を先に出す。「今すぐ送るより」「いったん整えてから」だけで始めない',
+        'paragraph2=理由は1〜2点だけ。入力文を分析せず、ユーザーが判断に使える理由だけを書く',
+        'paragraph3=具体的な行動・渡し方・言い方を出す。可能ならそのまま使える短い文例に近づける',
+        'paragraph4=締めは抽象語ではなく、今どうするかで閉じる',
+        'forbid_headings=いま見えていること / いま分けて見たいこと / ここから整理する順番 / いまのまとめ / 🔍 / 🎯 / ✅',
+        'forbid_style=分析レポート型 / 同じ意味の言い換え反復 / 状態観測だけ / 抽象的な余韻',
+        'forbid_tail=静かに / 場 / 流れ / 素直になります / 置き方 / 温度 / 順番 だけで締めない',
+        'must_not=ユーザーの発話を整理するだけで終わらない',
+        'must=ユーザーが今どうすればいいかを、迷わず読める形にする',
+      ].join('\n');
+    })();
+
     let base = [
       [
         mirrorFlowSeedText,
@@ -3798,6 +4001,8 @@ const diagnosisFollowupBlock = (() => {
         .join('\n\n'),
       irMetaBlock,
       diagnosisFollowupBlock,
+      userIntentBridgeBlock,
+      consultAnswerContractBlock,
 
       (() => {
         const currentUserText = String(

@@ -4736,6 +4736,7 @@ const systemPromptForWriter = [
           'seedにない新しい意味・具体軸を足さない',
           'emotion_inner / emotion_need がseedにある場合、それは入力に基づく感情材料としてOBSまたはSHIFTに自然に滲ませてよい。ただしラベル名は本文に出さない',
           'emotion_inner / emotion_need がseedにある場合でも、OBSの先頭は感情の言い換えだけで開始しない',
+          'emotion_inner / emotion_need の文を、そのまま単独文として本文に出さない。特に「〜がつらい」「〜したい」「〜が怖い」はユーザー感情の断定として出さず、質問への定義文に薄く反映する',
           'OBSの最初の一文は、質問への定義・軸・見取り図を短く置く',
           'emotion_inner / emotion_need は、定義のあとに必要な範囲で自然に反映する',
           '具体例を求められた場合は、OBSで定義し、その後に3〜5個の具体例を出す',
@@ -4746,7 +4747,8 @@ const systemPromptForWriter = [
           '具体例は番号ではなく「- 」の箇条書きで独立行にする',
           '具体例の箇条書きは、1項目1行で「- 見出し：説明。例: ...」の形にする',
           '同じ核を、日常語で分かりやすく言い換えて深める',
-          '質問しない',
+          '質問しない。ただし、ユーザー状態に合う次の見取り図・分岐・扱い方は、SAFEで1文だけ出してよい',
+          'SAFEでは「必要なら〜できます」「もっと知りたいですか？」より、「次に分けるなら〜で見られます」「ここから見るなら〜が分かりやすいです」のような入口提示を優先する',
 
           // --- 意味制御（最重要） ---
           'SAFE以外で意味を収束させない',
@@ -4910,95 +4912,139 @@ const systemPromptForWriter = [
           : isIntentMethodBomb
             ? '4段落目の3文目は、余韻で逃がさず最初の行動で閉じる。励ましや余白にしない。今ここで着手する一手がそのまま残るように、短く具体的に終える。たとえば「まずは、外したくないものを一つ決めてください」のように閉じる。'
             : '4段落目の3文目は、余韻だけで閉じる。文や言葉への言及をしない。強く締めず、静けさと少しの残りだけが場に残る形で終える。完全に閉じ切らず、呼吸が残る終わり方にする。'),
-      bodyStyle: isCompareStructureBomb
-        ? {
-            preferBlockSplit: true,
-            minBlocks: 4,
-            maxSentencesPerBlock: 4,
-            minSentences: 15,
-            maxSentences: 15,
-          }
-          : {
-            preferBlockSplit: true,
-            minBlocks: 4,
-            maxSentencesPerBlock: 6,
-            minSentences: 18,
-            maxSentences: 26,
-          },
+            bodyStyle: isCompareStructureBomb
+            ? {
+                preferBlockSplit: true,
+                minBlocks: 4,
+                maxSentencesPerBlock: 4,
+                minSentences: 15,
+                maxSentences: 15,
+              }
+            : key === 'IR_DETAIL_V1'
+              ? {
+                  preferBlockSplit: true,
+                  minBlocks: 4,
+                  maxSentencesPerBlock: 4,
+                  minSentences: 10,
+                  maxSentences: 18,
+                }
+              : {
+                  preferBlockSplit: true,
+                  minBlocks: 4,
+                  maxSentencesPerBlock: 6,
+                  minSentences: 18,
+                  maxSentences: 26,
+                },
 
           writeConstraints: isCompareStructureBomb
-          ? [
-              'normal_detail / diagnosis_detail では、必ず4つの段落で返す',
-              '4つの段落は、OBS → SHIFT → NEXT → SAFE の順に固定する',
-              '比較説明型では合計15文ちょうどで返す',
+            ? [
+                'normal_detail / diagnosis_detail では、必ず4つの段落で返す',
+                '4つの段落は、OBS → SHIFT → NEXT → SAFE の順に固定する',
+                '比較説明型では合計15文ちょうどで返す',
 
-              '1段落目はちょうど4文で書く',
-              '1段落目は Aの核 → Bの核 → 違いを優劣にしない補正 → 差の芯 の順に置く',
+                '1段落目はちょうど4文で書く',
+                '1段落目は Aの核 → Bの核 → 違いを優劣にしない補正 → 差の芯 の順に置く',
 
-              '2段落目はちょうど4文で書く',
-              '2段落目は Aの基準 → Bの基準 → Aから見た違和感 → Bから見た違和感 の順に置く',
+                '2段落目はちょうど4文で書く',
+                '2段落目は Aの基準 → Bの基準 → Aから見た違和感 → Bから見た違和感 の順に置く',
 
-              '3段落目はちょうど4文で書く',
-              '3段落目は 理解点の核 → A側の受け取り直し → B側の受け取り直し → 打ち解ける鍵 の順に置く',
+                '3段落目はちょうど4文で書く',
+                '3段落目は 理解点の核 → A側の受け取り直し → B側の受け取り直し → 打ち解ける鍵 の順に置く',
 
-              '4段落目はちょうど3文で書く',
-              '4段落目は Aの居心地 → Bの居心地 → 関係の着地 の順に置く',
+                '4段落目はちょうど3文で書く',
+                '4段落目は Aの居心地 → Bの居心地 → 関係の着地 の順に置く',
 
-              '比較説明では、違いの発生、A側の核、B側の核、ぶつかる点、相互の誤解、相互理解の鍵、最後の着地が読めるだけの材料を先に出す',
-              '特徴説明と理解点を同じ責務に混在させない',
-              '誤解と結論を同じ責務に混在させない',
-              'OBS / SHIFT / NEXT / SAFE は説明文ではなく自然文で書く',
-              'closing_line は現在地の結論で静かに閉じる',
-            ]
-            : [
-              'normal_detail / diagnosis_detail では、概念説明・構造説明・象徴読解の場合、4段落固定よりもMarkdown見出しによる意味の見通しを優先する',
-              '構成は、導入 → 構造展開 → ズレの表面化 → ズレの意味付け → IROS的な再配置 → 象徴的な着地を基本にする',
-              '「詳しく」「階層」「構造」「層」「段階」が含まれる問いでは、対象物に固有の層・段階・部位・中心軸がある場合、それを省略せず展開する',
-              '対象物が五重塔なら、第一層〜第五層と中心軸までを自然に展開する。山岳修行なら、欲求・浄化・覚悟・奉仕・一体化など、問いに即した段階を展開する',
-              'Markdown見出しは原則として2〜6個使う。見出しは独立行で出す',
-              '見出し例は固定しない。対象や問いに合わせて日常語で自然に作る。例：「## 好き嫌いより先に動いているもの」「## 関係が重くなるところ」「## 届き方を整える」「## いま見ている芯」',
-              '対象物に層・部位・段階・中心軸などの固有構造がある場合は、その構造に沿って意味を展開する',
-              '説明だけで終わらず、表の理解と奥の意図、ユーザー側の見え方と相手側に届く見え方、行為の外形と内側の意味の間に起きるズレを表面化する',
-              'そのズレが相手側ではどんな受け取りになるか、どこで受け取り違いが起きるか、どう再配置すれば届くかまで書く',
-              'そのズレがなぜ刺さるのか、どこに階層差・受け取り違い・意図の不一致があるのかを、問いの範囲内で深く意味付けする',
-              'ただし、根拠のない個人背景・過去原因・相手の本心・事実確認できない断定は足さない',
-              '番号リストは使わない。1. / 2. / 3. の形式は禁止する',
-              '小見出しは太字の独立行で出す。例：「**第一層：地の意図**」「**第二層：水の意図**」「**第三層：火の意図**」「**中心軸**」',
-              '区切り線 --- は、見出し同士の切り替わりが分かりやすくなる場合に使ってよい',
-              '大きく見せたい箇所では、Markdown見出し・太字・大文字見出しを使ってよい。ただし過剰に装飾しない',
-              '1段落目は3〜4文で書く',
-            '1段落目は current_state → misrecognition_negation → structural_reframe の順を守る',
-            '1段落目の前半で違いの発生や現在地を置き、後半で今回の核を仮置きしてよい',
-            '2段落目は3〜4文で書く',
-            '2段落目は breakdown_core_gap → breakdown_defense → breakdown_rejection_target の順を守る',
-            '2段落目では、なぜズレるか、何を守ろうとしているか、どこに拒否が出ているかを分けて置く',
-            '3段落目は3〜4文で書く',
-            '3段落目は reading_direction → concrete_sort_axis → concrete_sort_boundary の順を守る',
-            '3段落目では、次に見る焦点、比べる軸、どこまでを今回扱うかを分けて置く',
-            '4段落目は3〜4文で書く',
-            '4段落目は conclusion → caution → closing_line の順を守る',
-            '4段落目には必ず closing_line に相当する短い本文を最後の1文として書く',
-            '4段落目を見出しだけで終わらせない。3段落で終えることを禁止する',
-            '4段落目を次の提案や案内にしない',
-            'NORMAL_DETAIL_V1 では、説明を4段落に分ける前に、比較説明に必要な素材を15ユニット前後まで十分に出す',
-            '比較説明では、違いの発生、A側の核、B側の核、ぶつかる点、相互の誤解、相互理解の鍵、最後の着地が読めるだけの材料を先に出す',
-            '一つの文に複数責務を詰め込みすぎない',
-            '特徴説明と理解点を同じ責務に混在させない',
-            '誤解と結論を同じ責務に混在させない',
-            'OBS / SHIFT / NEXT / SAFE は説明文ではなく自然文で書く',
-            'current_state は今ある状態を書く',
-            'misrecognition_negation はその状態を弱さと決めない',
-            'structural_reframe は今回の核を一段仮置きする',
-            'breakdown_core_gap は混在している二つを名指しする',
-            'breakdown_defense は守ろうとしているものを書く',
-            'breakdown_rejection_target は避けたいものを書く',
-            'reading_direction は次に見る焦点を書く',
-            'concrete_sort_axis は比較の軸を書く',
-            'concrete_sort_boundary は今回どこまで扱うかを書く',
-            'conclusion は最後に残る核を書く',
-            'caution は急ぎすぎると何を見失うかを書く',
-            'closing_line は現在地の結論で静かに閉じる',
-          ],
+                '比較説明では、違いの発生、A側の核、B側の核、ぶつかる点、相互の誤解、相互理解の鍵、最後の着地が読めるだけの材料を先に出す',
+                '特徴説明と理解点を同じ責務に混在させない',
+                '誤解と結論を同じ責務に混在させない',
+                'OBS / SHIFT / NEXT / SAFE は説明文ではなく自然文で書く',
+                'closing_line は現在地の結論で静かに閉じる',
+              ]
+            : key === 'IR_DETAIL_V1'
+              ? [
+                  'IR_DETAIL_V1 では、診断後の深掘りとして返す。分析レポートではなく、相手・関係・状況の見立てを日常語で書く',
+                  '4つの段落は、見えていること → 内側で起きていること → ポイント → まとめ の順にする',
+                  '見出しを使う場合は「🌀 いま見えていること」「🧭 いま内側で起きていること」「🌱 ポイント」「🪔 まとめ」のように短くする',
+                  '「構造」「階層」「位相」「主軸」「観測」「再配置」「象徴」「核」「余韻」「閉じる」は本文に出しすぎない',
+                  '相手の本心や事実を断定しない。「今見える範囲では」「〜に見えます」「〜になりやすいです」の温度で書く',
+                  'ユーザーから見えやすい感覚を一度入れる。例：はっきりしない、本音が見えにくい、完全に終わった感じではない、など',
+                  '本文は難しい分析語より、読んだ人がそのまま納得できる言葉を優先する',
+                  '恋愛・対人相談では、相手の状態だけで終わらせず、ユーザー側からどう見えやすいかも短く入れる',
+                  '助言に寄せすぎない。必要な場合も「追う・詰める」などの強い行動指示ではなく、今の見え方の整理に留める',
+
+                  '1段落目は2〜3文で書く',
+                  '2段落目は2〜4文で書く',
+                  '3段落目は2〜3文で書く',
+                  '4段落目は2〜3文で書く',
+
+                  '番号リストは使わない。1. / 2. / 3. の形式は禁止する',
+                  '太字は要点を強めるために使ってよい。ただし1段落につき多くても1〜2箇所にする',
+                  '区切り線 --- は、見出し同士の切り替わりが分かりやすくなる場合に使ってよい',
+                  '最後は「完全に終わり」「絶対に進む」などの断定ではなく、今見える状態のまとめで閉じる',
+                  'OBS / SHIFT / NEXT / SAFE は出力しない。自然文として出す',
+
+                  'current_state は、今見える範囲の状態を日常語で書く',
+                  'misrecognition_negation は、誤解しやすい見え方を少しやわらげる',
+                  'structural_reframe は、今回の見立てを日常語で一文にする',
+                  'breakdown_core_gap は、ユーザーから見えやすいズレを日常語で書く',
+                  'breakdown_defense は、相手や関係が守ろうとしているペース・余裕・距離感として書く',
+                  'breakdown_rejection_target は、避けたいことを強い断定にせず、見え方として書く',
+                  'reading_direction は、今どちらの動きが強く見えるかを書く',
+                  'concrete_sort_axis は、相手の気持ちの有無より、行動に変える力があるかどうかの違いとして書く',
+                  'concrete_sort_boundary は、今決めきれない範囲を短く残す',
+                  'conclusion は、最後に残る見立てを短く書く',
+                  'caution は、ユーザーが消耗しやすい見方を短く書く',
+                  'closing_line は、今の状態のまとめでやわらかく閉じる',
+                ]
+              : [
+                'normal_detail / diagnosis_detail では、概念説明・構造説明・象徴読解の場合、4段落固定よりもMarkdown見出しによる意味の見通しを優先する',
+                '構成は、導入 → 構造展開 → ズレの表面化 → ズレの意味付け → IROS的な再配置 → 象徴的な着地を基本にする',
+                '「詳しく」「階層」「構造」「層」「段階」が含まれる問いでは、対象物に固有の層・段階・部位・中心軸がある場合、それを省略せず展開する',
+                '対象物が五重塔なら、第一層〜第五層と中心軸までを自然に展開する。山岳修行なら、欲求・浄化・覚悟・奉仕・一体化など、問いに即した段階を展開する',
+                'Markdown見出しは原則として2〜6個使う。見出しは独立行で出す',
+                '見出し例は固定しない。対象や問いに合わせて日常語で自然に作る。例：「## 好き嫌いより先に動いているもの」「## 関係が重くなるところ」「## 届き方を整える」「## いま見ている芯」',
+                '対象物に層・部位・段階・中心軸などの固有構造がある場合は、その構造に沿って意味を展開する',
+                '説明だけで終わらず、表の理解と奥の意図、ユーザー側の見え方と相手側に届く見え方、行為の外形と内側の意味の間に起きるズレを表面化する',
+                'そのズレが相手側ではどんな受け取りになるか、どこで受け取り違いが起きるか、どう再配置すれば届くかまで書く',
+                'そのズレがなぜ刺さるのか、どこに階層差・受け取り違い・意図の不一致があるのかを、問いの範囲内で深く意味付けする',
+                'ただし、根拠のない個人背景・過去原因・相手の本心・事実確認できない断定は足さない',
+                '番号リストは使わない。1. / 2. / 3. の形式は禁止する',
+                '小見出しは太字の独立行で出す。例：「**第一層：地の意図**」「**第二層：水の意図**」「**第三層：火の意図**」「**中心軸**」',
+                '区切り線 --- は、見出し同士の切り替わりが分かりやすくなる場合に使ってよい',
+                '大きく見せたい箇所では、Markdown見出し・太字・大文字見出しを使ってよい。ただし過剰に装飾しない',
+                '1段落目は3〜4文で書く',
+                '1段落目は current_state → misrecognition_negation → structural_reframe の順を守る',
+                '1段落目の前半で違いの発生や現在地を置き、後半で今回の核を仮置きしてよい',
+                '2段落目は3〜4文で書く',
+                '2段落目は breakdown_core_gap → breakdown_defense → breakdown_rejection_target の順を守る',
+                '2段落目では、なぜズレるか、何を守ろうとしているか、どこに拒否が出ているかを分けて置く',
+                '3段落目は3〜4文で書く',
+                '3段落目は reading_direction → concrete_sort_axis → concrete_sort_boundary の順を守る',
+                '3段落目では、次に見る焦点、比べる軸、どこまでを今回扱うかを分けて置く',
+                '4段落目は3〜4文で書く',
+                '4段落目は conclusion → caution → closing_line の順を守る',
+                '4段落目には必ず closing_line に相当する短い本文を最後の1文として書く',
+                '4段落目を見出しだけで終わらせない。3段落で終えることを禁止する',
+                '4段落目を次の提案や案内にしない',
+                'NORMAL_DETAIL_V1 では、説明を4段落に分ける前に、比較説明に必要な素材を15ユニット前後まで十分に出す',
+                '比較説明では、違いの発生、A側の核、B側の核、ぶつかる点、相互の誤解、相互理解の鍵、最後の着地が読めるだけの材料を先に出す',
+                '一つの文に複数責務を詰め込みすぎない',
+                '特徴説明と理解点を同じ責務に混在させない',
+                '誤解と結論を同じ責務に混在させない',
+                'OBS / SHIFT / NEXT / SAFE は説明文ではなく自然文で書く',
+                'current_state は今ある状態を書く',
+                'misrecognition_negation はその状態を弱さと決めない',
+                'structural_reframe は今回の核を一段仮置きする',
+                'breakdown_core_gap は混在している二つを名指しする',
+                'breakdown_defense は守ろうとしているものを書く',
+                'breakdown_rejection_target は避けたいものを書く',
+                'reading_direction は次に見る焦点を書く',
+                'concrete_sort_axis は比較の軸を書く',
+                'concrete_sort_boundary は今回どこまで扱うかを書く',
+                'conclusion は最後に残る核を書く',
+                'caution は急ぎすぎると何を見失うかを書く',
+                'closing_line は現在地の結論で静かに閉じる',
+              ],
     };
   }
   const writerPatternKeyForFirstPass = String(
@@ -6367,17 +6413,63 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
       !!patternLastIrDiagnosis ||
       (!!patternTargetLabel && isDiagnosisFollowupPhrase);
 
+    const patternFollowupKindForConsult = String(
+      (ctxPackForWriter as any)?.followupKind ??
+        patternMetaExtra?.followupKind ??
+        patternMetaExtraCtxPack?.followupKind ??
+        patternUserContextMetaExtra?.followupKind ??
+        patternUserContextMetaExtraCtxPack?.followupKind ??
+        patternUserContextCtxPack?.followupKind ??
+        patternOptsCtxPack?.followupKind ??
+        ''
+    ).trim();
+
+    const isConsultAnswerLikeForPattern =
+      patternFollowupKindForConsult === 'consult_timing' ||
+      (
+        /今|まだ|早い|タイミング|時期|今じゃない|今ではない|今すぐ|あとで|後で/u.test(
+          patternFollowupText
+        ) &&
+        /いい|良い|どう|使う|使用|シェア|共有|渡す|出す|送る|連絡|返信|返事|始める|進める/u.test(
+          patternFollowupText
+        )
+      ) ||
+      /どう渡|渡し方|伝え方|言い方|送れば|共有の仕方|シェアの仕方/u.test(
+        patternFollowupText
+      ) ||
+      /いいですか|良いですか|べき|判断|どちら|迷って|ありですか|やめた方|した方/u.test(
+        patternFollowupText
+      );
+
+    const effectivePatternPresentationKind = isConsultAnswerLikeForPattern
+      ? 'consult'
+      : patternPresentationKind;
+
+    const effectivePatternDetailMode = isConsultAnswerLikeForPattern
+      ? false
+      : patternDetailMode;
+
+    const effectiveHasPriorDiagnosisForPattern = isConsultAnswerLikeForPattern
+      ? false
+      : hasPriorDiagnosisForPattern;
+
     const patternSelectInput = {
-      line: patternPresentationKind === 'diagnosis' ? 'diagnosis' : patternPresentationKind,
-      questionType: resolvedQuestionType,
-      detailMode: patternDetailMode,
+      line: effectivePatternPresentationKind === 'diagnosis' ? 'diagnosis' : effectivePatternPresentationKind,
+      questionType: isConsultAnswerLikeForPattern ? null : resolvedQuestionType,
+      detailMode: effectivePatternDetailMode,
       followupText: patternFollowupText,
       userText: patternFollowupText,
       targetLabel: patternTargetLabel,
-      hasPriorDiagnosis: hasPriorDiagnosisForPattern,
+      hasPriorDiagnosis: effectiveHasPriorDiagnosisForPattern,
     };
 
-    const preSelectedPatternKey = String((opts as any)?.meta?.extra?.patternKey ?? '').trim();
+    const preSelectedPatternKeyRaw = String((opts as any)?.meta?.extra?.patternKey ?? '').trim();
+    const preSelectedPatternKey =
+      isConsultAnswerLikeForPattern &&
+      (preSelectedPatternKeyRaw === 'IR_DETAIL_V1' || preSelectedPatternKeyRaw === 'NORMAL_DETAIL_V1')
+        ? ''
+        : preSelectedPatternKeyRaw;
+
     const selectedByFunction = selectSlotPattern(patternSelectInput);
 
     console.log(
@@ -6413,9 +6505,11 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
       resolvedAskReadingModeForMaterialize === 'partner_side_resonance';
 
     const patternKey = (
-      isPartnerSideResonanceForMaterialize
+      isConsultAnswerLikeForPattern
+        ? 'NORMAL_COMPRESSED_V1'
+        : isPartnerSideResonanceForMaterialize
         ? 'PARTNER_SIDE_RESONANCE_V1'
-        : hasPriorDiagnosisForPattern && selectedByFunction === 'IR_DETAIL_V1'
+        : effectiveHasPriorDiagnosisForPattern && selectedByFunction === 'IR_DETAIL_V1'
           ? 'IR_DETAIL_V1'
           : preSelectedPatternKey === 'IR_DETAIL_V1' ||
               preSelectedPatternKey === 'NORMAL_DETAIL_V1' ||
@@ -6445,7 +6539,7 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
       targetLabel: patternTargetLabel,
       questionType: resolvedQuestionType,
       goalKind: goalKind ?? null,
-      detailMode: patternDetailMode,
+      detailMode: effectivePatternDetailMode,
     });
 // src/lib/iros/language/rephrase/rephraseEngine.full.ts
 // 5469-5519 行をこのブロックで丸ごと置換
@@ -8517,8 +8611,55 @@ const writerPatternHasPriorDiagnosis =
   writerPatternHasLastIrDiagnosis ||
   (!!writerPatternTargetLabel && writerPatternIsDiagnosisFollowupPhrase);
 
+const writerPatternFollowupKindForConsult = String(
+  (ctxPackForWriter as any)?.followupKind ??
+    (opts as any)?.ctxPack?.followupKind ??
+    (opts as any)?.userContext?.ctxPack?.followupKind ??
+    (opts as any)?.meta?.extra?.followupKind ??
+    (opts as any)?.meta?.extra?.ctxPack?.followupKind ??
+    ''
+).trim();
+
+const writerPatternIsConsultAnswerLike =
+  writerPatternFollowupKindForConsult === 'consult_timing' ||
+  (
+    /今|まだ|早い|タイミング|時期|今じゃない|今ではない|今すぐ|あとで|後で/u.test(
+      writerPatternFollowupText
+    ) &&
+    /いい|良い|どう|使う|使用|シェア|共有|渡す|出す|送る|連絡|返信|返事|始める|進める/u.test(
+      writerPatternFollowupText
+    )
+  ) ||
+  /どう渡|渡し方|伝え方|言い方|送れば|共有の仕方|シェアの仕方/u.test(
+    writerPatternFollowupText
+  ) ||
+  /いいですか|良いですか|べき|判断|どちら|迷って|ありですか|やめた方|した方/u.test(
+    writerPatternFollowupText
+  );
+
+console.log('[IROS/rephraseEngine][CONSULT_PATTERN_DETECT]', {
+  traceId: debug.traceId,
+  conversationId: debug.conversationId,
+  userCode: debug.userCode,
+  writerPatternFollowupText,
+  writerPatternFollowupKindForConsult,
+  writerPatternIsConsultAnswerLike,
+  hasConsultContractInPack: /CONSULT_ANSWER_CONTRACT\\s*\\(DO NOT OUTPUT\\):/u.test(
+    String(__writerInjectedPack ?? '')
+  ),
+  hasConsultModeInPack: /consultAnswerMode=enabled/u.test(String(__writerInjectedPack ?? '')),
+});
+
+const writerPatternEffectiveHasPriorDiagnosis = writerPatternIsConsultAnswerLike
+  ? false
+  : writerPatternHasPriorDiagnosis;
+
+const writerPatternEffectivePresentationKind = writerPatternIsConsultAnswerLike
+  ? 'consult'
+  : writerPatternPresentationKind;
+
 const writerPatternEarlySelected = selectSlotPattern({
-  line: writerPatternHasPriorDiagnosis ? 'diagnosis' : writerPatternPresentationKind,
+  line: writerPatternEffectiveHasPriorDiagnosis ? 'diagnosis' : writerPatternEffectivePresentationKind,
   questionType:
     String(
       (opts as any)?.userContext?.question?.questionType ??
@@ -8529,20 +8670,25 @@ const writerPatternEarlySelected = selectSlotPattern({
         ''
     ).trim() || null,
   detailMode:
-    (opts as any)?.ctxPack?.detailMode === true ||
-    (opts as any)?.userContext?.ctxPack?.detailMode === true ||
-    (opts as any)?.meta?.extra?.detailMode === true ||
-    (opts as any)?.meta?.extra?.ctxPack?.detailMode === true,
+    !writerPatternIsConsultAnswerLike &&
+    (
+      (opts as any)?.ctxPack?.detailMode === true ||
+      (opts as any)?.userContext?.ctxPack?.detailMode === true ||
+      (opts as any)?.meta?.extra?.detailMode === true ||
+      (opts as any)?.meta?.extra?.ctxPack?.detailMode === true
+    ),
   followupText: writerPatternFollowupText,
   userText: writerPatternFollowupText,
   targetLabel: writerPatternTargetLabel,
-  hasPriorDiagnosis: writerPatternHasPriorDiagnosis,
+  hasPriorDiagnosis: writerPatternEffectiveHasPriorDiagnosis,
 });
 
 const selectedPatternKey = String(
-  writerPatternHasPriorDiagnosis && writerPatternEarlySelected === 'IR_DETAIL_V1'
-    ? 'IR_DETAIL_V1'
-    : (debug as any)?.patternKey ??
+  writerPatternIsConsultAnswerLike
+    ? 'NORMAL_COMPRESSED_V1'
+    : writerPatternEffectiveHasPriorDiagnosis && writerPatternEarlySelected === 'IR_DETAIL_V1'
+      ? 'IR_DETAIL_V1'
+      : (debug as any)?.patternKey ??
       (ctxPackForWriter && typeof ctxPackForWriter === 'object'
         ? (ctxPackForWriter as any).patternKey
         : null) ??
@@ -9175,14 +9321,61 @@ const isResonanceStructureFollowup =
                   )
                 : writerDirectivesFromSlot;
 
+                const shouldSuppressDeepReadForConsultAnswer =
+                writerPatternIsConsultAnswerLike ||
+                /CONSULT_ANSWER_CONTRACT\s*\(DO NOT OUTPUT\):/u.test(
+                  String(__writerInjectedPack ?? '')
+                ) ||
+                /consultAnswerMode=enabled/u.test(String(__writerInjectedPack ?? ''));
+
                 const shouldApplyDeepReadDirectives =
                 isDeepReadHintWriter &&
+                !shouldSuppressDeepReadForConsultAnswer &&
                 questionTypeForPattern !== 'structure' &&
                 questionTypeForPattern !== 'meaning';
 
+                const shouldApplyConsultAnswerDirectives =
+                writerPatternIsConsultAnswerLike ||
+                /CONSULT_ANSWER_CONTRACT\s*\(DO NOT OUTPUT\):/u.test(
+                  String(__writerInjectedPack ?? '')
+                ) ||
+                /consultAnswerMode=enabled/u.test(String(__writerInjectedPack ?? ''));
+
+                const consultAnswerWriterDirectives = shouldApplyConsultAnswerDirectives
+                  ? {
+                      ...(baseWriterDirectivesForFinal ?? {}),
+                      pattern_key: 'NORMAL_COMPRESSED_V1',
+                      pattern_mode: 'consult_answer',
+                      bodyStyle: {
+                        preferBlockSplit: true,
+                        minBlocks: 3,
+                        maxBlocks: 4,
+                        maxSentencesPerBlock: 2,
+                        minSentences: 4,
+                        maxSentences: 7,
+                      },
+                      writeConstraints: [
+                        ...(
+                          Array.isArray((baseWriterDirectivesForFinal as any)?.writeConstraints)
+                            ? (baseWriterDirectivesForFinal as any).writeConstraints
+                            : []
+                        ),
+                        'CONSULT_ANSWER: 相談回答では、OBS/SHIFT/NEXT/SAFEの状態観測より、ユーザーの質問への答えを優先する',
+                        'CONSULT_ANSWER: 1文目で可否を答える。「送って大丈夫です。ただし、短く軽くが合います」または「今は送らない方がいいです」のように始める',
+                        'CONSULT_ANSWER: 「今は、送る前に」「何を確かめたいか」「少し絞るところです」で始めない',
+                        'CONSULT_ANSWER: 理由は1〜2点だけにする。状態整理や分析を増やさない',
+                        'CONSULT_ANSWER: 具体的な送る文面・渡し方・一言を必ず入れる',
+                        'CONSULT_ANSWER: 最後は「まだ決めきれていない」「今確認したいことは見えています」で閉じない',
+                        'CONSULT_ANSWER: 見出し、Markdown見出し、箇条書き、分析レポート型は禁止',
+                      ],
+                    }
+                  : null;
+
               const writerDirectivesForFinalRaw = relationshipAdviceRepairWriterDirectives
                 ? relationshipAdviceRepairWriterDirectives
-                : shouldApplyDeepReadDirectives
+                : consultAnswerWriterDirectives
+                  ? consultAnswerWriterDirectives
+                  : shouldApplyDeepReadDirectives
                   ? {
                       ...baseWriterDirectivesForFinal,
                       ...deepReadWriterDirectives,
@@ -10529,6 +10722,68 @@ userContext: {
         : 'NO_CHANGE',
   });
 
+  const stripConsultAnswerHeadings = (src: string): string => {
+    const consultHeadingStripUserText = String(
+      userText ??
+        (opts as any)?.userText ??
+        (opts as any)?.followupText ??
+        (opts as any)?.inputText ??
+        ''
+    ).trim();
+
+    const consultHeadingStripFollowupKind = String(
+      (opts as any)?.userContext?.ctxPack?.followupKind ??
+        (opts as any)?.ctxPack?.followupKind ??
+        (opts as any)?.meta?.extra?.ctxPack?.followupKind ??
+        ''
+    ).trim();
+
+    const hasConsultAnswerContract =
+      consultHeadingStripFollowupKind === 'consult_timing' ||
+      (
+        /今|まだ|早い|タイミング|時期|今じゃない|今ではない|今すぐ|あとで|後で/u.test(
+          consultHeadingStripUserText
+        ) &&
+        /いい|良い|どう|使う|使用|シェア|共有|渡す|出す|送る|連絡|返信|返事|始める|進める/u.test(
+          consultHeadingStripUserText
+        )
+      ) ||
+      /どう渡|渡し方|伝え方|言い方|送れば|共有の仕方|シェアの仕方/u.test(
+        consultHeadingStripUserText
+      ) ||
+      /いいですか|良いですか|べき|判断|どちら|迷って|ありですか|やめた方|した方/u.test(
+        consultHeadingStripUserText
+      );
+
+    if (!hasConsultAnswerContract) return String(src ?? '');
+
+    const headingRe =
+      /^\\s*(?:🔍|🎯|✅)?\\s*(いま見えていること|いま分けて見たいこと|ここから整理する順番|いまのまとめ)\\s*$/u;
+
+    return String(src ?? '')
+      .replace(/\\r\\n/g, '\\n')
+      .replace(/\\r/g, '\\n')
+      .split('\\n')
+      .filter((line) => !headingRe.test(String(line ?? '').trim()))
+      .join('\\n')
+      .replace(/\\n{3,}/g, '\\n\\n')
+      .trim();
+  };
+
+  const candidateBeforeConsultHeadingStrip = String(candidate ?? '');
+  candidate = stripConsultAnswerHeadings(candidate);
+
+  console.log('[IROS/rephraseEngine][CONSULT_HEADING_STRIP_APPLIED]', {
+    traceId: debug.traceId,
+    conversationId: debug.conversationId,
+    userCode: debug.userCode,
+    beforeLen: candidateBeforeConsultHeadingStrip.length,
+    afterLen: String(candidate ?? '').length,
+    changed: candidateBeforeConsultHeadingStrip !== String(candidate ?? ''),
+    beforeHead: safeHead(candidateBeforeConsultHeadingStrip, 160),
+    afterHead: safeHead(String(candidate ?? ''), 160),
+  });
+
   const softenDirectiveTail = (src: string): string => {
     let out = String(src ?? '')
       .replace(/\r\n/g, '\n')
@@ -10536,6 +10791,22 @@ userContext: {
       .trim();
 
     if (!out) return out;
+
+    // ✅ 日本語カッコ引用の中に入った余計な改行だけを潰す
+    // 例: 「学校給食から広まったかも？\n\n」→「学校給食から広まったかも？」
+    out = out
+      .replace(/「\s*\n+\s*([^「」\n]{1,160})\s*」/gu, (_m, p1) => `「${String(p1 ?? '').trim()}」`)
+      .replace(/「([^「」\n]{1,160})\s*\n+\s*」/gu, (_m, p1) => `「${String(p1 ?? '').trim()}」`);
+
+    out = out
+      .replace(
+        /^曖昧なまま置かれるのがつらい。\n+/u,
+        '共鳴とは、曖昧さをそのまま流さず、受け取り方まで分かる形にそろえる状態です。\n'
+      )
+      .replace(
+        /\n曖昧なまま置かれるのがつらい。\n/u,
+        '\n共鳴では、曖昧さをそのまま流さず、分かる形に戻すことが大事です。\n'
+      );
 
     const replaceLineTail = (line: string): string => {
       let s = String(line ?? '');

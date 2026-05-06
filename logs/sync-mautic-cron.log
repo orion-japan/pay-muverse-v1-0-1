@@ -1,0 +1,4 @@
+{"code":"WORKER_RESOURCE_LIMIT","message":"Function failed due to not having enough compute resources (please check logs)"}{"event": "sync_mautic_start", "pageSize": 50, "maxTotalPages": 2, "dryRun": true}
+{"ok":true,"result":{"created":49,"updated":0,"skipped":1,"dryRun":true,"pageStart":0,"pageSize":50,"maxPages":1,"processedPages":1}}
+{"ok":true,"result":{"created":41,"updated":0,"skipped":0,"dryRun":true,"pageStart":1,"pageSize":50,"maxPages":1,"processedPages":1}}
+{"event": "sync_mautic_done", "reason": "last_page", "lastPage": 1, "created": 90, "updated": 0, "skipped": 1, "dryRun": true}
