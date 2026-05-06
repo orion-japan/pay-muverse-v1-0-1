@@ -1,0 +1,130 @@
+name: Sync Mautic Daily
+
+on:
+  schedule:
+    # JST 03:00 = UTC 18:00
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync-mautic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      MAUTIC_SYNC_PAGE_SIZE: "50"
+      MAUTIC_SYNC_MAX_TOTAL_PAGES: "1000"
+      MAUTIC_SYNC_DRY_RUN: "false"
+
+    steps:
+      - name: Validate secrets
+        run: |
+          test -n "$SUPABASE_URL"
+          test -n "$SUPABASE_ANON_KEY"
+
+      - name: Run paged Mautic sync
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.request
+          import urllib.error
+
+          supabase_url = os.environ["SUPABASE_URL"]
+          anon_key = os.environ["SUPABASE_ANON_KEY"]
+
+          fn_url = supabase_url.rstrip("/") + "/functions/v1/sync-mautic"
+
+          page_size = int(os.environ.get("MAUTIC_SYNC_PAGE_SIZE", "50"))
+          max_total_pages = int(os.environ.get("MAUTIC_SYNC_MAX_TOTAL_PAGES", "1000"))
+          dry_run = os.environ.get("MAUTIC_SYNC_DRY_RUN", "false").lower() == "true"
+
+          headers = {
+              "Authorization": f"Bearer {anon_key}",
+              "apikey": anon_key,
+              "Content-Type": "application/json",
+          }
+
+          grand_created = 0
+          grand_updated = 0
+          grand_skipped = 0
+
+          print(json.dumps({
+              "event": "sync_mautic_start",
+              "pageSize": page_size,
+              "maxTotalPages": max_total_pages,
+              "dryRun": dry_run,
+          }, ensure_ascii=False))
+
+          for page in range(max_total_pages):
+              payload = {
+                  "action": "push",
+                  "dryRun": dry_run,
+                  "pageSize": page_size,
+                  "page": page,
+                  "maxPages": 1,
+              }
+
+              req = urllib.request.Request(
+                  fn_url,
+                  data=json.dumps(payload).encode("utf-8"),
+                  headers=headers,
+                  method="POST",
+              )
+
+              try:
+                  with urllib.request.urlopen(req, timeout=120) as res:
+                      raw = res.read().decode("utf-8")
+              except urllib.error.HTTPError as e:
+                  body = e.read().decode("utf-8", errors="replace")
+                  print(json.dumps({
+                      "event": "sync_mautic_http_error",
+                      "page": page,
+                      "status": e.code,
+                      "body": body,
+                  }, ensure_ascii=False))
+                  raise
+
+              print(raw)
+
+              data = json.loads(raw)
+              if not data.get("ok"):
+                  raise SystemExit(f"sync failed on page {page}: {raw}")
+
+              result = data.get("result") or {}
+              created = int(result.get("created") or 0)
+              updated = int(result.get("updated") or 0)
+              skipped = int(result.get("skipped") or 0)
+
+              grand_created += created
+              grand_updated += updated
+              grand_skipped += skipped
+
+              processed_count = created + updated + skipped
+
+              if processed_count < page_size:
+                  print(json.dumps({
+                      "event": "sync_mautic_done",
+                      "reason": "last_page",
+                      "lastPage": page,
+                      "created": grand_created,
+                      "updated": grand_updated,
+                      "skipped": grand_skipped,
+                      "dryRun": dry_run,
+                  }, ensure_ascii=False))
+                  break
+
+              time.sleep(0.5)
+          else:
+              print(json.dumps({
+                  "event": "sync_mautic_stopped",
+                  "reason": "max_total_pages_reached",
+                  "created": grand_created,
+                  "updated": grand_updated,
+                  "skipped": grand_skipped,
+                  "dryRun": dry_run,
+              }, ensure_ascii=False))
+          PY
