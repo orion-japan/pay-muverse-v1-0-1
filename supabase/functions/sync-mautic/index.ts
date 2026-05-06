@@ -233,14 +233,20 @@ function mapToMauticPayload(u: UserRow) {
       ? `${registeredDateRaw.slice(0, 10)} 00:00:00`
       : undefined;
 
+  const displayName =
+    (u?.FullName ?? '').trim() ||
+    (u?.click_username ?? '').trim() ||
+    undefined;
+
   return {
     email: u?.click_email ?? undefined,
-    firstname: u?.FullName ?? undefined,
+    firstname: displayName,
     phone: phone,
     company: u?.organization ?? undefined,
     plan: u?.plan ?? undefined, // カスタムフィールド想定（未定義なら無視される）
     plan_status: u?.plan_status ?? undefined, // 同上
-    username: u?.click_username ?? undefined, // 同上（必要なければ削除OK）
+    click_username: u?.click_username ?? undefined,
+    username: u?.click_username ?? undefined, // 旧alias互換用
     user_code: u?.user_code ?? undefined, // 同上
     supabase_uid: u?.supabase_uid ?? undefined,
     sofia_credit: Number.isFinite(sofiaCredit) ? sofiaCredit : undefined,
