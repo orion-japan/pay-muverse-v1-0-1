@@ -30,6 +30,7 @@ type UserRow = {
   plan_status?: string | null;
   click_username?: string | null;
   supabase_uid?: string | null;
+  sofia_credit?: number | string | null;
 };
 
 // ====== HTTP Entrypoint ======
@@ -172,7 +173,7 @@ async function fetchUsersPage(sb: any, from: number, limit: number): Promise<Use
 
   // ★ここに “実在する列だけ” を並べる（あなたのテーブルに合わせてあります）
   const columns =
-    'user_code, click_email, FullName, phone_number, phone_e164, organization, plan, plan_status, click_username, supabase_uid';
+    'user_code, click_email, FullName, phone_number, phone_e164, organization, plan, plan_status, click_username, supabase_uid, sofia_credit';
 
   const { data, error } = await sb
     .from('users')
@@ -219,6 +220,10 @@ function mapToMauticPayload(u: UserRow) {
   // 送信フィールドは “存在すれば” 詰める（undefined は JSON 化時に落ちない）
   // phone は E.164 を優先
   const phone = (u?.phone_e164 ?? u?.phone_number ?? undefined) || undefined;
+  const sofiaCredit =
+    u?.sofia_credit == null || u?.sofia_credit === ''
+      ? undefined
+      : Number(u.sofia_credit);
 
   return {
     email: u?.click_email ?? undefined,
@@ -230,6 +235,8 @@ function mapToMauticPayload(u: UserRow) {
     username: u?.click_username ?? undefined, // 同上（必要なければ削除OK）
     user_code: u?.user_code ?? undefined, // 同上
     supabase_uid: u?.supabase_uid ?? undefined,
+    sofia_credit: Number.isFinite(sofiaCredit) ? sofiaCredit : undefined,
+    credit_balance: Number.isFinite(sofiaCredit) ? sofiaCredit : undefined,
   };
 }
 
@@ -242,7 +249,7 @@ async function createContact(token: string, payload: any) {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
-    body: JSON.stringify({ contact: payload }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`[mautic] create failed: ${res.status} ${await res.text()}`);
 }
@@ -256,7 +263,7 @@ async function updateContact(token: string, id: string | number, payload: any) {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
-    body: JSON.stringify({ contact: payload }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`[mautic] update failed: ${res.status} ${await res.text()}`);
 }
