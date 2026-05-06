@@ -155,10 +155,9 @@ function basePlan(args: {
   // INSIGHT は I/T で入れる（ただし anti-repeat で抜くことがある）
   if (isIorT(String(depthStage))) plan.push('INSIGHT');
 
-  // ✅ SAFE は常駐（静かな保険）
-  // - ログ上 riskHint が null のケースが多く、SAFE が欠けて slotPlan=3 になっていたため
-  // - slotPlan=4（OBS/SHIFT/NEXT/SAFE）を安定させる目的で常駐化する
-  plan.push('SAFE');
+  // ✅ SAFE常駐は解除（深読み解放テスト）
+  // - SAFEは必要な時だけ別経路で入れる
+  // - 通常会話ではOBS/SHIFT/NEXT/INSIGHTの深度を優先する
 
   // NEXT は cooldown 以外は基本入れる（最小の一手）
   if (String(goalKind) !== 'cooldown') plan.push('NEXT');

@@ -38,7 +38,7 @@ export type SlotId = 'OBS' | 'SHIFT' | 'NEXT' | 'SAFE';
 
 export type SlotPlan = {
   id: SlotId;
-  required: true;
+  required?: boolean;
   hint?: string; // 本文ではなく「枠」だけ
 };
 
@@ -156,12 +156,11 @@ export function buildSlots(args: {
   const inputKind = safeInputKind(args.inputKind ?? 'unknown');
   const frame = args.frame;
 
-  // フレーム共通の最小4点セット
+  // フレーム共通の最小3点セット（SAFE常駐なし）
   const base: SlotPlan[] = [
-    { id: 'OBS', required: true, hint: '観測（事実/状況の再提示）' },
-    { id: 'SHIFT', required: true, hint: '視点の転換（1つだけ）' },
-    { id: 'NEXT', required: true, hint: '次の一歩（1つだけ）' },
-    { id: 'SAFE', required: true, hint: '安全句（静かな保険）' },
+    { id: 'OBS', hint: '観測（事実/状況の再提示）' },
+    { id: 'SHIFT', hint: '視点の転換（1つだけ）' },
+    { id: 'NEXT', hint: '次の一歩（1つだけ）' },
   ];
 
   // MICRO は “短く保つ” だけを強制
@@ -170,8 +169,6 @@ export function buildSlots(args: {
       if (s.id === 'OBS') return { ...s, hint: '観測（短く一行）' };
       if (s.id === 'SHIFT') return { ...s, hint: '視点転換（1フレーズ）' };
       if (s.id === 'NEXT') return { ...s, hint: '次の一歩（1つ、短く）' };
-      if (s.id === 'SAFE')
-        return { ...s, hint: '安全句（断定しすぎない短い保険）' };
       return s;
     });
   }
@@ -183,12 +180,11 @@ export function buildSlots(args: {
       if (s.id === 'SHIFT') return { ...s, hint: '視点転換（評価→運用／責め→扱い）' };
       if (s.id === 'NEXT')
         return { ...s, hint: '次の一歩（極小の1手／成功確率を上げる）' };
-      if (s.id === 'SAFE') return { ...s, hint: '安全句（決めつけを解除する一言）' };
       return s;
     });
   }
 
-  // NONE は “枠を弱める” が、最低4点は維持
+  // NONE は “枠を弱める”（SAFE常駐なし）
   return base;
 }
 

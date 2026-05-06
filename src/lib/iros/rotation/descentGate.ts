@@ -197,11 +197,9 @@ export function decideDescentGate(input: DescentGateInput): DescentGateResult {
         ? `hold: prev=${prev}, score=${score.toFixed(2)} >= off=${OFF_TH}`
         : `recover: prev=${prev}, score=${score.toFixed(2)} < off=${OFF_TH}`;
   } else {
-    descentGate = score >= ON_TH ? 'offered' : 'closed';
-    reason =
-      descentGate === 'offered'
-        ? `drop: score=${score.toFixed(2)} >= on=${ON_TH}`
-        : `stable: score=${score.toFixed(2)} < on=${ON_TH}`;
+    // ✅ 深読み解放テスト：初期状態でも下降入口を閉じない
+    descentGate = 'offered';
+    reason = `open_test: score=${score.toFixed(2)} / on=${ON_TH}`;
   }
 
   return {

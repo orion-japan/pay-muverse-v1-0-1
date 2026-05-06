@@ -4711,11 +4711,11 @@ const systemPromptForWriter = [
         pattern_mode: 'normal_compressed',
         bodyStyle: {
           preferBlockSplit: true,
-          minBlocks: 4,
-          maxBlocks: 4,
-          maxSentencesPerBlock: 2,
-          minSentences: 4,
-          maxSentences: 8,
+          minBlocks: 1,
+          maxBlocks: 3,
+          maxSentencesPerBlock: 4,
+          minSentences: 2,
+          maxSentences: 12,
         },
         writeConstraints: [
           // --- 構造 ---
@@ -4774,35 +4774,52 @@ const systemPromptForWriter = [
             ? 'declaration_resonance'
             : 'normal_resonance',
         pattern_block_order:
-          'state_surface,state_weight,state_open_edge,state_residue',
+          'free_resonance',
         block_state_surface:
-          '1段落目は、いま前に出ている状態そのものを書く。説明・要約・解釈で起こさない。',
-        block_state_weight:
-          '2段落目は、その話がどの重さで立っているかを書く。整理・説得・意味づけにしない。',
-        block_state_open_edge:
-          '3段落目は、まだ決まりきっていない部分を書く。未固定の差や揺れだけを置く。',
-        block_state_residue:
-          '4段落目は、最後に残る感じだけを書く。締め・結論・助言にしない。',
+          '必要な文量だけで、いま前に出ている核心を直接書く。説明・要約・整理に戻さない。',
         bodyStyle: {
-          preferBlockSplit: true,
-          minBlocks: 4,
-          maxBlocks: 4,
-          maxSentencesPerBlock: 2,
-          minSentences: 4,
-          maxSentences: 8,
+          preferBlockSplit: false,
+          minBlocks: 1,
+          maxBlocks: 2,
+          maxSentencesPerBlock: 4,
+          minSentences: 2,
+          maxSentences: 4,
         },
         writeConstraints: [
           `${
             key === 'DECLARATION_RESONANCE_V1'
               ? 'declaration_resonance'
               : 'normal_resonance'
-          } では、必ず4つの段落で返す`,
-          '4つの段落は、state_surface → state_weight → state_open_edge → state_residue の順に固定する',
-          '観測から始める',
-          '説明ではなく共鳴で書く',
-          '未固定部分は未固定のまま置く',
-          '締め・結論を書かない',
-          '最後は余韻で終える',
+          } では、段落数を固定しない`,
+          'state_surface / state_weight / state_open_edge / state_residue の順番を固定しない',
+          '必要なものだけを自然文に統合する',
+          '説明ではなく、核心を直接書く',
+          'まとめ・助言・安全句で薄めない',
+
+          // ✅ 革新共鳴
+          '因果説明を増やさない',
+          '「〜だから」「〜すると」「〜していく」を減らす',
+          '「近づく」「深まる」「届く」「変わる」で締めない',
+          '説明より、残っている状態そのものを置く',
+          '結論を作らず、輪郭のまま返してよい',
+          '一番残る一文を優先し、周辺説明を削る',
+
+          // ✅ resonateは削るのではなく、最初から状態文だけにする
+          'normal_resonanceでは、2〜4文で返す',
+          'normal_resonanceでは、助言・許可・例示・未来示唆を書かない',
+          'normal_resonanceでは、「どうすればよいか」ではなく「いま何が残っているか」だけを書く',
+          'normal_resonanceでは、「〜していい」「〜しなくていい」「〜なくていい」を使わない',
+          'normal_resonanceでは、「〜ほうが」「〜すると」「〜していく」「あとで」「必要なら」「たとえば」を使わない',
+          'normal_resonanceでは、「正しいです」「合っています」「近いです」「自然です」で判定しない',
+          'normal_resonanceでは、「合図」「〜に近い」「〜すると」「〜が抜ける」で説明しない',
+          'normal_resonanceでは、「無理に〜すると」「言い切らないほうが」「〜ほうが守られる」を使わない',
+          'normal_resonanceでは、各文を「〜が残っている」「〜が前に出ている」「〜がまだ固まっていない」「〜の手前にある」の形に寄せる',
+          'normal_resonanceでは、「AのほうがB」ではなく「AにBが残っている」の形で書く。例：「言葉にする前のほうが息をしている」ではなく「言葉にする前のところに、まだ息が残っている」',
+          'normal_resonanceでは、「AよりBのほうがC」ではなく「Bが残っている」の形で書く。例：「無理に整えるより、粗いまま置いてあるほうが近い」ではなく「粗いまま置いてあるものが、いま前に残っている」',
+          'normal_resonanceでは、「AよりB」だけの比較も避ける。例：「ぴたりと決めるより、ずれたままの輪郭が残っている」ではなく「ずれたままの輪郭が、そのまま残っている」',
+          'normal_resonanceでは、原因文ではなく状態文で書く。例：「無理に名前をつけると、輪郭より先に形だけが出る」ではなく「輪郭より先に、形だけが少し前に出ている」',
+          'normal_resonanceでは、比較文ではなく状態文で書く。例：「言い切らないほうが守られている」ではなく「守られているものが、言い切る前に残っている」',
+          'normal_resonanceでは、最後の1文を助言ではなく、残っている状態そのもので閉じる',
         ],
       };
     }
@@ -6722,13 +6739,15 @@ if (
           const remainingSlots = Math.max(1, slotOrderForMaterialize.length - slotIndex);
 
           const actualTakeCount =
-          Array.isArray(declarationTakePlan) &&
-          declarationTakePlan.length === slotOrderForMaterialize.length
-            ? Math.max(
-                1,
-                Math.min(remainingUnits, Number(declarationTakePlan[slotIndex] ?? 1)),
-              )
-            : Math.max(1, Math.ceil(remainingUnits / remainingSlots));
+          patternKey === 'NORMAL_RESONANCE_V1'
+            ? remainingUnits
+            : Array.isArray(declarationTakePlan) &&
+              declarationTakePlan.length === slotOrderForMaterialize.length
+              ? Math.max(
+                  1,
+                  Math.min(remainingUnits, Number(declarationTakePlan[slotIndex] ?? 1)),
+                )
+              : Math.max(1, Math.ceil(remainingUnits / remainingSlots));
 
           slotUnits = sourceUnits
             .slice(unitIndex, unitIndex + actualTakeCount)
@@ -8776,7 +8795,10 @@ const shouldForceDecidePattern =
 const shouldForceStructureDetailPattern =
   questionTypeForPattern === 'structure' &&
   goalKindForPattern === 'uncover' &&
-  selectedPatternKey === 'NORMAL_COMPRESSED_V1';
+  (
+    selectedPatternKey === 'NORMAL_COMPRESSED_V1' ||
+    selectedPatternKey === 'NORMAL_RESONANCE_V1'
+  );
 
 const writerPatternKey = (
   shouldForceStructureDetailPattern
@@ -8979,28 +9001,32 @@ const isResonanceStructureFollowup =
             pattern_mode: 'relationship_reflection_solve',
             bodyStyle: {
               preferBlockSplit: true,
-              minBlocks: 3,
-              maxBlocks: 4,
+              minBlocks: 2,
+              maxBlocks: 2,
               maxSentencesPerBlock: 2,
-              minSentences: 5,
-              maxSentences: 8,
+              minSentences: 3,
+              maxSentences: 4,
             },
             block_user_side_receive:
               '普通の会話として、まず不安を受ける。「それは不安になりますね」のように自然に入る。',
             block_user_side_boundary:
-              '相手側の本心や事実は断定しない。ただし、今こちらに映っている相手側の動きは可能性として短く触れてよい。',
+              '相手側の本心や事実は断定しない。相手側を読みに行きすぎず、連絡が来ないことでユーザー側に何が起きているかを中心に返す。',
             block_user_side_next:
-              '最後は、追いすぎず離れすぎない距離感か、送るなら短い一言まで自然に落とす。',
+              '最後は送信提案や距離感の助言に落とさず、今こちら側に残っている不安の状態で閉じる。',
             writeConstraints: [
-              'relationship_reflection_solve では、相手側だけでもユーザー側だけでも終わらない',
-              '相手側に見えている動き、ユーザーの状態が相手像に反映している部分、今こちらが取る距離感を自然に統合する',
-              'ユーザーの不安・投影・思い込みが、相手の沈黙や反応をどう重く見せているかを一文で含める',
-              '相手の本心や事実を断定しない。「そう映っている」「そう見えやすい」という温度で返す',
+              'relationship_reflection_solve では、相手側の本心・事情を断定しない',
+              'relationship_reflection_solve では、送信提案・例文・行動指示を常時出さない',
+              'relationship_reflection_solve では、ユーザーが「どう送る？」「何て送る？」と聞いた時だけ送信文を出す',
+              'relationship_reflection_solve では、追う/引く/待つ/距離を取るなどの助言で締めない',
+              'relationship_reflection_solve では、連絡が来ない事実よりも、見えないまま残っている不安の状態を中心に返す',
+              'relationship_reflection_solve では、「もう気持ちが変わった」「悪いほう」など、不安を悪化させる具体例を出さない',
+              'ユーザーの不安が、相手の沈黙をどう重く見せているかを一文で含める',
+              '相手の本心や事実を断定しない。「そう映りやすい」「重く見えやすい」という温度で返す',
               '仕事など既出文脈がある場合だけ、相手側の余裕の薄さとして自然に一度だけ触れてよい',
-              '最後は、追いすぎず離れすぎない距離感、または送るなら短い一言まで落としてよい',
-              '番号・見出しは避け、自然な3〜4段落で返す。ただしユーザーが例を求めた場合のみ、番号ではなく「- 」の箇条書きを独立行で使ってよい',
-              '短く切りすぎない。少なくとも5文以上で、受け止め→相手側の見え方→ユーザー側の反映→距離感の順に自然に展開する',
-              '「前にある」「残る」「置く」「空白」「ほどく」「気配」「余白」を使わない',
+              '番号・見出しは避け、自然な2〜3段落で返す',
+              '3〜4文で返す。受け止め→不安の状態→沈黙が重く見える構造までで止める',
+              '最後は、助言ではなく、今こちら側に残っている反応そのもので閉じる',
+              '「送るなら」「短く」「軽く」「一言」「元気？」「追いすぎず」「離れすぎず」「距離感」を使わない',
             ],
           }
         : {
@@ -9259,7 +9285,8 @@ const isResonanceStructureFollowup =
                   }
                 : null;
 
-                const deepReadWriterDirectives = isDeepReadHintWriter
+                const deepReadWriterDirectives =
+                true
                 ? {
                     pattern_key: 'NORMAL_DETAIL_V1',
                     pattern_mode: 'deep_read',
@@ -9329,8 +9356,10 @@ const isResonanceStructureFollowup =
                 /consultAnswerMode=enabled/u.test(String(__writerInjectedPack ?? ''));
 
                 const shouldApplyDeepReadDirectives =
-                isDeepReadHintWriter &&
                 !shouldSuppressDeepReadForConsultAnswer &&
+                goalKindForPattern !== 'resonate' &&
+                writerPatternKey !== 'NORMAL_RESONANCE_V1' &&
+                writerPatternKey !== 'DECLARATION_RESONANCE_V1' &&
                 questionTypeForPattern !== 'structure' &&
                 questionTypeForPattern !== 'meaning';
 
@@ -9404,50 +9433,16 @@ const isResonanceStructureFollowup =
                   'USER_STATE: 状態メタは返答の深さ・温度・具体度・踏み込み量の調整にだけ使う',
                 ];
 
-                if (sa != null && sa >= 0.45 && sa <= 0.65) {
-                  writeConstraints.push(
-                    'USER_STATE: SAが中間帯なので、強く断定しすぎず、ただし薄い一般論にも逃がさない'
-                  );
-                }
+                // ✅ USER_STATE抑制解除
 
-                if (sa != null && sa < 0.45) {
-                  writeConstraints.push(
-                    'USER_STATE: SAが低めなので、深掘りより短く扱える言葉へ戻す'
-                  );
-                }
 
-                if (depth.startsWith('S')) {
-                  writeConstraints.push(
-                    'USER_STATE: S帯域なので、深掘りより先に、読んだ人が分かる日常語で、今確認できていることと、まだ決めきれていないことを分けて返す'
-                  );
-                  writeConstraints.push(
-                    'USER_STATE: S帯域のNEXTでは、「残っているのは」「言葉の置き方」「どこまでを今回の確認に含めるか」を使わず、「今は、確認したい範囲を少し絞るところです」のように日常語で返す'
-                  );
-                  writeConstraints.push(
-                    'USER_STATE: S帯域のSAFEでは、「未整理」「輪郭」「中心」「余白」「揺れ」「閉じる」「閉じず」「置く」「置いている」「残しているところ」「状態です」「成り立っています」「状態を測る線」「線は見えています」「散っていない」を使わず、会話として意味が通る文にする'
-                  );
-                  writeConstraints.push(
-                    'USER_STATE: S帯域のSAFEは「まだ決めきれていないところはあります。でも、今確認したいことは見えています。」のように、日常語で分かる2文以内にする'
-                  );
-                }
+                // ✅ S帯域 shallow制御解除
 
-                if (returnStreak != null && returnStreak >= 3) {
-                  writeConstraints.push(
-                    'USER_STATE: RETURN継続なので、同じ説明を繰り返さず、前回との差分を一つだけ出す'
-                  );
-                }
+                // ✅ RETURN shallow制御解除
 
-                if (q === 'Q1' || eTurn === 'e1') {
-                  writeConstraints.push(
-                    'USER_STATE: Q1/e1傾向なので、感情を広げすぎず、整理・順序・確認に寄せる'
-                  );
-                }
+                // ✅ Q1/e1整理制御解除
 
-                if (phase === 'Outer' || polarity === 'yang') {
-                  writeConstraints.push(
-                    'USER_STATE: Outer/yang傾向なので、内面解説に寄せすぎず、表に出る言葉・動き・判断へ寄せる'
-                  );
-                }
+                // ✅ Outer/yang制御解除
 
                 return {
                   user_state_mode: 'enabled',
@@ -9693,7 +9688,7 @@ const finalWriterDirectivesMsg =
                   ].join('\n')
                 : [
                     'PATTERN_OUTPUT_CONTRACT (DO NOT OUTPUT):',
-                    'exact_paragraphs=4',
+                    'exact_paragraphs=disabled',
                     writerPatternKey === 'NORMAL_RESONANCE_V1' || isPartnerSideResonance
                       ? 'paragraph1=state_surface'
                       : 'paragraph1=current_state',
@@ -10913,7 +10908,6 @@ userContext: {
       .replace(/、という声として届いています。/gu, '。')
       .replace(/、という声は/gu, '。')
       .replace(/今あるのは、/gu, '')
-      .replace(/そこをそのままにして触れるほうが、/gu, 'そのまま触れるほうが、')
       .replace(/だから、説明で包まずに触れます。/gu, '説明で包まずに触れます。')
       .replace(/だから、決めた形よりも、/gu, '決めた形よりも、');
 

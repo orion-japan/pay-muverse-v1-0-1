@@ -3041,7 +3041,7 @@ function normForRecall(v: any): string {
         orchCtxPack.followupKind = normalizedFollowupKind;
         orchCtxPack.continuityKind = 'diagnosis_followup';
         orchCtxPack.presentationKind = normalizedPresentationKind;
-        orchCtxPack.detailMode = !isDiagnosisConsultTimingFollowupAfterOrch;
+        orchCtxPack.detailMode = false;
         orchCtxPack.goalKind = normalizedGoalKind;
         orchCtxPack.targetKind = normalizedGoalKind;
         orchCtxPack.shiftKind = normalizedShiftKind;
@@ -3062,7 +3062,7 @@ function normForRecall(v: any): string {
         if (orchExtra && typeof orchExtra === 'object') {
           (orchExtra as any).diagnosisFollowup = true;
           (orchExtra as any).presentationKind = normalizedPresentationKind;
-          (orchExtra as any).detailMode = !isDiagnosisConsultTimingFollowupAfterOrch;
+          (orchExtra as any).detailMode = false;
           (orchExtra as any).followupKind = normalizedFollowupKind;
           (orchExtra as any).goalKind = normalizedGoalKind;
           (orchExtra as any).targetKind = normalizedGoalKind;
@@ -3088,7 +3088,7 @@ function normForRecall(v: any): string {
 
         (extraLocal as any).diagnosisFollowup = true;
         (extraLocal as any).presentationKind = normalizedPresentationKind;
-        (extraLocal as any).detailMode = !isDiagnosisConsultTimingFollowupAfterOrch;
+        (extraLocal as any).detailMode = false;
         (extraLocal as any).followupKind = normalizedFollowupKind;
 
         if (resolvedDiagnosisTargetForWriter) {
@@ -3097,7 +3097,7 @@ function normForRecall(v: any): string {
 
         (extraLocal as any).ctxPack.diagnosisFollowup = true;
         (extraLocal as any).ctxPack.presentationKind = normalizedPresentationKind;
-        (extraLocal as any).ctxPack.detailMode = !isDiagnosisConsultTimingFollowupAfterOrch;
+        (extraLocal as any).ctxPack.detailMode = false;
         (extraLocal as any).ctxPack.followupKind = normalizedFollowupKind;
         (extraLocal as any).ctxPack.continuityKind = 'diagnosis_followup';
         (extraLocal as any).ctxPack.goalKind = normalizedGoalKind;
@@ -6043,7 +6043,7 @@ if (detailModeRaw) {
         shift2_goalKind === 'cutOff' ||
         hasAny('辞めようと思っています', '辞めたい', 'やめたい', '終わらせたい', '切りたい', '離れたい')
       ) {
-        return 'uncover_shift' as const;
+        return 'narrow_shift' as const;
       }
 
       return 'stabilize_shift' as const;
@@ -6675,18 +6675,11 @@ try {
         continue;
       }
 
-      // 欠けスロット（特に SAFE）を最小プレースホルダで補完
-      const hint = fpSlots.find((s: any) => String(s?.id ?? '').trim() === id)?.hint ?? null;
-
+      // ✅ 深読み解放：欠けスロットは補完しない
+      // - 特に SAFE の自動補完で安全着地へ戻るのを止める
+      // - framePlan 側に枠があっても、実際に生成された slotPlan だけを通す
       missing.push(id);
-      normalized.push({
-        key: id,
-        text: `@${id} ${JSON.stringify(
-          { kind: 'auto_fill', hint: hint ? String(hint) : null },
-          null,
-          0,
-        )}`,
-      });
+      continue;
     }
 
     slotPlanNormalized = normalized;
@@ -7291,7 +7284,7 @@ const finalTargetKind = shouldForceUncoverForStructureTarget
     cpForTargetKind?.targetKind ??
     awakenOverride ??
     goalKindBase ??
-    'uncover'; // ← replyGoal を完全排除
+    'resonate'; // ← uncover fallback解除
 
 (out.metaForSave as any).targetKind = finalTargetKind;
 (out.metaForSave as any).target_kind = finalTargetKind;
@@ -7306,7 +7299,7 @@ if (shouldForceUncoverForStructureTarget) {
 ) {
   cpForTargetKind.goalKind =
     finalTargetKind === 'resonate'
-      ? (goalKindBase ?? cpForTargetKind?.replyGoal?.kind ?? 'uncover')
+      ? (goalKindBase ?? cpForTargetKind?.replyGoal?.kind ?? 'resonate')
       : finalTargetKind;
 }
 console.log('[IROS][TARGET_KIND_FINAL]', {
@@ -8913,7 +8906,7 @@ try {
                 replyGoalKindNormalized ??
                 (out.metaForSave as any)?.goalKind ??
                 awakenGoalKind ??
-                'uncover';
+                'resonate';
 
         console.log('[IROS/GOALKIND_BRIDGE][REPHRASE_GOALKIND_RESOLVED]', {
           traceId: traceIdCanon,

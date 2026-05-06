@@ -1029,7 +1029,7 @@ if (isNonForwardButEmpty) {
 
       const shiftKindFromGoalKind = (raw: unknown): string | null => {
         const v = String(raw ?? '').trim();
-        if (v === 'uncover') return 'uncover_shift';
+        if (v === 'uncover') return 'narrow_shift';
         if (v === 'stabilize') return 'stabilize_shift';
         if (v === 'narrow') return 'narrow_shift';
         if (v === 'clarify') return 'clarify_shift';

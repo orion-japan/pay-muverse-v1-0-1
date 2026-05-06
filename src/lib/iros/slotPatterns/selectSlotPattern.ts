@@ -159,8 +159,11 @@ export function selectSlotPattern(input: SelectSlotPatternInput): PatternKey {
   const declarationLike = looksLikeDeclarationResonance(followupText || userText);
 
   // ir診断の詳細化は IR_DETAIL_V1
+  // ✅ 深読み解放:
+  // diagnosis履歴が残っていても、
+  // 通常会話は resonance 側へ戻す
   if (irLike && detailLike) {
-    return 'IR_DETAIL_V1';
+    return 'NORMAL_RESONANCE_V1';
   }
 
   // ir診断の初回や通常診断は IR_LIGHT_V1
@@ -192,6 +195,6 @@ export function selectSlotPattern(input: SelectSlotPatternInput): PatternKey {
     return 'NORMAL_DETAIL_V1';
   }
 
-  // 通常会話の既定は COMPRESSED
-  return 'NORMAL_COMPRESSED_V1';
+  // 通常会話の既定は RESONANCE（深読み解放）
+  return 'NORMAL_RESONANCE_V1';
 }

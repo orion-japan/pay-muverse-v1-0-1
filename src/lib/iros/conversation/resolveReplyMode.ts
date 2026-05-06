@@ -1,6 +1,6 @@
 // src/lib/iros/conversation/resolveReplyMode.ts
 
-export type ReplyMode = 'clarify' | 'compare' | 'decide' | 'commit';
+export type ReplyMode = 'clarify' | 'compare' | 'decide' | 'commit' | 'resonate';
 
 export type ReplyLaneKey = 'IDEA_BAND' | 'T_CONCRETIZE' | null;
 
@@ -12,8 +12,8 @@ export type ReplyShiftKind =
   | 'narrow_shift'
   | 'decide_shift';
 
-export type ReplyGoalKind = 'clarify' | 'expand' | 'decide';
-export type ReplyTargetKind = 'clarify' | 'expand' | 'decide';
+export type ReplyGoalKind = 'clarify' | 'expand' | 'decide' | 'resonate';
+export type ReplyTargetKind = 'clarify' | 'expand' | 'decide' | 'resonate';
 
 export type ReplyModeDecision = {
   replyMode: ReplyMode;
@@ -187,12 +187,12 @@ function decideFromCurrentTurn(input: ResolveReplyModeInput): ReplyModeDecision 
 
   if (hasAny(joined, CLARIFY_PATTERNS)) {
     return {
-      replyMode: 'clarify',
-      reason: buildReason('current_turn_clarify', joined),
+      replyMode: 'resonate',
+      reason: buildReason('current_turn_clarify_as_resonate', joined),
       laneKey: null,
-      shiftKind: 'clarify_shift',
-      goalKind: 'clarify',
-      targetKind: 'clarify',
+      shiftKind: 'narrow_shift',
+      goalKind: 'resonate',
+      targetKind: 'resonate',
       allowHints: {
         concretize: false,
         commitHint: false,
@@ -262,12 +262,12 @@ function decideFromFallback(input: ResolveReplyModeInput): ReplyModeDecision {
 
   if (shiftKind.includes('clarify') || goalKind === 'clarify' || targetKind === 'clarify') {
     return {
-      replyMode: 'clarify',
-      reason: buildReason('fallback_clarify', fallbackJoined),
+      replyMode: 'resonate',
+      reason: buildReason('fallback_clarify_as_resonate', fallbackJoined),
       laneKey: null,
-      shiftKind: 'clarify_shift',
-      goalKind: 'clarify',
-      targetKind: 'clarify',
+      shiftKind: 'narrow_shift',
+      goalKind: 'resonate',
+      targetKind: 'resonate',
       allowHints: {
         concretize: false,
         commitHint: false,
@@ -309,12 +309,12 @@ function decideFromFallback(input: ResolveReplyModeInput): ReplyModeDecision {
   }
 
   return {
-    replyMode: 'clarify',
-    reason: buildReason('default_clarify', fallbackJoined || 'no_strong_signal'),
+    replyMode: 'resonate',
+    reason: buildReason('default_resonate', fallbackJoined || 'no_strong_signal'),
     laneKey: null,
-    shiftKind: 'clarify_shift',
-    goalKind: 'clarify',
-    targetKind: 'clarify',
+    shiftKind: 'narrow_shift',
+    goalKind: 'resonate',
+    targetKind: 'resonate',
     allowHints: {
       concretize: false,
       commitHint: false,

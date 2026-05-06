@@ -136,21 +136,21 @@ function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey | null; f
   const mode =
     laneKey === 'T_CONCRETIZE'
       ? 'concretize_hint'
-      : 'observe_hint';
+      : 'resonance_hint';
 
   const hint =
     laneKey === 'T_CONCRETIZE'
       ? '比較で止まらず、結論を1本に決める'
       : laneKey === 'IDEA_BAND'
         ? '候補を増やさず、いま出ている差だけを見やすくする'
-        : 'いま出ている流れを崩さず、そのまま整えて返す';
+        : 'いま触れている輪郭を、説明へ戻さずそのまま残す';
 
         const message =
         laneKey === 'T_CONCRETIZE'
           ? '次は比較を広げず、どこをひとつ決めるかに絞るのが合っています。'
           : laneKey === 'IDEA_BAND'
             ? '次は候補を増やすより、いま出ている差だけを見やすくするのが合っています。'
-            : '';
+            : '次へ進めるより、いま残っている感触をそのまま置く。';
 
   return {
     key: 'NEXT',
@@ -1429,10 +1429,10 @@ function buildFlowReply(args: {
     // ② 司令塔 goalKind を最優先
     if (goalKind2 === 'resonate') {
       return stampShiftMeta('narrow_shift', {
-        goalKind: 'uncover' as any,
-        targetKind: 'uncover' as any,
+        goalKind: 'resonate' as any,
+        targetKind: 'resonate' as any,
         laneKey: null,
-        replyGoalKind: 'uncover' as any,
+        replyGoalKind: 'resonate' as any,
       });
     }
 
@@ -1458,18 +1458,18 @@ function buildFlowReply(args: {
 
           if (targetKindNow === 'resonate') {
             return stampShiftMeta('narrow_shift', {
-              goalKind: 'uncover' as any,
+              goalKind: 'resonate' as any,
               targetKind: 'resonate' as any,
               laneKey: null,
-              replyGoalKind: 'uncover' as any,
+              replyGoalKind: 'resonate' as any,
             });
           }
 
       return stampShiftMeta('narrow_shift', {
-        goalKind: 'uncover',
-        targetKind: targetKindNow ?? 'uncover',
+        goalKind: 'resonate' as any,
+        targetKind: 'resonate' as any,
         laneKey: null,
-        replyGoalKind: 'uncover',
+        replyGoalKind: 'resonate' as any,
       });
     }
 
@@ -1618,10 +1618,10 @@ function buildFlowReply(args: {
 
       if (replyGoalKindNow === 'resonate' || targetKindNow === 'resonate') {
         return stampShiftMeta('narrow_shift', {
-          goalKind: 'uncover' as any,
+          goalKind: 'resonate' as any,
           targetKind: 'resonate' as any,
           laneKey: null,
-          replyGoalKind: 'uncover' as any,
+          replyGoalKind: 'resonate' as any,
         });
       }
 
@@ -1928,11 +1928,11 @@ function buildFlowReply(args: {
   const shift =
     useUncoverShift
       ? m('SHIFT', {
-          kind: 'uncover_shift',
-          intent: 'uncover_meaning',
-          hint: 'uncover_shift_v1',
+          kind: 'narrow_shift',
+          intent: 'resonance_focus',
+          hint: 'resonance_focus_v1',
           line: shiftLine2,
-          source: 'goalKind_uncover',
+          source: 'goalKind_uncover_as_resonance',
           rules: {
             answer_user_meaning: true,
             answer_in_one_shot: true,
