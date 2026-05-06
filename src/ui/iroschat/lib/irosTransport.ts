@@ -557,6 +557,7 @@ export async function reply(params: {
   conversationId?: string;
   user_text: string; // UI 入力
   mode?: string; // UI のモード文字列（→ modeHint へ）
+  style?: 'friendly' | 'biz-soft' | 'biz-formal' | 'plain'; // 口調スタイル
   history?: HistoryMsg[]; // 任意（{role, content}）
   model?: string; // 任意
 }): Promise<any> {
@@ -590,6 +591,8 @@ export async function reply(params: {
     conversationId: cid, // ✅ UIはこれだけ送る（uuid）
     text,
     modeHint: params.mode,
+    styleHint: params.style ?? undefined,
+    style: params.style ?? undefined,
     extra: {
       model: params.model ?? undefined,
       traceId: clientTraceId, // ✅ ここが本命：/reply で traceId を揃える
@@ -681,6 +684,7 @@ export async function replyAndStore(args: {
   conversationId: string;
   user_text: string;
   mode?: string;
+  style?: 'friendly' | 'biz-soft' | 'biz-formal' | 'plain';
   model?: string;
   history?: HistoryMsg[];
 }) {
@@ -689,6 +693,7 @@ export async function replyAndStore(args: {
     conversationId: args.conversationId,
     user_text: args.user_text,
     mode: args.mode,
+    style: args.style,
     model: args.model,
     history: args.history,
   });

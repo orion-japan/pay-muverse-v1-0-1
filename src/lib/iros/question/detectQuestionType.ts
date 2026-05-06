@@ -90,6 +90,17 @@ function applyDomainBias(
 
 export function detectQuestionType(input: DetectQuestionTypeInput): QuestionType {
   const userText = normalizeText(input.userText ?? '');
+
+  // ✅ テスト・疎通確認は質問扱いしない
+  // - 「テストです」が structure に入り、NORMAL_DETAIL_V1 へ流れる誤爆を防ぐ
+  // - contextText が残っていても、このターン単体を優先して null にする
+  const isMetaCheckText =
+    /^(テスト|test|確認|動作確認|疎通確認|チェック)(です|します|しました)?[。.!！]*$/iu.test(
+      userText,
+    );
+
+  if (isMetaCheckText) return null as any;
+
   const topicHint = normalizeText(String(input.context?.topicHint ?? ''));
   const situationSummary = normalizeText(String(input.context?.situationSummary ?? ''));
   const contextText = [topicHint, situationSummary].filter(Boolean).join('\n');

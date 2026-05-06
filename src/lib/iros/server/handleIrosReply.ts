@@ -5037,16 +5037,19 @@ try {
       pendingRelationshipDisplayName && Boolean(pendingRelationshipRelationId);
 
     const displayNameRejectWords =
-      /(ことで|について|相談|恋愛|連絡|返信|返事|不安|距離|関係|気持ち|好き|大事にされたい|心配|悩み|話|ですか|ますか|したい|してほしい|されたい|ください)/u;
+      /(ことで|について|相談|恋愛|連絡|返信|返事|不安|距離|関係|気持ち|好き|大事にされたい|心配|悩み|話|テスト|確認|動作確認|検証|ですか|ますか|したい|してほしい|されたい|ください)/u;
+
+    const hasExplicitDisplayNamePrefix =
+      /^(名前は|呼び名は|相手は|彼は|彼女は)\s*/u.test(raw);
 
     const looksLikeStandaloneDisplayNameReply =
+      hasExplicitDisplayNamePrefix &&
       !displayNameRejectWords.test(raw) &&
-      /^(名前は|呼び名は|相手は|彼は|彼女は)?\s*[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}A-Za-z0-9ー・]{1,12}(さん|くん|ちゃん|様|氏)?です$/u.test(
+      /^(名前は|呼び名は|相手は|彼は|彼女は)\s*[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}A-Za-z0-9ー・]{1,12}(さん|くん|ちゃん|様|氏)?です$/u.test(
         raw,
       );
 
     if (
-      !historyHasRelationshipContext &&
       !canTreatAsPendingDisplayName &&
       !looksLikeStandaloneDisplayNameReply
     ) {
