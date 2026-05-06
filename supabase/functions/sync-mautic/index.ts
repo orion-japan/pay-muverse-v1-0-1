@@ -31,6 +31,8 @@ type UserRow = {
   click_username?: string | null;
   supabase_uid?: string | null;
   sofia_credit?: number | string | null;
+  DATE?: string | null;
+  registered_at?: string | null;
 };
 
 // ====== HTTP Entrypoint ======
@@ -173,7 +175,7 @@ async function fetchUsersPage(sb: any, from: number, limit: number): Promise<Use
 
   // ★ここに “実在する列だけ” を並べる（あなたのテーブルに合わせてあります）
   const columns =
-    'user_code, click_email, FullName, phone_number, phone_e164, organization, plan, plan_status, click_username, supabase_uid, sofia_credit';
+    'user_code, click_email, FullName, phone_number, phone_e164, organization, plan, plan_status, click_username, supabase_uid, sofia_credit, DATE, registered_at';
 
   const { data, error } = await sb
     .from('users')
@@ -225,6 +227,12 @@ function mapToMauticPayload(u: UserRow) {
       ? undefined
       : Number(u.sofia_credit);
 
+  const registeredDateRaw = (u?.registered_at ?? u?.DATE ?? '').trim();
+  const registeredDate =
+    registeredDateRaw.length >= 10
+      ? `${registeredDateRaw.slice(0, 10)} 00:00:00`
+      : undefined;
+
   return {
     email: u?.click_email ?? undefined,
     firstname: u?.FullName ?? undefined,
@@ -237,6 +245,7 @@ function mapToMauticPayload(u: UserRow) {
     supabase_uid: u?.supabase_uid ?? undefined,
     sofia_credit: Number.isFinite(sofiaCredit) ? sofiaCredit : undefined,
     credit_balance: Number.isFinite(sofiaCredit) ? sofiaCredit : undefined,
+    registered_date: registeredDate,
   };
 }
 
