@@ -117,10 +117,8 @@ function hasLeadingEmoji(s: string): boolean {
 }
 
 function pickParagraphIcon(index: number): string {
-  if (index === 0) return '🧿';
-  if (index === 1) return '🌀';
-  if (index === 2) return '🌱';
-  return '•';
+  const icons = ['🌀', '🌱', '🪔', '🌸'];
+  return icons[index % icons.length] ?? '🌀';
 }
 
 function HeadingLine({ title, level }: { title: string; level: 1 | 2 | 3 | 4 }) {
@@ -159,7 +157,8 @@ export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
 
   const paraCount = useMemo(() => countParagraphs(normalized), [normalized]);
   const headingCount = useMemo(() => countMarkdownHeadings(normalized), [normalized]);
-  const enableParaDecor = paraCount >= 2 && headingCount <= 1;
+  // 絵文字はUIで自動付与せず、LLM本文側で自然に出す。
+  const enableParaDecor = false;
 
   let pIndex = 0;
 
@@ -173,7 +172,7 @@ export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
       const idx = pIndex++;
       const isGuideParagraph = raw.includes('詳しく内容を分析するには');
       const shouldDecorate =
-        !isGuideParagraph && enableParaDecor && raw.trim() && !hasLeadingEmoji(raw) && idx <= 2;
+        !isGuideParagraph && enableParaDecor && raw.trim() && !hasLeadingEmoji(raw);
       const icon = pickParagraphIcon(idx);
 
       return (

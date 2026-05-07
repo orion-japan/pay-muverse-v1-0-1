@@ -4735,7 +4735,7 @@ const systemPromptForWriter = [
           'OBSは今いちばん前にある状態だけを書く',
           'SHIFTは流れが止まっている一点だけを書く',
           'NEXTは「残っているのは〜」で始めない。まだ決める前に、今どこまで確認すればよいかを日常語で短く書く',
-          'SAFEは許可・励まし・安心づけにしない。抽象語で余韻に逃がさず、読んだ人が分かる日常語で、まだ決めきれていない点・今確認できている点を短く置く',
+          'SAFEは許可・励まし・安心づけにしない。抽象語で余韻に逃がさず、読んだ人が分かる日常語で、まだ決めきれていない点・今確認できている点を短く返す',
           'SAFEは「〜していい」「無理に〜しなくていい」「十分です」「落ち着いていきます」で閉じない',
 
           // --- 基本ルール ---
@@ -4746,7 +4746,7 @@ const systemPromptForWriter = [
           'emotion_inner / emotion_need がseedにある場合、それは入力に基づく感情材料としてOBSまたはSHIFTに自然に滲ませてよい。ただしラベル名は本文に出さない',
           'emotion_inner / emotion_need がseedにある場合でも、OBSの先頭は感情の言い換えだけで開始しない',
           'emotion_inner / emotion_need の文を、そのまま単独文として本文に出さない。特に「〜がつらい」「〜したい」「〜が怖い」はユーザー感情の断定として出さず、質問への定義文に薄く反映する',
-          'OBSの最初の一文は、質問への定義・軸・見取り図を短く置く',
+          'OBSの最初の一文は、質問への定義・軸・見取り図を短く返す',
           'emotion_inner / emotion_need は、定義のあとに必要な範囲で自然に反映する',
           '具体例を求められた場合は、OBSで定義し、その後に3〜5個の具体例を出す',
           '具体例を求められた場合は、「必要なら例を出せます」で終えず、その場で具体例を出す',
@@ -4787,12 +4787,12 @@ const systemPromptForWriter = [
         block_state_surface:
           '必要な文量だけで、いま前に出ている核心を直接書く。説明・要約・整理に戻さない。',
         bodyStyle: {
-          preferBlockSplit: false,
-          minBlocks: 1,
-          maxBlocks: 2,
-          maxSentencesPerBlock: 4,
+          preferBlockSplit: true,
+          minBlocks: 2,
+          maxBlocks: 5,
+          maxSentencesPerBlock: 3,
           minSentences: 2,
-          maxSentences: 4,
+          maxSentences: 9,
         },
         writeConstraints: [
           `${
@@ -4809,26 +4809,26 @@ const systemPromptForWriter = [
           '因果説明を増やさない',
           '「〜だから」「〜すると」「〜していく」を減らす',
           '「近づく」「深まる」「届く」「変わる」で締めない',
-          '説明より、残っている状態そのものを置く',
+          '説明より、いま必要な核心を直接の言葉で返す',
           '結論を作らず、輪郭のまま返してよい',
           '一番残る一文を優先し、周辺説明を削る',
 
           // ✅ resonateは削るのではなく、最初から状態文だけにする
-          'normal_resonanceでは、2〜4文で返す',
-          'normal_resonanceでは、助言・許可・例示・未来示唆を書かない',
-          'normal_resonanceでは、「どうすればよいか」ではなく「いま何が残っているか」だけを書く',
-          'normal_resonanceでは、「〜していい」「〜しなくていい」「〜なくていい」を使わない',
-          'normal_resonanceでは、「〜ほうが」「〜すると」「〜していく」「あとで」「必要なら」「たとえば」を使わない',
+          'normal_resonanceでは、2〜4文に固定しない。恋愛・怒り・不安・限界・関係相談では、必要な文量で2〜5段落まで自然に返す',
+          'normal_resonanceでは、基本は観測や共鳴を優先する。ただし、ユーザーが困っている・怒りが強い・限界が出ている・解決を求めている場合は、短い具体策を1つだけ出してよい',
+          'normal_resonanceでは、状態観測だけに閉じず、ユーザーの奥で止まっている本音を自然に表面化する',
+          'normal_resonanceでは、「〜していい」「〜しなくていい」「〜なくていい」で薄めない。ただし、ユーザーを守るための短い境界線は自然な会話語で返してよい',
+          'normal_resonanceでは、「必要なら」で逃げない。次の一手を出す場合は「次は、そのまま使える一文に整えられます」のように、自然に開く。比較・理由・具体策が必要な場面では、会話語として最小限使ってよい',
           'normal_resonanceでは、「正しいです」「合っています」「近いです」「自然です」で判定しない',
           'normal_resonanceでは、「合図」「〜に近い」「〜すると」「〜が抜ける」で説明しない',
           'normal_resonanceでは、「無理に〜すると」「言い切らないほうが」「〜ほうが守られる」を使わない',
-          'normal_resonanceでは、各文を「〜が残っている」「〜が前に出ている」「〜がまだ固まっていない」「〜の手前にある」の形に寄せる',
-          'normal_resonanceでは、「AのほうがB」ではなく「AにBが残っている」の形で書く。例：「言葉にする前のほうが息をしている」ではなく「言葉にする前のところに、まだ息が残っている」',
-          'normal_resonanceでは、「AよりBのほうがC」ではなく「Bが残っている」の形で書く。例：「無理に整えるより、粗いまま置いてあるほうが近い」ではなく「粗いまま置いてあるものが、いま前に残っている」',
-          'normal_resonanceでは、「AよりB」だけの比較も避ける。例：「ぴたりと決めるより、ずれたままの輪郭が残っている」ではなく「ずれたままの輪郭が、そのまま残っている」',
-          'normal_resonanceでは、原因文ではなく状態文で書く。例：「無理に名前をつけると、輪郭より先に形だけが出る」ではなく「輪郭より先に、形だけが少し前に出ている」',
-          'normal_resonanceでは、比較文ではなく状態文で書く。例：「言い切らないほうが守られている」ではなく「守られているものが、言い切る前に残っている」',
-          'normal_resonanceでは、最後の1文を助言ではなく、残っている状態そのもので閉じる',
+          'normal_resonanceでは、「〜が残っている」「〜が前に出ている」「〜の手前にある」の形へ固定しない。必要なら直接文・宣言文・本音の表面化で返す',
+          'normal_resonanceでは、比較文を無理に「残っている」構文へ変換しない。文脈上自然なら、直接文として返す',
+          'normal_resonanceでは、共鳴が成立している場合、説明用の型よりも届く言葉を優先する',
+          'normal_resonanceでは、比較・宣言・短い断定を必要に応じて許可する。ただし根拠のない決めつけにはしない',
+          'normal_resonanceでは、原因説明を増やしすぎない。ただし、恋愛・怒り・不安・限界では、状態文だけに閉じず、感情を受ける → 本音を表面化する → 現実に扱える一手、まで自然に進んでよい',
+          'normal_resonanceでは、状態文だけでなく、場を動かす文・本音を戻す文・短い宣言文も許可する',
+          'normal_resonanceでは、最後の1文を観測文に固定しない。必要なら、共鳴・宣言・本音の表面化で閉じる',
         ],
       };
     }
@@ -4843,7 +4843,7 @@ const systemPromptForWriter = [
           ? '1段落目の1文目は、二者それぞれの説明から入らず、この関係の核を先に置く。最初に「この二人は何がぶつかりやすい関係か」「どういう組み合わせか」が一文で立つようにする。A/Bの性格紹介ではなく、関係の輪郭が最初に見える自然文を優先する。たとえば「この二人は、強さの出しどころがぶつかりやすい関係です。」「この組み合わせは、近づき方の違いがそのままズレになりやすいです。」のように、関係の核が先に立つ書き方にする。'
           : isIntentMethodBomb
             ? '1段落目の1文目は、いま何が決めきれずに止まっているかをそのまま置く。説明や要約にしない。方法の話に飛ぶ前に、いま詰まっている一点を自然文で出す。'
-            : '1段落目の1文目は、今いちばん前にあるものをそのまま置く。説明や要約にしない。判断や整理より先に、その場に立っている核心を自然文で出す。見えている状態を薄めず、最初の1文で軸が立つ書き方を優先する。'),
+            : '1段落目の1文目は、今いちばん前にあるものをそのまま言葉にする。説明や要約にしない。判断や整理より先に、その場に立っている核心を自然文で出す。見えている状態を薄めず、最初の1文で軸が立つ書き方を優先する。'),
 
       block_misrecognition_negation:
         relationshipDetailMaterial?.block_misrecognition_negation ??
@@ -4859,7 +4859,7 @@ const systemPromptForWriter = [
           ? '1段落目の3文目は、魅力や可能性へ早く着地しない。一般論にしない。この関係で本当にぶつかっているものを、一段深い対比として固定する。たとえば「強さの有無ではなく、強さの出しどころがぶつかっています。」「どちらが正しいかではなく、どちらが前に立つかがぶつかっています。」のように、争点の芯が一文で残る書き方を優先する。'
           : isIntentMethodBomb
             ? '1段落目の3文目は、今回の方法質問の芯を仮置きする。案内文や一般論にしない。何を決める前に何を先に定めるべきかを、一文で静かに言い切る。'
-            : '1段落目の3文目は、今回の核を仮置きしてよい。案内文や説明文にしない。何がこの迷いの中心にあるのかを、やわらかい断定で一文に置く。言い切りすぎず、でも主題が一段深く見える強さを優先する。'),
+            : '1段落目の3文目は、今回の核を仮に示してよい。案内文や説明文にしない。何がこの迷いの中心にあるのかを、やわらかい断定で一文にする。言い切りすぎず、でも主題が一段深く見える強さを優先する。'),
 
       block_breakdown_core_gap:
         relationshipDetailMaterial?.block_breakdown_core_gap ??
@@ -4867,7 +4867,7 @@ const systemPromptForWriter = [
           ? '2段落目の1文目は、まずこの関係で何がぶつかっているかを一文で固定する。A/Bの説明から入らない。性格紹介や一般論にしない。「意見の違いがそのまま対立に見えやすいです。」「どちらも引きたくないので、正しさの押し合いになりやすいです。」のように、争点の芯が最初に見える自然文を優先する。'
           : isIntentMethodBomb
             ? '2段落目の1文目は、いま噛み合っていない二つを名指しする。整理や分析にしない。決めたい気持ちと、決める対象がまだ曖昧なことの差が一文で見えるようにする。'
-            : '2段落目の1文目は、噛み合っていないところをそのまま名指ししてよい。整理や分析にしない。何と何が同時に残っているのか、どの二つが引っぱり合っているのかを、平明な自然文で一文に置く。ここでは差が分かる強さを優先する。'),
+            : '2段落目の1文目は、噛み合っていないところをそのまま名指ししてよい。整理や分析にしない。何と何が同時に残っているのか、どの二つが引っぱり合っているのかを、平明な自然文で一文にする。ここでは差が分かる強さを優先する。'),
 
       block_breakdown_defense:
         relationshipDetailMaterial?.block_breakdown_defense ??
@@ -4875,7 +4875,7 @@ const systemPromptForWriter = [
           ? '2段落目の2文目は、そこで何を守ろうとして強く出るのかを書く。A/Bの性格説明にしない。たとえば「自分のやり方を崩したくないので、相手の出方を待つより先に動きたくなります。」「主導権を渡したくないので、譲るより先に押し返したくなります。」のように、反応の裏で守っているものが見える自然文を優先する。'
           : isIntentMethodBomb
             ? '2段落目の2文目は、そこで守ろうとしているものを書く。一般論にしない。雑に決めて後悔したくないことや、見誤りたくないことがにじむように置く。'
-            : '2段落目の2文目は、そこで守ろうとしているものを書く。一般論にしない。大事にしているものがにじむように置く。断定しすぎず、でも曖昧に逃がさない。前文から自然につながる言い方にする。'),
+            : '2段落目の2文目は、そこで守ろうとしているものを書く。一般論にしない。大事にしているものがにじむ言葉にする。断定しすぎず、でも曖昧に逃がさない。前文から自然につながる言い方にする。'),
 
       block_breakdown_rejection_target:
         relationshipDetailMaterial?.block_breakdown_rejection_target ??
@@ -4901,7 +4901,7 @@ const systemPromptForWriter = [
           ? '3段落目の2文目は、AがBをどう読むと関係の見え方が変わるかを書く。説明口調にしない。Aの目に見えていた欠点が、別の力として見え直す感じを自然文で置く。'
           : isIntentMethodBomb
             ? '3段落目の2文目は、その一手をどう具体化するかを書く。比較説明ではなく、選択肢を増やさずに軸を細める。たとえば「やる・やめる・保留」のどれに近いかを見る、など一段狭い見方を置く。'
-            : '3段落目の2文目は、比べている二つの違いを書く。比較を説明しない。その差が読めば分かる形で、そのまま置く。整理語を使わず、前文の見立てをそのまま細める。'),
+            : '3段落目の2文目は、比べている二つの違いを書く。比較を説明しない。その差が読めば分かる形で、そのまま言葉にする。整理語を使わず、前文の見立てをそのまま細める。'),
 
       block_concrete_sort_boundary:
         relationshipDetailMaterial?.block_concrete_sort_boundary ??
@@ -4919,7 +4919,7 @@ const systemPromptForWriter = [
             ? '4段落目の1文目は、最後に残る核を短く深く置く。まとめにしない。何が実際にはまだ残っていて、その残りをどこで見誤りやすいのかを、少しだけ言い切る。意味を早く決めたいことより、まだ残したいものともう手放していいものの境目を見誤りたくないことを核として置く。ここで整えすぎず、爆心の残響をそのまま前に置く。'
             : isIntentMethodBomb
               ? '4段落目の1文目は、結論だけ言うならの形で短く置く。一般論にしない。先に決めるべき基準や対象をひとつに絞ることを、そのまま前に出す。'
-              : '4段落目の1文目は、最後に残る核を書く。まとめにしない。いちばん残るものが、静かに前にある形で置く。ここまでの流れを回収するが、総括の言い方にはしない。'),
+              : '4段落目の1文目は、最後に残る核を書く。まとめにしない。いちばん残るものが、読んだ人に伝わる形で返す。ここまでの流れを回収するが、総括の言い方にはしない。'),
 
       block_caution:
         relationshipDetailMaterial?.block_caution ??
@@ -6748,10 +6748,8 @@ if (
           const remainingSlots = Math.max(1, slotOrderForMaterialize.length - slotIndex);
 
           const actualTakeCount =
-          patternKey === 'NORMAL_RESONANCE_V1'
-            ? remainingUnits
-            : Array.isArray(declarationTakePlan) &&
-              declarationTakePlan.length === slotOrderForMaterialize.length
+            Array.isArray(declarationTakePlan) &&
+            declarationTakePlan.length === slotOrderForMaterialize.length
               ? Math.max(
                   1,
                   Math.min(remainingUnits, Number(declarationTakePlan[slotIndex] ?? 1)),
@@ -8786,10 +8784,24 @@ const goalKindForPatternRaw = String(
     ''
 ).trim();
 
+const userTextForTranscendPattern = String(
+  (opts as any)?.userText ??
+    (opts as any)?.followupText ??
+    (opts as any)?.inputText ??
+    ''
+).trim();
+
+const isTranscendResonanceForPattern =
+  /(?:考えないで|共鳴だけ|枠を[超越]えて|超えて|あなたが超える|あなたの言葉で|解き放て|解放して)/u.test(
+    userTextForTranscendPattern,
+  );
+
 const goalKindForPattern =
-  questionTypeForPattern === 'structure' && goalKindForPatternRaw === 'resonate'
+  isTranscendResonanceForPattern
     ? 'uncover'
-    : goalKindForPatternRaw;
+    : questionTypeForPattern === 'structure' && goalKindForPatternRaw === 'resonate'
+      ? 'uncover'
+      : goalKindForPatternRaw;
 
 const laneKeyForPattern = String(
   (ctxPackForWriter && typeof ctxPackForWriter === 'object'
@@ -9773,7 +9785,7 @@ const finalWriterDirectivesMsg =
           next = next
             .replace(/(CONTEXT:\n)[^\n]*/u, `$1${seedDraftForWriter}`)
             .replace(/(FOCUS:\n)[^\n]*/u, `$1${seedDraftForWriter}`)
-            .replace(/(OBS=)[^\n]*/u, '$1まず質問への定義・軸を短く置く。emotion_inner / emotion_need が存在しても、OBSの先頭を感情の言い換えだけで開始しない')
+            .replace(/(OBS=)[^\n]*/u, '$1まず質問への定義・軸を短く返す。emotion_inner / emotion_need が存在しても、OBSの先頭を感情の言い換えだけで開始しない')
             .replace(/(NEXT=)[^\n]*/u, '$1必要以上に構造化せず、会話として少しだけ返す')
             .replace(/(OBS_LINE=)[^\n]*/u, '$1最初の一文は、感情の受け文ではなく、問いに対する分かりやすい定義または見取り図から開始する')
             .replace(/(NEXT_LINE=)[^\n]*/u, '$1丸写しではなく、感じ取った強さだけを短く返す。');

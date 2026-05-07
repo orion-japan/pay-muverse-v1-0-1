@@ -4289,12 +4289,20 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
 
         const normalizedFinalGoalKind = normalizeGoalKind(finalGoalKind);
 
+        const currentUserTextForTranscend = String(text ?? '').trim();
+        const isTranscendResonanceRequest =
+          /(?:考えないで|共鳴だけ|枠を[超越]えて|超えて|あなたが超える|あなたの言葉で|解き放て|解放して)/u.test(
+            currentUserTextForTranscend,
+          );
+
         const chosenGoalKindRaw =
-          normalizedFinalGoalKind === 'resonate'
-            ? 'resonate'
-            : existingStrongGoalKind ??
-              normalizedFinalGoalKind ??
-              'uncover';
+          isTranscendResonanceRequest
+            ? 'uncover'
+            : normalizedFinalGoalKind === 'resonate'
+              ? 'resonate'
+              : existingStrongGoalKind ??
+                normalizedFinalGoalKind ??
+                'uncover';
 
         const seedTextForGoal = String(
           exAny?.slotPlanSeed ??

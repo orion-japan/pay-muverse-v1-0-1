@@ -1294,13 +1294,29 @@ function buildFlowReply(args: {
         hasConcreteContinuationSignal
       );
 
+    const transcendResonanceOverride =
+      hasAny(
+        '考えないで',
+        '共鳴だけ',
+        '枠を超えて',
+        '枠を越えて',
+        '超えて',
+        'あなたが超える',
+        'あなたの言葉で',
+        '解き放て',
+        '解放して'
+      ) ||
+      /(考えないで|共鳴だけ|枠を[超越]えて|超えて|あなたが超える|あなたの言葉で|解き放て|解放して)/.test(rawTextNow);
+
     const goalKind2Raw =
-      styleResonateOverride
-        ? 'resonate'
-        : String(replyDecisionBase?.goalKind ?? '').trim() ||
-          String((args as any)?.ctxPack?.goalKind ?? '').trim() ||
-          String((args as any)?.meta?.extra?.ctxPack?.goalKind ?? '').trim() ||
-          '';
+      transcendResonanceOverride
+        ? 'uncover'
+        : styleResonateOverride
+          ? 'resonate'
+          : String(replyDecisionBase?.goalKind ?? '').trim() ||
+            String((args as any)?.ctxPack?.goalKind ?? '').trim() ||
+            String((args as any)?.meta?.extra?.ctxPack?.goalKind ?? '').trim() ||
+            '';
 
     const goalKind2 =
       goalKind2Raw === 'clarify' ||

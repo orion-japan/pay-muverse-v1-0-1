@@ -1701,7 +1701,7 @@ return NextResponse.json({
           const n = normalizeIrosStyleFinal(finalText, {
             seed,
             emojiKeepRate: 1.0, // 絵文字は剥がさない
-            maxReplacements: 0, // ✅ 置換ゼロ（長文化の主因を止める）
+            maxReplacements: 5, // ✅ 最終語彙補正を有効化。「置く」系などを自然語へ変換する
           });
 
           const outText = typeof (n as any)?.text === 'string' ? (n as any).text : finalText;
