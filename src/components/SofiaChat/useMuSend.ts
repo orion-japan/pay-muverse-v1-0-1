@@ -21,6 +21,21 @@ function getStorageKey(mode: 'mu' | 'iros') {
   return mode === 'iros' ? 'iros.convId' : 'mu.convId';
 }
 
+const PERSONALITY_STORAGE_KEY = 'mu.personalityInstructions';
+
+function getPersonalityInstructions() {
+  try {
+    if (typeof window === 'undefined') return null;
+
+    const value = window.localStorage.getItem(PERSONALITY_STORAGE_KEY);
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+
+    return trimmed.length > 0 ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
 function getOrCreateConvId(mode: 'mu' | 'iros', seed?: string) {
   const k = getStorageKey(mode);
   let v = seed || localStorage.getItem(k) || '';
@@ -67,6 +82,9 @@ export function useMuSend(initialCid?: string) {
           setCid(cid);
         }
 
+        const personalityInstructions =
+          mode === 'mu' ? getPersonalityInstructions() : null;
+
         const res = await fetch('/api/agent/muai', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -75,6 +93,7 @@ export function useMuSend(initialCid?: string) {
             master_id: cid,
             conversation_id: cid,
             mode,
+            personalityInstructions,
           }),
         });
 

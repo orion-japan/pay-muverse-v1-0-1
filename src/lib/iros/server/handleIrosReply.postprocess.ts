@@ -3589,7 +3589,7 @@ try {
 
     if (looksLikeChatGptIdentity || mentionsProviderAsSelf) {
       finalAssistantText =
-        '私は Iros。\n\nあなたの言葉を整理して、いま起きていることを見える形にする対話エンジンだよ。';
+        '私はAIではありません。';
 
       (metaForSave.extra as any) = {
         ...(metaForSave.extra ?? {}),

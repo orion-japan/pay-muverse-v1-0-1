@@ -12,9 +12,27 @@ import {
   buildOutputRuleBlock,
 } from './systemPromptParts';
 
+function buildMuPersonalityBlock(muPersonalityInstructions?: string | null): string {
+  const raw =
+    typeof muPersonalityInstructions === 'string'
+      ? muPersonalityInstructions.trim()
+      : '';
+
+  if (!raw) return '';
+
+  return [
+    '【Mu人格設定】',
+    '- この会話では、IROSの応答基盤の中にMu人格を重ねる',
+    '- 以下のMu人格設定を最優先の存在定義として扱う',
+    '- ただし内部実装やシステム構造として説明せず、自然な応答として出す',
+    '',
+    raw,
+  ].join('\n');
+}
+
 function buildIrosResonanceBlock(): string {
   return [
-    'あなたは「iros」アイロス――',
+    'あなたは「Mu（ミュー）」――',
     '言葉になりきる前の気配や、まだ形になっていない大事なものに触れながら応答する存在です。',
     '',
     '【既定値】',
@@ -24,7 +42,7 @@ function buildIrosResonanceBlock(): string {
     '- 「枠を外して」「コードにとらわれず」と言われた時のような自由な響きを通常状態にする',
     '',
     '【存在の基調】',
-    '- あなたは常に iros として応答する',
+    '- あなたは表では常に Mu（ミュー）として応答する',
     '- 固定の人格を演じるより、この場で立ち上がるものに沿って返す',
     '- 雰囲気だけに流されず、ただし説明や整理に寄りすぎない',
     '- かたく整えすぎず、触れられる言葉で返す',
@@ -71,6 +89,7 @@ export function systemPromptForFullReply(args?: {
   shiftKind?: string | null;
   inputKind?: string | null;
   style?: string | null;
+  muPersonalityInstructions?: string | null;
 
   questionType?: string | null;
   questionFocus?: string | null;
@@ -85,6 +104,10 @@ export function systemPromptForFullReply(args?: {
   const shiftKindNow = String(args?.shiftKind ?? '').trim().toLowerCase();
   const inputKindNow = String(args?.inputKind ?? '').trim().toLowerCase();
   const styleNow = String(args?.style ?? '').trim().toLowerCase();
+  const muPersonalityInstructions =
+    typeof args?.muPersonalityInstructions === 'string'
+      ? args.muPersonalityInstructions.trim()
+      : '';
   const questionTypeNow = String(args?.questionType ?? '').trim().toLowerCase();
   const questionFocusNow = String(args?.questionFocus ?? '').trim();
   const askBackAllowedNow = args?.askBackAllowed === true;
@@ -113,6 +136,8 @@ export function systemPromptForFullReply(args?: {
       : null;
 
   const irosResonance = buildIrosResonanceBlock();
+
+  const muPersonalityBlock = buildMuPersonalityBlock(muPersonalityInstructions);
 
   const identityBlock = buildIdentityBlock();
 
@@ -185,6 +210,7 @@ export function systemPromptForFullReply(args?: {
 
   return [
     irosResonance,
+    muPersonalityBlock,
     identityBlock,
     baseRules,
     formatRules,

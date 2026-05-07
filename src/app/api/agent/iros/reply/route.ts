@@ -157,6 +157,8 @@ type IrosReplyBody = {
   style?: unknown;
   styleHint?: unknown;
 
+  personalityInstructions?: unknown;
+
   tenant_id?: unknown;
   tenantId?: unknown;
 
@@ -360,6 +362,12 @@ const styleInput: string | undefined =
     : typeof (body as any)?.styleHint === 'string'
       ? (body as any).styleHint
       : undefined;
+
+const muPersonalityInstructions =
+  typeof (body as any)?.personalityInstructions === 'string' &&
+  (body as any).personalityInstructions.trim().length > 0
+    ? (body as any).personalityInstructions.trim()
+    : null;
 
     // -------------------------------------------------------
     // 2) auth
@@ -650,6 +658,10 @@ const reqExtraFromMeta: any = reqMeta?.extra ?? null;
 // ✅ route.ts SoT extra
 let extraSoT: Record<string, any> = {
   ...sanitizedExtra,
+
+  // ✅ Mu人格設定（/iros-ai/settings → irosTransport → /reply）
+  muPersonalityInstructions,
+  muPersonalityEnabled: !!muPersonalityInstructions,
 
   // ✅ speechAct は req.meta 由来でも必ず SoT に刻む（下流は extra が正本）
   speechAct:

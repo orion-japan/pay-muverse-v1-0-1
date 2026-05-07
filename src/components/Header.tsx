@@ -55,7 +55,7 @@ export default function Header({ onLoginClick }: Props) {
           height: '44px', // ← 60px → 44px
           fontWeight: 'bold',
           color: 'white',
-          background: 'linear-gradient(90deg, #b089f9, #9a7ff9)',
+          background: 'linear-gradient(90deg, #95a0ff, #8b82f6)',
           borderRadius: '0 0 10px 10px', // ほんの少しだけ丸み（お好みで）
         }}
       >
@@ -77,7 +77,6 @@ export default function Header({ onLoginClick }: Props) {
           }}
         >
           <span aria-hidden>🏠</span>
-          <span>iros</span>
         </Link>
 
         <div

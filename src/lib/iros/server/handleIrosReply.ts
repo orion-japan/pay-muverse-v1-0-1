@@ -8845,6 +8845,30 @@ try {
     });
   } catch {}
 
+  // ✅ Mu人格設定を rephrase 直前の正本 extra に再注入する
+  // - route.ts → extraLocal までは来ていても、postprocess/orchestrator 後の
+  //   out.metaForSave.extra から落ちる可能性があるため、ここで最終保証する。
+  {
+    const muPersonalityInstructions =
+      typeof (extraLocal as any)?.muPersonalityInstructions === 'string' &&
+      (extraLocal as any).muPersonalityInstructions.trim().length > 0
+        ? (extraLocal as any).muPersonalityInstructions.trim()
+        : null;
+
+    out.metaForSave = out.metaForSave ?? {};
+    (out.metaForSave as any).extra =
+      (out.metaForSave as any).extra &&
+      typeof (out.metaForSave as any).extra === 'object'
+        ? (out.metaForSave as any).extra
+        : {};
+
+    if (muPersonalityInstructions) {
+      (out.metaForSave as any).extra.muPersonalityInstructions =
+        muPersonalityInstructions;
+      (out.metaForSave as any).extra.muPersonalityEnabled = true;
+    }
+  }
+
   const rr = await rephraseSlotsFinal(
     extracted,
     {

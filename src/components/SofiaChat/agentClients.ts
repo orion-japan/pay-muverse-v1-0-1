@@ -200,6 +200,21 @@ export async function fetchMessages(
  * =======================================================*/
 // src/components/SofiaChat/agentClients.ts
 
+const MU_PERSONALITY_STORAGE_KEY = 'mu.personalityInstructions';
+
+function getMuPersonalityInstructionsForAgentClient() {
+  try {
+    if (typeof window === 'undefined') return null;
+
+    const value = window.localStorage.getItem(MU_PERSONALITY_STORAGE_KEY);
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+
+    return trimmed.length > 0 ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
 // 旧: Mui API 経由
 async function sendMuViaMuiAPI(args: {
   userCode: string;
@@ -226,6 +241,7 @@ async function sendMuViaMuiAPI(args: {
         ? { master_id: args.conversationId, conversation_id: args.conversationId }
         : {}),
       source_type: 'chat',
+      personalityInstructions: getMuPersonalityInstructionsForAgentClient(),
       // 旧 mui の use_kb 等は muai では不要
     }),
   });

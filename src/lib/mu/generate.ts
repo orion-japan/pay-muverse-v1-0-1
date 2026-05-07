@@ -29,6 +29,12 @@ export type MuContext = {
   idle?: boolean;
 
   image_style?: '写実' | 'シンプル' | '手描き風';
+
+  /**
+   * 管理画面 /iros-ai/settings で保存した Mu 人格設定。
+   * ここに値がある場合は、通常の Mu system prompt を置き換える。
+   */
+  personality_instructions?: string | null;
 };
 
 type SelfBand = '0_40' | '40_70' | '70_100';
@@ -377,7 +383,15 @@ export async function generateMuReply(message: string, ctx: MuContext) {
     trigger: 'auto',
   });
 
-  const system = buildMuSystemPrompt({});
+  const personalityPromptOverride =
+    typeof ctx.personality_instructions === 'string' &&
+    ctx.personality_instructions.trim().length > 0
+      ? ctx.personality_instructions.trim()
+      : undefined;
+
+  const system = buildMuSystemPrompt({
+    promptOverride: personalityPromptOverride,
+  });
   const model = (MU_AGENT as any)?.model ?? envStr('gpt-5-mini', 'MU_MODEL');
   const baseTemp = (MU_AGENT as any)?.temperature ?? envNumAny(0.6, 'MU_TEMPERATURE');
   const temperature = Math.max(

@@ -114,12 +114,19 @@ export async function POST(req: NextRequest) {
       text, // 旧UI互換
       input, // 旧UI互換
       user_code: bodyUserCode, // 保険
+      personalityInstructions,
     } = body || {};
 
     // 後方互換メッセージ解決
     const msgRaw = (message ?? text ?? input ?? '') as unknown;
     const msg = typeof msgRaw === 'string' ? msgRaw : String(msgRaw ?? '');
     if (!msg || !msg.trim()) return bad('empty message', 400);
+
+    const personalityInstructionsText =
+      typeof personalityInstructions === 'string' &&
+      personalityInstructions.trim().length > 0
+        ? personalityInstructions.trim()
+        : null;
 
     // user_code（認証優先）
     const userCode =
@@ -161,6 +168,7 @@ export async function POST(req: NextRequest) {
         thread_id: thread_id ?? null,
         board_id: board_id ?? null,
         source_type: source_type ?? 'chat',
+        personality_instructions: personalityInstructionsText,
       });
     } catch {
       await recordMuTextTurn({
@@ -173,6 +181,7 @@ export async function POST(req: NextRequest) {
           reason: 'generation_error',
           thread_id: thread_id ?? null,
           board_id: board_id ?? null,
+          personality_instructions_enabled: !!personalityInstructionsText,
           ...promptMeta,
         },
       });

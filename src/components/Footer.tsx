@@ -132,7 +132,7 @@ export default function Footer() {
 
   const items: Item[] = useMemo(
     () => [
-      { id: 'iros', label: 'Iros', href: '/', icon: <span>🌀</span> },
+      { id: 'iros', label: 'Mu', href: '/', icon: <span>🌀</span> },
       { id: 'event', label: 'Event', href: '/event', icon: <span>🎉</span> },
       { id: 'mypage', label: 'My Page', href: '/mypage', icon: <span>👤</span> },
       { id: 'plan', label: 'Plan', href: '/pay', icon: <span>💳</span> },

@@ -25,7 +25,7 @@ export default function IrosHeader({
   meta,
 }: HeaderProps) {
   const router = useRouter();
-  const title = 'iros_AI';
+  const title = 'Mu';
 
   const chatCtx = (typeof useIrosChat === 'function' ? useIrosChat() : null) as any;
 
@@ -63,7 +63,7 @@ export default function IrosHeader({
 
   const defaultIcon = (
     <Image
-      src="/iros.png"
+      src="/mu001_s.png"
       alt="Iros"
       width={28}
       height={28}

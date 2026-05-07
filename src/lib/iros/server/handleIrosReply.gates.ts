@@ -513,47 +513,9 @@ export async function runGreetingGate(args: any): Promise<{
     /^(?:name|yourname|whatsyourname|whatisyourname)$/iu.test(core);
 
   if (isIdentityQuestion) {
-    const seed =
-      `私は Iros。\n\n` +
-      `あなたの言葉を整理して、いま起きていることを見える形にする対話エンジンだよ。`;
-
-    const slots = [
-      { key: 'OBS', role: 'assistant', style: 'soft', content: '私は Iros。' },
-      { key: 'SEED_TEXT', role: 'assistant', style: 'soft', content: seed },
-    ];
-
-    const framePlan = {
-      slotPlanPolicy: 'FINAL',
-      slots,
-    };
-
-    return {
-      ok: true,
-      result: seed,
-      metaForSave: {
-        gate: 'identity',
-        prefer_llm_writer: true,
-        framePlan,
-        slotPlan: {
-          slotPlanPolicy: 'FINAL',
-          slots,
-        },
-        slotPlanPolicy: 'FINAL',
-        slotPlanLen: slots.length,
-        extra: {
-          slotPlanPolicy: 'FINAL',
-          slotPlanLen: slots.length,
-          ctxPack: {
-            shortSummary: 'identity_question',
-          },
-          framePlan,
-          slotPlan: {
-            slotPlanPolicy: 'FINAL',
-            slots,
-          },
-        },
-      },
-    };
+    // ✅ Mu移行後は、名前・存在確認を gate の固定テンプレで返さない。
+    // systemPrompt / Mu人格設定を通した通常LLM応答へ流す。
+    return { ok: false, result: null, metaForSave: null };
   }
 
   // =========================================================

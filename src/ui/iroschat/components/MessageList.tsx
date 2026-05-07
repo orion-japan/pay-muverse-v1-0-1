@@ -497,7 +497,7 @@ export default function MessageList() {
 
 {messages.map((m, index) => {
         const isUser = m.role === 'user';
-        const iconSrc = isUser ? resolveUserAvatar(m) : '/iros.png';
+        const iconSrc = isUser ? resolveUserAvatar(m) : '/mu001_s.png';
 
 // ★ メタを本文から隠す：toSafeString → stripIrosMetaHeader → stripNextStepTags → transform
 const rawText = stripIrosMetaHeader(toSafeString(m.text));
@@ -700,7 +700,7 @@ const shouldShowDiagnosisNotice =
               >
                 <img
                   src={iconSrc}
-                  alt={isUser ? 'you' : 'iros'}
+                  alt={isUser ? 'you' : 'Mu'}
                   className={isUser ? 'avatar user' : 'avatar assistant'}
                 />
 

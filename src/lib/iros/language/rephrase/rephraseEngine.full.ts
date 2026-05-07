@@ -3593,6 +3593,12 @@ const shiftKindForLane =
   //    （directTask があると “文章を仕上げる” 側に吸われて契約違反の初撃が出やすい）
   const directTaskForPrompt = wantsIdeaBand ? false : isDirectTask;
 
+  const muPersonalityInstructions =
+    typeof (opts as any)?.extra?.muPersonalityInstructions === 'string' &&
+    (opts as any).extra.muPersonalityInstructions.trim().length > 0
+      ? (opts as any).extra.muPersonalityInstructions.trim()
+      : null;
+
   // ✅ レーンが明示されている時は GROUND をやめる
   //    （GROUND骨格が IDEA_BAND を潰すため）
   const baseSystemPrompt = systemPromptForFullReply({
@@ -3600,6 +3606,9 @@ const shiftKindForLane =
 
     // ✅ inputKind を systemPrompt に渡す（micro/greeting 判定・ログ整合）
     inputKind,
+
+    // ✅ IROS内に重ねるMu人格設定
+    muPersonalityInstructions,
 
     // ✅ directTask は wantsIdeaBand を考慮した版を渡す
     directTask: directTaskForPrompt,
