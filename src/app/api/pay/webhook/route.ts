@@ -113,18 +113,27 @@ async function planApply(
 }
 
 function resolveClickTypeFromSub(obj: any): string {
-  const planId =
+  const rawPlan =
     obj?.plan || obj?.plan_id || obj?.items?.[0]?.plan || obj?.items?.[0]?.plan_id || null;
 
-  if (!planId) return 'pro';
+  const planId =
+    rawPlan && typeof rawPlan === 'object' && rawPlan.id
+      ? String(rawPlan.id)
+      : rawPlan
+        ? String(rawPlan)
+        : '';
 
-  const proId = process.env.PAYJP_PLAN_PRO_ID;
-  const masterId = process.env.PAYJP_PLAN_MASTER_ID;
+  if (!planId) return 'regular';
 
-  if (masterId && String(planId) === String(masterId)) return 'master';
-  if (proId && String(planId) === String(proId)) return 'pro';
+  const regularId = process.env.PLAN_ID_REGULAR;
+  const premiumId = process.env.PLAN_ID_PREMIUM;
+  const masterId = process.env.PLAN_ID_MASTER;
 
-  return 'pro';
+  if (regularId && planId === String(regularId)) return 'regular';
+  if (premiumId && planId === String(premiumId)) return 'premium';
+  if (masterId && planId === String(masterId)) return 'master';
+
+  return 'regular';
 }
 
 function toIsoFromPayjpTime(value: any): string | null {

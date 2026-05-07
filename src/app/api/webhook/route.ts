@@ -1,60 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
-// POSTエンドポイント
+// src/app/api/webhook/route.ts
+// Legacy PAY.JP webhook endpoint.
+//
+// 以前は subscription.created / subscription.updated を受けると
+// click_type を無条件で premium に上書きしていた。
+// 現在の課金反映は /api/pay/webhook → /api/pay/plan/apply に集約するため、
+// この legacy endpoint では署名確認後、受信だけしてDB更新しない。
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: NextRequest) {
-  // PAY.JP Webhookからの署名トークンを取得
   const token = req.headers.get('x-payjp-webhook-token');
 
-  // トークンが一致しない場合は拒否
   if (token !== process.env.PAYJP_WEBHOOK_SECRET) {
     return new NextResponse('Invalid signature', { status: 400 });
   }
 
-  // Webhookのペイロードをパース
-  const payload = await req.json();
+  const payload = await req.json().catch(() => null);
 
-  // Supabaseクライアント（service_roleでフルアクセス）
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  );
+  console.log('[legacy webhook noop]', {
+    type: payload?.type ?? null,
+    event_id: payload?.id ?? null,
+  });
 
-  // 該当イベントの処理（subscription作成または更新）
-  if (payload.type === 'subscription.created' || payload.type === 'subscription.updated') {
-    const sub = payload.data.object;
-    const customerId = sub.customer;
-
-    // 該当するユーザーを取得（payjp_customer_idが一致するレコード）
-    const { data: user, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('payjp_customer_id', customerId)
-      .single();
-
-    if (error) {
-      console.error('ユーザー取得失敗:', error);
-      return new NextResponse('User not found', { status: 404 });
-    }
-
-    if (user) {
-      // webhookではクレジットを触らない
-      const { error: updateError } = await supabase
-        .from('users')
-        .update({
-          click_type: 'premium',
-          payjp_subscription_id: sub.id,
-          last_payment_date: new Date().toISOString(),
-        })
-        .eq('user_code', user.user_code);
-
-      if (updateError) {
-        console.error('ユーザー更新失敗:', updateError);
-        return new NextResponse('Update failed', { status: 500 });
-      }
-    }
-  }
-
-  // Webhookを正常に受け取ったレスポンス
-  return NextResponse.json({ received: true });
+  return NextResponse.json({
+    received: true,
+    legacy_noop: true,
+  });
 }
