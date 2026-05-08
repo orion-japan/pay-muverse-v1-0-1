@@ -145,6 +145,22 @@ function detectInputKind(userText: string): InputKind {
   const s = String(userText ?? '').trim();
   if (!s) return 'unknown';
 
+  const compact = s
+    .replace(/\s+/g, '')
+    .replace(/[。．.!！?？…]+$/g, '')
+    .toLowerCase();
+
+  // ✅ short ACK / 接続反応
+  // 「確かに！」などは新規相談ではなく、直前応答への受領・同意として扱う。
+  // ここで micro にしておくことで、chat として新規テーマ化されるのを防ぐ。
+  if (
+    /^(うん|うんうん|はい|そう|そうです|そうですね|なるほど|たしかに|確かに|それです|それだ|わかった|分かった|了解|ok|おけ|ありがとう|助かる)$/.test(
+      compact,
+    )
+  ) {
+    return 'micro';
+  }
+
   // ✅ recall-check（会話を覚えてる？系）: 質問扱いにすると frame=R でテンプレ化しやすいので chat 扱いに落とす
   if (
     /(覚えて(る|ます)|覚えてますか|覚えてる\?|覚えてる？)/.test(s) &&

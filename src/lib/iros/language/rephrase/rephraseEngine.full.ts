@@ -2786,13 +2786,16 @@ return blocks;
     const preferred =
       Array.isArray((opts as any)?.turnsForWriter) && (opts as any).turnsForWriter.length > 0
         ? (opts as any).turnsForWriter
-        : Array.isArray((opts as any)?.userContext?.turnsForWriter) &&
-            (opts as any).userContext.turnsForWriter.length > 0
-          ? (opts as any).userContext.turnsForWriter
-          : Array.isArray((opts as any)?.userContext?.ctxPack?.turnsForWriter) &&
-              (opts as any).userContext.ctxPack.turnsForWriter.length > 0
-            ? (opts as any).userContext.ctxPack.turnsForWriter
-            : null;
+        : Array.isArray((opts as any)?.messages) &&
+            (opts as any).messages.length > 0
+          ? (opts as any).messages
+          : Array.isArray((opts as any)?.userContext?.turnsForWriter) &&
+              (opts as any).userContext.turnsForWriter.length > 0
+            ? (opts as any).userContext.turnsForWriter
+            : Array.isArray((opts as any)?.userContext?.ctxPack?.turnsForWriter) &&
+                (opts as any).userContext.ctxPack.turnsForWriter.length > 0
+              ? (opts as any).userContext.ctxPack.turnsForWriter
+              : null;
 
     if (preferred) return preferred;
     return extractLastTurnsFromContext(opts?.userContext ?? null);
@@ -4252,6 +4255,7 @@ const shouldPreferPastStateRecall =
       shouldPreferPastStateRecall || turnsPatternKeyForWriter === 'DECLARATION_RESONANCE_V1'
         ? (
             (opts as any)?.turnsForWriter ??
+            (opts as any)?.messages ??
             (opts as any)?.userContext?.turnsForWriter ??
             (opts as any)?.userContext?.ctxPack?.turnsForWriter ??
             (opts as any)?.userContext?.ctxPack?.turns ??
@@ -4261,6 +4265,7 @@ const shouldPreferPastStateRecall =
           )
         : (
             (opts as any)?.turnsForWriter ??
+            (opts as any)?.messages ??
             (opts as any)?.userContext?.turnsForWriter ??
             (opts as any)?.userContext?.ctxPack?.turnsForWriter ??
             (opts as any)?.userContext?.ctxPack?.turns ??
@@ -4818,6 +4823,10 @@ const systemPromptForWriter = [
           'normal_resonanceでは、基本は観測や共鳴を優先する。ただし、ユーザーが困っている・怒りが強い・限界が出ている・解決を求めている場合は、短い具体策を1つだけ出してよい',
           'normal_resonanceでは、状態観測だけに閉じず、ユーザーの奥で止まっている本音を自然に表面化する',
           'normal_resonanceでは、「〜していい」「〜しなくていい」「〜なくていい」で薄めない。ただし、ユーザーを守るための短い境界線は自然な会話語で返してよい',
+          'normal_resonanceでは、「十分です」「それで十分」「そのままでいい」「そのまま大事にしていい」「無理に広げなくていい」「急いで形にしなくていい」「説明を足さなくていい」で閉じない',
+          'normal_resonanceで短い同意・納得入力を受けた場合は、入力語そのものを評価しない。直前assistantの核心を1つ受けて、「そこが見えたなら、次に見るのは〜」のように次の方向を日常語で返す',
+          'normal_resonanceで「確かに」「なるほど」「それです」系に返す場合は、受け止めで止めず、直前の話題に接続する。例: 「そこです。待てなさの中心は、返事そのものより、曖昧なまま置かれる感じに反応しているところです」',
+          'normal_resonanceでは、「分かったことを保留する」より、「見えた核心から次に見る方向を示す」ことを優先する',
           'normal_resonanceでは、「必要なら」で逃げない。次の一手を出す場合は「次は、そのまま使える一文に整えられます」のように、自然に開く。比較・理由・具体策が必要な場面では、会話語として最小限使ってよい',
           'normal_resonanceでは、「正しいです」「合っています」「近いです」「自然です」で判定しない',
           'normal_resonanceでは、「合図」「〜に近い」「〜すると」「〜が抜ける」で説明しない',
@@ -7577,11 +7586,28 @@ if (slotDecision && typeof slotDecision === 'object') {
   const userLenTiny = userTextTrim.length <= 2;
   const seedLenTiny = seedDraftTrim.length > 0 && seedDraftTrim.length <= 40;
 
+  const userTextCompactForMicro = userTextTrim
+    .replace(/\s+/g, '')
+    .replace(/[。．.!！?？…]+$/g, '')
+    .toLowerCase();
+
+  // ✅ 「確かに！」系は、単なるmicro定型ではなく直前応答への接続反応。
+  // ここで早期returnすると「了解です。」で流れが切れるため、通常writerへ通す。
+  const isContinuationAckMicro =
+    inputKind === 'micro' &&
+    /^(たしかに|確かに|なるほど|それです|それだ|そうですね|そうです|ほんとそれ|本当それ)$/.test(
+      userTextCompactForMicro,
+    );
+
   // inputKind が 'micro' / 'greeting' を持っている場合もここで吸収
+  // ただし continuation ack は吸収しない
   const microLikeEarly =
-    inputKind === 'micro' ||
-    inputKind === 'greeting' ||
-    (userLenTiny && seedLenTiny);
+    !isContinuationAckMicro &&
+    (
+      inputKind === 'micro' ||
+      inputKind === 'greeting' ||
+      (userLenTiny && seedLenTiny)
+    );
 
   const stripInternalAndHintLines = (src: string): string => {
     return String(src ?? '')
