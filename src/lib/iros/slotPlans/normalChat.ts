@@ -205,7 +205,7 @@ function isEnd(text: string) {
 
 function isCompose(text: string) {
   const t = norm(text);
-  return /(文章|文面|例文|文を作って|書いて|まとめて)/.test(t);
+  return /(文章|文面|例文|使える文|返信文|LINE文|ライン文|送る文|送信文|返す文|返事文|文ください|文をください|文を作って|書いて|まとめて)/.test(t);
 }
 
 // ✅ 確認・ツッコミ・意味質問（会話の噛み合わせ優先）

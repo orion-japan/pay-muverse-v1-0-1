@@ -157,6 +157,12 @@ function detectInputKind(userText: string): InputKind {
     return 'review';
   }
 
+  // ✅ compose / writing task
+  // 「使える文ください」「返信文ください」などは、共鳴会話ではなく文面作成タスクとして扱う。
+  if (/(文章|文面|例文|使える文|返信文|LINE文|ライン文|送る文|送信文|返す文|返事文|文ください|文をください|文を作って|書いて|まとめて)/.test(s)) {
+    return 'task';
+  }
+
   if (
     /(実装|修正|改修|デバッグ|バグ|エラー|ログ|原因|再現|調査|確認|設計|仕様|コード|関数|ファイル|import|export|tsc|typecheck|TypeScript|Next\.js|Supabase|SQL)/i.test(
       s,
@@ -840,6 +846,78 @@ export async function buildTurnContext(
       ? (finalSituationSummary || latestUserCore || 'その他・ライフ全般')
       : rawSituationTopic
   ).slice(0, 40);
+
+  // ✅ 直前のMu提案に対する「ください」を、提案の実行として補完する
+  // 例:
+  // assistant: 必要なら次に、そのまま使える短い文だけ一緒に整えます。
+  // user: 使える文ください
+  // => 「相手に送る短い文を作る」compose/action として扱う
+  try {
+    const currentTextForPriorOffer = String(text ?? '').trim();
+
+    const historyForPriorOffer =
+      (baseMetaForTurn as any)?.extra?.ctxPack?.historyForWriter ??
+      (baseMetaForTurn as any)?.extra?.historyForWriter ??
+      (args as any)?.history ??
+      [];
+
+    const lastAssistantFromHistoryForPriorOffer = Array.isArray(historyForPriorOffer)
+      ? (() => {
+          const found = [...historyForPriorOffer]
+            .reverse()
+            .find((turn: any) => String(turn?.role ?? '').toLowerCase().trim() === 'assistant');
+
+          return (
+            (typeof (found as any)?.content === 'string' && String((found as any).content).trim()) ||
+            (typeof (found as any)?.text === 'string' && String((found as any).text).trim()) ||
+            (typeof (found as any)?.message === 'string' && String((found as any).message).trim()) ||
+            ''
+          );
+        })()
+      : '';
+
+    const lastAssistantForPriorOffer = (
+      String(latestAssistantCore ?? '').trim() ||
+      String(lastAssistantFromHistoryForPriorOffer ?? '').trim()
+    );
+
+    const userAcceptsPriorOffer =
+      /(ください|下さい|お願いします|お願い|使える文|返信文|LINE文|ライン文|送る文|送信文|返す文|返事文|例文|文ください|文をください)/.test(
+        currentTextForPriorOffer,
+      );
+
+    const assistantOfferedCompose =
+      /(そのまま使える|使える短い文|短い文|文だけ|一文|整えます|整えられます|作れます|出せます)/.test(
+        lastAssistantForPriorOffer,
+      );
+
+    const inputKindForPriorOffer = String((baseMetaForTurn as any)?.inputKind ?? '').trim();
+
+    if (inputKindForPriorOffer === 'task' && userAcceptsPriorOffer && assistantOfferedCompose) {
+      const resolvedAsk = {
+        askType: 'compose_from_prior_offer',
+        topic: '直前のMu提案に基づいて、相手に送る短い文を作る。自分を落ち着かせる保留文ではなく、相手に気持ち・要望・境界線を伝える文にする',
+        sourceUserText: currentTextForPriorOffer,
+        sourceAssistantText: lastAssistantForPriorOffer.slice(0, 220),
+      };
+
+      (baseMetaForTurn as any).extra ??= {};
+      (baseMetaForTurn as any).extra.ctxPack ??= {};
+
+      (baseMetaForTurn as any).extra.resolvedAsk = resolvedAsk;
+      (baseMetaForTurn as any).extra.ctxPack.resolvedAsk = resolvedAsk;
+      (baseMetaForTurn as any).extra.ctxPack.resolvedAskType = 'compose_from_prior_offer';
+      (baseMetaForTurn as any).extra.ctxPack.goalKind = 'action';
+      (baseMetaForTurn as any).extra.ctxPack.replyGoal = { kind: 'action' };
+      (baseMetaForTurn as any).extra.ctxPack.continuityKind = 'prior_offer_followup';
+      (baseMetaForTurn as any).extra.ctxPack.situationSummary =
+        '直前のMu提案に基づいて、相手に送る短い文を作る。自分を落ち着かせる保留文ではなく、相手に気持ち・要望・境界線を伝える文にする';
+      (baseMetaForTurn as any).extra.ctxPack.situationTopic =
+        '相手に送る短い文';
+    }
+  } catch {
+    // 補完に失敗しても通常会話は止めない
+  }
 
   return {
     isFirstTurn,

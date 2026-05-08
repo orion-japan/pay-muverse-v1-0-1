@@ -6612,13 +6612,37 @@ if (
     patternKey === 'IR_DETAIL_V1' ||
     patternKey === 'DECLARATION_RESONANCE_V1' ||
     patternKey === 'PARTNER_SIDE_RESONANCE_V1';
+  const splitSourceBlockForMaterialize = (block: unknown): string[] => {
+    const rawBlock = String(block ?? '').trim();
+    if (!rawBlock) return [];
+
+    // ✅ Markdown見出し・箇条書き・引用文は、句点で分割しない。
+    // 「- 「本文。」」を句点分割すると、閉じカッコ「」」だけが次ブロックへ飛ぶため。
+    const hasMarkdownHeading = /^#{1,6}\s+|\*\*[^*]+\*\*/m.test(rawBlock);
+    const hasBulletLine = /^\s*[-・•]\s+/m.test(rawBlock);
+    const hasQuotedBullet = /^\s*[-・•]\s*[「『]/m.test(rawBlock);
+    const hasJapaneseQuote = /[「『][\s\S]*?[」』]/u.test(rawBlock);
+    const hasUnclosedJapaneseQuote =
+      /[「『]/u.test(rawBlock) && !/[」』]/u.test(rawBlock);
+
+    if (
+      hasMarkdownHeading ||
+      hasBulletLine ||
+      hasQuotedBullet ||
+      hasJapaneseQuote ||
+      hasUnclosedJapaneseQuote
+    ) {
+      return [rawBlock];
+    }
+
+    return rawBlock
+      .split(/(?<=[。！？!?])\s*/u)
+      .map((x) => String(x ?? '').trim())
+      .filter(Boolean);
+  };
+
   const sourceUnits = shouldExpandSourceUnits
-    ? sourceBlocksRaw.flatMap((block) =>
-        String(block ?? '')
-          .split(/(?<=[。！？!?])\s*/u)
-          .map((x) => String(x ?? '').trim())
-          .filter(Boolean)
-      )
+    ? sourceBlocksRaw.flatMap((block) => splitSourceBlockForMaterialize(block))
     : sourceBlocksRaw;
   materializeSourceUnitsLog = [...sourceUnits];
 
@@ -8796,12 +8820,22 @@ const isTranscendResonanceForPattern =
     userTextForTranscendPattern,
   );
 
+const inputKindForPattern = String(inputKind ?? '').trim().toLowerCase();
+
+const isComposeRequestForPattern =
+  inputKindForPattern === 'task' &&
+  /(使える文|返信文|LINE文|ライン文|送る文|送信文|返す文|返事文|例文|文ください|文をください|文を作って|書いて|まとめて)/u.test(
+    userTextForTranscendPattern,
+  );
+
 const goalKindForPattern =
-  isTranscendResonanceForPattern
-    ? 'uncover'
-    : questionTypeForPattern === 'structure' && goalKindForPatternRaw === 'resonate'
+  isComposeRequestForPattern
+    ? 'action'
+    : isTranscendResonanceForPattern
       ? 'uncover'
-      : goalKindForPatternRaw;
+      : questionTypeForPattern === 'structure' && goalKindForPatternRaw === 'resonate'
+        ? 'uncover'
+        : goalKindForPatternRaw;
 
 const laneKeyForPattern = String(
   (ctxPackForWriter && typeof ctxPackForWriter === 'object'
@@ -8822,13 +8856,17 @@ const shouldForceStructureDetailPattern =
   );
 
 const writerPatternKey = (
-  shouldForceStructureDetailPattern
-    ? 'NORMAL_DETAIL_V1'
-    : shouldForceDecidePattern
-      ? selectedPatternKey === 'NORMAL_RESONANCE_V1'
-        ? 'NORMAL_DETAIL_V1'
+  // ✅ directTask/使える文系は、深読み detail レーンに入れない。
+  // 文面作成では、NORMAL_DETAIL_V1 の構造説明・深読み指示が強すぎるため。
+  isComposeRequestForPattern && selectedPatternKey === 'NORMAL_RESONANCE_V1'
+    ? selectedPatternKey
+    : shouldForceStructureDetailPattern
+      ? 'NORMAL_DETAIL_V1'
+      : shouldForceDecidePattern
+        ? selectedPatternKey === 'NORMAL_RESONANCE_V1'
+          ? 'NORMAL_DETAIL_V1'
+          : selectedPatternKey
         : selectedPatternKey
-      : selectedPatternKey
 ) as any;
 
 console.log(
@@ -9421,16 +9459,49 @@ const isResonanceStructureFollowup =
                     }
                   : null;
 
+              const composeRequestWriterDirectives = isComposeRequestForPattern
+                ? {
+                    ...(baseWriterDirectivesForFinal ?? {}),
+                    pattern_key: 'NORMAL_RESONANCE_V1',
+                    pattern_mode: 'compose_message',
+                    bodyStyle: {
+                      preferBlockSplit: true,
+                      minBlocks: 2,
+                      maxBlocks: 4,
+                      maxSentencesPerBlock: 2,
+                      minSentences: 2,
+                      maxSentences: 7,
+                    },
+                    writeConstraints: [
+                      ...(
+                        Array.isArray((baseWriterDirectivesForFinal as any)?.writeConstraints)
+                          ? (baseWriterDirectivesForFinal as any).writeConstraints
+                          : []
+                      ),
+                      'COMPOSE_MESSAGE: ユーザーはそのまま使える文面を求めている。状態観測や共鳴説明より、文面作成を最優先する',
+                      'COMPOSE_MESSAGE: 冒頭で長く説明しない。最初の1〜2行以内に、そのまま送れる文を必ず出す',
+                      'COMPOSE_MESSAGE: 「使える文ください」では、自分を落ち着かせる保留文だけにしない。相手に送る文として、気持ち・要望・境界線が伝わる文を優先する',
+                      'COMPOSE_MESSAGE: 保留文だけで終わらせない。「少し落ち着いてから話します」系を出す場合でも、相手へ伝える本題文を最低1つ入れる',
+                      'COMPOSE_MESSAGE: 怒りが強い文脈では、相手を責める文にせず、短く、事実・気持ち・要望を入れる',
+                      'COMPOSE_MESSAGE: 恋愛・連絡不安の文脈では、「連絡がないとつらい」「一言だけでも返してほしい」「このまま分からない状態はしんどい」のように、相手へ届く要望文を優先する',
+                      'COMPOSE_MESSAGE: 例文は引用符つきで独立行にする。余計な分析、深読み、構造説明、診断語は出さない',
+                      'COMPOSE_MESSAGE: 最後に提案を足す場合も短くする。「必要なら次に」は1文まで。メニューを増やしすぎない',
+                    ],
+                  }
+                : null;
+
               const writerDirectivesForFinalRaw = relationshipAdviceRepairWriterDirectives
                 ? relationshipAdviceRepairWriterDirectives
                 : consultAnswerWriterDirectives
                   ? consultAnswerWriterDirectives
-                  : shouldApplyDeepReadDirectives
-                  ? {
-                      ...baseWriterDirectivesForFinal,
-                      ...deepReadWriterDirectives,
-                    }
-                  : baseWriterDirectivesForFinal;
+                  : composeRequestWriterDirectives
+                    ? composeRequestWriterDirectives
+                    : shouldApplyDeepReadDirectives
+                    ? {
+                        ...baseWriterDirectivesForFinal,
+                        ...deepReadWriterDirectives,
+                      }
+                    : baseWriterDirectivesForFinal;
 
               const userStateWriterDirectivesForFinal = (() => {
                 const depth = String(depthStageForUnderstanding ?? '').trim().toUpperCase();

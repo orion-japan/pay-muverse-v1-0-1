@@ -135,7 +135,14 @@ function normalizeTargetKindOrNull(v: unknown): TargetKind | null {
   // IROS側の詳細kindを training 4分類へ寄せる
   if (s === 'clarify') return 'stabilize';
   if (s === 'narrow') return 'stabilize';
+
+  // ✅ 行動・文面作成系は、Training 4分類では expand に寄せる
   if (s === 'decide') return 'expand';
+  if (s === 'action') return 'expand';
+  if (s === 'enableaction') return 'expand';
+  if (s === 'create') return 'expand';
+  if (s === 'compose_message') return 'expand';
+  if (s === 'compose_from_prior_offer') return 'expand';
 
   if (s === 'cutoff' || s === 'cut_off' || s === 'cutoff_shift') return 'uncover';
 

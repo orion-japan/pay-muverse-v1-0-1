@@ -1060,12 +1060,20 @@ if (isNonForwardButEmpty) {
 
       const rootGoalKind =
         String(
-          mfs.targetKind ??
+          // ✅ compose/action などの今回ターンの意図は ctxPack / extra 側が新しい。
+          // root targetKind は古い resonate が残りやすいので、最後に見る。
+          mfsExtra?.ctxPack?.targetKind ??
+            mfsExtra?.ctxPack?.goalKind ??
+            mfsExtra?.ctxPack?.replyGoal?.kind ??
+            resultExtra?.ctxPack?.targetKind ??
+            resultExtra?.ctxPack?.goalKind ??
+            resultExtra?.ctxPack?.replyGoal?.kind ??
+            mfsExtra.goalKind ??
+            resultExtra.goalKind ??
+            mfs.targetKind ??
             mfs.target_kind ??
             resultMeta.targetKind ??
             resultMeta.target_kind ??
-            mfsExtra.goalKind ??
-            resultExtra.goalKind ??
             '',
         ).trim() || null;
 
