@@ -711,7 +711,56 @@ function buildWriterHintsFromMeta(meta: any): {
         .filter(Boolean)
     : [];
 
-  if (!frame && slotKeys.length === 0 && focusWriterHintLines.length === 0) {
+  const muSelfKnowledge =
+    meta?.extra?.ctxPack?.muSelfKnowledge && typeof meta.extra.ctxPack.muSelfKnowledge === 'object'
+      ? meta.extra.ctxPack.muSelfKnowledge
+      : meta?.extra?.muSelfKnowledge && typeof meta.extra.muSelfKnowledge === 'object'
+        ? meta.extra.muSelfKnowledge
+        : null;
+
+  const muSelfKnowledgeItems = Array.isArray(muSelfKnowledge?.items)
+    ? muSelfKnowledge.items
+        .map((item: any) => ({
+          title: String(item?.title ?? '').trim(),
+          intent: String(item?.intent ?? '').trim(),
+          content: String(item?.content ?? '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 220),
+        }))
+        .filter((item: any) => item.title && item.content)
+        .slice(0, 3)
+    : [];
+
+  const muSelfKnowledgeHintLines =
+    muSelfKnowledge?.enabled === true && muSelfKnowledgeItems.length > 0
+      ? [
+          '',
+          'MU_SELF_KNOWLEDGE_V1 (DO NOT OUTPUT)',
+          'rule=MuSelfナレッジは本文材料ではなく、返答方向の制御だけに使う',
+          'rule=恋愛・人間関係では、相手攻略だけで終わらせず、必要に応じてユーザー自身の反応へ日常語で戻す',
+          'rule=自己受容・MS理論・ニコイチ問題などの専門語は、ユーザーが学びや根本原因を求めた時以外は出さない',
+          'rule=深度が浅い時は、現実対応と短い一手を優先し、背景理論を説明しない',
+        ]
+      : [];
+
+  console.log(
+    '[IROS/WRITER_HINT_MU_SELF]',
+    JSON.stringify({
+      hasMuSelfKnowledge: Boolean(muSelfKnowledge),
+      enabled: muSelfKnowledge?.enabled === true,
+      itemCount: muSelfKnowledgeItems.length,
+      hintLineCount: muSelfKnowledgeHintLines.length,
+      titles: muSelfKnowledgeItems.map((x: any) => x.title).filter(Boolean),
+    }),
+  );
+
+  if (
+    !frame &&
+    slotKeys.length === 0 &&
+    focusWriterHintLines.length === 0 &&
+    muSelfKnowledgeHintLines.length === 0
+  ) {
     return { frame: null, slotKeys: [], hintText: null };
   }
 
@@ -733,6 +782,10 @@ function buildWriterHintsFromMeta(meta: any): {
   if (focusWriterHintLines.length > 0) {
     hintLines.push('');
     hintLines.push(...focusWriterHintLines);
+  }
+
+  if (muSelfKnowledgeHintLines.length > 0) {
+    hintLines.push(...muSelfKnowledgeHintLines);
   }
 
   const hintText =

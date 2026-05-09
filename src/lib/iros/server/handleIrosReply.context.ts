@@ -11,6 +11,7 @@ import { loadLatestIrDiagnosisSnapshot } from '@/lib/iros/memoryRecall';
 // ✅ FramePlan（器＋スロット）(Layer C/D)
 import { buildFramePlan, type InputKind, type IrosStateLite } from '@/lib/iros/language/frameSlots';
 import { resolveFocusResolution } from '@/lib/iros/conversation/focusResolution';
+import { resolveMuSelfKnowledge } from '@/lib/iros/knowledge/muSelfKnowledge';
 
 // ✅ 外部conversationId(string) -> DB conversation_id(uuid) 変換
 import { ensureIrosConversationUuid } from './ensureIrosConversationUuid';
@@ -909,14 +910,54 @@ export async function buildTurnContext(
       (baseMetaForTurn as any).extra.patternKey = 'NORMAL_PRACTICAL_RESONANCE_V1';
       (baseMetaForTurn as any).extra.ctxPack.patternKey = 'NORMAL_PRACTICAL_RESONANCE_V1';
       (baseMetaForTurn as any).patternKey = 'NORMAL_PRACTICAL_RESONANCE_V1';
+
+      // ✅ MuSelf Knowledge
+      // - 恋愛/人間関係の実用共鳴時に、自己受容・もうひとつの自分へ戻す背景知識を取得する。
+      // - ここでは本文生成せず、ctxPack に軽量保存するだけ。
+      try {
+        const muSelfKnowledge = await resolveMuSelfKnowledge({
+          userText: text,
+          focusResolution,
+          depthStage:
+            (baseMetaForTurn as any)?.extra?.ctxPack?.depthStage ??
+            (baseMetaForTurn as any)?.depthStage ??
+            null,
+          qCode:
+            (baseMetaForTurn as any)?.extra?.ctxPack?.qCode ??
+            (baseMetaForTurn as any)?.qCode ??
+            null,
+          limit: 3,
+        });
+
+        (baseMetaForTurn as any).extra.muSelfKnowledge = muSelfKnowledge;
+        (baseMetaForTurn as any).extra.ctxPack.muSelfKnowledge = muSelfKnowledge;
+
+        console.log(
+          '[IROS/MU_SELF_KNOWLEDGE]',
+          JSON.stringify({
+            enabled: muSelfKnowledge.enabled,
+            reason: muSelfKnowledge.reason,
+            query: muSelfKnowledge.query,
+            count: Array.isArray(muSelfKnowledge.items) ? muSelfKnowledge.items.length : 0,
+            titles: Array.isArray(muSelfKnowledge.items)
+              ? muSelfKnowledge.items.map((x: any) => x?.title).filter(Boolean)
+              : [],
+          }),
+        );
+      } catch (e) {
+        console.warn('[IROS/MU_SELF_KNOWLEDGE][FAILED]', { error: e });
+      }
     }
 
-    console.log('[IROS/FOCUS_RESOLUTION]', {
-      enabled: focusResolution.enabled,
-      domain: focusResolution.domain,
-      reason: focusResolution.reason,
-      outputShape: focusResolution.outputShape,
-    });
+    console.log(
+      '[IROS/FOCUS_RESOLUTION]',
+      JSON.stringify({
+        enabled: focusResolution.enabled,
+        domain: focusResolution.domain,
+        reason: focusResolution.reason,
+        outputShape: focusResolution.outputShape,
+      }),
+    );
   } catch (e) {
     console.warn('[IROS/FOCUS_RESOLUTION][FAILED]', { error: e });
   }

@@ -84,9 +84,9 @@ const RELATIONSHIP_PATTERNS: RegExp[] = [
 ];
 
 const CONTACT_ANXIETY_PATTERNS: RegExp[] = [
-  /連絡.*(来ない|こない|ない|ありません)/,
-  /返事.*(来ない|こない|ない|ありません)/,
-  /返信.*(来ない|こない|ない|ありません)/,
+  /連絡.*(来ない|こない|来ません|きません|ない|ありません)/,
+  /返事.*(来ない|こない|来ません|きません|ない|ありません)/,
+  /返信.*(来ない|こない|来ません|きません|ない|ありません)/,
   /既読.*(つかない|付かない|ならない)/,
   /未読/,
   /待てない/,
@@ -130,12 +130,12 @@ function buildRelationshipContactAnxietyDecision(
     : '相手の反応を断定せず、連絡が来ない時間で自分の価値まで揺れそうになっている状態を見る';
 
   const resolution = asksSmooth || mayChase
-    ? '関係を一気に動かそうとせず、送るなら一文だけに絞り、それ以上は追わない'
-    : '相手を動かす説明ではなく、自分を崩さない短い一手に絞る';
+    ? '相手を動かすために急いで送る話へ固定せず、追いかけたい気持ちの奥で何が揺れているかを見る'
+    : '相手を動かす説明ではなく、連絡がないことで自分の中の何が揺れているかを見る';
 
   const nextAction = asksSmooth || mayChase
-    ? '送るなら短い一文だけを出す。長文・連投・確認の追撃はしない'
-    : 'まず一文だけで気持ちか要望を伝える。返答がなければ追撃ではなく待つ線を決める';
+    ? '必要な時だけ問いで整理する。送信文はユーザーが明示的に求めた時だけ出す'
+    : 'すぐ送る話に固定せず、返事が欲しいのか、安心を確かめたいのかを日常語で分ける';
 
   const avoid = [
     '彼の本音を断定しない',
@@ -154,9 +154,9 @@ function buildRelationshipContactAnxietyDecision(
     `resolution=${resolution}`,
     `nextAction=${nextAction}`,
     'outputShape=simple_practical_resonance',
-    'mustStart=まず結論を短く出す',
-    'mustInclude=気持ちの受け止め / 苦しさの正体 / 今やること1つ / 必要ならそのまま送れる一文 / やらない方がいいこと',
-    'style=深く読むが、普通の言葉に翻訳する。難しい比喩で逃げない',
+    'mustStart=まず受け止めを短く出す',
+    'mustInclude=気持ちの受け止め / 苦しさの正体 / 何が揺れているか / 必要な時だけ問いの整理',
+    'style=深く読むが、普通の言葉に翻訳する。送信文や行動指示へ急がない',
     `avoid=${avoid.join(' / ')}`,
     `sourceHead=${joined.slice(0, 180)}`,
   ];
