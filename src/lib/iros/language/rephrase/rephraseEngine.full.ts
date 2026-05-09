@@ -4713,6 +4713,7 @@ const systemPromptForWriter = [
       key !== 'IR_DETAIL_V1' &&
       key !== 'NORMAL_DETAIL_V1' &&
       key !== 'NORMAL_RESONANCE_V1' &&
+      key !== 'NORMAL_PRACTICAL_RESONANCE_V1' &&
       key !== 'DECLARATION_RESONANCE_V1' &&
       key !== 'NORMAL_COMPRESSED_V1'
     ) {
@@ -4777,6 +4778,51 @@ const systemPromptForWriter = [
           '「だから」で文を始めない。必要なら「そのため」「ここでは」「今は」に言い換える',
           '断定的なまとめ表現で締めない（〜だけです等）',
         ]
+      };
+    }
+
+    if (key === 'NORMAL_PRACTICAL_RESONANCE_V1') {
+      return {
+        pattern_key: key,
+        pattern_mode: 'normal_practical_resonance',
+        pattern_block_order: 'practical_resonance',
+        block_current_state:
+          '1段落目は、まず結論を短く出す。気持ちは受け止めるが、比喩や余韻を先に置かない。ユーザーが今どう動けばいいか分かる入り方にする。',
+        block_state_action:
+          '2段落目は、今やることを1つだけ具体的に出す。恋愛・連絡不安では、必要に応じてそのまま送れる短い一文を入れる。長文・連投・確認の追撃は勧めない。',
+        block_caution:
+          '3段落目は、やらない方がいいことを短く言う。相手の本音を断定せず、ユーザーが自分を崩さないための線を日常語で示す。',
+        block_closing_line:
+          '最後は安心させすぎず、今は関係を一気に動かすより崩さない一手に絞る、という現実的な着地で閉じる。',
+        bodyStyle: {
+          preferBlockSplit: true,
+          minBlocks: 3,
+          maxBlocks: 4,
+          maxSentencesPerBlock: 3,
+          minSentences: 4,
+          maxSentences: 10,
+        },
+        writeConstraints: [
+          'normal_practical_resonance では、最初に結論を短く出す',
+          '深く読むが、普通の言葉に翻訳する',
+          '詩的な比喩・余韻・抽象語を先に出さない',
+          '「場」「位置」「反転」「線」「糸」「静かに」「立ち位置が細くなる」「届き方が細くなる」などの抽象表現で締めない',
+          '「位置」は使わず、「不安が強く出すぎない」「自分を崩さない」「重く伝わりすぎない」のように日常語へ言い換える',
+          '「細くなる」は使わず、「重く伝わりやすい」「相手が返しにくくなる」「あとで自分が苦しくなる」のように言い換える',
+          '恋愛・人間関係の不安では、今できる具体行動を1つだけ出す',
+          '必要なら、そのまま送れる短い一文を出す',
+          '送信文は長くしない。責めない。返事を急かしすぎない',
+          '長文・連投・確認の追撃は勧めない',
+          '相手の本音・愛情・未練・浮気・脈あり脈なしを断定しない',
+          '説明を増やしすぎない。結論 → 理由 → 具体行動 → 注意点の順にする',
+          '質問で終わらない',
+          '「必要なら〜できます」で逃げず、必要な一手はその場で出す',
+          '「十分」「十分です」「それで十分です」は絶対に使わない',
+          '「足ります」「これで足ります」「それで足ります」も使わない。必要なら「短い一通だけにしてください」「ここで止めてください」に言い換える',
+          '「自分を崩さない」「自分も崩れにくい」は使わない。必要なら「あとで後悔しにくい」「不安をぶつけすぎない」「相手が返しやすい形にする」に言い換える',
+          '送信例の後は「これで足ります」ではなく、「ここで止めてください」「これ以上は足さないでください」と書く',
+          '締めは「今日は、それ以上追わない形で止めるのがいちばん現実的です」のように、具体的な行動で閉じる',
+        ],
       };
     }
 
@@ -6549,6 +6595,7 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
           : preSelectedPatternKey === 'IR_DETAIL_V1' ||
               preSelectedPatternKey === 'NORMAL_DETAIL_V1' ||
               preSelectedPatternKey === 'NORMAL_RESONANCE_V1' ||
+              preSelectedPatternKey === 'NORMAL_PRACTICAL_RESONANCE_V1' ||
               preSelectedPatternKey === 'DECLARATION_RESONANCE_V1' ||
               preSelectedPatternKey === 'PARTNER_SIDE_RESONANCE_V1'
             ? preSelectedPatternKey

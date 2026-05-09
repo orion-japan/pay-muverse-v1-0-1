@@ -698,7 +698,20 @@ function buildWriterHintsFromMeta(meta: any): {
   const slotKeysFromMeta = extractSlotKeys(meta?.slotPlan);
   const slotKeys = slotKeysFromPlan.length > 0 ? slotKeysFromPlan : slotKeysFromMeta;
 
-  if (!frame && slotKeys.length === 0) {
+  const focusResolution =
+    meta?.extra?.ctxPack?.focusResolution && typeof meta.extra.ctxPack.focusResolution === 'object'
+      ? meta.extra.ctxPack.focusResolution
+      : meta?.extra?.focusResolution && typeof meta.extra.focusResolution === 'object'
+        ? meta.extra.focusResolution
+        : null;
+
+  const focusWriterHintLines = Array.isArray(focusResolution?.writerHintLines)
+    ? focusResolution.writerHintLines
+        .map((line: unknown) => String(line ?? '').trim())
+        .filter(Boolean)
+    : [];
+
+  if (!frame && slotKeys.length === 0 && focusWriterHintLines.length === 0) {
     return { frame: null, slotKeys: [], hintText: null };
   }
 
@@ -716,6 +729,11 @@ function buildWriterHintsFromMeta(meta: any): {
   const hintLines: string[] = [];
   if (frame) hintLines.push(`FRAME=${frame}（${frameGuide[frame]}）`);
   if (slotKeys.length > 0) hintLines.push(`SLOTS=${slotKeys.join(',')}`);
+
+  if (focusWriterHintLines.length > 0) {
+    hintLines.push('');
+    hintLines.push(...focusWriterHintLines);
+  }
 
   const hintText =
     `【writer hint】\n` +

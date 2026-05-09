@@ -1288,7 +1288,38 @@ try {
 
     if (lastAssistant) {
       const raw = String(lastAssistant.content ?? lastAssistant.text ?? '').trim();
-      forcedLongTermMemory = raw.replace(/\s+/g, ' ').slice(0, 220);
+
+      // ✅ LTM注入前の軽い文体サニタイズ
+      // - longTermMemoryNoteText は writer / rephrase に強く影響するため、
+      //   古い共鳴文体や禁止したい締め語をここで弱める。
+      // - 意味は大きく変えず、表現の癖だけ落とす。
+      const sanitized = raw
+        .replace(/\s+/g, ' ')
+
+        // ✅ 「〜で十分です」を単語単位で潰すと文が崩れるので、先に自然な文へ置換する
+        .replace(/重くしない一文で十分です。?/g, '重くしない一文で止めるのが現実的です。')
+        .replace(/短い一文で十分です。?/g, '短い一文で止めるのが現実的です。')
+        .replace(/一文で十分です。?/g, '一文で止めるのが現実的です。')
+        .replace(/それで十分です。?/g, 'そこで一度止めるのが現実的です。')
+        .replace(/ここ一点だけで十分。?/g, 'ここだけを見れば整理しやすいです。')
+        .replace(/くらいで十分です。?/g, 'くらいで止めるのが現実的です。')
+
+        // ✅ 単独の「十分」は最後に処理する
+        .replace(/十分です。?/g, 'そこで一度止めるのが現実的です。')
+        .replace(/十分。?/g, 'そこで一度止めるのが現実的です。')
+
+        .replace(/そのままでも、話は続けられます。?/g, 'そのままでも、会話は続けられます。')
+        .replace(/深度やメタが引っ込み、?/g, '')
+        .replace(/表面のやりとりだけが前に出ている感じです。?/g, 'いまは表面の言葉が前に出ています。')
+        .replace(/手前の言葉で十分です。?/g, 'まずは分かる言葉で返す方が扱いやすいです。')
+        .replace(/あなたの位置を崩さない/g, '不安が強く出すぎない')
+        .replace(/位置を崩さない/g, '不安が強く出すぎない')
+        .replace(/自分の位置を崩さない/g, '不安が強く出すぎない')
+        .replace(/あなたの位置まで揺れてしまう/g, '自分の価値まで揺れてしまう')
+        .replace(/自分の位置まで揺れてしまう/g, '自分の価値まで揺れてしまう')
+        .trim();
+
+      forcedLongTermMemory = sanitized.slice(0, 220);
     }
   }
 } catch (e) {
@@ -1714,15 +1745,35 @@ return NextResponse.json({
 
           const outText = typeof (n as any)?.text === 'string' ? (n as any).text : finalText;
 
+          // ✅ Mu practical final guard
+          // - writer 指示だけでは残る禁止表現を、UI/DB保存前の最終正本で保証する。
+          // - ここは表示本文だけを軽く整える。意味は変えず、古い締め癖だけ落とす。
+          const practicalSafeText = String(outText ?? '')
+            .replace(/このくらいで十分です。?/g, 'ここで止めてください。')
+            .replace(/これくらいで十分です。?/g, 'ここで止めてください。')
+            .replace(/くらいで十分です。?/g, 'くらいで止めてください。')
+            .replace(/それで十分です。?/g, 'ここで止めてください。')
+            .replace(/十分です。?/g, 'ここで止めてください。')
+            .replace(/これで足ります。?/g, 'ここで止めてください。')
+            .replace(/それで足ります。?/g, 'ここで止めてください。')
+            .replace(/で足ります。?/g, 'で止めてください。')
+            .replace(/自分を崩さないこと/g, 'あとで後悔しにくい形にすること')
+            .replace(/自分を崩さない/g, 'あとで後悔しにくい形にする')
+            .replace(/自分も崩れにくい/g, 'あとで苦しくなりにくい')
+            .replace(/自分の位置を崩さない/g, '不安をぶつけすぎない')
+            .replace(/あなたの位置を崩さない/g, '不安をぶつけすぎない')
+            .replace(/位置を崩さない/g, '不安をぶつけすぎない');
+
           console.info('[IROS/STYLE_NORM_FINAL]', {
             applied: true,
             meta: (n as any)?.meta,
             len_in: String(finalText ?? '').length,
-            len_out: String(outText ?? '').length,
+            len_out: String(practicalSafeText ?? '').length,
+            practicalGuardChanged: practicalSafeText !== outText,
           });
 
           // ✅ 正規化結果を finalText 正本へ
-          finalText = outText;
+          finalText = practicalSafeText;
 
           // ✅ 監査用
           const metaAny2: any = meta as any;

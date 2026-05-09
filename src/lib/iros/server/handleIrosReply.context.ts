@@ -10,6 +10,7 @@ import { loadLatestIrDiagnosisSnapshot } from '@/lib/iros/memoryRecall';
 
 // ✅ FramePlan（器＋スロット）(Layer C/D)
 import { buildFramePlan, type InputKind, type IrosStateLite } from '@/lib/iros/language/frameSlots';
+import { resolveFocusResolution } from '@/lib/iros/conversation/focusResolution';
 
 // ✅ 外部conversationId(string) -> DB conversation_id(uuid) 変換
 import { ensureIrosConversationUuid } from './ensureIrosConversationUuid';
@@ -862,6 +863,63 @@ export async function buildTurnContext(
       ? (finalSituationSummary || latestUserCore || 'その他・ライフ全般')
       : rawSituationTopic
   ).slice(0, 40);
+
+  // ✅ Focus & Resolution Director
+  // - 本文は生成しない
+  // - 今回どこを見るか / どう着地させるかだけを ctxPack に保存する
+  // - writer への注入は次段階で行う
+  try {
+    (baseMetaForTurn as any).extra ??= {};
+    (baseMetaForTurn as any).extra.ctxPack ??= {};
+
+    const focusResolution = resolveFocusResolution({
+      userText: text,
+      conversationLine:
+        (baseMetaForTurn as any)?.extra?.ctxPack?.conversationLine ??
+        (baseMetaForTurn as any)?.conversationLine ??
+        null,
+      situationSummary: finalSituationSummary,
+      situationTopic: finalSituationTopic,
+      goalKind:
+        (baseMetaForTurn as any)?.extra?.ctxPack?.goalKind ??
+        (baseMetaForTurn as any)?.goalKind ??
+        null,
+      flowDelta:
+        (baseMetaForTurn as any)?.extra?.ctxPack?.flow?.delta ??
+        (baseMetaForTurn as any)?.flowDelta ??
+        null,
+      returnStreak:
+        (baseMetaForTurn as any)?.extra?.ctxPack?.flow?.returnStreak ??
+        (baseMetaForTurn as any)?.returnStreak ??
+        null,
+    });
+
+    (baseMetaForTurn as any).extra.focusResolution = focusResolution;
+    (baseMetaForTurn as any).extra.ctxPack.focusResolution = focusResolution;
+
+    if (focusResolution.enabled) {
+      (baseMetaForTurn as any).extra.ctxPack.focus = focusResolution.focus;
+      (baseMetaForTurn as any).extra.ctxPack.resolution = focusResolution.resolution;
+      (baseMetaForTurn as any).extra.ctxPack.nextAction = focusResolution.nextAction;
+      (baseMetaForTurn as any).extra.ctxPack.outputShape = focusResolution.outputShape;
+
+      // ✅ FocusResolution が有効なターンは、通常共鳴パターンに戻さず、
+      //    「焦点→決着→具体行動」へ寄せる実用共鳴パターンへ渡す。
+      //    rephraseEngine.full.ts は meta.extra.patternKey を preSelectedPatternKey として読む。
+      (baseMetaForTurn as any).extra.patternKey = 'NORMAL_PRACTICAL_RESONANCE_V1';
+      (baseMetaForTurn as any).extra.ctxPack.patternKey = 'NORMAL_PRACTICAL_RESONANCE_V1';
+      (baseMetaForTurn as any).patternKey = 'NORMAL_PRACTICAL_RESONANCE_V1';
+    }
+
+    console.log('[IROS/FOCUS_RESOLUTION]', {
+      enabled: focusResolution.enabled,
+      domain: focusResolution.domain,
+      reason: focusResolution.reason,
+      outputShape: focusResolution.outputShape,
+    });
+  } catch (e) {
+    console.warn('[IROS/FOCUS_RESOLUTION][FAILED]', { error: e });
+  }
 
   // ✅ 直前のMu提案に対する「ください」を、提案の実行として補完する
   // 例:
