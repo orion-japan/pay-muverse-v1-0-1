@@ -38,7 +38,6 @@ const DICT_20: DictEntry[] = [
   { from: '輪郭だけ', to: 'まだイメージ段階' },
   { from: '紙に書くなら', to: 'ノートに書くなら' },
   { from: '一点に示す', to: '一つに絞る' },
-  { from: '固める', to: 'いったん整える' },
 
   // 操作感が透ける語
   { from: 'いま一番前に出てるのは', to: '今いちばん気になっているのは' },
@@ -60,7 +59,70 @@ const DICT_20: DictEntry[] = [
   { from: 'だけ置く', to: 'だけ書く' },
   { from: '一言だけ置く', to: '一言だけ書く' },
   { from: 'ひとことだけ置く', to: 'ひとことだけ書く' },
-  { from: '置いておく', to: 'いったん分けて扱う' },
+  { from: '置いておく', to: 'いったん分ける' },
+
+  // ✅ Mu会話で止まりやすい構造語の最終保険
+  { from: '心を固める', to: '決めつける' },
+  { from: '心を固めすぎる', to: '決めつけすぎる' },
+  { from: '固めすぎる', to: '決めつけすぎる' },
+  { from: '固める', to: '決める' },
+
+  { from: '扱うのが', to: '考えるのが' },
+  { from: '扱う方が', to: '考える方が' },
+  { from: '扱うほうが', to: '考える方が' },
+  { from: '扱う', to: '考える' },
+
+  { from: '崩れにくい', to: 'つらくなりにくい' },
+  { from: '崩れやすい', to: 'つらくなりやすい' },
+  { from: '自分を崩さない', to: 'あとで後悔しにくくする' },
+  { from: '気持ちを崩さない', to: '気持ちが苦しくなりすぎない' },
+
+  { from: '前に出ている', to: '強くなっている' },
+  { from: '前に出ています', to: '強くなっています' },
+  { from: '前に出てきている', to: '強くなっている' },
+  { from: '表に出ている', to: '強く出ている' },
+
+  { from: '連絡を重ねる', to: '何度も送る' },
+  { from: '追い打ちの連絡を重ねる', to: '続けて送る' },
+  { from: '重ねる', to: '何度も送る' },
+  { from: 'そこで止める', to: 'いったん送らない' },
+  { from: '一度そこで止める', to: 'いったん送らない' },
+
+  { from: '見るのは', to: '大事なのは' },
+  { from: '見ておくのは', to: '大事なのは' },
+  { from: '待ち方', to: '待つ間にどうするか' },
+
+  { from: '立ち位置', to: 'どう関わるか' },
+  { from: '位置', to: '立場' },
+  { from: '置き直す', to: '言い換える' },
+  { from: '見える形', to: '分かる言葉' },
+  { from: '未確定', to: 'まだ決まっていない' },
+  { from: '定まっていない', to: 'まだ決まっていない' },
+  { from: '構造として掴む', to: '分かる言葉にする' },
+  { from: '止まり方', to: '止まっている理由' },
+
+  // ✅ 恋愛相談で分析っぽく見える言い回しの最終保険
+  { from: '先に立ちやすい', to: 'つい先に気になりやすい' },
+  { from: '先に立つ', to: '先に気になる' },
+  { from: '先に立っている', to: '先に気になっている' },
+
+  { from: '見分けること', to: '分けて考えること' },
+  { from: '見分ける', to: '分けて考える' },
+
+  { from: '何を確かめたくて苦しいのか', to: '何が不安で苦しいのか' },
+  { from: '何を確かめたいのか', to: '何が不安なのか' },
+  { from: '確かめたくて苦しい', to: '不安で苦しい' },
+
+  { from: '返事が欲しいのか、安心したいのか', to: '返事が欲しいのか、このまま終わりそうで怖いのか' },
+  { from: '返事が欲しいのか、安心を確かめたいのか', to: '返事が欲しいのか、このまま終わりそうで怖いのか' },
+  { from: '安心を確かめたい', to: '不安を消したい' },
+  { from: '安心を確かめる', to: '不安を消す' },
+  { from: '安心したいのか', to: 'このまま終わりそうで怖いのか' },
+
+  { from: 'その一点で', to: 'そこが分かると' },
+  { from: 'その一点', to: 'そこ' },
+  { from: '見え方が少し変わります', to: '次に送る言葉も決めやすくなります' },
+  { from: '見え方が変わります', to: '次に送る言葉も決めやすくなります' },
 ];
 
 // ------------------------------
@@ -170,11 +232,12 @@ export function normalizeIrosStyleFinal(input: unknown, opts: NormalizeIrosStyle
   const seed = String(opts?.seed ?? '');
   const emojiKeepRate = typeof opts?.emojiKeepRate === 'number' ? opts.emojiKeepRate : 0.3;
   const maxReplacements = typeof opts?.maxReplacements === 'number' ? opts.maxReplacements : 5;
+  const effectiveMaxReplacements = Math.max(maxReplacements, 20);
 
   let text = raw;
 
-  // A) 辞書置換（20語）
-  const a = applyDictWithCap(text, DICT_20, maxReplacements);
+  // A) 辞書置換
+  const a = applyDictWithCap(text, DICT_20, effectiveMaxReplacements);
   text = a.text;
 
   // C) 絵文字制御（30% keep + 抑制ルール）
@@ -205,7 +268,8 @@ export function normalizeIrosStyleFinal(input: unknown, opts: NormalizeIrosStyle
       replaced: a.replaced,
       emojiAction,
       emojiKeepRate,
-      maxReplacements,
+      maxReplacements: effectiveMaxReplacements,
+      requestedMaxReplacements: maxReplacements,
       dictSize: DICT_20.length,
     },
   };

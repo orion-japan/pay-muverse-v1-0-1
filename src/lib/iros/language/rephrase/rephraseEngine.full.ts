@@ -2383,10 +2383,21 @@ const toRephraseBlocks = (s: string): string[] => {
 
     const parts: string[] = [];
     let buf = '';
+    let quoteDepth = 0;
 
     for (const ch of src) {
+      if (/[「『]/u.test(ch)) quoteDepth += 1;
+
       buf += ch;
-      if (/[。！？]/u.test(ch)) {
+
+      if (/[」』]/u.test(ch)) {
+        quoteDepth = Math.max(0, quoteDepth - 1);
+      }
+
+      // ✅ 日本語カギ括弧の内側では句点分割しない
+      // 例: 「連絡がなくて少し心配していました。落ち着いたら、また連絡ください。」
+      // の途中で改行されるのを防ぐ。
+      if (quoteDepth === 0 && /[。！？]/u.test(ch)) {
         const t = cleanLine(buf);
         if (t) parts.push(t);
         buf = '';
@@ -6270,12 +6281,26 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
       normalizedParagraphsForCompressed.length > 0 &&
       normalizedParagraphsForCompressed.length < 4
         ? normalizedParagraphsForCompressed
-            .flatMap((p) =>
-              String(p)
+            .flatMap((p) => {
+              const rawParagraph = String(p ?? '').trim();
+              if (!rawParagraph) return [];
+
+              // ✅ 日本語カギ括弧内の例文は、句点で分割しない。
+              // 例: 「連絡がなくて少し心配していました。落ち着いたら、また連絡ください。」
+              // ここで分割すると、表示側で 「...。 / 次文。 / 」 が別ブロックになる。
+              const hasJapaneseQuote = /[「『][\s\S]*?[」』]/u.test(rawParagraph);
+              const hasUnclosedJapaneseQuote =
+                /[「『]/u.test(rawParagraph) && !/[」』]/u.test(rawParagraph);
+
+              if (hasJapaneseQuote || hasUnclosedJapaneseQuote) {
+                return [rawParagraph];
+              }
+
+              return rawParagraph
                 .split(/(?<=[。！？!?])\s*/u)
                 .map((x) => String(x ?? '').trim())
-                .filter(Boolean)
-            )
+                .filter(Boolean);
+            })
         : [];
 
     const compressedFourBlocksFromSentences =
@@ -8900,10 +8925,24 @@ const isTranscendResonanceForPattern =
 
 const inputKindForPattern = String(inputKind ?? '').trim().toLowerCase();
 
+const resolvedAskTypeForPattern = String(
+  (ctxPackForWriter && typeof ctxPackForWriter === 'object'
+    ? (ctxPackForWriter as any)?.resolvedAsk?.askType
+    : null) ??
+    (opts as any)?.ctxPack?.resolvedAsk?.askType ??
+    (opts as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ??
+    (opts as any)?.userContext?.ctxPack?.resolvedAsk?.askType ??
+    (opts as any)?.userContext?.meta?.extra?.ctxPack?.resolvedAsk?.askType ??
+    ''
+).trim();
+
 const isComposeRequestForPattern =
-  inputKindForPattern === 'task' &&
-  /(使える文|返信文|LINE文|ライン文|送る文|送信文|返す文|返事文|例文|文ください|文をください|文を作って|書いて|まとめて)/u.test(
-    userTextForTranscendPattern,
+  resolvedAskTypeForPattern === 'compose_from_prior_offer' ||
+  (
+    inputKindForPattern === 'task' &&
+    /(使える文|返信文|LINE文|ライン文|送る文|送信文|返す文|返事文|例文|文ください|文をください|文を作って|書いて|まとめて)/u.test(
+      userTextForTranscendPattern,
+    )
   );
 
 const goalKindForPattern =
@@ -9056,6 +9095,27 @@ const resolvedAskReadingModeForWriter = String(
     ''
 ).trim();
 
+console.log(
+  '[IROS/rephraseEngine][RESOLVED_ASK_FOR_WRITER]',
+  JSON.stringify({
+    traceId: debug.traceId ?? null,
+    conversationId: debug.conversationId ?? null,
+    userCode: debug.userCode ?? null,
+    hasResolvedAskForWriter: !!resolvedAskForWriter,
+    askType: String((resolvedAskForWriter as any)?.askType ?? '').trim() || null,
+    topicHead: String((resolvedAskForWriter as any)?.topic ?? '').slice(0, 120),
+    sourceUserText: String((resolvedAskForWriter as any)?.sourceUserText ?? '').slice(0, 120),
+    sourceAssistantTextHead: String((resolvedAskForWriter as any)?.sourceAssistantText ?? '').slice(0, 160),
+    ctxPackHasResolvedAsk:
+      !!(ctxPackForWriter && typeof ctxPackForWriter === 'object' && (ctxPackForWriter as any).resolvedAsk),
+    optsCtxPackHasResolvedAsk: !!(opts as any)?.ctxPack?.resolvedAsk,
+    metaExtraCtxPackHasResolvedAsk: !!(opts as any)?.meta?.extra?.ctxPack?.resolvedAsk,
+    userContextCtxPackHasResolvedAsk: !!(opts as any)?.userContext?.ctxPack?.resolvedAsk,
+    userContextMetaExtraCtxPackHasResolvedAsk:
+      !!(opts as any)?.userContext?.meta?.extra?.ctxPack?.resolvedAsk,
+  })
+);
+
 const isPartnerSideResonance =
   String((resolvedAskForWriter as any)?.askType ?? '').trim() === 'truth_structure' &&
   resolvedAskReadingModeForWriter === 'partner_side_resonance' &&
@@ -9139,31 +9199,45 @@ const isResonanceStructureFollowup =
             bodyStyle: {
               preferBlockSplit: true,
               minBlocks: 2,
-              maxBlocks: 2,
+              maxBlocks: 3,
               maxSentencesPerBlock: 2,
               minSentences: 3,
               maxSentences: 4,
             },
+            // ✅ relationship_reflection_solve では、通常の practical block 指示を上書きする。
+            // ここを上書きしないと、NORMAL_PRACTICAL_RESONANCE_V1 側の
+            // 「何が揺れているか」「今見る選択肢」系が残って解説文に戻る。
+            block_current_state:
+              '1段落目は「返事が来ないと、不安になりますね。」くらいの短い自然文で受ける。理由説明を足しすぎない。',
+            block_state_action:
+              '2段落目は「でも、返事がないだけで彼の気持ちまで決まったわけではありません。」のように、相手の本心を決めつけない言葉にする。「何が揺れているか」は書かない。',
+            block_caution:
+              '3段落目を入れる場合は「今わかっているのは、まだ返事が来ていないことだけです。」くらいで短く閉じる。不安が相手に向かう説明や、心理分析を足さない。',
+            block_closing_line:
+              '最後は「今わかっているのは、まだ返事が来ていないことだけです。」または「彼の気持ちまで、ここで決まったわけではありません。」で自然に閉じる。「返事が欲しいのか、安心を確かめたいのか」では閉じない。',
             block_user_side_receive:
-              '普通の会話として、まず不安を受ける。「それは不安になりますね」のように自然に入る。',
+              'まず普通の相談相手として受ける。「返事が来ないと、不安になりますね。」くらいの短い自然文で入る。',
             block_user_side_boundary:
-              '相手側の本心や事実は断定しない。相手側を読みに行きすぎず、連絡が来ないことでユーザー側に何が起きているかを中心に返す。',
+              '相手の本心を読みに行かない。返事がないだけで、彼の気持ちまで決まったわけではないと、日常語で伝える。',
             block_user_side_next:
-              '最後は送信提案や距離感の助言に落とさず、今こちら側に残っている不安の状態で閉じる。',
+              '最後は分析で閉じない。「今わかっているのは、まだ返事が来ていないことだけです」くらいの、事実に戻す言葉で終える。',
             writeConstraints: [
-              'relationship_reflection_solve では、相手側の本心・事情を断定しない',
-              'relationship_reflection_solve では、送信提案・例文・行動指示を常時出さない',
-              'relationship_reflection_solve では、ユーザーが「どう送る？」「何て送る？」と聞いた時だけ送信文を出す',
-              'relationship_reflection_solve では、追う/引く/待つ/距離を取るなどの助言で締めない',
-              'relationship_reflection_solve では、連絡が来ない事実よりも、見えないまま残っている不安の状態を中心に返す',
-              'relationship_reflection_solve では、「もう気持ちが変わった」「悪いほう」など、不安を悪化させる具体例を出さない',
-              'ユーザーの不安が、相手の沈黙をどう重く見せているかを一文で含める',
-              '相手の本心や事実を断定しない。「そう映りやすい」「重く見えやすい」という温度で返す',
-              '仕事など既出文脈がある場合だけ、相手側の余裕の薄さとして自然に一度だけ触れてよい',
-              '番号・見出しは避け、自然な2〜3段落で返す',
-              '3〜4文で返す。受け止め→不安の状態→沈黙が重く見える構造までで止める',
-              '最後は、助言ではなく、今こちら側に残っている反応そのもので閉じる',
-              '「送るなら」「短く」「軽く」「一言」「元気？」「追いすぎず」「離れすぎず」「距離感」を使わない',
+              'relationship_reflection_solve は、解説文ではなく、普通の相談相手の返答にする',
+              '相手の本心・事情・愛情の有無は断定しない',
+              '返事がない＝終わり、と決めつけない方向で受ける',
+              'ユーザーの不安を分析しすぎない。「なぜ苦しいか」を説明し続けない',
+              '「沈黙が重く見える」「不安の状態」「構造」「選択肢を示す」「今見るべき」は使わない',
+              '「返事が欲しいのか、安心を確かめたいのか」で閉じない',
+              '「彼を諦めるかどうか」など、大きい判断に話を広げない',
+              '送信文・例文・具体行動は、ユーザーが明示的に求めた時だけ出す',
+              '本文は2〜3段落。全体は3〜4文までにする',
+              '各段落は1〜2文まで。長く説明しない',
+              '書いてよい内容は、①不安を受ける、②返事がないだけで彼の気持ちは決まらない、③今見えている事実、④まだ言い切れない範囲、の4つだけにする',
+              '不安の理由づけ・心理説明・内面分析を足さない',
+              '「それは自然なことです」は使わない。受ける場合は「返事を待つ側だけが、時間を長く感じてしまいます」のように、この状況に沿った短い自然文にする',
+              '「だから」「いま必要なのは」「結論」「大丈夫」「不安に引っぱられ」「分けて」「置いておく」「崩れにくい」は使わない',
+              '「待っているあいだ」「気持ちだけが先に行く」「相手を疑いたい」「ちゃんと届いている」「確かめたい気持ち」「事実と想像」は使わない',
+              '最後は固定文にしない。ただし「まだ返事が来ていない」「ここから先はまだ言い切れない」系の事実で閉じる',
             ],
           }
         : {
@@ -9539,34 +9613,69 @@ const isResonanceStructureFollowup =
 
               const composeRequestWriterDirectives = isComposeRequestForPattern
                 ? {
-                    ...(baseWriterDirectivesForFinal ?? {}),
                     pattern_key: 'NORMAL_RESONANCE_V1',
                     pattern_mode: 'compose_message',
                     bodyStyle: {
                       preferBlockSplit: true,
-                      minBlocks: 2,
-                      maxBlocks: 4,
+                      minBlocks: 1,
+                      maxBlocks: 3,
                       maxSentencesPerBlock: 2,
-                      minSentences: 2,
-                      maxSentences: 7,
+                      minSentences: 1,
+                      maxSentences: 5,
                     },
                     writeConstraints: [
-                      ...(
-                        Array.isArray((baseWriterDirectivesForFinal as any)?.writeConstraints)
-                          ? (baseWriterDirectivesForFinal as any).writeConstraints
-                          : []
-                      ),
-                      'COMPOSE_MESSAGE: ユーザーはそのまま使える文面を求めている。状態観測や共鳴説明より、文面作成を最優先する',
-                      'COMPOSE_MESSAGE: 冒頭で長く説明しない。最初の1〜2行以内に、そのまま送れる文を必ず出す',
-                      'COMPOSE_MESSAGE: 「使える文ください」では、自分を落ち着かせる保留文だけにしない。相手に送る文として、気持ち・要望・境界線が伝わる文を優先する',
-                      'COMPOSE_MESSAGE: 保留文だけで終わらせない。「少し落ち着いてから話します」系を出す場合でも、相手へ伝える本題文を最低1つ入れる',
-                      'COMPOSE_MESSAGE: 怒りが強い文脈では、相手を責める文にせず、短く、事実・気持ち・要望を入れる',
-                      'COMPOSE_MESSAGE: 恋愛・連絡不安の文脈では、「連絡がないとつらい」「一言だけでも返してほしい」「このまま分からない状態はしんどい」のように、相手へ届く要望文を優先する',
-                      'COMPOSE_MESSAGE: 例文は引用符つきで独立行にする。余計な分析、深読み、構造説明、診断語は出さない',
-                      'COMPOSE_MESSAGE: 最後に提案を足す場合も短くする。「必要なら次に」は1文まで。メニューを増やしすぎない',
+                      ...(resolvedAskTypeForPattern === 'compose_from_prior_offer'
+                        ? [
+                            'COMPOSE_FROM_PRIOR_OFFER: ユーザー発話そのものを送信文にしない',
+                            'COMPOSE_FROM_PRIOR_OFFER: 1文目は「彼に送るなら、これです。」のように短く答える',
+                            'COMPOSE_FROM_PRIOR_OFFER: 連絡が来ない恋愛相談では「連絡がなくて少し心配していました。落ち着いたら、また連絡ください。」を優先する',
+                          ]
+                        : []),
+                      'COMPOSE_MESSAGE_LIGHT: 返答は、答え・例文・一言だけにする',
+                      'COMPOSE_MESSAGE_LIGHT: 状態説明、理由説明、診断語、抽象まとめを足さない',
+                      'COMPOSE_MESSAGE_LIGHT: 「これは〜ための文です」「いま必要なのは」「必要なら」「ちょうどいい」を使わない',
+                      'COMPOSE_MESSAGE_LIGHT: 最後は「送るなら一度だけで大丈夫です。」のように短く閉じる',
                     ],
                   }
                 : null;
+
+              const referenceClarificationWriterDirectives =
+                String((resolvedAskForWriter as any)?.askType ?? '').trim() === 'reference_clarification'
+                  ? {
+                      ...(baseWriterDirectivesForFinal ?? {}),
+                      pattern_key: 'NORMAL_RESONANCE_V1',
+                      pattern_mode: 'reference_clarification',
+                      bodyStyle: {
+                        preferBlockSplit: true,
+                        minBlocks: 2,
+                        maxBlocks: 4,
+                        maxSentencesPerBlock: 2,
+                        minSentences: 3,
+                        maxSentences: 7,
+                      },
+                      writeConstraints: [
+                        ...(
+                          Array.isArray((baseWriterDirectivesForFinal as any)?.writeConstraints)
+                            ? (baseWriterDirectivesForFinal as any).writeConstraints
+                            : []
+                        ),
+                        'REFERENCE_CLARIFICATION: ユーザー発話そのものを説明しない',
+                        'REFERENCE_CLARIFICATION: 「それはどういう意味ですか？」という質問文の意味を説明しない',
+                        'REFERENCE_CLARIFICATION: resolvedAsk.sourceAssistantText を説明対象にする',
+                        'REFERENCE_CLARIFICATION: 直前assistant発話の中の抽象表現・比喩・提案・判断語を、現在の相談文脈に戻して説明する',
+                        'REFERENCE_CLARIFICATION: 1文目は「さっきの〇〇という意味ですね」または「ここで言った〇〇は、〜という意味です」の形で始める',
+                        'REFERENCE_CLARIFICATION: 「表の言葉ではなく奥の本当の意図」など、質問文そのものへの意図読みは禁止',
+                        'REFERENCE_CLARIFICATION: 恋愛・人間関係では、相手の事実や本心を断定しない',
+                        'REFERENCE_CLARIFICATION: 必要なら、ユーザーが使える短い言い換え・伝え方を1つだけ出す',
+                      ],
+                      block_reference_target:
+                        `直前assistant発話から、ユーザーが指していそうな抽象表現を特定する。説明対象: ${String((resolvedAskForWriter as any)?.sourceAssistantText ?? '').slice(0, 500)}`,
+                      block_reference_explain:
+                        'その表現の意味を、辞書説明ではなく現在の相談文脈に戻して日常語で説明する。',
+                      block_reference_example:
+                        '必要なら、相手に伝える短い言い方・境界の出し方を1つだけ添える。',
+                    }
+                  : null;
 
               const writerDirectivesForFinalRaw = relationshipAdviceRepairWriterDirectives
                 ? relationshipAdviceRepairWriterDirectives
@@ -9574,12 +9683,14 @@ const isResonanceStructureFollowup =
                   ? consultAnswerWriterDirectives
                   : composeRequestWriterDirectives
                     ? composeRequestWriterDirectives
-                    : shouldApplyDeepReadDirectives
-                    ? {
-                        ...baseWriterDirectivesForFinal,
-                        ...deepReadWriterDirectives,
-                      }
-                    : baseWriterDirectivesForFinal;
+                    : referenceClarificationWriterDirectives
+                      ? referenceClarificationWriterDirectives
+                      : shouldApplyDeepReadDirectives
+                      ? {
+                          ...baseWriterDirectivesForFinal,
+                          ...deepReadWriterDirectives,
+                        }
+                      : baseWriterDirectivesForFinal;
 
               const userStateWriterDirectivesForFinal = (() => {
                 const depth = String(depthStageForUnderstanding ?? '').trim().toUpperCase();

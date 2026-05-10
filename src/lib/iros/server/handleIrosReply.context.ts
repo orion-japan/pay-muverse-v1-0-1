@@ -962,6 +962,87 @@ export async function buildTurnContext(
     console.warn('[IROS/FOCUS_RESOLUTION][FAILED]', { error: e });
   }
 
+  // ✅ 直前Mu発話への参照質問を、通常会話の「意味補足」として補完する
+  // 例:
+  // assistant: 黙って飲み込むより、短く境界を置くほうがいいです。
+  // user: それはどういう意味ですか？
+  // => ユーザー発話そのものを診断せず、直前Mu発話の抽象表現を現在文脈に戻して説明する
+  try {
+    const currentTextForReference = String(text ?? '').trim();
+
+    const historyForReference =
+      (baseMetaForTurn as any)?.extra?.ctxPack?.historyForWriter ??
+      (baseMetaForTurn as any)?.extra?.historyForWriter ??
+      (args as any)?.history ??
+      [];
+
+    const lastAssistantFromHistoryForReference = Array.isArray(historyForReference)
+      ? (() => {
+          const found = [...historyForReference]
+            .reverse()
+            .find((turn: any) => String(turn?.role ?? '').toLowerCase().trim() === 'assistant');
+
+          return (
+            (typeof (found as any)?.content === 'string' && String((found as any).content).trim()) ||
+            (typeof (found as any)?.text === 'string' && String((found as any).text).trim()) ||
+            (typeof (found as any)?.message === 'string' && String((found as any).message).trim()) ||
+            ''
+          );
+        })()
+      : '';
+
+    const lastAssistantForReference = (
+      String(lastAssistantFromHistoryForReference ?? '').trim() ||
+      String(latestAssistantCore ?? '').trim()
+    );
+
+    const isReferenceMeaningQuestion =
+      /(それ|その|その言葉|その意味|それって|それは|今の|さっきの|先ほどの|この意味)/.test(
+        currentTextForReference,
+      ) &&
+      /(どういう意味|どういうこと|何を指して|なにを指して|意味ですか|意味は|つまり|要するに|って何|とは)/.test(
+        currentTextForReference,
+      );
+
+    if (isReferenceMeaningQuestion && lastAssistantForReference) {
+      const resolvedAsk = {
+        askType: 'reference_clarification',
+        topic:
+          '直前のMu発話に含まれる抽象表現・比喩・提案の意味を、現在の相談文脈に戻して説明する。ユーザー発話そのものを診断しない。',
+        sourceUserText: currentTextForReference,
+        sourceAssistantText: lastAssistantForReference.slice(0, 500),
+      };
+
+      (baseMetaForTurn as any).extra ??= {};
+      (baseMetaForTurn as any).extra.ctxPack ??= {};
+
+      (baseMetaForTurn as any).extra.referenceClarification = true;
+      (baseMetaForTurn as any).extra.resolvedAsk = resolvedAsk;
+
+      (baseMetaForTurn as any).extra.ctxPack.referenceClarification = true;
+      (baseMetaForTurn as any).extra.ctxPack.resolvedAsk = resolvedAsk;
+      (baseMetaForTurn as any).extra.ctxPack.resolvedAskType = 'reference_clarification';
+      (baseMetaForTurn as any).extra.ctxPack.goalKind = 'clarify';
+      (baseMetaForTurn as any).extra.ctxPack.replyGoal = { kind: 'clarify' };
+      (baseMetaForTurn as any).extra.ctxPack.continuityKind = 'reference_clarification';
+      (baseMetaForTurn as any).extra.ctxPack.situationSummary =
+        '直前のMu発話の意味補足。ユーザー発話そのものではなく、直前Mu発話の抽象表現を説明する。';
+      (baseMetaForTurn as any).extra.ctxPack.situationTopic =
+        '直前Mu発話の意味補足';
+
+      console.log(
+        '[IROS/REFERENCE_CLARIFICATION]',
+        JSON.stringify({
+          enabled: true,
+          sourceUserText: currentTextForReference.slice(0, 120),
+          sourceAssistantText: lastAssistantForReference.slice(0, 160),
+        }),
+      );
+    }
+  } catch {
+    // 補完に失敗しても通常会話は止めない
+  }
+
   // ✅ 直前のMu提案に対する「ください」を、提案の実行として補完する
   // 例:
   // assistant: 必要なら次に、そのまま使える短い文だけ一緒に整えます。
@@ -1001,14 +1082,25 @@ export async function buildTurnContext(
         currentTextForPriorOffer,
       );
 
+    const userAsksPriorOfferReference =
+      /(それを送る|それ送る|送るのですか|送ればいい|送っていい|送るんですか|おくるんですか|その言葉|その一文|何をすすめ|なにをすすめ|何を進め|なにを進め|どれを送る|どれをおくる|何を送る|なにを送る|何をおくる|なにをおくる|どの言葉|どの文|どの一文)/.test(
+        currentTextForPriorOffer,
+      );
+
     const assistantOfferedCompose =
-      /(そのまま使える|使える短い文|短い文|文だけ|一文|整えます|整えられます|作れます|出せます)/.test(
+      /(そのまま使える|使える短い文|短い文|文だけ|一文|整えます|整えられます|作れます|出せます|送る|返事|返信|連絡|言葉|例文|文面|提案|すすめる|進める)/.test(
         lastAssistantForPriorOffer,
       );
 
     const inputKindForPriorOffer = String((baseMetaForTurn as any)?.inputKind ?? '').trim();
 
-    if (inputKindForPriorOffer === 'task' && userAcceptsPriorOffer && assistantOfferedCompose) {
+    if (
+      assistantOfferedCompose &&
+      (
+        (inputKindForPriorOffer === 'task' && userAcceptsPriorOffer) ||
+        userAsksPriorOfferReference
+      )
+    ) {
       const resolvedAsk = {
         askType: 'compose_from_prior_offer',
         topic: '直前のMu提案に基づいて、相手に送る短い文を作る。自分を落ち着かせる保留文ではなく、相手に気持ち・要望・境界線を伝える文にする',

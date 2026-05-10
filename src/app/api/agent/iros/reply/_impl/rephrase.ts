@@ -1379,6 +1379,57 @@ try {
       shiftTextForGuard.includes('"kind":"stabilize_shift"')
     );
 
+  // ✅ relationship_support では、過去 assistant 本文を writer に戻さない。
+  // 目的:
+  // - 直前のMu返答が長い解説文だった場合、historyForWriter 経由で同じ文体を再学習してしまう。
+  // - 恋愛の連絡不安では、現在のユーザー発話 + focusResolution + writerDirectives を正本にする。
+  const relationshipAskTypeForHfw = normText(
+    (meta as any)?.extra?.resolvedAsk?.askType ??
+      (meta as any)?.extra?.ctxPack?.resolvedAsk?.askType ??
+      (extraMerged as any)?.resolvedAsk?.askType ??
+      (extraMerged as any)?.ctxPack?.resolvedAsk?.askType ??
+      (userContext as any)?.resolvedAsk?.askType ??
+      (userContext as any)?.ctxPack?.resolvedAsk?.askType ??
+      (ctxPack as any)?.resolvedAsk?.askType ??
+      ''
+  );
+
+  const relationshipDomainForHfw = normText(
+    (meta as any)?.extra?.focusResolution?.domain ??
+      (meta as any)?.extra?.ctxPack?.focusResolution?.domain ??
+      (extraMerged as any)?.focusResolution?.domain ??
+      (extraMerged as any)?.ctxPack?.focusResolution?.domain ??
+      (userContext as any)?.focusResolution?.domain ??
+      (userContext as any)?.ctxPack?.focusResolution?.domain ??
+      (ctxPack as any)?.focusResolution?.domain ??
+      ''
+  );
+
+  const isRelationshipSupportNow =
+    relationshipAskTypeForHfw === 'relationship_support' ||
+    relationshipDomainForHfw === 'relationship_contact_anxiety';
+
+  if (isRelationshipSupportNow) {
+    // ✅ 恋愛・連絡不安では、古い助言文体の longTermMemoryNoteText を writer に戻さない。
+    // LTMに「追いかけない」「何度も送らない」「一点だけ」などが入ると、
+    // 返答の中盤以降が説明・説教・助言文に戻るため、現在ターンの
+    // focusResolution / writerDirectives / userText を正本にする。
+    delete (userContext as any).longTermMemoryNoteText;
+
+    if ((userContext as any).ctxPack && typeof (userContext as any).ctxPack === 'object') {
+      delete (userContext as any).ctxPack.longTermMemoryNoteText;
+    }
+
+    console.log('[IROS/_impl/rephrase.ts][RELATIONSHIP_DROP_LTM]', {
+      conversationId,
+      userCode,
+      traceId: traceId ?? null,
+      askType: relationshipAskTypeForHfw || null,
+      domain: relationshipDomainForHfw || null,
+      dropped: true,
+    });
+  }
+
   console.log('[IROS/_impl/rephrase.ts][HFW_GUARD_INPUT]', {
     conversationId,
     userCode,
@@ -1391,6 +1442,9 @@ try {
     curHfw_len: Array.isArray(curHfw) ? curHfw.length : 0,
     hfwEffective_isArray: Array.isArray(hfwEffective),
     hfwEffective_len: Array.isArray(hfwEffective) ? hfwEffective.length : 0,
+    isRelationshipSupportNow,
+    relationshipAskTypeForHfw: relationshipAskTypeForHfw || null,
+    relationshipDomainForHfw: relationshipDomainForHfw || null,
     userContext_ctxPack_hasHistoryForWriter: Array.isArray((userContext as any)?.ctxPack?.historyForWriter),
     userContext_ctxPack_historyForWriter_len: Array.isArray((userContext as any)?.ctxPack?.historyForWriter)
       ? (userContext as any).ctxPack.historyForWriter.length
@@ -1557,6 +1611,27 @@ try {
       .map(normalizeTurnLite)
       .filter((v): v is { role: 'assistant' | 'user'; content: string } => Boolean(v));
 
+    if (isRelationshipSupportNow && out.length > 0) {
+      const before = out;
+
+      // ✅ 恋愛相談では、過去 assistant の説明文体を再注入しない。
+      // user 発話だけを残し、現在ターンの focusResolution / writerDirectives を優先する。
+      out = before.filter((t) => t.role === 'user').slice(-3);
+
+      console.log('[IROS/_impl/rephrase.ts][HFW_RELATIONSHIP_DROP_ASSISTANT]', {
+        conversationId,
+        userCode,
+        traceId: traceId ?? null,
+        askType: relationshipAskTypeForHfw || null,
+        domain: relationshipDomainForHfw || null,
+        beforeLen: before.length,
+        afterLen: out.length,
+        beforeRoles: before.map((t) => t.role),
+        afterRoles: out.map((t) => t.role),
+        droppedAssistant: before.some((t) => t.role === 'assistant'),
+      });
+    }
+
     console.log('[IROS/_impl/rephrase.ts][HFW_AFTER_NORMALIZE]', {
       conversationId,
       userCode,
@@ -1662,7 +1737,41 @@ try {
   // 3) historyForWriter の扱い
   // - capability_reask / clarify / stabilize_shift は前トピックHFWを使わない
   // - topic_recall / structure_map は normalize + trim を通す
-  if (isCapabilityReaskNow) {
+  if (isRelationshipSupportNow) {
+    const src: any[] =
+      Array.isArray(hfwEffective) && hfwEffective.length > 0
+        ? hfwEffective
+        : Array.isArray(curHfw) && curHfw.length > 0
+          ? curHfw
+          : Array.isArray(turnsRaw) && turnsRaw.length > 0
+            ? turnsRaw
+            : [];
+
+    const hfwForWriter = src.length > 0
+      ? buildHfwForWriter(src)
+      : [];
+
+    if (hfwForWriter.length > 0) {
+      (userContext.ctxPack as any).historyForWriter = hfwForWriter;
+      (userContext as any).turnsForWriter = hfwForWriter;
+    } else {
+      delete (userContext.ctxPack as any).historyForWriter;
+      delete (userContext as any).turnsForWriter;
+    }
+
+    console.log('[IROS/_impl/rephrase.ts][HFW_RELATIONSHIP_FORCE_USER_ONLY_ASSIGN]', {
+      conversationId,
+      userCode,
+      traceId: traceId ?? null,
+      srcLen: src.length,
+      assignedLen: hfwForWriter.length,
+      assignedRoles: hfwForWriter.map((t) => t.role),
+      assignedPreview: hfwForWriter.map((t) => ({
+        role: t.role,
+        contentHead: t.content.slice(0, 80),
+      })),
+    });
+  } else if (isCapabilityReaskNow) {
     delete (userContext.ctxPack as any).historyForWriter;
     delete (userContext as any).turnsForWriter;
   } else if (isClarifyMeaningNow || isStabilizeShiftNow) {

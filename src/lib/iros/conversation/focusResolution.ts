@@ -126,16 +126,16 @@ function buildRelationshipContactAnxietyDecision(
     );
 
   const focus = mayChase
-    ? '連絡が来ない事実そのものではなく、不安を止めたくて追いかけそうになっている状態を見る'
-    : '相手の反応を断定せず、連絡が来ない時間で自分の価値まで揺れそうになっている状態を見る';
+    ? '返事が来なくて不安になっている。何度も送りたくなっても、今は彼の気持ちまで決めつけない。'
+    : '返事が来なくて不安になっている。今は、返事がないだけで彼の気持ちまで決めつけない。';
 
   const resolution = asksSmooth || mayChase
-    ? '相手を動かすために急いで送る話へ固定せず、追いかけたい気持ちの奥で何が揺れているかを見る'
-    : '相手を動かす説明ではなく、連絡がないことで自分の中の何が揺れているかを見る';
+    ? '急いで相手を動かす話にしない。まず「まだ返事待ち」として受ける。'
+    : '相手の本心を読みに行かない。まず「まだ返事待ち」として受ける。';
 
   const nextAction = asksSmooth || mayChase
-    ? '必要な時だけ問いで整理する。送信文はユーザーが明示的に求めた時だけ出す'
-    : 'すぐ送る話に固定せず、返事が欲しいのか、安心を確かめたいのかを日常語で分ける';
+    ? '送る文は、ユーザーが明示的に求めた時だけ出す。'
+    : '今わかっているのは、まだ返事が来ていないことだけ、という言葉で終える。';
 
   const avoid = [
     '彼の本音を断定しない',
@@ -145,6 +145,8 @@ function buildRelationshipContactAnxietyDecision(
     '場・位置・反転・線などの構造語だけで説明しない',
     '抽象的な共鳴語だけで終わらない',
     '質問で終わらない',
+    '返事が欲しいのか、安心を確かめたいのか、で閉じない',
+    '何が揺れているかを見る、状態を見る、分けて見る、を使わない',
   ];
 
   const writerHintLines = [
@@ -154,9 +156,9 @@ function buildRelationshipContactAnxietyDecision(
     `resolution=${resolution}`,
     `nextAction=${nextAction}`,
     'outputShape=simple_practical_resonance',
-    'mustStart=まず受け止めを短く出す',
-    'mustInclude=気持ちの受け止め / 苦しさの正体 / 何が揺れているか / 必要な時だけ問いの整理',
-    'style=深く読むが、普通の言葉に翻訳する。送信文や行動指示へ急がない',
+    'mustStart=返事が来ないと不安になりますね、のように短く受ける',
+    'mustInclude=返事がないだけで彼の気持ちまで決めつけなくていい / まだ返事待ちとして受ける',
+    'style=解説文にしない。普通の相談相手の言葉で短く返す。送信文や行動指示へ急がない',
     `avoid=${avoid.join(' / ')}`,
     `sourceHead=${joined.slice(0, 180)}`,
   ];

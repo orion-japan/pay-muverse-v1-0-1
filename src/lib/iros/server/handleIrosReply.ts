@@ -9024,8 +9024,45 @@ try {
               ? 'concretize'
               : null;
 
+        // ✅ reference_clarification 救済
+        // context側で extra.resolvedAsk / extra.ctxPack.resolvedAsk に入った参照質問情報が、
+        // rephraseBridge到達時に ctxPack から落ちているケースをここで復元する。
+        const resolvedAskForRephraseCtx =
+          baseCtx?.resolvedAsk ??
+          (out.metaForSave as any)?.extra?.resolvedAsk ??
+          null;
+
+        const resolvedAskTypeForRephraseCtx =
+          String(baseCtx?.resolvedAskType ?? '').trim() ||
+          String((resolvedAskForRephraseCtx as any)?.askType ?? '').trim() ||
+          String((out.metaForSave as any)?.extra?.resolvedAskType ?? '').trim();
+
+        const referenceClarificationForRephraseCtx =
+          baseCtx?.referenceClarification === true ||
+          (out.metaForSave as any)?.extra?.referenceClarification === true ||
+          resolvedAskTypeForRephraseCtx === 'reference_clarification';
+
         return {
           ...baseCtx,
+
+          ...(resolvedAskForRephraseCtx
+            ? {
+                resolvedAsk: resolvedAskForRephraseCtx,
+              }
+            : {}),
+          ...(resolvedAskTypeForRephraseCtx
+            ? {
+                resolvedAskType: resolvedAskTypeForRephraseCtx,
+              }
+            : {}),
+          ...(referenceClarificationForRephraseCtx
+            ? {
+                referenceClarification: true,
+                continuityKind: 'reference_clarification',
+                goalKind: 'clarify',
+                replyGoal: { kind: 'clarify' },
+              }
+            : {}),
 
           selfAcceptance: selfAcceptanceForRephraseSlots,
           self_acceptance: selfAcceptanceForRephraseSlots,
