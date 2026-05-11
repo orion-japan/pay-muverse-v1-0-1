@@ -978,6 +978,97 @@ const prevActive =
   }
 
   // ----------------------------------------------------------------
+  // I.5) Orchestrator → Spin bridge
+  // ----------------------------------------------------------------
+  // computeGoalAndPriority は IT / IntentBridge より前に走るため、
+  // 後半で確定した tLayerHint / itTriggered / T_CONCRETIZE を
+  // spinLoop / spinStep / rotationState へ戻す。
+  {
+    const laneKey =
+      String(
+        (meta as any)?.extra?.intentBridge?.laneKey ??
+          (meta as any)?.intentBridge?.laneKey ??
+          (meta as any)?.ctxPack?.intentBridge?.laneKey ??
+          '',
+      ).trim() || null;
+
+    const tActive =
+      (meta as any)?.itTriggered === true ||
+      (meta as any)?.it_triggered === true ||
+      (meta as any)?.tLayerModeActive === true ||
+      (meta as any)?.t_layer_mode_active === true ||
+      typeof (meta as any)?.tLayerHint === 'string' ||
+      typeof (meta as any)?.t_layer_hint === 'string';
+
+    const isTConcretize = laneKey === 'T_CONCRETIZE';
+
+    const currentSpinLoop =
+      ((meta as any)?.spinLoop === 'TCF' || (meta as any)?.spinLoop === 'SRI'
+        ? (meta as any).spinLoop
+        : null) ??
+      ((meta as any)?.rotationState?.spinLoop === 'TCF' ||
+      (meta as any)?.rotationState?.spinLoop === 'SRI'
+        ? (meta as any).rotationState.spinLoop
+        : null) ??
+      lastSpinLoop ??
+      'SRI';
+
+    const currentSpinStep =
+      typeof (meta as any)?.spinStep === 'number'
+        ? Math.max(0, Math.min(2, Math.trunc((meta as any).spinStep)))
+        : null;
+
+    const shouldEnterTcf = tActive || isTConcretize;
+
+    if (shouldEnterTcf) {
+      const nextSpinStep = isTConcretize
+        ? 1
+        : currentSpinLoop === 'TCF' && currentSpinStep !== null
+          ? currentSpinStep
+          : 0;
+
+      (meta as any).spinLoop = 'TCF';
+      (meta as any).spinStep = nextSpinStep;
+      (meta as any).descentGate = 'accepted';
+
+      (meta as any).rotationState = {
+        ...(((meta as any).rotationState && typeof (meta as any).rotationState === 'object')
+          ? (meta as any).rotationState
+          : {}),
+        spinLoop: 'TCF',
+        spinStep: nextSpinStep,
+        descentGate: 'accepted',
+        depth: (meta as any)?.depth ?? (meta as any)?.depthStage ?? null,
+        reason: isTConcretize
+          ? 'orchestrator_spin_bridge:T_CONCRETIZE -> TCF/C'
+          : 'orchestrator_spin_bridge:T_ACTIVE -> TCF/T',
+      };
+    } else if (currentSpinLoop === 'SRI') {
+      const depthNow = String((meta as any)?.depth ?? (meta as any)?.depthStage ?? '').trim().toUpperCase();
+      const head = depthNow.charAt(0);
+
+      const sriStep =
+        head === 'R' ? 1 :
+        head === 'I' ? 2 :
+        0;
+
+      (meta as any).spinLoop = 'SRI';
+      (meta as any).spinStep = sriStep;
+
+      (meta as any).rotationState = {
+        ...(((meta as any).rotationState && typeof (meta as any).rotationState === 'object')
+          ? (meta as any).rotationState
+          : {}),
+        spinLoop: 'SRI',
+        spinStep: sriStep,
+        descentGate: (meta as any)?.descentGate ?? (meta as any)?.rotationState?.descentGate ?? 'closed',
+        depth: (meta as any)?.depth ?? (meta as any)?.depthStage ?? null,
+        reason: `orchestrator_spin_bridge:SRI/${head || 'S'}`,
+      };
+    }
+  }
+
+  // ----------------------------------------------------------------
   // J) DescentGate + Frame + Slots（7.5）
   // ----------------------------------------------------------------
   {
@@ -995,6 +1086,39 @@ const prevActive =
     });
 
     meta = r.meta;
+
+    // ----------------------------------------------------------------
+    // J.1) Post-container Spin bridge
+    // ----------------------------------------------------------------
+    // applyContainerDecision 後に slotPlan / frameSelected が確定するため、
+    // T_CONCRETIZE が slotPlan 側で出た場合は、ここで spin へ戻す。
+    {
+      const slotPlanRaw = (meta as any)?.slotPlan;
+      const slotPlanText = Array.isArray(slotPlanRaw)
+        ? slotPlanRaw
+            .map((s: any) => String(s?.text ?? s?.key ?? ''))
+            .join('\n')
+        : String(slotPlanRaw ?? '');
+
+      const hasTConcretizeSlot = slotPlanText.includes('T_CONCRETIZE');
+
+      if (hasTConcretizeSlot) {
+        (meta as any).spinLoop = 'TCF';
+        (meta as any).spinStep = 1;
+        (meta as any).descentGate = 'accepted';
+
+        (meta as any).rotationState = {
+          ...(((meta as any).rotationState && typeof (meta as any).rotationState === 'object')
+            ? (meta as any).rotationState
+            : {}),
+          spinLoop: 'TCF',
+          spinStep: 1,
+          descentGate: 'accepted',
+          depth: (meta as any)?.depth ?? (meta as any)?.depthStage ?? null,
+          reason: 'post_container_spin_bridge:T_CONCRETIZE -> TCF/C',
+        };
+      }
+    }
 
     // =========================================================
     // ✅ T3 Anchor Entry（証拠ベースでのみ開く）

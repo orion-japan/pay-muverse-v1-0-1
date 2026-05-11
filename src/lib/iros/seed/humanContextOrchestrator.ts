@@ -97,6 +97,69 @@ function axisFromSpin(spinLoop: string | null | undefined, spinStep: number | nu
   return null;
 }
 
+function spinAxisOrder(spinLoop: string | null | undefined): HumanReplyAxis[] | null {
+  const loop = norm(spinLoop).toUpperCase();
+
+  if (loop === 'SRI') return ['S', 'R', 'I'];
+  if (loop === 'TCF') return ['T', 'C', 'F'];
+
+  return null;
+}
+
+function nextAxisFromSpin(spinLoop: string | null | undefined, spinStep: number | null | undefined): HumanReplyAxis | null {
+  const order = spinAxisOrder(spinLoop);
+  const step = typeof spinStep === 'number' && Number.isFinite(spinStep) ? spinStep : null;
+
+  if (!order || step == null) return null;
+
+  const currentIndex = Math.max(0, Math.min(2, Math.trunc(step)));
+  const nextIndex = (currentIndex + 1) % order.length;
+
+  return order[nextIndex] ?? null;
+}
+
+function buildSpinProgressMeaning(args: {
+  spinLoop?: string | null;
+  leadAxis: HumanReplyAxis | null;
+  nextAxis: HumanReplyAxis | null;
+}): string | null {
+  const loop = norm(args.spinLoop).toUpperCase();
+  const lead = args.leadAxis;
+  const next = args.nextAxis;
+
+  if (!lead || !next) return null;
+
+  if (loop === 'SRI') {
+    if (lead === 'S' && next === 'R') {
+      return 'いまは本人の現在地を受け取り、次に関係・場との響きへ進める。';
+    }
+
+    if (lead === 'R' && next === 'I') {
+      return 'いまは関係・場との響きを受け取り、次にその奥の意図へ進める。';
+    }
+
+    if (lead === 'I' && next === 'S') {
+      return 'いまは意図を受け取り、確定へ飛ばさず、必要なら現在地へ戻して整える。';
+    }
+  }
+
+  if (loop === 'TCF') {
+    if (lead === 'T' && next === 'C') {
+      return 'いまは引き受けるものを確認し、次に形へ落とす。';
+    }
+
+    if (lead === 'C' && next === 'F') {
+      return 'いまは形にする段階で、次に流れ・一手へ進める。';
+    }
+
+    if (lead === 'F' && next === 'T') {
+      return 'いまは流れ・一手を整え、必要なら引き受ける核へ戻す。';
+    }
+  }
+
+  return null;
+}
+
 function detectQuestionAxis(userText: string, questionType: string | null | undefined): HumanReplyAxis | null {
   const qt = norm(questionType).toLowerCase();
   const t = compact(userText);
@@ -229,15 +292,38 @@ export function buildHumanContextOrchestration(
   const flowAxis = axisFromFlow(input.currentFlow);
   const depthAxis = axisFromDepthStage(input.depthStage);
   const spinAxis = axisFromSpin(input.spinLoop, input.spinStep);
+  const spinOrder = spinAxisOrder(input.spinLoop);
+  const spinNextAxis = nextAxisFromSpin(input.spinLoop, input.spinStep);
+  const spinProgressMeaning = buildSpinProgressMeaning({
+    spinLoop: input.spinLoop,
+    leadAxis: spinAxis,
+    nextAxis: spinNextAxis,
+  });
 
-  const replyAxisPrimary =
+  const replyAxisBase =
     questionAxis ??
     flowAxis ??
     depthAxis ??
     spinAxis ??
     'S';
 
-  const replyAxisSecondary = secondaryFor(replyAxisPrimary);
+  // ✅ spin が TCF/C に入った時だけ、depth=S による C_too_early をほどく。
+  // - 具体化フェーズでは「現在地を見る」だけで止めず、C→F へ自然に進める
+  // - ただし questionAxis / flowAxis が明確に別軸を出している場合は無理に潰さない
+  const shouldAlignReplyAxisWithTcfC =
+    spinAxis === 'C' &&
+    replyAxisBase === 'S' &&
+    !questionAxis &&
+    !flowAxis;
+
+  const replyAxisPrimary: HumanReplyAxis = shouldAlignReplyAxisWithTcfC
+    ? 'C'
+    : replyAxisBase;
+
+  const replyAxisSecondary = shouldAlignReplyAxisWithTcfC
+    ? 'F'
+    : secondaryFor(replyAxisPrimary);
+
   const avoidAxis = buildAvoidAxis(replyAxisPrimary, userText);
   const qContext = buildQContext(input.qCode);
   const trustLevel = trustFrom(input.confidence, input.returnStreak);
@@ -270,6 +356,12 @@ export function buildHumanContextOrchestration(
     `REPLY_AXIS_PRIMARY=${replyAxisPrimary}`,
     replyAxisSecondary ? `REPLY_AXIS_SECONDARY=${replyAxisSecondary}` : null,
     avoidAxis.length ? `AVOID_AXIS=${avoidAxis.join(', ')}` : null,
+    spinOrder ? `SPIN_LOOP=${norm(input.spinLoop).toUpperCase()}` : null,
+    spinOrder ? `SPIN_STEP=${typeof input.spinStep === 'number' && Number.isFinite(input.spinStep) ? Math.trunc(input.spinStep) : 0}` : null,
+    spinAxis ? `SPIN_LEAD_AXIS=${spinAxis}` : null,
+    spinNextAxis ? `SPIN_NEXT_AXIS=${spinNextAxis}` : null,
+    spinOrder ? `SPIN_AXIS_ORDER=${spinOrder.join(',')}` : null,
+    spinProgressMeaning ? `SPIN_PROGRESS_MEANING=${spinProgressMeaning}` : null,
     currentMeaning ? `CURRENT_MEANING=${currentMeaning}` : null,
     futureMeaning ? `FUTURE_MEANING=${futureMeaning}` : null,
     qContext ? `Q_CONTEXT=${qContext}` : null,

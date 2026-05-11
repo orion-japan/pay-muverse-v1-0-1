@@ -9926,7 +9926,7 @@ const isResonanceStructureFollowup =
                   /(イベント|開催|日程|場所|会場|福岡|打ち合わせ|ミーティング|予定|販売|制作|投稿|公開|告知|演出|導入|関わる人|誰と|一緒に動く|現実に動|現実の側|動き始め)/.test(raw);
 
                 if (isEventOpenEdge) {
-                  return '最後は抽象的な余韻で閉じず、「ここからは、演出・会場・日程・関わる人のどこからでも現実の組み立てに入れます。」のように、次に話せる現実の入口を自然文で残す。';
+                  return '最後は抽象的な余韻で閉じず、ユーザーの直前発話に含まれる具体要素から、次に触れられる現実の入口を一つだけ自然文で残す。固定文・定型句・項目列挙をそのまま出さない。';
                 }
 
                 const isRelationshipOpenEdge =
@@ -9953,6 +9953,116 @@ const isResonanceStructureFollowup =
                     }
                   : {}),
               };
+const tConcretizeForSpinBridge = (() => {
+  const raw = [
+    // ✅ T_CONCRETIZE は seedDraft まで来る前に落ちることがあるため、
+    // slotsTextRawAll / seedDraftRaw / extracted.slots も正本として見る。
+    String(seedDraft ?? ''),
+    String(seedDraftRaw ?? ''),
+    String(slotsTextRawAll ?? ''),
+    String((opts as any)?.seedDraft ?? ''),
+    String((opts as any)?.seedDraftRawAll ?? ''),
+    String((opts as any)?.slotPlanSeed ?? ''),
+    String((opts as any)?.userContext?.slotPlanSeed ?? ''),
+    String((opts as any)?.userContext?.ctxPack?.slotPlanSeed ?? ''),
+    ...((Array.isArray((extracted as any)?.slots)
+      ? (extracted as any).slots.map((s: any) =>
+          [
+            String(s?.key ?? ''),
+            String(s?.id ?? ''),
+            String(s?.slotKey ?? ''),
+            String(s?.text ?? ''),
+          ].join(' ')
+        )
+      : []) as string[]),
+  ]
+    .filter(Boolean)
+    .join('\n')
+    .slice(0, 12000);
+
+  const laneKeyNow = String(
+    (typeof laneKeyForAllow !== 'undefined' ? laneKeyForAllow : null) ??
+      (opts as any)?.laneKey ??
+      (opts as any)?.userContext?.laneKey ??
+      (opts as any)?.userContext?.ctxPack?.laneKey ??
+      '',
+  ).trim();
+
+  return (
+    laneKeyNow === 'T_CONCRETIZE' ||
+    /"laneKey"\s*:\s*"T_CONCRETIZE"/.test(raw) ||
+    /\bT_CONCRETIZE\b/.test(raw)
+  );
+})();
+
+const spinLoopForWriterCall =
+  tConcretizeForSpinBridge
+    ? 'TCF'
+    : String(
+        // ✅ Orchestrator → Spin bridge の確定値を最優先する
+        (opts as any)?.meta?.spinLoop ??
+          (opts as any)?.meta?.spin_loop ??
+          (opts as any)?.meta?.rotationState?.spinLoop ??
+          (opts as any)?.rotationState?.spinLoop ??
+          (opts as any)?.spinLoop ??
+          (opts as any)?.spin_loop ??
+
+          // 以下は古い/補助コンテキスト。root meta が無い場合だけ使う
+          (opts as any)?.userContext?.meta?.spinLoop ??
+          (opts as any)?.userContext?.meta?.spin_loop ??
+          (opts as any)?.userContext?.meta?.rotationState?.spinLoop ??
+          (opts as any)?.userContext?.spinLoop ??
+          (opts as any)?.userContext?.spin_loop ??
+          (opts as any)?.userContext?.rotationState?.spinLoop ??
+          (opts as any)?.userContext?.ctxPack?.spinLoop ??
+          (opts as any)?.userContext?.ctxPack?.spin_loop ??
+          (opts as any)?.userContext?.ctxPack?.rotationState?.spinLoop ??
+          (opts as any)?.userContext?.ctxPack?.willRotation?.spinLoop ??
+          (ctxPackForWriter as any)?.spinLoop ??
+          (ctxPackForWriter as any)?.spin_loop ??
+          (ctxPackForWriter as any)?.rotationState?.spinLoop ??
+          (ctxPackForWriter as any)?.willRotation?.spinLoop ??
+          '',
+      ).trim() || null;
+
+const spinStepForWriterCall = (() => {
+  if (tConcretizeForSpinBridge) return 1;
+
+  const raw =
+    // ✅ Orchestrator → Spin bridge の確定値を最優先する
+    (opts as any)?.meta?.spinStep ??
+    (opts as any)?.meta?.spin_step ??
+    (opts as any)?.meta?.rotationState?.spinStep ??
+    (opts as any)?.rotationState?.spinStep ??
+    (opts as any)?.spinStep ??
+    (opts as any)?.spin_step ??
+
+    // 以下は古い/補助コンテキスト。root meta が無い場合だけ使う
+    (opts as any)?.userContext?.meta?.spinStep ??
+    (opts as any)?.userContext?.meta?.spin_step ??
+    (opts as any)?.userContext?.meta?.rotationState?.spinStep ??
+    (opts as any)?.userContext?.spinStep ??
+    (opts as any)?.userContext?.spin_step ??
+    (opts as any)?.userContext?.rotationState?.spinStep ??
+    (opts as any)?.userContext?.ctxPack?.spinStep ??
+    (opts as any)?.userContext?.ctxPack?.spin_step ??
+    (opts as any)?.userContext?.ctxPack?.rotationState?.spinStep ??
+    (opts as any)?.userContext?.ctxPack?.willRotation?.spinStep ??
+    (ctxPackForWriter as any)?.spinStep ??
+    (ctxPackForWriter as any)?.spin_step ??
+    (ctxPackForWriter as any)?.rotationState?.spinStep ??
+    (ctxPackForWriter as any)?.willRotation?.spinStep ??
+    null;
+
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  if (!Number.isFinite(n)) return null;
+
+  const i = Math.trunc(n);
+  if (i <= 0) return 0;
+  if (i === 1) return 1;
+  return 2;
+})();
+
 console.log(
   '[IROS/rephraseEngine][CALL_WRITER_ARGS]',
   JSON.stringify({
@@ -10378,6 +10488,19 @@ userContext: {
   ...(((opts as any)?.userContext && typeof (opts as any).userContext === 'object')
     ? (opts as any).userContext
     : {}),
+
+  // ✅ SRI/TCF 回転メタを writerCalls 側へ渡す
+  // - ログ追加なし。既存metaから拾って userContext に橋渡しするだけ。
+  spinLoop: spinLoopForWriterCall,
+  spinStep: spinStepForWriterCall,
+  rotationState: {
+    ...(((opts as any)?.userContext?.rotationState &&
+      typeof (opts as any).userContext.rotationState === 'object')
+      ? (opts as any).userContext.rotationState
+      : {}),
+    ...(spinLoopForWriterCall ? { spinLoop: spinLoopForWriterCall } : {}),
+    ...(spinStepForWriterCall !== null ? { spinStep: spinStepForWriterCall } : {}),
+  },
 
     ctxPack: {
       ...((((opts as any)?.userContext?.ctxPack &&

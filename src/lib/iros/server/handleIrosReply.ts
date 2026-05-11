@@ -3542,6 +3542,55 @@ function normForRecall(v: any): string {
               '',
           ).trim() || null,
 
+        // ✅ SRI/TCF 回転メタを FlowSeed → HumanContextOrchestrator へ渡す
+        // - Writer本文の主軸を急に変えず、会話上の進行意味だけを追加で読ませる
+        spinLoop:
+          String(
+            // ✅ Orchestrator の root meta に確定した spin を最優先で拾う
+            (orchMeta as any)?.spinLoop ??
+              (orchMeta as any)?.spin_loop ??
+              (orchMeta as any)?.rotationState?.spinLoop ??
+              (orchCtxPack as any)?.spinLoop ??
+              (orchCtxPack as any)?.spin_loop ??
+              (orchCtxPack as any)?.rotationState?.spinLoop ??
+              (orchCtxPack as any)?.willRotation?.spinLoop ??
+              (orchExtra as any)?.spinLoop ??
+              (orchExtra as any)?.spin_loop ??
+              (orchExtra as any)?.rotationState?.spinLoop ??
+              (orchExtra as any)?.willRotation?.spinLoop ??
+              (ctx as any)?.baseMetaForTurn?.spinLoop ??
+              (ctx as any)?.baseMetaForTurn?.spin_loop ??
+              (ctx as any)?.baseMetaForTurn?.rotationState?.spinLoop ??
+              '',
+          ).trim() || null,
+
+        spinStep:
+          (() => {
+            const raw =
+              // ✅ Orchestrator の root meta に確定した spin を最優先で拾う
+              (orchMeta as any)?.spinStep ??
+              (orchMeta as any)?.spin_step ??
+              (orchMeta as any)?.rotationState?.spinStep ??
+              (orchCtxPack as any)?.spinStep ??
+              (orchCtxPack as any)?.spin_step ??
+              (orchCtxPack as any)?.rotationState?.spinStep ??
+              (orchExtra as any)?.spinStep ??
+              (orchExtra as any)?.spin_step ??
+              (orchExtra as any)?.rotationState?.spinStep ??
+              (ctx as any)?.baseMetaForTurn?.spinStep ??
+              (ctx as any)?.baseMetaForTurn?.spin_step ??
+              (ctx as any)?.baseMetaForTurn?.rotationState?.spinStep ??
+              null;
+
+            const n = typeof raw === 'number' ? raw : Number(raw);
+            if (!Number.isFinite(n)) return null;
+
+            const i = Math.trunc(n);
+            if (i <= 0) return 0;
+            if (i === 1) return 1;
+            return 2;
+          })(),
+
         eTurn:
           String(
             (orchExtra as any)?.e_turn ??

@@ -2906,6 +2906,84 @@ return {
 };
               })();
 
+              const tConcretizeSpinBridgeForWriter = (() => {
+                const raw = [
+                  String(internalPackRaw ?? ''),
+                  String((args as any)?.slotPlanSeed ?? ''),
+                  String((args as any)?.seedDraft ?? ''),
+                  String((args as any)?.seedDraftRawAll ?? ''),
+                  String((args as any)?.userContext?.slotPlanSeed ?? ''),
+                  String((args as any)?.userContext?.ctxPack?.slotPlanSeed ?? ''),
+                  String((args as any)?.userContext?.meta?.extra?.slotPlanSeed ?? ''),
+                  String((extra as any)?.slotPlanSeed ?? ''),
+                  String((ctxPack as any)?.slotPlanSeed ?? ''),
+                ]
+                  .filter(Boolean)
+                  .join('\n')
+                  .slice(0, 12000);
+
+                const laneKeyNow = String(
+                  (args as any)?.laneKey ??
+                    (args as any)?.userContext?.laneKey ??
+                    (args as any)?.userContext?.ctxPack?.laneKey ??
+                    (args as any)?.userContext?.meta?.extra?.laneKey ??
+                    (ctxPack as any)?.laneKey ??
+                    (extra as any)?.laneKey ??
+                    '',
+                ).trim();
+
+                const questionTypeNow = String(
+                  (args as any)?.questionType ??
+                    (args as any)?.extra?.question?.questionType ??
+                    (args as any)?.userContext?.question?.questionType ??
+                    (args as any)?.userContext?.ctxPack?.question?.questionType ??
+                    (ctxPack as any)?.question?.questionType ??
+                    (extra as any)?.question?.questionType ??
+                    '',
+                ).trim();
+
+                const tLayerNow = String(
+                  (args as any)?.tLayerHint ??
+                    (args as any)?.itxStep ??
+                    (args as any)?.userContext?.tLayerHint ??
+                    (args as any)?.userContext?.itxStep ??
+                    (args as any)?.userContext?.ctxPack?.tLayerHint ??
+                    (args as any)?.userContext?.ctxPack?.itxStep ??
+                    (ctxPack as any)?.tLayerHint ??
+                    (ctxPack as any)?.itxStep ??
+                    (extra as any)?.tLayerHint ??
+                    (extra as any)?.itxStep ??
+                    '',
+                ).trim();
+
+                const userTextForSpin = String(
+                  latestUserText ??
+                    (args as any)?.userText ??
+                    (args as any)?.text ??
+                    '',
+                ).trim();
+
+                const hasTConcretize =
+                  laneKeyNow === 'T_CONCRETIZE' ||
+                  /"laneKey"\s*:\s*"T_CONCRETIZE"/.test(raw) ||
+                  /\bT_CONCRETIZE\b/.test(raw);
+
+                if (hasTConcretize) return true;
+
+                // ✅ writerCalls には T_CONCRETIZE 本体が届かない経路があるため、
+                // T3/future_design かつ具体化語がある場合だけ TCF/C として扱う。
+                const hasConcreteIntent =
+                  /(具体|決めたい|決める|演出|会場|見せ方|入口|主役|写真映え|現実|形に|組み立て|日程|場所|関わる人|企画|イベント)/.test(
+                    `${userTextForSpin}\n${raw.slice(0, 2000)}`,
+                  );
+
+                return (
+                  (tLayerNow === 'T3' || tLayerNow === 'T') &&
+                  questionTypeNow === 'future_design' &&
+                  hasConcreteIntent
+                );
+              })();
+
               const flowSeedV1 = buildFlowSeedV1({
                 flow: {
                   current: (() => {
@@ -3212,30 +3290,9 @@ return {
 
                     safeLine:
                     (() => {
-                      const rawForOpenEdge = [
-                        latestUserText,
-                        (args as any)?.userText,
-                        (args as any)?.followupText,
-                        (args as any)?.inputText,
-                      ]
-                        .map((v) => String(v ?? '').trim())
-                        .filter(Boolean)
-                        .join('\n');
-
-                      const isEventOpenEdge =
-                        /(イベント|開催|日程|場所|会場|福岡|打ち合わせ|ミーティング|予定|販売|制作|投稿|公開|告知|演出|導入|関わる人|誰と|一緒に動く|現実に動|現実の側|動き始め)/.test(rawForOpenEdge);
-
-                      const isRelationshipOpenEdge =
-                        /(彼|彼女|旦那|夫|妻|恋人|好きな人|浮気|不倫|連絡|返信|返事|既読|未読|不安|心配|関係|距離感|別れ|喧嘩|仲直り|復縁|嫌われ|待てない|イライラ)/.test(rawForOpenEdge);
-
-                      const openEdgeLineForDialogue = isEventOpenEdge
-                        ? 'ここからは、演出・会場・日程・関わる人のどこからでも現実の組み立てに入れます。'
-                        : isRelationshipOpenEdge
-                          ? 'この話は、今わかっている事実、不安、相手への言葉、待つ時間のどこからでも続けられます。'
-                          : null;
-
+                      // ✅ 固定文・テンプレ文を本文候補として直接出さない。
+                      // 会話の入口は writer/directives 側で自然に生成させる。
                       const v =
-                        cleanMeaningLine(openEdgeLineForDialogue) ||
                         cleanMeaningLine((args as any)?.flow180?.sentence) ||
                         cleanMeaningLine((args as any)?.writerDirectives?.deltaLine) ||
                         cleanMeaningLine(latestUserText) ||
@@ -3248,6 +3305,62 @@ return {
                 depthStage: depthStage || null,
                 phase: phase || null,
                 qCode: qCode || null,
+
+                // ✅ SRI/TCF 回転メタを FlowSeed → HumanContextOrchestrator へ渡す
+                // - writerCalls 側で FlowSeed を再生成するため、ここにも橋渡しが必要
+                spinLoop:
+                  tConcretizeSpinBridgeForWriter
+                    ? 'TCF'
+                    : String(
+                        (args as any)?.spinLoop ??
+                          (args as any)?.spin_loop ??
+                          (args as any)?.rotationState?.spinLoop ??
+                          (args as any)?.userContext?.spinLoop ??
+                          (args as any)?.userContext?.spin_loop ??
+                          (args as any)?.userContext?.rotationState?.spinLoop ??
+                          (args as any)?.userContext?.meta?.spinLoop ??
+                          (args as any)?.userContext?.meta?.spin_loop ??
+                          (args as any)?.userContext?.meta?.rotationState?.spinLoop ??
+                          (ctxPack as any)?.spinLoop ??
+                          (ctxPack as any)?.spin_loop ??
+                          (ctxPack as any)?.rotationState?.spinLoop ??
+                          (extra as any)?.spinLoop ??
+                          (extra as any)?.spin_loop ??
+                          (extra as any)?.rotationState?.spinLoop ??
+                          '',
+                      ).trim() || null,
+
+                spinStep:
+                  (() => {
+                    if (tConcretizeSpinBridgeForWriter) return 1;
+
+                    const raw =
+                      (args as any)?.spinStep ??
+                      (args as any)?.spin_step ??
+                      (args as any)?.rotationState?.spinStep ??
+                      (args as any)?.userContext?.spinStep ??
+                      (args as any)?.userContext?.spin_step ??
+                      (args as any)?.userContext?.rotationState?.spinStep ??
+                      (args as any)?.userContext?.meta?.spinStep ??
+                      (args as any)?.userContext?.meta?.spin_step ??
+                      (args as any)?.userContext?.meta?.rotationState?.spinStep ??
+                      (ctxPack as any)?.spinStep ??
+                      (ctxPack as any)?.spin_step ??
+                      (ctxPack as any)?.rotationState?.spinStep ??
+                      (extra as any)?.spinStep ??
+                      (extra as any)?.spin_step ??
+                      (extra as any)?.rotationState?.spinStep ??
+                      null;
+
+                    const n = typeof raw === 'number' ? raw : Number(raw);
+                    if (!Number.isFinite(n)) return null;
+
+                    const i = Math.trunc(n);
+                    if (i <= 0) return 0;
+                    if (i === 1) return 1;
+                    return 2;
+                  })(),
+
                 eTurn: eTurn || null,
 
                 askBackAllowed: (args as any)?.askBackAllowed ?? null,
