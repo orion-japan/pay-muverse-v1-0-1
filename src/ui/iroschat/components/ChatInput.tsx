@@ -205,15 +205,11 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
   }, [text, sendMessage, onMeta, autoSize, setDraftText, loading, sending]);
 
   const onKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
-        e.preventDefault();
-        if (canSend) {
-          void handleSend();
-        }
-      }
+    (_e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // スマホの Enter は改行として使う。
+      // 送信は送信ボタンのみで行う。
     },
-    [isComposing, canSend, handleSend],
+    [],
   );
 
   useEffect(() => {
@@ -252,7 +248,7 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
           ref={taRef}
           className="sof-textarea"
           rows={1}
-          placeholder="こちらに入力してください…（Shift+Enterで改行）"
+          placeholder="こちらに入力してください…"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
@@ -308,7 +304,7 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
   }}
   disabled={!canSend}
   aria-label="送信"
-  title="送信（Enter）"
+  title="送信"
 >
   {sending ? '送信中…' : '送信'}
 </button>

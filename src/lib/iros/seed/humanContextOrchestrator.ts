@@ -160,6 +160,16 @@ function buildSpinProgressMeaning(args: {
   return null;
 }
 
+function isPlainMeaningQuestion(userText: string, questionType: string | null | undefined): boolean {
+  const qt = norm(questionType).toLowerCase();
+  const t = compact(userText);
+
+  return (
+    qt === 'meaning' ||
+    /(どういう意味|どういう事|どういうこと|とは|という意味|何を指す|何のこと|それが.+ですか|それは.+ですか)/.test(t)
+  );
+}
+
 function detectQuestionAxis(userText: string, questionType: string | null | undefined): HumanReplyAxis | null {
   const qt = norm(questionType).toLowerCase();
   const t = compact(userText);
@@ -249,10 +259,18 @@ function trustFrom(confidence: number | null | undefined, returnStreak: number |
   return 'medium';
 }
 
-function buildReplyFocus(primary: HumanReplyAxis, secondary: HumanReplyAxis | null): string {
+function buildReplyFocus(
+  primary: HumanReplyAxis,
+  secondary: HumanReplyAxis | null,
+  plainMeaningQuestion = false,
+): string {
   if (primary === 'S') return secondary === 'I' ? '現在地を受け取り、その先の方向へつなげる。' : '現在地を中心に返す。';
   if (primary === 'R') return '関係や相手とのズレを扱う。ただし相手の本心は断定しない。';
-  if (primary === 'I') return '目的・意味・未来の方向を主軸に返す。心理状態の説明だけで閉じない。';
+  if (primary === 'I') {
+    return plainMeaningQuestion
+      ? '言葉の意味・指している内容を日常語で説明する。詩的展開や意図展開を先に出さない。'
+      : '目的・意味・未来の方向を主軸に返す。心理状態の説明だけで閉じない。';
+  }
   if (primary === 'C') return '現実の一歩や形にする方向を返す。抽象論だけで終わらせない。';
   if (primary === 'T') return '全体視点で統合する。ただし飛躍した断定は避ける。';
   if (primary === 'F') return '外に出す形、伝え方、輪郭を整える。';
@@ -266,16 +284,28 @@ function buildWriterDirective(args: {
   futureFlowRandom: string | null;
   currentMeaning: string | null;
   transferMeaning: string | null;
+  plainMeaningQuestion?: boolean;
 }): string {
-  const { primary, secondary, currentFlow, futureFlowRandom, currentMeaning, transferMeaning } = args;
+  const {
+    primary,
+    secondary,
+    currentFlow,
+    futureFlowRandom,
+    currentMeaning,
+    transferMeaning,
+    plainMeaningQuestion = false,
+  } = args;
 
   const parts = [
     `本文は${primary}${secondary ? `→${secondary}` : ''}の視点を主軸にする。`,
     currentFlow ? `currentFlow=${currentFlow} は現在状態としてだけ扱う。` : '',
     futureFlowRandom ? `futureFlowRandom=${futureFlowRandom} は未来候補としてだけ扱い、現在の心理状態へ混ぜない。` : '',
-    currentMeaning ? `現在意味: ${currentMeaning}` : '',
-    transferMeaning ? `移管意味: ${transferMeaning}` : '',
-    primary === 'I' ? '目的・意味・未来を中心に返し、ユーザー発話にない対立構造を足さない。' : '',
+    currentMeaning && !plainMeaningQuestion ? `現在意味: ${currentMeaning}` : '',
+    transferMeaning && !plainMeaningQuestion ? `移管意味: ${transferMeaning}` : '',
+    primary === 'I' && plainMeaningQuestion
+      ? 'I軸は内部理解にだけ使う。本文ではまず用語の意味・指している内容を日常語で説明する。「中心の意図」「形になる前」「名前のついていない」「気配」「奥」「本音」「余白」へ先に広げない。'
+      : '',
+    primary === 'I' && !plainMeaningQuestion ? '目的・意味・未来を中心に返し、ユーザー発話にない対立構造を足さない。' : '',
     primary === 'R' ? '相手の本心断定を避け、関係の受け取り方として返す。' : '',
     primary === 'C' ? '具体へ落とすが、手順を増やしすぎない。' : '',
   ].filter(Boolean);
@@ -288,6 +318,7 @@ export function buildHumanContextOrchestration(
 ): HumanContextOrchestratorResult {
   const userText = norm(input.userText);
 
+  const plainMeaningQuestion = isPlainMeaningQuestion(userText, input.questionType);
   const questionAxis = detectQuestionAxis(userText, input.questionType);
   const flowAxis = axisFromFlow(input.currentFlow);
   const depthAxis = axisFromDepthStage(input.depthStage);
@@ -327,7 +358,7 @@ export function buildHumanContextOrchestration(
   const avoidAxis = buildAvoidAxis(replyAxisPrimary, userText);
   const qContext = buildQContext(input.qCode);
   const trustLevel = trustFrom(input.confidence, input.returnStreak);
-  const replyFocus = buildReplyFocus(replyAxisPrimary, replyAxisSecondary);
+  const replyFocus = buildReplyFocus(replyAxisPrimary, replyAxisSecondary, plainMeaningQuestion);
 
   const avoidReply = [
     ...avoidAxis,
@@ -349,6 +380,7 @@ export function buildHumanContextOrchestration(
     futureFlowRandom: norm(input.futureFlowRandom) || null,
     currentMeaning,
     transferMeaning: norm(input.transferMeaning) || null,
+    plainMeaningQuestion,
   });
 
   const lines = [

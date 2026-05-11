@@ -48,6 +48,7 @@ export default function Header({ onLoginClick }: Props) {
           width: '100%',
           maxWidth: '430px',
           margin: '0 auto',
+          position: 'relative',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -59,39 +60,27 @@ export default function Header({ onLoginClick }: Props) {
           borderRadius: '0 0 10px 10px', // ほんの少しだけ丸み（お好みで）
         }}
       >
-        <Link
-          href="/"
-          onClick={prevent}
-          style={{
-            textDecoration: 'none',
-            color: 'white',
-            fontSize: '14px', // ← 18px → 14px
-            fontWeight: 800,
-            padding: '4px 8px',
-            borderRadius: '8px',
-            background: 'rgba(255,255,255,0.18)',
-            lineHeight: 1,
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-          }}
-        >
-          <span aria-hidden>🏠</span>
-        </Link>
-
-        <div
-          style={{
-            fontSize: '16px', // ← 22px → 16px
-            fontWeight: 900,
-            textAlign: 'center',
-            letterSpacing: '.3px',
-            lineHeight: 1,
-          }}
-        >
-          Muverse
-        </div>
-
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Link
+            href="/"
+            onClick={prevent}
+            style={{
+              textDecoration: 'none',
+              color: 'white',
+              fontSize: '14px', // ← 18px → 14px
+              fontWeight: 800,
+              padding: '4px 8px',
+              borderRadius: '8px',
+              background: 'rgba(255,255,255,0.18)',
+              lineHeight: 1,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <span aria-hidden>🏠</span>
+          </Link>
+
           {/* ★ 追加：再読み込みボタン */}
           <button
             onClick={handleReload}
@@ -112,7 +101,26 @@ export default function Header({ onLoginClick }: Props) {
           >
             🔄
           </button>
+        </div>
 
+        <div
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: '50%',
+            transform: 'translate(-50%, -50%)',
+            fontSize: '16px', // ← 22px → 16px
+            fontWeight: 900,
+            textAlign: 'center',
+            letterSpacing: '.3px',
+            lineHeight: 1,
+            pointerEvents: 'none',
+          }}
+        >
+          Muverse
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           {isLoggedIn ? (
             <button
               onClick={handleLogout}

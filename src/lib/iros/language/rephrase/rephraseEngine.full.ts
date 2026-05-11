@@ -10022,11 +10022,32 @@ const isResonanceStructureFollowup =
                 return null;
               })();
 
-              const shouldSuppressDeepRevealForFinal =
-                Array.isArray((writerDirectivesBaseForFinal as any)?.writeConstraints) &&
-                (writerDirectivesBaseForFinal as any).writeConstraints.some((line: any) =>
-                  String(line ?? '').includes('DEEP_READ_CONTROL: ユーザーがポジティブ')
+              const plainMeaningQuestionTextForFinal = String(
+                (opts as any)?.userText ??
+                  (opts as any)?.followupText ??
+                  (opts as any)?.inputText ??
+                  ''
+              ).trim();
+
+              const isPlainMeaningQuestionForFinal =
+                /(どういう意味|どういう事|どういうこと|とは|という意味|何を指す|何のこと|それが.+ですか|それは.+ですか|未来という意味|意味ですか)/u.test(
+                  plainMeaningQuestionTextForFinal
                 );
+
+              const isPlainMeaningConfirmationForFinal =
+                isPlainMeaningQuestionForFinal &&
+                /(という意味ですね|ということですね|ってことですね|という意味ですか|ということですか|ですよね|ですね\?|ですね？|未来でなくて.*前|未来ではなく.*前|前という意味)/u.test(
+                  plainMeaningQuestionTextForFinal
+                );
+
+              const shouldSuppressDeepRevealForFinal =
+                (
+                  Array.isArray((writerDirectivesBaseForFinal as any)?.writeConstraints) &&
+                  (writerDirectivesBaseForFinal as any).writeConstraints.some((line: any) =>
+                    String(line ?? '').includes('DEEP_READ_CONTROL: ユーザーがポジティブ')
+                  )
+                ) ||
+                isPlainMeaningQuestionForFinal;
 
               const deepReadSuppressionConstraintsForFinal =
                 shouldSuppressDeepRevealForFinal
@@ -10036,8 +10057,46 @@ const isResonanceStructureFollowup =
                       'DEEP_READ_CONTROL_FINAL: 「我慢に見える」「止めているように見える」「守っているように見える」など、第三者視点の再解釈を足さない',
                       'DEEP_READ_CONTROL_FINAL: 2〜4文程度で、ユーザーの自己定義を採用して閉じる',
                       'DEEP_READ_CONTROL_FINAL: state_residue を作らない。追加課題・次に見ること・言葉にする課題を足さない',
+                      ...(isPlainMeaningQuestionForFinal
+                        ? [
+                            'PLAIN_MEANING_CONTROL: このターンは意味確認。まず日常語で答える',
+                            'PLAIN_MEANING_CONTROL: 「中心の意図」「名前のついていない」「形になる前」「気配」「奥」「本音」「余白」「未来を生む前」へ先に広げない',
+                            'PLAIN_MEANING_CONTROL: ユーザーの質問に対して、未来かどうか・何を指すかを先に明確に答える',
+                            'PLAIN_MEANING_CONTROL: 詩的表現やI層表現は必要な場面では使ってよいが、意味確認では説明の後に短く添える程度にする',
+                            'PLAIN_MEANING_CONTROL_FINAL: 冒頭で「はい、そう受け取れます」「そう読めます」と同意から始めない。まず「未来という意味ではありません」と答える',
+                            'PLAIN_MEANING_CONTROL_FINAL: 「まだ形になる前」「名前のついていない」「可能性」「未来の感じ」「未来は形より先」「未来を生む前」を使わない',
+                            'PLAIN_MEANING_CONTROL_FINAL: この質問では「ずっと先」を、未来ではなく、鳥の飛び方が飛行機より前から自然界に存在していたという意味として説明する',
+                            'PLAIN_MEANING_CONTROL_FINAL: 飛行機は後から作られた技術、鳥は先に自然界に存在していた飛び方、という日常語の対比で答える',
+                          ]
+                        : []),
                     ]
                   : [];
+
+              const baseWriteConstraintsForFinal = Array.isArray(
+                (writerDirectivesBaseForFinal as any)?.writeConstraints
+              )
+                ? (writerDirectivesBaseForFinal as any).writeConstraints
+                : [];
+
+              const relaxedWriteConstraintsForFinal = isPlainMeaningConfirmationForFinal
+                ? baseWriteConstraintsForFinal.filter((line: any) => {
+                    const s = String(line ?? '');
+
+                    return !(
+                      s.includes('説明ではなく、核心を直接書く') ||
+                      s.includes('核心を直接') ||
+                      s.includes('輪郭のまま返してよい') ||
+                      s.includes('奥で止まっている本音') ||
+                      s.includes('本音を自然に表面化') ||
+                      s.includes('見えた核心から次に見る方向') ||
+                      s.includes('場を動かす文') ||
+                      s.includes('本音を戻す文') ||
+                      s.includes('短い宣言文') ||
+                      s.includes('state_residue') ||
+                      s.includes('never_leave_paragraph4')
+                    );
+                  })
+                : baseWriteConstraintsForFinal;
 
               const writerDirectivesForFinal = {
                 ...writerDirectivesBaseForFinal,
@@ -10048,29 +10107,45 @@ const isResonanceStructureFollowup =
                   : {}),
                 ...(shouldSuppressDeepRevealForFinal
                   ? {
-                      pattern_mode: 'self_definition_acceptance',
+                      pattern_mode: isPlainMeaningQuestionForFinal
+                        ? 'plain_meaning_answer'
+                        : 'self_definition_acceptance',
                       bodyStyle: {
                         ...(((writerDirectivesBaseForFinal as any)?.bodyStyle ?? {}) as any),
-                        preferBlockSplit: true,
+                        preferBlockSplit: !isPlainMeaningConfirmationForFinal,
                         minBlocks: 1,
-                        maxBlocks: 2,
-                        maxSentencesPerBlock: 3,
-                        minSentences: 2,
-                        maxSentences: 5,
+                        maxBlocks: isPlainMeaningConfirmationForFinal ? 1 : 2,
+                        maxSentencesPerBlock: isPlainMeaningConfirmationForFinal ? 3 : 3,
+                        minSentences: isPlainMeaningConfirmationForFinal ? 1 : 2,
+                        maxSentences: isPlainMeaningConfirmationForFinal ? 3 : 5,
                       },
-                      block_state_surface:
-                        'ユーザーの自己定義をそのまま採用する。選択・停止・我慢へ戻さない。',
-                      block_state_residue:
-                        '残りや余白を作らず、ユーザーの言葉を芯として短く閉じる。',
-                      block_closing_line:
-                        '最後は「選んでいない、止めていない、受け入れている。そこをそのまま採用します。」の方向で閉じる。',
+                      block_state_surface: isPlainMeaningConfirmationForFinal
+                        ? 'ユーザーの言い換え確認に短く答える。説明を広げず、自然な会話として確定する。'
+                        : isPlainMeaningQuestionForFinal
+                          ? 'ユーザーの意味確認に対して、まず日常語で答える。詩的・象徴的な再解釈へ先に進めない。'
+                          : 'ユーザーの自己定義をそのまま採用する。選択・停止・我慢へ戻さない。',
+                      block_state_residue: isPlainMeaningConfirmationForFinal
+                        ? '余韻や追加説明を作らず、確認への答えだけで閉じる。'
+                        : isPlainMeaningQuestionForFinal
+                          ? '追加の奥読みを作らず、何を指しているかを明確にして閉じる。'
+                          : '残りや余白を作らず、ユーザーの言葉を芯として短く閉じる。',
+                      block_closing_line: isPlainMeaningConfirmationForFinal
+                        ? '最後は「はい。ここでは未来ではなく、前からあったという意味です。」の方向で短く閉じる。'
+                        : isPlainMeaningQuestionForFinal
+                          ? '最後は「未来ではなく、先に存在していた原型という意味です。」の方向で閉じる。'
+                          : '最後は「選んでいない、止めていない、受け入れている。そこをそのまま採用します。」の方向で閉じる。',
                     }
                   : {}),
                 writeConstraints: [
-                  ...(Array.isArray((writerDirectivesBaseForFinal as any)?.writeConstraints)
-                    ? (writerDirectivesBaseForFinal as any).writeConstraints
-                    : []),
+                  ...relaxedWriteConstraintsForFinal,
                   ...deepReadSuppressionConstraintsForFinal,
+                  ...(isPlainMeaningConfirmationForFinal
+                    ? [
+                        'MEANING_CONFIRMATION_RELAXED: このターンは言い換え確認。深読みの圧を下げ、短く自然に確定する',
+                        'MEANING_CONFIRMATION_RELAXED: 辞書的な構造分解・分類ラベル・余韻の追加をしない',
+                        'MEANING_CONFIRMATION_RELAXED: 1〜3文で返す。必要なら一文目で結論を言う',
+                      ]
+                    : []),
                 ],
                 ...(deepRevealLineForWriter && !shouldSuppressDeepRevealForFinal
                   ? {
