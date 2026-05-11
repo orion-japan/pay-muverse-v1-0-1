@@ -275,8 +275,10 @@ function normalizeAssistantText(json: any): string {
   t = (t ?? '').trim();
   if (t && !/[。！？!?🪔]$/.test(t)) t += '。';
   if (t) {
+    // ✅ サーバー側の最終本文を尊重する。
+    // 一部環境で 🪔 が replacement character（�）表示になるため、
+    // UI側では絵文字を自動付与しない。
     t = t.replace(/🪔+/g, '');
-    t += '🪔';
   }
   return t;
 }
