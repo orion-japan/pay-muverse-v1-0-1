@@ -145,6 +145,18 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
   }, []);
 
   const handleSend = useCallback(async () => {
+    // ✅ 二重送信防止:
+    // React state の disabled/sending 反映より先に、クリック/Enter が連続で入ることがある。
+    // ここで即時ロックを見て、postMessage だけ複数走る状態を防ぐ。
+    if (sendLockRef.current || loading || sending) {
+      console.warn('[IrosChatInput] blocked: already sending', {
+        sendLock: sendLockRef.current,
+        loading,
+        sending,
+      });
+      return;
+    }
+
     const value = normalizeSendText(text);
 
     if (!value) {
@@ -190,7 +202,7 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
       sendLockRef.current = false;
       autoSize();
     }
-  }, [text, sendMessage, onMeta, autoSize, setDraftText]);
+  }, [text, sendMessage, onMeta, autoSize, setDraftText, loading, sending]);
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

@@ -190,85 +190,127 @@ function IrosChatInner({ open }: Props) {
     };
   }, [chat, userCode, authLoading]);
 
-  // 初回オープン/初期選択（フェッチは必ず1回だけ）
+  // 初回オープン/初期選択
+  // - 自動選択は1回だけ
+  // - URL / open で cid が明示された場合は、activeConversationId と違えば必ず同期する
   const didInitialFetchRef = useRef(false);
+  const lastSyncedCidRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (urlCid === 'new' || openTarget.type === 'new') {
       didInitialFetchRef.current = false;
+      lastSyncedCidRef.current = null;
     }
   }, [urlCid, openTarget.type]);
 
   useEffect(() => {
     if (!canUse) return;
-    if (didInitialFetchRef.current) return;
+    if (!chat) return;
 
     const convs = Array.isArray(chat?.conversations) ? chat?.conversations ?? [] : [];
 
     // ====== 1) openTarget: new ======
     if (openTarget.type === 'new') {
-      didInitialFetchRef.current = true; // ✅ 先に立てる（競合防止）
+      if (lastSyncedCidRef.current === '__new__') return;
+
+      didInitialFetchRef.current = true;
+      lastSyncedCidRef.current = '__new__';
+
       try {
         if (typeof window !== 'undefined') {
           window.localStorage.removeItem(lastConvKey(agentK));
         }
       } catch {}
-      chat.startConversation().catch(() => {});
+
+      chat.startConversation().catch((e) => {
+        lastSyncedCidRef.current = null;
+        console.error('[IROS][Shell] startConversation failed', e);
+      });
       return;
     }
 
     // ====== 2) openTarget: cid/uuid ======
+    // ✅ ここは didInitialFetchRef で止めない。
+    // URL の cid と activeConversationId がズレたら、必ず fetchMessages して同期する。
     if ((openTarget.type === 'cid' || openTarget.type === 'uuid') && openTarget.cid) {
-      didInitialFetchRef.current = true; // ✅ 先に立てる（競合防止）
+      const targetCid = openTarget.cid;
+      const activeCid = chat.activeConversationId ?? null;
+
+      if (lastSyncedCidRef.current === targetCid && activeCid === targetCid) {
+        return;
+      }
+
+      didInitialFetchRef.current = true;
+      lastSyncedCidRef.current = targetCid;
+
       chat
-        .fetchMessages(openTarget.cid)
-        .catch(() => {})
+        .fetchMessages(targetCid)
+        .catch((e) => {
+          lastSyncedCidRef.current = null;
+          console.error('[IROS][Shell] fetchMessages failed for explicit cid', {
+            targetCid,
+            activeCid,
+            error: String((e as any)?.message ?? e),
+          });
+        })
         .finally(() => {
           try {
             if (typeof window !== 'undefined') {
-              window.localStorage.setItem(lastConvKey(agentK), openTarget.cid!);
+              window.localStorage.setItem(lastConvKey(agentK), targetCid);
             }
           } catch {}
         });
       return;
     }
 
-    // ====== 3) open指定が無い通常遷移（conversations が揃ってから決める） ======
-    if (!convs.length) return; // convs が無いと決められないので待つ
+    // ====== 3) open指定が無い通常遷移（自動選択は1回だけ） ======
+    if (didInitialFetchRef.current) return;
+    if (!convs.length) return;
+
+    let targetCid: string | null = null;
 
     // URL の cid が優先
     if (urlCid) {
       const exists = convs.some((c) => c.id === urlCid);
       if (exists) {
-        didInitialFetchRef.current = true; // ✅ 先に立てる（競合防止）
-        chat.fetchMessages(urlCid).catch(() => {});
-        return;
+        targetCid = urlCid;
       }
     }
 
     // localStorage の lastConv
-    let lastId: string | null = null;
-    try {
-      if (typeof window !== 'undefined') {
-        lastId = window.localStorage.getItem(lastConvKey(agentK));
-      }
-    } catch {}
+    if (!targetCid) {
+      let lastId: string | null = null;
+      try {
+        if (typeof window !== 'undefined') {
+          lastId = window.localStorage.getItem(lastConvKey(agentK));
+        }
+      } catch {}
 
-    if (lastId) {
-      const exists = convs.some((c) => c.id === lastId);
-      if (exists) {
-        didInitialFetchRef.current = true; // ✅ 先に立てる（競合防止）
-        chat.fetchMessages(lastId).catch(() => {});
-        return;
+      if (lastId) {
+        const exists = convs.some((c) => c.id === lastId);
+        if (exists) {
+          targetCid = lastId;
+        }
       }
     }
 
     // それでも決まらなければ、最新の会話
-    const latest = convs[0];
-    if (latest?.id) {
-      didInitialFetchRef.current = true; // ✅ 先に立てる（競合防止）
-      chat.fetchMessages(latest.id).catch(() => {});
-      return;
+    if (!targetCid) {
+      targetCid = convs[0]?.id ?? null;
     }
+
+    if (!targetCid) return;
+
+    didInitialFetchRef.current = true;
+    lastSyncedCidRef.current = targetCid;
+
+    chat.fetchMessages(targetCid).catch((e) => {
+      lastSyncedCidRef.current = null;
+      console.error('[IROS][Shell] fetchMessages failed for initial cid', {
+        targetCid,
+        error: String((e as any)?.message ?? e),
+      });
+    });
   }, [canUse, chat, openTarget, urlCid, agentK]);
 
 

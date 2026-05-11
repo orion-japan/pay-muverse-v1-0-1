@@ -371,6 +371,12 @@ const sendMessage = useCallback(
     try {
       setMessages((m) => [...m, userMsg]);
 
+      console.log('[IROS][HARD_SEND_TRACE] 01 before postMessage', {
+        cid,
+        mode,
+        textLen: norm.text.length,
+        head: norm.text.slice(0, 80),
+      });
       devlog('[UI/sendMessage] BEFORE postMessage', { cid });
       await irosClient.postMessage({
         conversationId: cid,
@@ -379,9 +385,21 @@ const sendMessage = useCallback(
         meta: {},
       });
       devlog('[UI/sendMessage] AFTER postMessage', { cid });
+      console.log('[IROS][HARD_SEND_TRACE] 02 after postMessage', {
+        cid,
+        mode,
+        textLen: norm.text.length,
+      });
 
       const history = buildHistoryForLLM([...(messagesRef.current || []), userMsg], 10);
 
+      console.log('[IROS][HARD_SEND_TRACE] 03 before replyAndStore', {
+        cid,
+        mode,
+        style,
+        historyLen: Array.isArray(history) ? history.length : null,
+        textLen: norm.text.length,
+      });
       devlog('[UI/sendMessage] BEFORE replyAndStore', { cid, mode });
       const r: any = await irosClient.replyAndStore({
         conversationId: cid,
@@ -391,6 +409,13 @@ const sendMessage = useCallback(
         history,
       });
       devlog('[UI/sendMessage] AFTER replyAndStore', { cid });
+      console.log('[IROS][HARD_SEND_TRACE] 04 after replyAndStore', {
+        cid,
+        mode,
+        hasResult: !!r,
+        assistantLen: typeof r?.assistant === 'string' ? r.assistant.length : null,
+        hasMeta: !!r?.meta,
+      });
 
       const assistant = normalizeText(r?.assistant ?? '');
       const meta = r?.meta ?? null;

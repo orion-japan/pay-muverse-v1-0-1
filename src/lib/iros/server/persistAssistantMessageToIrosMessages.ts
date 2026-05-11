@@ -97,7 +97,10 @@ export async function persistAssistantMessageToIrosMessages(args: {
   const supabase = args.supabase;
   const conversationUuid = String(args.conversationId ?? '').trim();
   const userCode = String(args.userCode ?? '').trim();
-  const content = String(args.content ?? '').trimEnd();
+  // ✅ content/text 側にも壊れたUnicode除去を通す
+  // meta は sanitizeForJsonb 済みだが、本文 content/text は別経路なのでここで正規化する。
+  const contentRaw = String(args.content ?? '').trimEnd();
+  const content = String(sanitizeForJsonb(contentRaw) ?? '').trimEnd();
   const meta = args.meta ?? null;
 
   // =========================
