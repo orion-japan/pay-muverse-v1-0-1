@@ -19,6 +19,13 @@ import {
   type WriterDirectivesLike,
 } from './buildSeedCanonical';
 
+import {
+  buildHumanStateTransferSeed,
+  type HumanStateTransferSeed,
+  type SaPolarity,
+  type UtteranceAlignment,
+} from '../delta/humanStateTransfer';
+
 export type FlowSeedV21 = {
   flow: {
     current: string | null;
@@ -43,6 +50,9 @@ export type FlowSeedV21 = {
   /** flow直結の意味（1本） */
   meaning?: string | null;
 
+  /** currentFlow → secondFlow の状態移管SEED */
+  transferSeed?: HumanStateTransferSeed | null;
+
   goalKind?: string | null;
 
   canonical?: SeedCanonical | null;
@@ -55,6 +65,20 @@ export type FlowSeedV21Input = {
     delta?: string | null;
     energy?: string | null;
     futureRandom?: string | null;
+  } | null;
+
+  /**
+   * 通常会話の状態移管を読むための補助メタ。
+   * 主移管は prev → current を優先し、prev がない場合は current → current として扱う。
+   * futureRandom は表示・候補には残すが、通常会話の主移管には使わない。
+   * 真実/嘘ではなく、内的整合・揺れ・余白として扱う。
+   */
+  transferContext?: {
+    sa?: number | null;
+    saPolarity?: SaPolarity | null;
+    yuragi?: number | null;
+    yohaku?: number | null;
+    utteranceAlignment?: UtteranceAlignment | null;
   } | null;
 
   userCore?: string | null;
@@ -596,6 +620,28 @@ export function buildFlowSeedV1(input: FlowSeedV21Input): FlowSeedV21 {
     compression.pressure,
   );
 
+  const transferFromFlow = flow.prev ?? flow.current;
+  const transferToFlow = flow.current;
+
+  const transferSeed = buildHumanStateTransferSeed({
+    currentFlow: transferFromFlow,
+    secondFlow: transferToFlow,
+    sa:
+      typeof input.transferContext?.sa === 'number'
+        ? input.transferContext.sa
+        : null,
+    saPolarity: input.transferContext?.saPolarity ?? null,
+    yuragi:
+      typeof input.transferContext?.yuragi === 'number'
+        ? input.transferContext.yuragi
+        : null,
+    yohaku:
+      typeof input.transferContext?.yohaku === 'number'
+        ? input.transferContext.yohaku
+        : null,
+    utteranceAlignment: input.transferContext?.utteranceAlignment ?? null,
+  });
+
   const canonical = buildSeedCanonical({
     meaning,
 
@@ -609,6 +655,8 @@ export function buildFlowSeedV1(input: FlowSeedV21Input): FlowSeedV21 {
       energy: flow.energy,
       futureRandom: flow.futureRandom,
     },
+
+    transferSeedText: transferSeed.ok ? transferSeed.seedText : null,
 
     focus: compression.focus,
     tone: compression.tone,
@@ -640,6 +688,7 @@ export function buildFlowSeedV1(input: FlowSeedV21Input): FlowSeedV21 {
       pressure: normalizedPressure,
     },
     meaning,
+    transferSeed,
     goalKind: pickString(input.goalKind),
     canonical,
   };

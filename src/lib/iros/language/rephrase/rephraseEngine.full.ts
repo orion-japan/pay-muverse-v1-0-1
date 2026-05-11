@@ -8499,30 +8499,44 @@ const stageLabel = (layer: string | null) => {
 };
 
 const transition180 = (() => {
-  const from = currentParsed.raw;
-  const to = futureParsed.raw;
+  // ✅ 通常会話の主移管は prev → current。
+  // prev がない初回/復帰時は current → current として扱う。
+  // futureRandom は候補・観測値として残すが、主移管先には使わない。
+  const fromParsedForTransition = prevParsed.raw ? prevParsed : currentParsed;
+  const toParsedForTransition = currentParsed;
 
-  if (!from || !to || !e_now || !layer_now || !polarity_now || !e_future || !layer_future || !polarity_future) {
+  const from = fromParsedForTransition.raw;
+  const to = toParsedForTransition.raw;
+
+  const e_from = fromParsedForTransition.e;
+  const layer_from = fromParsedForTransition.layer;
+  const polarity_from = fromParsedForTransition.polarity;
+
+  const e_to = toParsedForTransition.e;
+  const layer_to = toParsedForTransition.layer;
+  const polarity_to = toParsedForTransition.polarity;
+
+  if (!from || !to || !e_from || !layer_from || !polarity_from || !e_to || !layer_to || !polarity_to) {
     return null;
   }
 
   const stageShift =
-    layer_now.charAt(0).toUpperCase() === layer_future.charAt(0).toUpperCase()
+    layer_from.charAt(0).toUpperCase() === layer_to.charAt(0).toUpperCase()
       ? 'same_stage_band'
-      : `${layer_now.charAt(0).toUpperCase()}_to_${layer_future.charAt(0).toUpperCase()}`;
+      : `${layer_from.charAt(0).toUpperCase()}_to_${layer_to.charAt(0).toUpperCase()}`;
 
   const polarityShift =
-    polarity_now === polarity_future
-      ? `same_${polarity_now}`
-      : `${polarity_now}_to_${polarity_future}`;
+    polarity_from === polarity_to
+      ? `same_${polarity_to}`
+      : `${polarity_from}_to_${polarity_to}`;
 
   const energyShift =
-    e_now === e_future
+    e_from === e_to
       ? 'same_energy'
-      : `${e_now}_to_${e_future}`;
+      : `${e_from}_to_${e_to}`;
 
-  const fromStageLabel = stageLabel(layer_now);
-  const toStageLabel = stageLabel(layer_future);
+  const fromStageLabel = stageLabel(layer_from);
+  const toStageLabel = stageLabel(layer_to);
 
   const meaning =
     differenceFromSeed ||
@@ -8554,17 +8568,32 @@ let transitionMeaning: string | null = transitionMeaningFromSeed || null;
 deepRevealLineForWriter = (() => {
   try {
     const meaning = transitionMeaning ?? null;
-    if (!meaning) return null;
 
     const stingLevelNow =
       (opts as any)?.userContext?.ctxPack?.stingLevel ??
       (opts as any)?.userContext?.stingLevel ??
       null;
 
-    if (String(stingLevelNow).toUpperCase() !== 'HIGH') return null;
+    const result =
+      meaning && String(stingLevelNow).toUpperCase() === 'HIGH'
+        ? meaning
+        : null;
 
-    return meaning;
-  } catch {
+    console.log(
+      '[IROS/TRANSITION_MEANING][DEEP_REVEAL_CHECK]',
+      JSON.stringify({
+        traceId: debug.traceId ?? null,
+        conversationId: debug.conversationId ?? null,
+        userCode: debug.userCode ?? null,
+        transitionMeaning: meaning,
+        stingLevelNow,
+        deepRevealLineForWriter: result,
+      }),
+    );
+
+    return result;
+  } catch (e) {
+    console.warn('[IROS/TRANSITION_MEANING][DEEP_REVEAL_CHECK][ERROR]', e);
     return null;
   }
 })();
@@ -9765,7 +9794,7 @@ const isResonanceStructureFollowup =
                 };
               };
 
-              const writerDirectivesForFinal =
+              const writerDirectivesBaseForFinal =
                 writerPatternKey === 'IR_DETAIL_V1'
                   ? {
                       ...mergeUserStateWriterDirectives(writerDirectivesForFinalRaw),
@@ -9773,6 +9802,16 @@ const isResonanceStructureFollowup =
                       pattern_mode: 'diagnosis_detail',
                     }
                   : mergeUserStateWriterDirectives(writerDirectivesForFinalRaw);
+
+              const writerDirectivesForFinal = {
+                ...writerDirectivesBaseForFinal,
+                ...(deepRevealLineForWriter
+                  ? {
+                      deepRevealLine: deepRevealLineForWriter,
+                      forceUseDeepReveal: true,
+                    }
+                  : {}),
+              };
 console.log(
   '[IROS/rephraseEngine][CALL_WRITER_ARGS]',
   JSON.stringify({

@@ -70,7 +70,43 @@ export async function loadConversationHistory(
       return [];
     }
 
-    const rows = (data ?? []).slice().reverse();
+    const rawRowsDesc = Array.isArray(data) ? data : [];
+
+    // ✅ 同一 conversation_id が長期間使い回された場合の履歴汚染を止める
+    // - DBは created_at desc で取得済み
+    // - 最新行から見て、前の行との間隔が大きく空いたらそこで別セッション扱いにして切る
+    // - 既定は24時間。必要なら IROS_HISTORY_SESSION_GAP_HOURS で調整する
+    const sessionGapHoursRaw = Number(process.env.IROS_HISTORY_SESSION_GAP_HOURS);
+    const sessionGapHours =
+      Number.isFinite(sessionGapHoursRaw) && sessionGapHoursRaw > 0
+        ? Math.max(1, Math.min(168, Math.floor(sessionGapHoursRaw)))
+        : 24;
+    const sessionGapMs = sessionGapHours * 60 * 60 * 1000;
+
+    const parseTimeMs = (v: any): number | null => {
+      if (typeof v !== 'string' || !v.trim()) return null;
+      const n = Date.parse(v);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const sessionRowsDesc: any[] = [];
+    let newerMs: number | null = null;
+
+    for (const row of rawRowsDesc as any[]) {
+      const rowMs = parseTimeMs(row?.created_at);
+
+      if (sessionRowsDesc.length > 0 && newerMs != null && rowMs != null) {
+        const gapMs = Math.abs(newerMs - rowMs);
+        if (gapMs > sessionGapMs) {
+          break;
+        }
+      }
+
+      sessionRowsDesc.push(row);
+      if (rowMs != null) newerMs = rowMs;
+    }
+
+    const rows = sessionRowsDesc.slice().reverse();
 
     const pickTextFromRow = (m: any): string => {
       // 1) text が文字列なら最優先

@@ -1837,8 +1837,14 @@ const mirrorFlowV1ForSeed: any =
                     } catch {}
                     if (!currentStateId) return null;
 
-                    const candidates = buildTransition180Candidates(currentStateId);
-                    const picked180 = selectTransition180(candidates, futureStateId);
+                    // ✅ 通常会話の主移管は prev → current。
+                    // prev がない初回/復帰時は current → current として扱う。
+                    // futureRandom は候補表示には残すが、主移管先には使わない。
+                    const transitionFromStateId = previousStateId ?? currentStateId;
+                    const transitionToStateId = currentStateId;
+
+                    const candidates = buildTransition180Candidates(transitionFromStateId);
+                    const picked180 = selectTransition180(candidates, transitionToStateId);
                     const primary180 = picked180?.primary ?? null;
 
                     if (!primary180) return null;
@@ -1983,18 +1989,28 @@ const mirrorFlowV1ForSeed: any =
                           currentStateId: null,
                           previousStateId,
                           futureStateId,
+                          transitionFromStateId: null,
+                          transitionToStateId: null,
                           primary: null,
                           secondary: [],
                         };
                       }
 
-                      const candidates = buildTransition180Candidates(currentStateId);
-                      const picked180 = selectTransition180(candidates, futureStateId);
+                      // ✅ 通常会話の主移管は prev → current。
+                      // prev がない初回/復帰時は current → current として扱う。
+                      // futureRandom は観測値として残すが、主移管先には使わない。
+                      const transitionFromStateId = previousStateId ?? currentStateId;
+                      const transitionToStateId = currentStateId;
+
+                      const candidates = buildTransition180Candidates(transitionFromStateId);
+                      const picked180 = selectTransition180(candidates, transitionToStateId);
 
                       return {
                         currentStateId,
                         previousStateId,
                         futureStateId,
+                        transitionFromStateId,
+                        transitionToStateId,
                         primary: picked180.primary,
                         secondary: picked180.secondary,
                       };
@@ -2963,6 +2979,89 @@ return {
                     return fromFlowObj || null;
                   })(),
                 },
+
+                transferContext: (() => {
+                  const pickNumber = (...vals: any[]) => {
+                    for (const v of vals) {
+                      if (typeof v === 'number' && Number.isFinite(v)) return v;
+
+                      if (typeof v === 'string' && v.trim() !== '') {
+                        const n = Number(v);
+                        if (Number.isFinite(n)) return n;
+                      }
+                    }
+
+                    return null;
+                  };
+
+                  const sa = pickNumber(
+                    (args as any)?.selfAcceptance,
+                    (args as any)?.self_acceptance,
+                    (args as any)?.sa,
+                    (ctxPack as any)?.selfAcceptance,
+                    (ctxPack as any)?.self_acceptance,
+                    (ctxPack as any)?.sa,
+                    (extra as any)?.selfAcceptance,
+                    (extra as any)?.self_acceptance,
+                    (extra as any)?.sa,
+                    (flowAny as any)?.pack?.context?.sa,
+                  );
+
+                  const yuragi = pickNumber(
+                    (args as any)?.yuragi,
+                    (ctxPack as any)?.yuragi,
+                    (extra as any)?.yuragi,
+                    (exprMeta as any)?.yuragi,
+                    (ctxPack as any)?.exprMeta?.yuragi,
+                    (extra as any)?.exprMeta?.yuragi,
+                    (flowAny as any)?.pack?.context?.yuragi,
+                  );
+
+                  const yohaku = pickNumber(
+                    (args as any)?.yohaku,
+                    (ctxPack as any)?.yohaku,
+                    (extra as any)?.yohaku,
+                    (exprMeta as any)?.yohaku,
+                    (ctxPack as any)?.exprMeta?.yohaku,
+                    (extra as any)?.exprMeta?.yohaku,
+                    (flowAny as any)?.pack?.context?.yohaku,
+                  );
+
+                  const saBiasHintRaw = String(
+                    (args as any)?.saBiasHint ??
+                      (ctxPack as any)?.saBiasHint ??
+                      (extra as any)?.saBiasHint ??
+                      (flowAny as any)?.pack?.context?.saBiasHint ??
+                      '',
+                  ).trim();
+
+                  const saBiasHint =
+                    saBiasHintRaw ||
+                    (typeof sa === 'number'
+                      ? sa < 0.35
+                        ? 'negative_risk'
+                        : sa > 0.7
+                          ? 'positive_capacity'
+                          : 'neutral'
+                      : '');
+
+                  const saPolarity =
+                    saBiasHint === 'positive_capacity'
+                      ? 'pos'
+                      : saBiasHint === 'negative_risk'
+                        ? 'neg'
+                        : saBiasHint === 'neutral'
+                          ? 'neutral'
+                          : null;
+
+                  return {
+                    sa,
+                    saPolarity,
+                    yuragi,
+                    yohaku,
+                    utteranceAlignment: null,
+                  };
+                })(),
 
                 goalKind: pick(
                   (extra as any)?.goalKind,

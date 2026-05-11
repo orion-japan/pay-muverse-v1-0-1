@@ -39,6 +39,12 @@ export type SeedCanonicalInput = {
     futureRandom?: string | null;
   } | null;
 
+  /**
+   * currentFlow → secondFlow の状態移管SEED。
+   * Writerには意味生成させず、ここで圧縮済みの移管情報だけを渡す。
+   */
+  transferSeedText?: string | null;
+
   focus?: string | null;
   tone?: string | null;
   pressure?: string | null;
@@ -88,6 +94,8 @@ export type SeedCanonical = {
     energy: string | null;
     futureRandom: string | null;
   };
+
+  transferSeedText: string | null;
 
   state: {
     from: string | null;
@@ -331,6 +339,7 @@ function buildSeedText(seed: Omit<SeedCanonical, 'text'>): string {
         .join('\n')),
       line('CONTEXT', clean(seed.context.userCore) ?? clean(seed.focus)),
       line('DIFFERENCE', differenceText),
+      line('TRANSFER_SEED', clean(seed.transferSeedText)),
       line('FOCUS', clean(seed.focus)),
       line('TONE', clean(seed.tone)),
       line('PRESSURE', clean(seed.pressure)),
@@ -458,6 +467,8 @@ export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
       energy: clean(input.flow?.energy),
       futureRandom: clean(input.flow?.futureRandom),
     },
+
+    transferSeedText: clean(input.transferSeedText),
 
     state: {
       from: clean(input.flow180?.from) ?? clean(input.writerDirectives?.flowFrom),

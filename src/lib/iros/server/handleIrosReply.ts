@@ -3389,6 +3389,62 @@ function normForRecall(v: any): string {
           (orchCtxPack as any)?.flow180 ??
           null,
 
+        transferContext: (() => {
+          const pickNumber = (...vals: any[]) => {
+            for (const v of vals) {
+              if (typeof v === 'number' && Number.isFinite(v)) return v;
+            }
+            return null;
+          };
+
+          const sa = pickNumber(
+            (orchCtxPack as any)?.selfAcceptance,
+            (orchCtxPack as any)?.self_acceptance,
+            (orchCtxPack as any)?.sa,
+            (orchExtra as any)?.selfAcceptance,
+            (orchExtra as any)?.self_acceptance,
+            (orchExtra as any)?.sa,
+          );
+
+          const yuragi = pickNumber(
+            (orchCtxPack as any)?.yuragi,
+            (orchExtra as any)?.yuragi,
+            (orchCtxPack as any)?.exprMeta?.yuragi,
+            (orchExtra as any)?.exprMeta?.yuragi,
+          );
+
+          const yohaku = pickNumber(
+            (orchCtxPack as any)?.yohaku,
+            (orchExtra as any)?.yohaku,
+            (orchCtxPack as any)?.exprMeta?.yohaku,
+            (orchExtra as any)?.exprMeta?.yohaku,
+          );
+
+          const saBiasHint = String(
+            (orchCtxPack as any)?.saBiasHint ??
+              (orchExtra as any)?.saBiasHint ??
+              (orchFlow as any)?.pack?.context?.saBiasHint ??
+              '',
+          ).trim();
+
+          const saPolarity =
+            saBiasHint === 'positive_capacity'
+              ? 'pos'
+              : saBiasHint === 'negative_risk'
+                ? 'neg'
+                : saBiasHint === 'neutral'
+                  ? 'neutral'
+                  : null;
+
+          return {
+            sa,
+            saPolarity,
+            yuragi,
+            yohaku,
+            utteranceAlignment: null,
+          };
+        })(),
+
         writerDirectives:
           previousReplyRephraseSeed
             ? {
@@ -6244,18 +6300,27 @@ if (detailModeRaw) {
         }
 
     if (wantsPartnerSideResonance) {
+      const isContactPartnerReading =
+        /(連絡|返事|返信|既読|未読|LINE|ライン|DM|メッセージ|返ってこない|返せない|返さない|連絡しない|連絡が取れない)/u.test(
+          currentUserText,
+        );
+
+      const partnerSideTopic = isContactPartnerReading
+        ? /彼女/u.test(currentUserText)
+          ? '連絡が取れない彼女側の状態'
+          : /相手|あの人|好きな人|パートナー/u.test(currentUserText)
+            ? '連絡が取れない相手側の状態'
+            : '連絡が取れない彼側の状態'
+        : currentUserText;
+
       return {
         next: {
-          topic: /彼女/u.test(currentUserText)
-            ? '連絡が取れない彼女側の状態'
-            : /相手|あの人|好きな人|パートナー/u.test(currentUserText)
-              ? '連絡が取れない相手側の状態'
-              : '連絡が取れない彼側の状態',
+          topic: partnerSideTopic,
           askType: 'truth_structure',
           replyMode: 'partner_side_resonance',
           readingMode: 'partner_side_resonance',
           sourceUserText: currentUserText,
-          historyHint: partnerSideHistoryHint || null,
+          historyHint: isContactPartnerReading ? partnerSideHistoryHint || null : null,
         },
         clear: false,
       } as const;
