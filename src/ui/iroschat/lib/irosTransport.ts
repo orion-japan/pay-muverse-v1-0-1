@@ -756,7 +756,6 @@ export async function replyAndStore(args: {
 
   // ③ orchestrator から返ってきた meta を拾う
   const meta = r?.meta ?? null;
-  console.log('🔥 meta raw', meta);
   // ★ クライアント側では assistant を DB に二重保存しない ★
   // （保存はサーバ側に任せる）
 
