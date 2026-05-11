@@ -36,6 +36,10 @@ export type SpeechDecision = {
   hint?: {
     allowLLM?: boolean; // actに反してLLMを呼ばないための保険
     oneLineOnly?: boolean;
+
+    // ✅ 現実行動・予定・イベント・人/場所/日程などが出た時だけ、
+    // FORWARD でも最後の状況確認質問を1つ許可する。
+    allowQuestion?: boolean;
   };
 };
 

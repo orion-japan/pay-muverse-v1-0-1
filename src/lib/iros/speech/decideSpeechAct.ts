@@ -69,6 +69,15 @@ function hasSlots(n?: number | null): boolean {
   return v > 0;
 }
 
+function shouldAllowRealityQuestion(userText?: string | null): boolean {
+  const t = normStr(userText ?? '');
+  if (!t) return false;
+
+  // ✅ 現実行動・予定・イベント・人/場所/日程など、
+  // ユーザーの現実を受け取りに行かないと会話が閉じる領域だけ質問を許可する。
+  return /(イベント|開催|日程|場所|会場|福岡|打ち合わせ|ミーティング|予定|会う|送る|決める|申し込み|申込み|販売|制作|投稿|公開|契約|予約|参加|誰と|一緒に動く|現実に動|現実の側|動き始め|彼|彼女|旦那|夫|妻|恋人|好きな人|浮気|不倫|連絡|返信|返事|既読|未読|不安|心配|関係|距離感|別れ|喧嘩|仲直り|復縁|嫌われ|待てない|イライラ)/.test(t);
+}
+
 function tCommitPossible(i: DecideSpeechActInput): boolean {
   if (i.tLayerModeActive === true) return true;
 
@@ -137,7 +146,7 @@ function makeDecision(d: {
   shouldPersistAssistant?: boolean;
 
   // hint は applySpeechAct が参照（抑制のトリガ）
-  hint?: { allowLLM?: boolean; oneLineOnly?: boolean };
+  hint?: { allowLLM?: boolean; oneLineOnly?: boolean; allowQuestion?: boolean };
 
   // applySpeechAct が any で読みに行く “meta”
   meta?: any | null;
@@ -167,6 +176,7 @@ function makeDecision(d: {
 
 export function decideSpeechAct(input: DecideSpeechActInput): SpeechDecision {
   const oneLineOnly = input.oneLineOnly === true;
+  const allowRealityQuestion = shouldAllowRealityQuestion(input.userText ?? null);
 
   // ✅ metaLite は入口で一度だけ作る（分岐で漏れない）
   const metaLite = buildMetaLite(input);
@@ -247,6 +257,7 @@ export function decideSpeechAct(input: DecideSpeechActInput): SpeechDecision {
       confidence: 0.85,
       allowLLM: true,
       oneLineOnly,
+      hint: allowRealityQuestion ? { allowQuestion: true } : undefined,
       meta: metaLite,
     });
   }
@@ -258,6 +269,7 @@ export function decideSpeechAct(input: DecideSpeechActInput): SpeechDecision {
     confidence: 0.6,
     allowLLM: true,
     oneLineOnly,
+    hint: allowRealityQuestion ? { allowQuestion: true } : undefined,
     meta: metaLite,
   });
 }

@@ -3212,11 +3212,35 @@ return {
 
                     safeLine:
                     (() => {
+                      const rawForOpenEdge = [
+                        latestUserText,
+                        (args as any)?.userText,
+                        (args as any)?.followupText,
+                        (args as any)?.inputText,
+                      ]
+                        .map((v) => String(v ?? '').trim())
+                        .filter(Boolean)
+                        .join('\n');
+
+                      const isEventOpenEdge =
+                        /(イベント|開催|日程|場所|会場|福岡|打ち合わせ|ミーティング|予定|販売|制作|投稿|公開|告知|演出|導入|関わる人|誰と|一緒に動く|現実に動|現実の側|動き始め)/.test(rawForOpenEdge);
+
+                      const isRelationshipOpenEdge =
+                        /(彼|彼女|旦那|夫|妻|恋人|好きな人|浮気|不倫|連絡|返信|返事|既読|未読|不安|心配|関係|距離感|別れ|喧嘩|仲直り|復縁|嫌われ|待てない|イライラ)/.test(rawForOpenEdge);
+
+                      const openEdgeLineForDialogue = isEventOpenEdge
+                        ? 'ここからは、演出・会場・日程・関わる人のどこからでも現実の組み立てに入れます。'
+                        : isRelationshipOpenEdge
+                          ? 'この話は、今わかっている事実、不安、相手への言葉、待つ時間のどこからでも続けられます。'
+                          : null;
+
                       const v =
+                        cleanMeaningLine(openEdgeLineForDialogue) ||
                         cleanMeaningLine((args as any)?.flow180?.sentence) ||
                         cleanMeaningLine((args as any)?.writerDirectives?.deltaLine) ||
                         cleanMeaningLine(latestUserText) ||
-                        'そこだけが、静かに残っています。';
+                        null;
+                      if (!v) return null;
                       return /[。！？]$/.test(v) ? v : `${v}。`;
                     })(),
                 },

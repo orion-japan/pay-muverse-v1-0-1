@@ -8230,7 +8230,26 @@ raw = await (async () => {
               200
             );
 
+            const allowRealityAskBackForWriter = (() => {
+              const raw = [
+                (opts as any)?.userText,
+                (historyDigestV1 as any)?.topic?.situationTopic,
+                (historyDigestV1 as any)?.topic?.situationSummary,
+                (historyDigestV1 as any)?.continuity?.last_user_core,
+              ]
+                .map((v) => String(v ?? '').trim())
+                .filter(Boolean)
+                .join('\n');
+
+              if (!raw) return false;
+
+              // ✅ 現実行動・予定・イベント・人/場所/日程など、
+              // ユーザーの現実を受け取りに行かないと会話が閉じる領域だけ質問を許可する。
+              return /(イベント|開催|日程|場所|会場|福岡|打ち合わせ|ミーティング|予定|会う|送る|決める|申し込み|申込み|販売|制作|投稿|公開|契約|予約|参加|誰と|一緒に動く|現実に動|現実の側|動き始め|彼|彼女|旦那|夫|妻|恋人|好きな人|浮気|不倫|連絡|返信|返事|既読|未読|不安|心配|関係|距離感|別れ|喧嘩|仲直り|復縁|嫌われ|待てない|イライラ)/.test(raw);
+            })();
+
             const askBackAllowedValue = (() => {
+              if (allowRealityAskBackForWriter) return true;
               if (suppressQuestionMetaForStateCues) return false;
               const v = (questionForWriter as any)?.outputPolicy?.askBackAllowed;
               return typeof v === 'boolean' ? v : null;
@@ -9887,8 +9906,46 @@ const isResonanceStructureFollowup =
                     }
                   : mergeUserStateWriterDirectives(writerDirectivesForFinalRaw);
 
+              const openEdgeClosingLineForFinal = (() => {
+                const raw = [
+                  (opts as any)?.userText,
+                  (opts as any)?.followupText,
+                  (opts as any)?.inputText,
+                  (opts as any)?.userContext?.ctxPack?.topicDigest,
+                  (opts as any)?.userContext?.ctxPack?.conversationLine,
+                  (opts as any)?.userContext?.question?.focus,
+                  (opts as any)?.userContext?.meta?.extra?.question?.focus,
+                ]
+                  .map((v) => String(v ?? '').trim())
+                  .filter(Boolean)
+                  .join('\n');
+
+                if (!raw) return null;
+
+                const isEventOpenEdge =
+                  /(イベント|開催|日程|場所|会場|福岡|打ち合わせ|ミーティング|予定|販売|制作|投稿|公開|告知|演出|導入|関わる人|誰と|一緒に動く|現実に動|現実の側|動き始め)/.test(raw);
+
+                if (isEventOpenEdge) {
+                  return '最後は抽象的な余韻で閉じず、「ここからは、演出・会場・日程・関わる人のどこからでも現実の組み立てに入れます。」のように、次に話せる現実の入口を自然文で残す。';
+                }
+
+                const isRelationshipOpenEdge =
+                  /(彼|彼女|旦那|夫|妻|恋人|好きな人|浮気|不倫|連絡|返信|返事|既読|未読|不安|心配|関係|距離感|別れ|喧嘩|仲直り|復縁|嫌われ|待てない|イライラ)/.test(raw);
+
+                if (isRelationshipOpenEdge) {
+                  return '最後は抽象的な余韻で閉じず、「この話は、今わかっている事実、不安、相手への言葉、待つ時間のどこからでも続けられます。」のように、次に話せる現実の入口を自然文で残す。相手の本心は断定しない。';
+                }
+
+                return null;
+              })();
+
               const writerDirectivesForFinal = {
                 ...writerDirectivesBaseForFinal,
+                ...(openEdgeClosingLineForFinal
+                  ? {
+                      block_closing_line: openEdgeClosingLineForFinal,
+                    }
+                  : {}),
                 ...(deepRevealLineForWriter
                   ? {
                       deepRevealLine: deepRevealLineForWriter,
@@ -10543,6 +10600,27 @@ userContext: {
       userContextAny?.meta?.extra?.question?.outputPolicy?.askBackAllowed ??
       null;
 
+    const allowRealityQuestionByText = (() => {
+      const raw = [
+        (opts as any)?.userText,
+        questionAny?.focus,
+        questionAny?.tState?.focus,
+        userContextAny?.question?.focus,
+        userContextAny?.meta?.extra?.question?.focus,
+        userContextAny?.ctxPack?.topicDigest,
+        userContextAny?.ctxPack?.conversationLine,
+      ]
+        .map((v) => String(v ?? '').trim())
+        .filter(Boolean)
+        .join('\n');
+
+      if (!raw) return false;
+
+      // ✅ SpeechAct 側の allowQuestion と同じ現実接続条件。
+      // ここだけ質問禁止を解除し、抽象質問や質問連発は許可しない。
+      return /(イベント|開催|日程|場所|会場|福岡|打ち合わせ|ミーティング|予定|会う|送る|決める|申し込み|申込み|販売|制作|投稿|公開|契約|予約|参加|誰と|一緒に動く|現実に動|現実の側|動き始め|彼|彼女|旦那|夫|妻|恋人|好きな人|浮気|不倫|連絡|返信|返事|既読|未読|不安|心配|関係|距離感|別れ|喧嘩|仲直り|復縁|嫌われ|待てない|イライラ)/.test(raw);
+    })();
+
     const seedHintText = String(
       (opts as any)?.seedDraftRawAllHead ??
         (opts as any)?.seedDraftHead ??
@@ -10576,20 +10654,23 @@ userContext: {
       !isShortAmbiguousFollowup;
 
     const noQuestions =
-      forceNoQuestionsByMeaningConfirm ||
-      forceNoQuestionsByContinuity;
+      !allowRealityQuestionByText &&
+      (forceNoQuestionsByMeaningConfirm ||
+        forceNoQuestionsByContinuity);
 
-    const askBackAllowedResolved = noQuestions
-      ? false
-      : askBackAllowedRaw;
+    const askBackAllowedResolved = allowRealityQuestionByText
+      ? true
+      : noQuestions
+        ? false
+        : askBackAllowedRaw;
 
     const goalKindNow =
       forceNoQuestionsByMeaningConfirm && goalKindRaw === 'expand'
         ? 'confirm'
         : goalKindRaw;
 
-    const questionsMaxNow = noQuestions ? 0 : null;
-    const forceNoQuestionsByContract = noQuestions;
+    const questionsMaxNow = allowRealityQuestionByText ? 1 : noQuestions ? 0 : null;
+    const forceNoQuestionsByContract = allowRealityQuestionByText ? false : noQuestions;
 
     const beforeLast = String(t.split('\n').filter(Boolean).slice(-1)[0] ?? '');
 

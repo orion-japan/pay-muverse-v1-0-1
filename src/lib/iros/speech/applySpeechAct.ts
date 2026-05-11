@@ -195,6 +195,7 @@ export function applySpeechAct(decision: SpeechDecision): ApplySpeechActOutput {
   // ただし “器” を FORWARD の最小（1行）に固定する。
   const hintAllow = (decision as any)?.hint?.allowLLM;
   const forcedByHint = hintAllow === false;
+  const allowQuestion = (decision as any)?.hint?.allowQuestion === true;
 
   const isSuppressed = forcedByQ1Suppress || forcedByHint;
 
@@ -209,11 +210,17 @@ export function applySpeechAct(decision: SpeechDecision): ApplySpeechActOutput {
   // 抑制時の maxLines は 1 に固定（短文でも “人間語の1行” を作らせる）
   const maxLines = isSuppressed ? 1 : Math.max(allowCandidateBase.maxLines ?? 1, 1);
 
+  const allowFields =
+    allowQuestion && !isSuppressed && actCandidate === 'FORWARD'
+      ? { ...((allowCandidateBase as any).fields ?? {}), question: true }
+      : (allowCandidateBase as any).fields;
+
   // allow を上書き（maxLines を確実に反映）
   const allow: AllowSchema = {
     ...(allowCandidateBase as any),
     allowLLM: true,
     maxLines,
+    fields: allowFields,
   } as any;
 
   // =========================================================
