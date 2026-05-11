@@ -9841,9 +9841,92 @@ const isResonanceStructureFollowup =
                     ? returnStreakForUnderstanding
                     : null;
 
+                const userSurfaceTextForDeepReadControl = String(
+                  (opts as any)?.userText ??
+                    (opts as any)?.followupText ??
+                    (opts as any)?.inputText ??
+                    ''
+                ).trim();
+
+                const userMetaForDeepReadControl: any =
+                  ((opts as any)?.meta && typeof (opts as any).meta === 'object'
+                    ? (opts as any).meta
+                    : null) ??
+                  ((opts as any)?.userContext?.meta &&
+                  typeof (opts as any).userContext.meta === 'object'
+                    ? (opts as any).userContext.meta
+                    : null) ??
+                  {};
+
+                const userExtraForDeepReadControl: any =
+                  userMetaForDeepReadControl?.extra &&
+                  typeof userMetaForDeepReadControl.extra === 'object'
+                    ? userMetaForDeepReadControl.extra
+                    : {};
+
+                const deepReadControlMetaText = [
+                  userMetaForDeepReadControl?.defensiveSignal,
+                  userMetaForDeepReadControl?.defensive_signal,
+                  userMetaForDeepReadControl?.defenseSignal,
+                  userMetaForDeepReadControl?.defense_signal,
+                  userMetaForDeepReadControl?.contradictionSignal,
+                  userMetaForDeepReadControl?.contradiction_signal,
+                  userMetaForDeepReadControl?.surfaceVsCoreGap,
+                  userMetaForDeepReadControl?.surface_vs_core_gap,
+                  userMetaForDeepReadControl?.pressure,
+                  userExtraForDeepReadControl?.defensiveSignal,
+                  userExtraForDeepReadControl?.defensive_signal,
+                  userExtraForDeepReadControl?.defenseSignal,
+                  userExtraForDeepReadControl?.defense_signal,
+                  userExtraForDeepReadControl?.contradictionSignal,
+                  userExtraForDeepReadControl?.contradiction_signal,
+                  userExtraForDeepReadControl?.surfaceVsCoreGap,
+                  userExtraForDeepReadControl?.surface_vs_core_gap,
+                  userExtraForDeepReadControl?.pressure,
+                ]
+                  .map((v) => String(v ?? '').trim().toLowerCase())
+                  .filter(Boolean)
+                  .join(' / ');
+
+                const hasStrongDeepReadMeta =
+                  /strong|high|defensive|defense|contradiction|surface.*core|core.*gap|gap|bluff|sour|強|高|防衛|矛盾|強がり|負け惜しみ/u.test(
+                    deepReadControlMetaText
+                  );
+
+                const isPositiveAcceptanceOrSelfDefinition =
+                  polarity === 'positive' ||
+                  /(良かった|よかった|嬉しい|うれしい|感謝|安心|平常心|苦しくありません|苦しくない|我慢じゃない|我慢ではない|止めていない|止めているわけじゃない|受け入れている|尊重している|反応しない|反応がない|その通り|それで合って|それが正解|正解です)/u.test(
+                    userSurfaceTextForDeepReadControl
+                  );
+
+                const isAiCorrectionOrComplaint =
+                  /(なんども|何度も|違います|違う|そうじゃない|言ってます|言いました|あなたは|Muは|AI|完璧主義|しつこい|偏屈|認め|受け入れて)/u.test(
+                    userSurfaceTextForDeepReadControl
+                  );
+
+                const shouldSuppressDeepReadByUserState =
+                  (isPositiveAcceptanceOrSelfDefinition || isAiCorrectionOrComplaint) &&
+                  !hasStrongDeepReadMeta;
+
                 const writeConstraints: string[] = [
                   'USER_STATE: 状態メタ(Q/depth/phase/SA/e_turn/polarity/returnStreak)は本文に露出しない',
                   'USER_STATE: 状態メタは返答の深さ・温度・具体度・踏み込み量の調整にだけ使う',
+
+                  ...(shouldSuppressDeepReadByUserState
+                    ? [
+                        'DEEP_READ_CONTROL: ユーザーがポジティブ・感謝・安心・納得・平常心・自己定義を明示しており、防衛/矛盾/表面と核心のズレが strong/high ではないため、裏読みしない',
+                        'DEEP_READ_CONTROL: 「ただ」「でも」「本当は」「避けている」「止めている」「守っている」で、ユーザーの自己定義を差し戻さない',
+                        'DEEP_READ_CONTROL: ユーザーの「我慢ではない」「止めていない」「受け入れている」「尊重している」「平常心」を確定情報として採用する',
+                        'DEEP_READ_CONTROL: AI/Muへの指摘はユーザー診断に変換せず、必要なら読み違いを認めて修正する',
+                      ]
+                    : []),
+
+                  ...(hasStrongDeepReadMeta
+                    ? [
+                        'DEEP_READ_CONTROL: 防衛/矛盾/表面と核心のズレが strong/high の場合のみ、短く一段だけ裏を見る',
+                        'DEEP_READ_CONTROL: 裏を見る場合も、人格診断・決めつけ・相手の本心断定にしない',
+                      ]
+                    : []),
                 ];
 
                 // ✅ USER_STATE抑制解除
@@ -9939,6 +10022,23 @@ const isResonanceStructureFollowup =
                 return null;
               })();
 
+              const shouldSuppressDeepRevealForFinal =
+                Array.isArray((writerDirectivesBaseForFinal as any)?.writeConstraints) &&
+                (writerDirectivesBaseForFinal as any).writeConstraints.some((line: any) =>
+                  String(line ?? '').includes('DEEP_READ_CONTROL: ユーザーがポジティブ')
+                );
+
+              const deepReadSuppressionConstraintsForFinal =
+                shouldSuppressDeepRevealForFinal
+                  ? [
+                      'DEEP_READ_CONTROL_FINAL: このターンは自己定義の受領として返す。奥の本音・残り・余白・別解釈を作らない',
+                      'DEEP_READ_CONTROL_FINAL: 出力本文で「ただ」「でも」「本当は」「見られやすい」「〜に見える」を使わない',
+                      'DEEP_READ_CONTROL_FINAL: 「我慢に見える」「止めているように見える」「守っているように見える」など、第三者視点の再解釈を足さない',
+                      'DEEP_READ_CONTROL_FINAL: 2〜4文程度で、ユーザーの自己定義を採用して閉じる',
+                      'DEEP_READ_CONTROL_FINAL: state_residue を作らない。追加課題・次に見ること・言葉にする課題を足さない',
+                    ]
+                  : [];
+
               const writerDirectivesForFinal = {
                 ...writerDirectivesBaseForFinal,
                 ...(openEdgeClosingLineForFinal
@@ -9946,7 +10046,33 @@ const isResonanceStructureFollowup =
                       block_closing_line: openEdgeClosingLineForFinal,
                     }
                   : {}),
-                ...(deepRevealLineForWriter
+                ...(shouldSuppressDeepRevealForFinal
+                  ? {
+                      pattern_mode: 'self_definition_acceptance',
+                      bodyStyle: {
+                        ...(((writerDirectivesBaseForFinal as any)?.bodyStyle ?? {}) as any),
+                        preferBlockSplit: true,
+                        minBlocks: 1,
+                        maxBlocks: 2,
+                        maxSentencesPerBlock: 3,
+                        minSentences: 2,
+                        maxSentences: 5,
+                      },
+                      block_state_surface:
+                        'ユーザーの自己定義をそのまま採用する。選択・停止・我慢へ戻さない。',
+                      block_state_residue:
+                        '残りや余白を作らず、ユーザーの言葉を芯として短く閉じる。',
+                      block_closing_line:
+                        '最後は「選んでいない、止めていない、受け入れている。そこをそのまま採用します。」の方向で閉じる。',
+                    }
+                  : {}),
+                writeConstraints: [
+                  ...(Array.isArray((writerDirectivesBaseForFinal as any)?.writeConstraints)
+                    ? (writerDirectivesBaseForFinal as any).writeConstraints
+                    : []),
+                  ...deepReadSuppressionConstraintsForFinal,
+                ],
+                ...(deepRevealLineForWriter && !shouldSuppressDeepRevealForFinal
                   ? {
                       deepRevealLine: deepRevealLineForWriter,
                       forceUseDeepReveal: true,
@@ -10428,7 +10554,7 @@ const finalWriterDirectivesMsg =
       ...({ slotDecision: slotDecisionForWriter } as any),
       writerDirectives: {
         ...writerDirectivesForFinal,
-        ...(deepRevealLineForWriter
+        ...(deepRevealLineForWriter && !shouldSuppressDeepRevealForFinal
           ? {
               deepRevealLine: deepRevealLineForWriter,
               forceUseDeepReveal: true,

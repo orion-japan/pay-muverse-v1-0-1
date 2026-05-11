@@ -120,9 +120,43 @@ const qBadgeStyle: React.CSSProperties = {
   color: '#4338ca',
 };
 
+function stripBrokenSurrogatesForDisplay(value: string): string {
+  const s = String(value ?? '');
+  let out = '';
+
+  for (let i = 0; i < s.length; i += 1) {
+    const code = s.charCodeAt(i);
+
+    // high surrogate
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = s.charCodeAt(i + 1);
+
+      // 正常な surrogate pair は保持する
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        out += s[i] + s[i + 1];
+        i += 1;
+      }
+
+      // 片割れだけの high surrogate は捨てる
+      continue;
+    }
+
+    // 片割れだけの low surrogate は捨てる
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      continue;
+    }
+
+    out += s[i];
+  }
+
+  return out
+    .replace(/[ \t]+([。、，．！？!?])/g, '$1')
+    .replace(/\s+$/g, '');
+}
+
 /** [object Object]対策：本文として使える文字列が無い object は「表示しない」 */
 function toSafeString(v: unknown): string {
-  if (typeof v === 'string') return v;
+  if (typeof v === 'string') return stripBrokenSurrogatesForDisplay(v);
   if (v == null) return '';
 
   // object の場合：本文候補キーだけ拾う。無ければ空文字（←ここが重要）
