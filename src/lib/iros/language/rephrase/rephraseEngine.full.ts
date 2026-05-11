@@ -3825,30 +3825,50 @@ if (!disableFlowSeedin) {
       ucExtra?.e_turn ??
       null) as any;
 
+  // ✅ FLOW_V2 の currentFlow に必要なのは pos/neg。
+  // yin/yang は内向き/外向きの位相なので、ここでは pos/neg に変換しない。
+  // 最優先は MirrorFlow が作った e_turn_v2.polarity。
   const polarity =
-    (mirrorFlowV1Any?.mirror?.polarity ??
+    (mirrorFlowV1Any?.mirror?.e_turn_v2?.polarity ??
+      mirrorFlowV1Any?.mirror?.turnPolarity ??
+      mirrorFlowV1Any?.mirror?.turn_polarity ??
+      mirrorAny?.e_turn_v2?.polarity ??
+      mirrorAny?.turnPolarity ??
+      mirrorAny?.turn_polarity ??
+      ctxPack0?.turnPolarity ??
+      ctxPack0?.turn_polarity ??
+      ucExtra?.ctxPack?.turnPolarity ??
+      ucExtra?.ctxPack?.turn_polarity ??
+      ucExtra?.turnPolarity ??
+      ucExtra?.turn_polarity ??
+      mirrorFlowV1Any?.mirror?.polarity ??
       mirrorAny?.polarity ??
       ctxPack0?.polarity ??
       ucExtra?.ctxPack?.polarity ??
       ucExtra?.polarity ??
       null) as any;
-      const polarityNorm =
-        (() => {
-          const raw =
-            typeof polarity === 'string'
-              ? polarity
-              : polarity?.in ?? polarity?.out ?? null;
 
-          const s = String(raw ?? '').trim().toLowerCase();
+  const polarityNorm =
+    (() => {
+      const raw =
+        typeof polarity === 'string'
+          ? polarity
+          : polarity?.e_turn_v2?.polarity ??
+            polarity?.turnPolarity ??
+            polarity?.turn_polarity ??
+            polarity?.polarity ??
+            polarity?.out ??
+            polarity?.in ??
+            null;
 
-          if (s === 'pos' || s === 'positive' || s === 'yang') return 'pos';
-          if (s === 'neg' || s === 'negative' || s === 'yin') return 'neg';
+      const s = String(raw ?? '').trim().toLowerCase();
 
-          return null;
-        })();
-      typeof polarity === 'string'
-        ? polarity
-        : polarity?.in ?? polarity?.out ?? null;
+      if (s === 'pos' || s === 'positive' || s === '+' || s === 'plus') return 'pos';
+      if (s === 'neg' || s === 'negative' || s === '-' || s === 'minus') return 'neg';
+
+      // ✅ yin/yang は位相。FLOW_V2 の状態極性には使わない。
+      return null;
+    })();
   const sa =
     (ctxPack0?.sa ??
       ucExtra?.ctxPack?.sa ??
@@ -3954,6 +3974,55 @@ if (!disableFlowSeedin) {
           previousNow,
         })
       );
+    console.log(
+      '[IROS/rephraseEngine][FLOW_INPUT_BEFORE_BUILD]',
+      JSON.stringify({
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+
+        pickedDepthStage,
+        e_turn,
+        polarityNorm,
+        sa,
+        confidence,
+        phase: ctxPack0?.phase ?? null,
+
+        mirrorFlowV1_mirror_e_turn_v2_polarity:
+          mirrorFlowV1Any?.mirror?.e_turn_v2?.polarity ?? null,
+        mirrorFlowV1_mirror_turnPolarity:
+          mirrorFlowV1Any?.mirror?.turnPolarity ??
+          mirrorFlowV1Any?.mirror?.turn_polarity ??
+          null,
+        mirrorFlowV1_mirror_polarity:
+          mirrorFlowV1Any?.mirror?.polarity ?? null,
+
+        mirrorAny_e_turn_v2_polarity:
+          mirrorAny?.e_turn_v2?.polarity ?? null,
+        mirrorAny_turnPolarity:
+          mirrorAny?.turnPolarity ?? mirrorAny?.turn_polarity ?? null,
+        mirrorAny_polarity:
+          mirrorAny?.polarity ?? null,
+
+        ctxPack_turnPolarity:
+          ctxPack0?.turnPolarity ?? ctxPack0?.turn_polarity ?? null,
+        ctxPack_polarity:
+          ctxPack0?.polarity ?? null,
+
+        ucExtra_ctxPack_turnPolarity:
+          ucExtra?.ctxPack?.turnPolarity ??
+          ucExtra?.ctxPack?.turn_polarity ??
+          null,
+        ucExtra_ctxPack_polarity:
+          ucExtra?.ctxPack?.polarity ?? null,
+
+        ucExtra_turnPolarity:
+          ucExtra?.turnPolarity ?? ucExtra?.turn_polarity ?? null,
+        ucExtra_polarity:
+          ucExtra?.polarity ?? null,
+      })
+    );
+
     const flowResult = buildFlowEngineResult({
       current: {
         depthStage: (pickedDepthStage ?? null) as any,
@@ -8993,9 +9062,24 @@ const laneKeyForPattern = String(
 const shouldForceDecidePattern =
   goalKindForPattern === 'decide' || laneKeyForPattern === 'T_CONCRETIZE';
 
+const isSunIntentStructurePattern =
+  questionTypeForPattern === 'structure' &&
+  (
+    /(?:意図|本来の意図|目的|未来|この先|方向性|展望|ムーブメント|ブームメント|世界|争いの無い世界|争いのない世界|希望|歓喜|成長|進化|SUN|太陽)/u.test(
+      userTextForTranscendPattern,
+    ) ||
+    /(?:SUN|太陽|希望|歓喜|成長|進化)/u.test(
+      String((ctxPackForWriter as any)?.historyDigestV1?.anchor?.phrase ?? ''),
+    ) ||
+    /(?:-pos\b)/u.test(
+      String((ctxPackForWriter as any)?.flow?.current?.id ?? (ctxPackForWriter as any)?.flow?.current ?? ''),
+    )
+  );
+
 const shouldForceStructureDetailPattern =
   questionTypeForPattern === 'structure' &&
   goalKindForPattern === 'uncover' &&
+  !isSunIntentStructurePattern &&
   (
     selectedPatternKey === 'NORMAL_COMPRESSED_V1' ||
     selectedPatternKey === 'NORMAL_RESONANCE_V1'

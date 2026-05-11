@@ -45,6 +45,12 @@ export type SeedCanonicalInput = {
    */
   transferSeedText?: string | null;
 
+  /**
+   * HumanContextOrchestrator が作る司令塔SEED。
+   * 3軸 / Qコード / questionType / futureRandom の扱いを Writer に渡す。
+   */
+  humanContextOrchestrationText?: string | null;
+
   focus?: string | null;
   tone?: string | null;
   pressure?: string | null;
@@ -96,6 +102,7 @@ export type SeedCanonical = {
   };
 
   transferSeedText: string | null;
+  humanContextOrchestrationText: string | null;
 
   state: {
     from: string | null;
@@ -340,6 +347,7 @@ function buildSeedText(seed: Omit<SeedCanonical, 'text'>): string {
       line('CONTEXT', clean(seed.context.userCore) ?? clean(seed.focus)),
       line('DIFFERENCE', differenceText),
       line('TRANSFER_SEED', clean(seed.transferSeedText)),
+      line('HUMAN_CONTEXT_ORCHESTRATION', clean(seed.humanContextOrchestrationText)),
       line('FOCUS', clean(seed.focus)),
       line('TONE', clean(seed.tone)),
       line('PRESSURE', clean(seed.pressure)),
@@ -469,6 +477,7 @@ export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
     },
 
     transferSeedText: clean(input.transferSeedText),
+    humanContextOrchestrationText: clean(input.humanContextOrchestrationText),
 
     state: {
       from: clean(input.flow180?.from) ?? clean(input.writerDirectives?.flowFrom),

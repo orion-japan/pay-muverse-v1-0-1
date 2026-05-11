@@ -3329,23 +3329,59 @@ function normForRecall(v: any): string {
             orchFlow?.labels?.current ??
             orchFlow?.current ??
             orchFlow?.currentId ??
+            (orchCtxPack as any)?.flow?.currentFlow ??
+            (orchCtxPack as any)?.flow?.current ??
+            (orchExtra as any)?.ctxPack?.flow?.currentFlow ??
+            (orchExtra as any)?.ctxPack?.flow?.current ??
+            (orchExtra as any)?.flow?.currentFlow ??
+            (orchExtra as any)?.flow?.current ??
             null,
           prev:
             orchFlow?.labels?.prev ??
             orchFlow?.prev ??
             orchFlow?.prevId ??
+            (orchCtxPack as any)?.flow?.previousFlow ??
+            (orchCtxPack as any)?.flow?.previous ??
+            (orchCtxPack as any)?.flow?.prev ??
+            (orchExtra as any)?.ctxPack?.flow?.previousFlow ??
+            (orchExtra as any)?.ctxPack?.flow?.previous ??
+            (orchExtra as any)?.ctxPack?.flow?.prev ??
+            (orchExtra as any)?.flow?.previousFlow ??
+            (orchExtra as any)?.flow?.previous ??
+            (orchExtra as any)?.flow?.prev ??
             null,
           delta:
             orchFlow?.flowDelta ??
             orchFlow?.delta ??
+            (orchCtxPack as any)?.flow?.flowDelta ??
+            (orchCtxPack as any)?.flow?.delta ??
+            (orchExtra as any)?.ctxPack?.flow?.flowDelta ??
+            (orchExtra as any)?.ctxPack?.flow?.delta ??
+            (orchExtra as any)?.flow?.flowDelta ??
+            (orchExtra as any)?.flow?.delta ??
             null,
           energy:
             orchCtxPack?.emotionalTemperature ??
             orchExtra?.emotionalTemperature ??
+            (orchCtxPack as any)?.flow?.energy ??
+            (orchCtxPack as any)?.flow?.e_turn ??
+            (orchExtra as any)?.ctxPack?.flow?.energy ??
+            (orchExtra as any)?.ctxPack?.flow?.e_turn ??
+            (orchExtra as any)?.flow?.energy ??
+            (orchExtra as any)?.flow?.e_turn ??
             null,
           futureRandom:
             orchFlow?.labels?.future ??
             orchFlow?.futureRandom ??
+            (orchCtxPack as any)?.flow?.futureFlowRandom ??
+            (orchCtxPack as any)?.flow?.futureRandom ??
+            (orchCtxPack as any)?.flow?.future ??
+            (orchExtra as any)?.ctxPack?.flow?.futureFlowRandom ??
+            (orchExtra as any)?.ctxPack?.flow?.futureRandom ??
+            (orchExtra as any)?.ctxPack?.flow?.future ??
+            (orchExtra as any)?.flow?.futureFlowRandom ??
+            (orchExtra as any)?.flow?.futureRandom ??
+            (orchExtra as any)?.flow?.future ??
             null,
         },
 

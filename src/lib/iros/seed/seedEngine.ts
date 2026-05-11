@@ -26,6 +26,11 @@ import {
   type UtteranceAlignment,
 } from '../delta/humanStateTransfer';
 
+import {
+  buildHumanContextOrchestration,
+  type HumanContextOrchestratorResult,
+} from './humanContextOrchestrator';
+
 export type FlowSeedV21 = {
   flow: {
     current: string | null;
@@ -52,6 +57,9 @@ export type FlowSeedV21 = {
 
   /** currentFlow → secondFlow の状態移管SEED */
   transferSeed?: HumanStateTransferSeed | null;
+
+  /** 3軸 / Qコード / futureRandom をWriter方針へ翻訳した司令塔SEED */
+  humanContextOrchestration?: HumanContextOrchestratorResult | null;
 
   goalKind?: string | null;
 
@@ -112,6 +120,12 @@ export type FlowSeedV21Input = {
   phase?: string | null;
   qCode?: string | null;
   eTurn?: string | null;
+
+  questionType?: string | null;
+  spinLoop?: string | null;
+  spinStep?: number | null;
+  returnStreak?: number | null;
+  confidence?: number | null;
 };
 
 function pickString(v: unknown): string | null {
@@ -642,6 +656,45 @@ export function buildFlowSeedV1(input: FlowSeedV21Input): FlowSeedV21 {
     utteranceAlignment: input.transferContext?.utteranceAlignment ?? null,
   });
 
+  try {
+    console.log('[IROS/HUMAN_CONTEXT_ORCH_INPUT]', {
+      currentFlow: flow.current,
+      prevFlow: flow.prev,
+      futureFlowRandom: flow.futureRandom,
+      depthStage: pickString(input.depthStage),
+      qCode: pickString(input.qCode),
+      questionType: pickString(input.questionType),
+      transferFromInnerState: transferSeed.fromInnerState,
+      transferFromReplyFocus: transferSeed.fromReplyFocus,
+      fallbackMeaning: meaning,
+    });
+  } catch {}
+
+  const humanContextOrchestration = buildHumanContextOrchestration({
+    userText: context.userCore,
+    currentFlow: flow.current,
+    futureFlowRandom: flow.futureRandom,
+
+    qCode: pickString(input.qCode),
+    depthStage: pickString(input.depthStage),
+    phase: pickString(input.phase),
+
+    questionType: pickString(input.questionType),
+    spinLoop: pickString(input.spinLoop),
+    spinStep: typeof input.spinStep === 'number' ? input.spinStep : null,
+
+    returnStreak: typeof input.returnStreak === 'number' ? input.returnStreak : null,
+    confidence: typeof input.confidence === 'number' ? input.confidence : null,
+
+    currentMeaning:
+      transferSeed.fromInnerState ??
+      transferSeed.fromReplyFocus ??
+      meaning,
+    transferMeaning: transferSeed.transferMeaning,
+    currentReplyFocus: transferSeed.fromReplyFocus,
+    futureReplyFocus: transferSeed.toReplyFocus,
+  });
+
   const canonical = buildSeedCanonical({
     meaning,
 
@@ -657,6 +710,7 @@ export function buildFlowSeedV1(input: FlowSeedV21Input): FlowSeedV21 {
     },
 
     transferSeedText: transferSeed.ok ? transferSeed.seedText : null,
+    humanContextOrchestrationText: humanContextOrchestration.seedText,
 
     focus: compression.focus,
     tone: compression.tone,
@@ -689,6 +743,7 @@ export function buildFlowSeedV1(input: FlowSeedV21Input): FlowSeedV21 {
     },
     meaning,
     transferSeed,
+    humanContextOrchestration,
     goalKind: pickString(input.goalKind),
     canonical,
   };

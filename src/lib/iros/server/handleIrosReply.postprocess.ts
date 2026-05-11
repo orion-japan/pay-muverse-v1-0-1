@@ -585,12 +585,12 @@ function renderSlotPlanText(slotPlan: any[]): string {
 
     if (kind === 'narrow_shift' || intent === 'narrow_focus') {
       if (seed) {
-        out.push(`「${seed}」に対して、まだ見方がいくつか並んでいるからです。`);
+        out.push(`「${seed}」の中で、いま一番大事な方向に焦点を合わせます。`);
       } else {
-        out.push('まだ見方がいくつか並んでいて、ひとつに決まり切っていないからです。');
+        out.push('いま一番大事な方向に焦点を合わせます。');
       }
-      out.push('このまま話を増やすと、どれも見えているのに決めにくくなります。');
-      out.push('先に決めるのは、どこから見るかです。');
+      out.push('話を狭めるのではなく、進む方向が見えやすい形に整えます。');
+      out.push('見る中心は、今ここから開いていく方向です。');
       return out;
     }
 
@@ -1531,10 +1531,15 @@ const hasFlow = !!(metaForSave as any)?.extra?.ctxPack?.flow;
       (metaForSave as any)?.extra?.ctxPack?.q_counts ??
       null;
 
+    // ✅ 最新の MirrorFlowV1 を正本にする。
+    // extra.mirror は古い互換値が残ることがあるため、先に読むと
+    // e_turn_v2.polarity / turnPolarity を取り逃がして currentFlow が null になる。
     const mirrorObjAny: any =
-      (metaForSave as any)?.mirror ??
-      (metaForSave as any)?.extra?.mirror ??
+      (metaForSave as any)?.extra?.ctxPack?.mirrorFlowV1?.mirror ??
       (metaForSave as any)?.extra?.mirrorFlowV1?.mirror ??
+      (metaForSave as any)?.extra?.ctxPack?.mirror ??
+      (metaForSave as any)?.extra?.mirror ??
+      (metaForSave as any)?.mirror ??
       null;
 
     const rawETurn: any =
@@ -1588,8 +1593,12 @@ const hasFlow = !!(metaForSave as any)?.extra?.ctxPack?.flow;
       (metaForSave as any)?.extra?.coord?.band ??
       null;
 
-// polarity は flow seed に必要（yin/yang）
+// ✅ flow seed に必要なのは pos/neg。
+    // yin/yang は内向き/外向きの位相なので、currentFlow の polarity には使わない。
     const polRaw: any =
+      mirrorObjAny?.e_turn_v2?.polarity ??
+      mirrorObjAny?.turnPolarity ??
+      mirrorObjAny?.turn_polarity ??
       mirrorObjAny?.polarity ??
       (metaForSave as any)?.polarityBand ??
       (metaForSave as any)?.unified?.polarityBand ??
@@ -1598,22 +1607,36 @@ const hasFlow = !!(metaForSave as any)?.extra?.ctxPack?.flow;
       (metaForSave as any)?.extra?.ctxPack?.polarityBand ??
       null;
 
-    const normalizeCardPolarity = (raw: any): 'yin' | 'yang' | null => {
+    const normalizeCardPolarity = (raw: any): 'pos' | 'neg' | null => {
       if (raw == null) return null;
 
       if (typeof raw === 'string') {
         const s = raw.trim().toLowerCase();
-        if (s === 'yin' || s === 'negative') return 'yin';
-        if (s === 'yang' || s === 'positive') return 'yang';
+        if (!s) return null;
+
+        if (s === 'pos' || s === 'positive' || s === '+' || s === 'plus') return 'pos';
+        if (s === 'neg' || s === 'negative' || s === '-' || s === 'minus') return 'neg';
+
+        // ✅ yin/yang は位相。ここでは pos/neg に変換しない。
         return null;
       }
 
       if (typeof raw === 'object') {
-        const vIn = normalizeCardPolarity((raw as any).in);
-        if (vIn) return vIn;
+        const vTurn =
+          normalizeCardPolarity((raw as any).turnPolarity) ??
+          normalizeCardPolarity((raw as any).turn_polarity) ??
+          normalizeCardPolarity((raw as any).polarity);
+
+        if (vTurn) return vTurn;
+
+        const vEturn = normalizeCardPolarity((raw as any).e_turn_v2?.polarity);
+        if (vEturn) return vEturn;
 
         const vOut = normalizeCardPolarity((raw as any).out);
         if (vOut) return vOut;
+
+        const vIn = normalizeCardPolarity((raw as any).in);
+        if (vIn) return vIn;
 
         const vBand = normalizeCardPolarity((raw as any).metaBand);
         if (vBand) return vBand;
@@ -1625,7 +1648,7 @@ const hasFlow = !!(metaForSave as any)?.extra?.ctxPack?.flow;
       return null;
     };
 
-    const polKey: 'yin' | 'yang' | null = normalizeCardPolarity(polRaw);
+    const polKey: 'pos' | 'neg' | null = normalizeCardPolarity(polRaw);
 
     // 既存lite互換（UI互換のため温存）
     const makeLabels = (k: string) => {
@@ -1952,18 +1975,21 @@ const polarityMetaBand: string | null =
     : null) ??
   (typeof polarityBand === 'string' && polarityBand.trim() ? polarityBand.trim() : null);
   // ✅ MirrorFlow へは object で渡す（stringにすると metaBand が 'yang' になってしまう）
+  // ✅ polarity 未判定を neg に倒さない
+  // 旧仕様では polarityCanon が無いだけで in/out を 'neg' にしていたため、
+  // 内向き・未判定・受け取り中のターンまで neg として currentFlow に渡っていた。
   const polarity: any =
-  polarityCanon == null
-    ? {
-        in: 'neg',
-        out: 'neg',
-        metaBand: polarityMetaBand ?? 'negative',
-      }
-    : {
-        in: polarityCanon,
-        out: polarityCanon,
-        metaBand: polarityMetaBand,
-      };
+    polarityCanon == null
+      ? {
+          in: null,
+          out: null,
+          metaBand: polarityMetaBand ?? null,
+        }
+      : {
+          in: polarityCanon,
+          out: polarityCanon,
+          metaBand: polarityMetaBand,
+        };
 
   console.info('[IROS/PP][POLARITY_BRIDGE]', {
     polarityBand_raw: polarityBand ?? null,
@@ -2112,10 +2138,14 @@ const polarityMetaBand: string | null =
       (metaForSave as any).extra = exAny;
 
       // e_turn は MIRROR_FLOW の mirror から拾う
+      // ✅ 最新の MirrorFlowV1 を正本にする。
+      // extra.mirror は古い互換値が残ることがあるため、後段では mirrorFlowV1 を優先する。
       const mirrorObjAny: any =
-        (metaForSave as any)?.mirror ??
-        (metaForSave as any)?.extra?.mirror ??
+        (metaForSave as any)?.extra?.ctxPack?.mirrorFlowV1?.mirror ??
         (metaForSave as any)?.extra?.mirrorFlowV1?.mirror ??
+        (metaForSave as any)?.extra?.ctxPack?.mirror ??
+        (metaForSave as any)?.extra?.mirror ??
+        (metaForSave as any)?.mirror ??
         null;
 
       const rawETurn: any = mirrorObjAny?.e_turn ?? null;
@@ -2204,22 +2234,37 @@ const polarityMetaBand: string | null =
         return 50;
       };
 
-      const normalizeCardPolarity = (raw: any): 'yin' | 'yang' | null => {
+      const normalizeCardPolarity = (raw: any): 'pos' | 'neg' | null => {
         if (raw == null) return null;
 
         if (typeof raw === 'string') {
           const s = raw.trim().toLowerCase();
-          if (s === 'yin' || s === 'negative') return 'yin';
-          if (s === 'yang' || s === 'positive') return 'yang';
+          if (!s) return null;
+
+          if (s === 'pos' || s === 'positive' || s === '+' || s === 'plus') return 'pos';
+          if (s === 'neg' || s === 'negative' || s === '-' || s === 'minus') return 'neg';
+
+          // ✅ yin/yang は内向き/外向きの位相。
+          // ここでは currentFlow 用の pos/neg に変換しない。
           return null;
         }
 
         if (typeof raw === 'object') {
-          const vIn = normalizeCardPolarity((raw as any).in);
-          if (vIn) return vIn;
+          const vTurn =
+            normalizeCardPolarity((raw as any).turnPolarity) ??
+            normalizeCardPolarity((raw as any).turn_polarity) ??
+            normalizeCardPolarity((raw as any).polarity);
+
+          if (vTurn) return vTurn;
+
+          const vEturn = normalizeCardPolarity((raw as any).e_turn_v2?.polarity);
+          if (vEturn) return vEturn;
 
           const vOut = normalizeCardPolarity((raw as any).out);
           if (vOut) return vOut;
+
+          const vIn = normalizeCardPolarity((raw as any).in);
+          if (vIn) return vIn;
 
           const vBand = normalizeCardPolarity((raw as any).metaBand);
           if (vBand) return vBand;
@@ -2232,6 +2277,9 @@ const polarityMetaBand: string | null =
       };
 
       const polRaw: any =
+        mirrorObjAny?.e_turn_v2?.polarity ??
+        mirrorObjAny?.turnPolarity ??
+        mirrorObjAny?.turn_polarity ??
         mirrorObjAny?.polarity ??
         (metaForSave as any)?.polarityBand ??
         (metaForSave as any)?.unified?.polarityBand ??
@@ -2240,7 +2288,7 @@ const polarityMetaBand: string | null =
         (metaForSave as any)?.extra?.ctxPack?.polarityBand ??
         null;
 
-        const polKey: 'yin' | 'yang' | null = normalizeCardPolarity(polRaw);
+        const polKey: 'pos' | 'neg' | null = normalizeCardPolarity(polRaw);
 
         if (eKey) {
           const labels = makeLabels(eKey);
@@ -2297,6 +2345,21 @@ const polarityMetaBand: string | null =
       (metaForSave as any).depth = currentDepthStageNow ?? null;
       (metaForSave as any).depth_stage = currentDepthStageNow ?? null;
       (metaForSave as any).extra.ctxPack.depthStage = currentDepthStageNow ?? null;
+
+      console.log('[IROS/FLOW][BEFORE_SEED_FROM_FLOW180]', {
+        eKey,
+        cardStageNow,
+        observedStageNow,
+        depthNow,
+        polKey,
+        mirror_e_turn: mirrorObjAny?.e_turn ?? null,
+        mirror_e_turn_v2_polarity: mirrorObjAny?.e_turn_v2?.polarity ?? null,
+        mirror_turnPolarity: mirrorObjAny?.turnPolarity ?? mirrorObjAny?.turn_polarity ?? null,
+        mirror_polarity: mirrorObjAny?.polarity ?? null,
+        hasMirrorObjAny: !!mirrorObjAny,
+        hasCtxMirrorFlowV1: !!(metaForSave as any)?.extra?.ctxPack?.mirrorFlowV1,
+        hasExtraMirrorFlowV1: !!(metaForSave as any)?.extra?.mirrorFlowV1,
+      });
 
       if (cardStageNow && polKey) {
         try {

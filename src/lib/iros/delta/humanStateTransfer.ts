@@ -549,22 +549,54 @@ function buildAvoidReply(args: {
 function buildSeedText(seed: Omit<HumanStateTransferSeed, 'seedText'>): string | null {
   if (!seed.ok) return null;
 
+  const currentState =
+    seed.fromFlow && seed.fromInnerState
+      ? `${seed.fromFlow}: ${seed.fromInnerState}`
+      : seed.fromFlow
+        ? seed.fromFlow
+        : null;
+
+  const secondState =
+    seed.toFlow && seed.toInnerState
+      ? `${seed.toFlow}: ${seed.toInnerState}`
+      : seed.toFlow
+        ? seed.toFlow
+        : null;
+
+  const currentReplyFocus =
+    seed.fromReplyFocus ? `CURRENT_REPLY_FOCUS=${seed.fromReplyFocus}` : null;
+
+  const secondReplyFocus =
+    seed.toReplyFocus ? `SECOND_REPLY_FOCUS=${seed.toReplyFocus}` : null;
+
   const lines = [
     'HUMAN_STATE_TRANSFER (DO NOT OUTPUT):',
-    seed.fromFlow ? `from=${seed.fromFlow}` : null,
-    seed.toFlow ? `to=${seed.toFlow}` : null,
-    seed.transferClass ? `class=${seed.transferClass}` : null,
-    seed.fromInnerState ? `FROM_INNER_STATE=${seed.fromInnerState}` : null,
-    seed.toInnerState ? `TO_INNER_STATE=${seed.toInnerState}` : null,
-    seed.fromReplyFocus ? `FROM_REPLY_FOCUS=${seed.fromReplyFocus}` : null,
-    seed.toReplyFocus ? `TO_REPLY_FOCUS=${seed.toReplyFocus}` : null,
-    seed.humanStateReplyFocus ? `HUMAN_STATE_REPLY_FOCUS=${seed.humanStateReplyFocus}` : null,
+
+    // ✅ 180状態のPDF由来意味を、Writerが最初に読む正本にする
+    currentState ? `CURRENT_STATE=${currentState}` : null,
+    secondState ? `SECOND_STATE=${secondState}` : null,
+
+    // ✅ 移管そのものの意味
+    seed.transferClass ? `TRANSFER_CLASS=${seed.transferClass}` : null,
     seed.transferMeaning ? `STATE_TRANSFER=${seed.transferMeaning}` : null,
+
+    // ✅ 180状態それぞれの返答焦点
+    currentReplyFocus,
+    secondReplyFocus,
+    seed.humanStateReplyFocus
+      ? `HUMAN_STATE_REPLY_FOCUS=${seed.humanStateReplyFocus}`
+      : null,
+
+    // ✅ 移管補助情報
     seed.sa.meaning ? `SA_EFFECT=${seed.sa.meaning}` : null,
     seed.yinyang.meaning ? `YINYANG_EFFECT=${seed.yinyang.meaning}` : null,
     seed.fluctuation.meaning ? `FLUCTUATION=${seed.fluctuation.meaning}` : null,
     seed.margin.meaning ? `MARGIN=${seed.margin.meaning}` : null,
-    seed.utteranceAlignment.meaning ? `UTTERANCE_ALIGNMENT=${seed.utteranceAlignment.meaning}` : null,
+    seed.utteranceAlignment.meaning
+      ? `UTTERANCE_ALIGNMENT=${seed.utteranceAlignment.meaning}`
+      : null,
+
+    // ✅ 最終的にWriterが守る一点
     seed.likelyProblem ? `LIKELY_PROBLEM=${seed.likelyProblem}` : null,
     seed.replyFocus ? `REPLY_FOCUS=${seed.replyFocus}` : null,
     seed.avoidReply ? `AVOID_REPLY=${seed.avoidReply}` : null,

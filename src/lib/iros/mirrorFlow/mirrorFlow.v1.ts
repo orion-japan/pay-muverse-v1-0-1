@@ -21,6 +21,7 @@
 //   - intensity: そのターンの “熱/圧” 0..1（短文でも強く出る）
 
 export type PolarityV1 = 'yin' | 'yang';
+export type TurnPolarityV1 = 'pos' | 'neg';
 export type FlowDeltaV1 = 'FORWARD' | 'RETURN';
 export type BandV1 = 'S' | 'F' | 'R' | 'C' | 'I' | 'T';
 
@@ -70,7 +71,7 @@ export type MirrorMetaV1 = {
   };
 };
 
-function mapToETurnV2(e: ETurnV1 | null, polarity: PolarityV1 | null): ETurnV2 | null {
+function mapToETurnV2(e: ETurnV1 | null, turnPolarity: TurnPolarityV1 | null): ETurnV2 | null {
   if (!e) return null;
 
   const baseMap = {
@@ -92,7 +93,10 @@ function mapToETurnV2(e: ETurnV1 | null, polarity: PolarityV1 | null): ETurnV2 |
   return {
     base: baseMap[e],
     action: actionMap[e],
-    polarity: polarity === 'yang' ? 'pos' : polarity === 'yin' ? 'neg' : null,
+
+    // ✅ yin/yang は内向き/外向きの位相。
+    // pos/neg はこのターンの状態方向として別に渡す。
+    polarity: turnPolarity,
   };
 }
 
@@ -707,7 +711,29 @@ export function buildMirrorFlowV1(input: MirrorFlowInputV1): MirrorFlowResultV1 
         ? (polarityRaw as any).metaBand.trim()
         : null;
 
-        const polarity_in = polarityFromEmotionPrimary ?? normPol(polarityRaw);
+        const polarity_in_raw = polarityFromEmotionPrimary ?? normPol(polarityRaw);
+
+        // ✅ 自己理解・未来展望の問いは、明示不安がない限り neg に落とさない
+        // 例: 「わたしの今の心理状態と、この先に見据える未来を教えてください」
+        // yin は「内向き/受け取り中」であり、必ずしも neg ではない。
+        const userTextForPolarity = stripSpaces(normText(userText));
+        const looksSelfUnderstandingOrFuture =
+          /(心理状態|今の状態|いまの状態|自分の状態|現在地|この先|未来|見据える|見通し|方向性|展望|流れを見|流れを教えて|教えてください|見てください)/.test(
+            userTextForPolarity,
+          );
+
+        const hasExplicitNegativeEmotion =
+          /(不安|心配|怖い|こわい|恐い|苦しい|つらい|辛い|しんどい|無理|どうしよう|迷って|迷う|モヤ|もや|大丈夫かな|嫌われ|終わり|消えたい|空虚|虚無|怒り|イライラ)/.test(
+            userTextForPolarity,
+          );
+
+        const polarity_in =
+          polarity_in_raw === 'yin' &&
+          looksSelfUnderstandingOrFuture &&
+          !hasExplicitNegativeEmotion
+            ? 'yang'
+            : polarity_in_raw;
+
         const polarity_out =
           polarityFromEmotionPrimary ||
           normPol((polarityRaw as any)?.out) ||
@@ -715,7 +741,35 @@ export function buildMirrorFlowV1(input: MirrorFlowInputV1): MirrorFlowResultV1 
           polarity_in;
 
   const polarityForKey = polarity_in;
-  const e_turn_v2 = mapToETurnV2(e_turn, polarity_in);
+
+  const turnPolarity: TurnPolarityV1 | null = (() => {
+    const primary = String(emotionProfile?.primary ?? '').trim().toLowerCase();
+
+    if (/_pos$/u.test(primary)) return 'pos';
+    if (/_neg$/u.test(primary)) return 'neg';
+
+    const textForTurnPolarity = stripSpaces(normText(userText)).toLowerCase();
+
+    if (
+      /(不安|心配|怖い|こわい|恐い|苦しい|つらい|辛い|しんどい|無理|どうしよう|迷って|迷う|モヤ|もや|大丈夫かな|嫌われ|終わり|消えたい|空虚|虚無|怒り|イライラ|停滞|失敗|拒絶|断絶|崩れ|閉じる|閉じて)/.test(
+        textForTurnPolarity,
+      )
+    ) {
+      return 'neg';
+    }
+
+    if (
+      /(意図|本来の意図|目的|未来|この先|方向性|展望|構造をつく|構造を作|構造化|創造|活動|ムーブメント|ブームメント|世界|争いの無い世界|争いのない世界|希望|歓喜|成長|進化|広が|広げ|実現|実装|形にする|進めたい|作りたい|やりたい|突破|熱量|情熱|ワクワク|楽しい|好き|喜び|太陽|sun)/i.test(
+        textForTurnPolarity,
+      )
+    ) {
+      return 'pos';
+    }
+
+    return null;
+  })();
+
+  const e_turn_v2 = mapToETurnV2(e_turn, turnPolarity);
   const emotionTexture = buildEmotionTexture({ userText, e: e_turn_v2 });
 
   const meaningKey = makeMirrorMeaningKeyV1({
