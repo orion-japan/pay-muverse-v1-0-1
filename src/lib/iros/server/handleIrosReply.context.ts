@@ -1043,6 +1043,170 @@ export async function buildTurnContext(
     // 補完に失敗しても通常会話は止めない
   }
 
+  // ✅ 直前Muの確認質問への短答を、確認質問の回答として補完する
+  // 例:
+  // assistant: 最後に連絡したのは、あなたからですか？それとも彼からですか？
+  // user: わたしです
+  // => 「最後に連絡したのはユーザーから」として、連絡不安の続きへ接続する
+  try {
+    const currentTextForShortAnswer = String(text ?? '').trim();
+    const compactShortAnswer = currentTextForShortAnswer
+      .replace(/\s+/g, '')
+      .replace(/[。．.!！?？…]+$/g, '');
+
+    const pickLastAssistantFromHistory = (historyLike: any): string => {
+      if (!Array.isArray(historyLike)) return '';
+
+      const found = [...historyLike]
+        .reverse()
+        .find((turn: any) => String(turn?.role ?? '').toLowerCase().trim() === 'assistant');
+
+      return (
+        (typeof (found as any)?.content === 'string' && String((found as any).content).trim()) ||
+        (typeof (found as any)?.text === 'string' && String((found as any).text).trim()) ||
+        (typeof (found as any)?.message === 'string' && String((found as any).message).trim()) ||
+        ''
+      );
+    };
+
+    const historyForShortAnswerPrimary =
+      (baseMetaForTurn as any)?.extra?.ctxPack?.historyForWriter ??
+      (baseMetaForTurn as any)?.extra?.historyForWriter ??
+      [];
+
+    const lastAssistantFromHistoryForShortAnswer =
+      pickLastAssistantFromHistory(historyForShortAnswerPrimary) ||
+      pickLastAssistantFromHistory((args as any)?.history);
+
+    const lastAssistantForShortAnswer = (
+      String(lastAssistantFromHistoryForShortAnswer ?? '').trim() ||
+      String(latestAssistantCore ?? '').trim()
+    );
+
+    const ctxPackForShortAnswer = (baseMetaForTurn as any)?.extra?.ctxPack ?? {};
+    const relationshipTextForShortAnswer = [
+      ctxPackForShortAnswer?.focusResolution?.domain,
+      ctxPackForShortAnswer?.situationTopic,
+      ctxPackForShortAnswer?.situationSummary,
+      ctxPackForShortAnswer?.conversationLine,
+      ctxPackForShortAnswer?.topicDigest,
+      ctxPackForShortAnswer?.focus,
+      ctxPackForShortAnswer?.resolution,
+    ]
+      .map((v) => String(v ?? '').trim())
+      .filter(Boolean)
+      .join('\n');
+
+    const looksLikeRelationshipContactContext =
+      /relationship_contact_anxiety|連絡不安|返事|連絡/.test(relationshipTextForShortAnswer);
+
+    const askedLastContactSide =
+      /最後に連絡したのは/.test(lastAssistantForShortAnswer) &&
+      /(あなたから|彼から|彼女から|相手から|向こうから)/.test(lastAssistantForShortAnswer);
+
+    const pureUserAnswer =
+      /^(私|わたし|自分|俺|僕|こちら|こっち|私です|わたしです|自分です|俺です|僕です)$/.test(
+        compactShortAnswer,
+      );
+
+    const userFromAnswer =
+      /^(私|わたし|自分|俺|僕|こちら|こっち)(から|からです)$/.test(compactShortAnswer) ||
+      /^最後(は|に)?(私|わたし|自分|俺|僕|こちら|こっち)(から)?(です)?$/.test(
+        compactShortAnswer,
+      ) ||
+      /^最後(の連絡|に連絡したの|に送ったの)?(は)?(私|わたし|自分|こちら|こっち)(から)?(です)?$/.test(
+        compactShortAnswer,
+      ) ||
+      /^最後(は|に|の連絡|に連絡したの|に送ったの)?(私|わたし|自分|こちら|こっち)(から)?(連絡|送信|送り)?(した|しました|済み|済みです)?$/.test(
+        compactShortAnswer,
+      );
+
+    const partnerFromAnswer =
+      /^(彼|彼女|相手|向こう)(から|からです|です)$/.test(compactShortAnswer) ||
+      /^最後(は|に)?(彼|彼女|相手|向こう)(から)?(です)?$/.test(compactShortAnswer) ||
+      /^最後(の連絡|に連絡したの|に送ったの)?(は)?(彼|彼女|相手|向こう)(から)?(です)?$/.test(
+        compactShortAnswer,
+      ) ||
+      /^最後(は|に|の連絡|に連絡したの|に送ったの)?(彼|彼女|相手|向こう)(から)?(連絡|送信|送り)?(した|しました|済み|済みです)?$/.test(
+        compactShortAnswer,
+      );
+
+    const hasLastContactAnswerMarker =
+      /^最後(は|に|の連絡|に連絡したの|に送ったの)?/.test(compactShortAnswer);
+
+    let lastContactBy: 'user' | 'partner' | null = null;
+
+    if (pureUserAnswer || userFromAnswer) {
+      lastContactBy = 'user';
+    } else if (partnerFromAnswer) {
+      lastContactBy = 'partner';
+    }
+
+    const canResolveLastContactAnswer =
+      !!lastContactBy &&
+      (
+        askedLastContactSide ||
+        userFromAnswer ||
+        partnerFromAnswer ||
+        (looksLikeRelationshipContactContext && hasLastContactAnswerMarker)
+      );
+
+    if (canResolveLastContactAnswer) {
+      const resolvedAsk = {
+        askType: 'relationship_last_contact_answer',
+        topic:
+          lastContactBy === 'user'
+            ? '最後に連絡したのはユーザーから。送ったのに返事が来ていない状態として、連絡不安の続きへ接続する。'
+            : '最後に連絡したのは相手から。相手の連絡後に次の反応がない状態として、連絡不安の続きへ接続する。',
+        sourceUserText: currentTextForShortAnswer,
+        sourceAssistantText: lastAssistantForShortAnswer.slice(0, 500),
+        lastContactBy,
+      };
+
+      (baseMetaForTurn as any).extra ??= {};
+      (baseMetaForTurn as any).extra.ctxPack ??= {};
+
+      (baseMetaForTurn as any).extra.resolvedAsk = resolvedAsk;
+      (baseMetaForTurn as any).extra.ctxPack.resolvedAsk = resolvedAsk;
+      (baseMetaForTurn as any).extra.ctxPack.resolvedAskType = 'relationship_last_contact_answer';
+      (baseMetaForTurn as any).extra.ctxPack.relationshipLastContactBy = lastContactBy;
+      (baseMetaForTurn as any).extra.ctxPack.goalKind = 'resonate';
+      (baseMetaForTurn as any).extra.ctxPack.replyGoal = { kind: 'resonate' };
+      (baseMetaForTurn as any).extra.ctxPack.continuityKind = 'relationship_question_followup';
+      (baseMetaForTurn as any).extra.ctxPack.situationSummary =
+        lastContactBy === 'user'
+          ? '最後に連絡したのはユーザーから。送ったのに返事が来ていない状態。'
+          : '最後に連絡したのは相手から。相手の連絡後に次の反応がない状態。';
+      (baseMetaForTurn as any).extra.ctxPack.situationTopic =
+        '恋愛の連絡不安の状況確認';
+
+      // writer 側で「わたしです」を自己表明として読ませず、
+      // 直前確認質問への回答として扱わせるための明示メタ
+      (baseMetaForTurn as any).extra.ctxPack.relationshipFollowupMode =
+        'last_contact_answer';
+      (baseMetaForTurn as any).extra.ctxPack.askBackAllowed = true;
+      (baseMetaForTurn as any).extra.ctxPack.questionsMax = 1;
+      (baseMetaForTurn as any).extra.ctxPack.outputShape =
+        'relationship_last_contact_followup';
+      (baseMetaForTurn as any).extra.ctxPack.nextAction =
+        lastContactBy === 'user'
+          ? 'ユーザーから送ったあと返事が来ていない状態として受ける。次は、送ってからどれくらい経っているかを短く確認する。'
+          : '相手から連絡があったあと、次の反応がない状態として受ける。次は、どこで止まっているかを短く確認する。';
+
+      console.log(
+        '[IROS/RELATIONSHIP_SHORT_ANSWER_RESOLVED]',
+        JSON.stringify({
+          enabled: true,
+          lastContactBy,
+          sourceUserText: currentTextForShortAnswer.slice(0, 120),
+          sourceAssistantText: lastAssistantForShortAnswer.slice(0, 160),
+        }),
+      );
+    }
+  } catch {
+    // 補完に失敗しても通常会話は止めない
+  }
+
   // ✅ 直前のMu提案に対する「ください」を、提案の実行として補完する
   // 例:
   // assistant: 必要なら次に、そのまま使える短い文だけ一緒に整えます。

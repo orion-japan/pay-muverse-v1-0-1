@@ -271,8 +271,10 @@ function buildOneLineConstraint(input: SeedCanonicalInput): string {
   const questionsMax =
     typeof input.questionsMax === 'number' ? input.questionsMax : null;
 
-  if (!askBackAllowed || questionsMax === 0) {
+  if (questionsMax === 0) {
     pieces.push('質問しない');
+  } else if (!askBackAllowed) {
+    pieces.push('状況に応じて、必要な場合だけ短い確認質問を1つまで許可する');
   }
 
   return pieces.join(' / ');
@@ -283,13 +285,16 @@ function buildRules(input: SeedCanonicalInput): string[] {
   const out = [...base];
 
   const hasNoQuestion = out.some((v) => /質問しない/.test(v));
+  const hasConditionalQuestion = out.some((v) => /状況に応じて、必要な場合だけ短い確認質問を1つまで許可する/.test(v));
 
   const askBackAllowed = input.askBackAllowed === true;
   const questionsMax =
     typeof input.questionsMax === 'number' ? input.questionsMax : null;
 
-  if ((!askBackAllowed || questionsMax === 0) && !hasNoQuestion) {
+  if (questionsMax === 0 && !hasNoQuestion) {
     out.push('質問しない');
+  } else if (!askBackAllowed && !hasNoQuestion && !hasConditionalQuestion) {
+    out.push('状況に応じて、必要な場合だけ短い確認質問を1つまで許可する');
   }
 
   if (clean(input.goalKind) === 'stabilize') {
