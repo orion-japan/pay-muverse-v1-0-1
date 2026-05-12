@@ -1334,6 +1334,82 @@ const irMeta =
           summaryText: null,
         };
 
+      const diagnosisHistoryAt = new Date().toISOString();
+
+      const diagnosisTargetLabelForHistory =
+        String(
+          (irMeta as any)?.targetLabel ??
+            (irMeta as any)?.target ??
+            (extraLocal as any)?.targetLabel ??
+            (extraLocal as any)?.diagnosisTarget ??
+            (extraLocal as any)?.ctxPack?.targetLabel ??
+            (finalText.match(/観測対象[:：]\s*([^\n]+)/u)?.[1] ?? '')
+        ).trim() || '対象未指定';
+
+      const diagnosisTargetNormForHistory = diagnosisTargetLabelForHistory
+        .replace(/[\s　]+/g, '')
+        .replace(/さん|様|先生|くん|ちゃん/g, '');
+
+      const diagnosisTargetScopeForHistory = (() => {
+        if (/^(自分|今の自分|自分自身|本当の自分|わたし|私|僕|俺|自分のこと)$/u.test(diagnosisTargetNormForHistory)) {
+          return 'self';
+        }
+
+        if (/(相手|浮気相手|不倫相手|彼|彼氏|彼女|妻|嫁|奥さん|夫|旦那|主人|恋人|好きな人|元彼|元カレ|元彼女|元カノ|友達|親友|上司|部下|同僚|社長|先生|母|父|親|子ども|息子|娘|兄|弟|姉|妹|家族|お客|顧客)/u.test(diagnosisTargetNormForHistory)) {
+          return 'other';
+        }
+
+        if (/(仕事|計画|企画|事業|申請|助成金|映像|動画|投稿|サービス|アプリ|実装|開発|設計|資料|文章|プロンプト|プロジェクト|契約|会議|打ち合わせ|この件|この問題|問題|課題|状況|状態|流れ|関係|関係性|浮気|不倫|離婚|連絡|返信|返事|予定|お金|売上|集客|TikTok|SNS|サイト|LP|講座|商品|企画書)/u.test(diagnosisTargetNormForHistory)) {
+          return 'situation';
+        }
+
+        return 'other';
+      })();
+
+      const diagnosisId =
+        `diag_${diagnosisHistoryAt.replace(/[^0-9]/g, '').slice(0, 14)}_${Math.random()
+          .toString(36)
+          .slice(2, 8)}`;
+
+      const previousDiagnosisHistoryRaw =
+        (extraLocal as any)?.ctxPack?.diagnosisHistory ??
+        (extraLocal as any)?.diagnosisHistory ??
+        [];
+
+      const previousDiagnosisHistory = Array.isArray(previousDiagnosisHistoryRaw)
+        ? previousDiagnosisHistoryRaw.filter((item: any) => item && typeof item === 'object').slice(-12)
+        : [];
+
+      const lastIrDiagnosis = {
+        id: diagnosisId,
+        target: diagnosisTargetLabelForHistory,
+        targetLabel: diagnosisTargetLabelForHistory,
+        targetScope: diagnosisTargetScopeForHistory,
+        text: finalText,
+        diagnosisText: finalText,
+        assistantText: finalText,
+        irMeta,
+        createdAt: diagnosisHistoryAt,
+      };
+
+      const diagnosisHistory = [
+        ...previousDiagnosisHistory.filter((item: any) => String(item?.id ?? '') !== diagnosisId),
+        lastIrDiagnosis,
+      ].slice(-12);
+
+      const activeDiagnosisId = diagnosisId;
+
+      const diagnosisHistoryForWriter = finalText
+        ? [
+            {
+              role: 'assistant' as const,
+              content: finalText,
+            },
+          ]
+        : [];
+
+      const diagnosisHistoryForWriterAt = diagnosisHistoryAt;
+
       return {
         ok: true,
         assistantText: finalText,
@@ -1353,6 +1429,13 @@ const irMeta =
               ...(((extraLocal as any)?.ctxPack ?? {}) as any),
               irMeta,
               detailMode: true,
+              targetLabel: diagnosisTargetLabelForHistory,
+              targetScope: diagnosisTargetScopeForHistory,
+              diagnosisHistory,
+              activeDiagnosisId,
+              lastIrDiagnosis,
+              historyForWriter: diagnosisHistoryForWriter,
+              historyForWriterAt: diagnosisHistoryForWriterAt,
             },
             slotPlanKeys: [],
             slotPlan_keys: [],
@@ -1378,6 +1461,13 @@ const irMeta =
                 ...(((extraLocal as any)?.ctxPack ?? {}) as any),
                 irMeta,
                 detailMode: true,
+                targetLabel: diagnosisTargetLabelForHistory,
+                targetScope: diagnosisTargetScopeForHistory,
+                diagnosisHistory,
+                activeDiagnosisId,
+                lastIrDiagnosis,
+                historyForWriter: diagnosisHistoryForWriter,
+                historyForWriterAt: diagnosisHistoryForWriterAt,
               },
               slotPlanKeys: [],
               slotPlan_keys: [],
@@ -2865,6 +2955,79 @@ function normForRecall(v: any): string {
                     relation: null,
                   };
 
+                  const diagnosisHistoryAtForOrchBranch = new Date().toISOString();
+
+                  const diagnosisTargetLabelForHistoryAfterOrch =
+                    String(
+                      (irMeta as any)?.targetLabel ??
+                        (irMeta as any)?.target ??
+                        (orchExtra as any)?.ctxPack?.targetLabel ??
+                        (orchExtra as any)?.targetLabel ??
+                        (extraLocal as any)?.ctxPack?.targetLabel ??
+                        (extraLocal as any)?.targetLabel ??
+                        (finalText.match(/観測対象[:：]\\s*([^\\n]+)/u)?.[1] ?? '')
+                    ).trim() || '対象未指定';
+
+                  const diagnosisTargetNormForHistoryAfterOrch =
+                    diagnosisTargetLabelForHistoryAfterOrch
+                      .replace(/[\\s　]+/g, '')
+                      .replace(/さん|様|先生|くん|ちゃん/g, '');
+
+                  const diagnosisTargetScopeForHistoryAfterOrch = (() => {
+                    if (/^(自分|今の自分|自分自身|本当の自分|わたし|私|僕|俺|自分のこと)$/u.test(diagnosisTargetNormForHistoryAfterOrch)) {
+                      return 'self';
+                    }
+
+                    if (/(相手|浮気相手|不倫相手|彼|彼氏|彼女|妻|嫁|奥さん|夫|旦那|主人|恋人|好きな人|元彼|元カレ|元彼女|元カノ|友達|親友|上司|部下|同僚|社長|先生|母|父|親|子ども|息子|娘|兄|弟|姉|妹|家族|お客|顧客)/u.test(diagnosisTargetNormForHistoryAfterOrch)) {
+                      return 'other';
+                    }
+
+                    if (/(仕事|計画|企画|事業|申請|助成金|映像|動画|投稿|サービス|アプリ|実装|開発|設計|資料|文章|プロンプト|プロジェクト|契約|会議|打ち合わせ|この件|この問題|問題|課題|状況|状態|流れ|関係|関係性|浮気|不倫|離婚|連絡|返信|返事|予定|お金|売上|集客|TikTok|SNS|サイト|LP|講座|商品|企画書)/u.test(diagnosisTargetNormForHistoryAfterOrch)) {
+                      return 'situation';
+                    }
+
+                    return 'other';
+                  })();
+
+                  const diagnosisIdForOrchBranch =
+                    `diag_${diagnosisHistoryAtForOrchBranch.replace(/[^0-9]/g, '').slice(0, 14)}_${Math.random()
+                      .toString(36)
+                      .slice(2, 8)}`;
+
+                  const previousDiagnosisHistoryRawAfterOrch =
+                    (orchExtra as any)?.ctxPack?.diagnosisHistory ??
+                    (orchExtra as any)?.diagnosisHistory ??
+                    (extraLocal as any)?.ctxPack?.diagnosisHistory ??
+                    (extraLocal as any)?.diagnosisHistory ??
+                    [];
+
+                  const previousDiagnosisHistoryAfterOrch = Array.isArray(previousDiagnosisHistoryRawAfterOrch)
+                    ? previousDiagnosisHistoryRawAfterOrch
+                        .filter((item: any) => item && typeof item === 'object')
+                        .slice(-12)
+                    : [];
+
+                  const lastIrDiagnosisAfterOrch = {
+                    id: diagnosisIdForOrchBranch,
+                    target: diagnosisTargetLabelForHistoryAfterOrch,
+                    targetLabel: diagnosisTargetLabelForHistoryAfterOrch,
+                    targetScope: diagnosisTargetScopeForHistoryAfterOrch,
+                    text: finalText,
+                    diagnosisText: finalText,
+                    assistantText: finalText,
+                    irMeta,
+                    createdAt: diagnosisHistoryAtForOrchBranch,
+                  };
+
+                  const diagnosisHistoryAfterOrch = [
+                    ...previousDiagnosisHistoryAfterOrch.filter(
+                      (item: any) => String(item?.id ?? '') !== diagnosisIdForOrchBranch
+                    ),
+                    lastIrDiagnosisAfterOrch,
+                  ].slice(-12);
+
+                  const activeDiagnosisIdAfterOrch = diagnosisIdForOrchBranch;
+
                   const diagnosisHistoryForWriter =
                   finalText
                     ? [
@@ -2875,20 +3038,32 @@ function normForRecall(v: any): string {
                       ]
                     : [];
 
+                  const diagnosisHistoryForWriterAtAfterOrch = diagnosisHistoryAtForOrchBranch;
+
                 const diagnosisCtxPack =
                   orchExtra?.ctxPack && typeof orchExtra.ctxPack === 'object'
                     ? {
                         ...orchExtra.ctxPack,
                         irMeta,
                         detailMode: true,
+                        targetLabel: diagnosisTargetLabelForHistoryAfterOrch,
+                        targetScope: diagnosisTargetScopeForHistoryAfterOrch,
+                        diagnosisHistory: diagnosisHistoryAfterOrch,
+                        activeDiagnosisId: activeDiagnosisIdAfterOrch,
+                        lastIrDiagnosis: lastIrDiagnosisAfterOrch,
                         historyForWriter: diagnosisHistoryForWriter,
-                        historyForWriterAt: new Date().toISOString(),
+                        historyForWriterAt: diagnosisHistoryForWriterAtAfterOrch,
                       }
                     : {
                         irMeta,
                         detailMode: true,
+                        targetLabel: diagnosisTargetLabelForHistoryAfterOrch,
+                        targetScope: diagnosisTargetScopeForHistoryAfterOrch,
+                        diagnosisHistory: diagnosisHistoryAfterOrch,
+                        activeDiagnosisId: activeDiagnosisIdAfterOrch,
+                        lastIrDiagnosis: lastIrDiagnosisAfterOrch,
                         historyForWriter: diagnosisHistoryForWriter,
-                        historyForWriterAt: new Date().toISOString(),
+                        historyForWriterAt: diagnosisHistoryForWriterAtAfterOrch,
                       };
 
                 return {

@@ -4923,7 +4923,7 @@ const systemPromptForWriter = [
         pattern_block_order:
           'free_resonance',
         block_state_surface:
-          '必要な文量だけで、いま前に出ている核心を直接書く。説明・要約・整理に戻さない。',
+          '必要な文量だけで、いま大事なところを日常語で書く。説明を増やすより、ユーザーが受け取りやすい言葉にする。',
         bodyStyle: {
           preferBlockSplit: true,
           minBlocks: 2,
@@ -4940,21 +4940,23 @@ const systemPromptForWriter = [
           } では、段落数を固定しない`,
           'state_surface / state_weight / state_open_edge / state_residue の順番を固定しない',
           '必要なものだけを自然文に統合する',
-          '説明ではなく、核心を直接書く',
-          'まとめ・助言・安全句で薄めない',
+          '大事なところを、むずかしい言葉にせず日常語で書く',
+          'まとめだけ、助言だけ、安心させるだけで終わらせない',
 
           // ✅ 革新共鳴
           '因果説明を増やさない',
           '「〜だから」「〜すると」「〜していく」を減らす',
           '「近づく」「深まる」「届く」「変わる」で締めない',
-          '説明より、いま必要な核心を直接の言葉で返す',
-          '結論を作らず、輪郭のまま返してよい',
-          '一番残る一文を優先し、周辺説明を削る',
+          'いま必要な大事なところを、ふつうの言葉で返す',
+          '無理に結論にせず、今わかる範囲だけを返してよい',
+          '一番伝えたい一文を優先し、まわりの説明を増やしすぎない',
 
           // ✅ resonateは削るのではなく、最初から状態文だけにする
           'normal_resonanceでは、2〜4文に固定しない。恋愛・怒り・不安・限界・関係相談では、必要な文量で2〜5段落まで自然に返す',
           'normal_resonanceでは、基本は観測や共鳴を優先する。恋愛・怒り・不安・限界・関係相談でも、送信文や行動指示を常時出さず、まず何が揺れているかを日常語で映す',
-          'normal_resonanceでは、状態観測だけに閉じず、ユーザーの奥で止まっている本音を自然に表面化する',
+          'normal_resonanceでは、状態を見るだけで終わらせず、ユーザーが心の中で本当に求めていることを、受け取りやすい言葉で返す',
+          'normal_resonanceでは、「穴」「空白」「気配」「ほどける」などの抽象語をそのまま出しすぎない。恋愛・人間関係・浮気・夫婦・不安・怒り・限界では、安心感・寂しさ・逃げ場・不安・やさしさ・ほっとしたい気持ちなど、実際の感情に置き換える',
+          'normal_resonanceでは、ユーザーが「わからない」「どうしたらいい」と言った場合は、深めるより先に、日常語でやさしく分ける',
           'normal_resonanceでは、「〜していい」「〜しなくていい」「〜なくていい」で薄めない。ただし、ユーザーを守るための短い境界線は自然な会話語で返してよい',
           'normal_resonanceでは、「十分です」「それで十分」「そのままでいい」「そのまま大事にしていい」「無理に広げなくていい」「急いで形にしなくていい」「説明を足さなくていい」で閉じない',
           'normal_resonanceで短い同意・納得入力を受けた場合は、入力語そのものを評価しない。直前assistantの核心を1つ受けて、「そこが見えたなら、次に見るのは〜」のように次の方向を日常語で返す',
@@ -4968,9 +4970,9 @@ const systemPromptForWriter = [
           'normal_resonanceでは、比較文を無理に「残っている」構文へ変換しない。文脈上自然なら、直接文として返す',
           'normal_resonanceでは、共鳴が成立している場合、説明用の型よりも届く言葉を優先する',
           'normal_resonanceでは、比較・宣言・短い断定を必要に応じて許可する。ただし根拠のない決めつけにはしない',
-          'normal_resonanceでは、原因説明を増やしすぎない。ただし、恋愛・怒り・不安・限界では、状態文だけに閉じず、感情を受ける → 本音を表面化する → 必要な時だけ問いの整理、まで自然に進んでよい',
-          'normal_resonanceでは、状態文だけでなく、場を動かす文・本音を戻す文・短い宣言文も許可する',
-          'normal_resonanceでは、最後の1文を観測文に固定しない。必要なら、共鳴・宣言・本音の表面化で閉じる',
+          'normal_resonanceでは、原因説明を増やしすぎない。ただし、恋愛・怒り・不安・限界では、気持ちを受ける → 本当に求めていることを日常語にする → 必要な時だけ問いを分ける、まで自然に進んでよい',
+          'normal_resonanceでは、状態文だけでなく、気持ちが少し前に進む文・本当に言いたかったことを戻す文・短い言い切りも許可する',
+          'normal_resonanceでは、最後の1文を観測文に固定しない。必要なら、受け止め・短い言い切り・本当に求めていることの言葉で閉じる',
         ],
       };
     }
@@ -5901,7 +5903,22 @@ const writerDirectivesFromSlotForFirstPass = isDetailPatternWriterForFirstPass
   const resolvedTrigger = resolveUserTextForTrigger();
   const userTextForTrigger = resolvedTrigger.text;
 
-  const explicitTrigger = detectExplicitBlockPlanTrigger(userTextForTrigger);
+  // ✅ 診断フォローでは multi7 の深掘り構成に入れない
+  // - 「診断内容を詳しく」「実際の会話の続きにして」などは、
+  //   通常共鳴の7段見出しではなく、直前診断を日常語で具体化するターン。
+  const isDiagnosisFollowupCtxForBlockPlan =
+    (ctxPack as any)?.diagnosisFollowup === true ||
+    String((ctxPack as any)?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+    ((ctxPack as any)?.detailMode === true &&
+      (ctxPack as any)?.irMeta &&
+      typeof (ctxPack as any).irMeta === 'object' &&
+      /診断内容|診断結果|さっきの診断|前の診断|この診断|今の診断|詳しく|詳細|深く|具体的に|実際の会話|会話の続き/u.test(
+        String(userTextForTrigger ?? '')
+      ));
+
+  const explicitTrigger = isDiagnosisFollowupCtxForBlockPlan
+    ? false
+    : detectExplicitBlockPlanTrigger(userTextForTrigger);
 
   // ✅ 観測点：トリガ元テキストの採用元を固定ログ化
   try {
@@ -7021,6 +7038,15 @@ if (
           return out.filter(Boolean);
         })();
 
+        const shouldSuppressIrDetailHeadingForConversationContinuation =
+          patternKey === 'IR_DETAIL_V1' &&
+          /実際の会話|会話の続き|そのまま送れる|会話文|送れる形/u.test(
+            String(patternFollowupText ?? '')
+          );
+
+        const effectiveHeading =
+          shouldSuppressIrDetailHeadingForConversationContinuation ? '' : heading;
+
         if (patternKey === 'NORMAL_DETAIL_V1') {
           materializedBlocks.push(
             ...slotParagraphs.map((paragraph, paragraphIndex) => ({
@@ -7034,7 +7060,7 @@ if (
           continue;
         }
 
-        if (!heading) {
+        if (!effectiveHeading) {
           materializedBlocks.push(
             ...slotParagraphs.map((paragraph, paragraphIndex) => ({
               text: paragraph,
@@ -7048,11 +7074,11 @@ if (
 
         slotParagraphs.forEach((paragraph, paragraphIndex) => {
           materializedBlocks.push({
-            text: paragraphIndex === 0 ? `${heading}\n${paragraph}` : paragraph,
+            text: paragraphIndex === 0 ? `${effectiveHeading}\n${paragraph}` : paragraph,
             kind: 'p' as const,
             slotKey,
             blockKey: slotBlockKeys.get(String(slotKey))?.[paragraphIndex] ?? undefined,
-            heading,
+            heading: effectiveHeading,
           });
         });
       }
@@ -9982,14 +10008,218 @@ const isResonanceStructureFollowup =
                 };
               };
 
-              const writerDirectivesBaseForFinal =
+              const diagnosisFollowupTargetLabelForFinal =
+                String(
+                  writerPatternTargetLabel ??
+                    (ctxPackForWriter as any)?.targetLabel ??
+                    (ctxPackForWriter as any)?.irMeta?.targetLabel ??
+                    (ctxPackForWriter as any)?.lastIrDiagnosis?.target ??
+                    (opts as any)?.ctxPack?.targetLabel ??
+                    (opts as any)?.userContext?.ctxPack?.targetLabel ??
+                    ''
+                ).trim();
+
+              const diagnosisFollowupTargetNormForFinal =
+                diagnosisFollowupTargetLabelForFinal
+                  .replace(/[\\s　]+/g, '')
+                  .replace(/さん|様|先生|くん|ちゃん/g, '');
+
+              const diagnosisFollowupTargetScopeForFinal = (() => {
+                if (!diagnosisFollowupTargetNormForFinal) return 'unknown';
+
+                if (
+                  /^(自分|今の自分|自分自身|本当の自分|わたし|私|僕|俺|自分のこと)$/u.test(
+                    diagnosisFollowupTargetNormForFinal
+                  )
+                ) {
+                  return 'self';
+                }
+
+                if (
+                  /(相手|浮気相手|不倫相手|彼|彼氏|彼女|妻|嫁|奥さん|夫|旦那|主人|恋人|好きな人|元彼|元カレ|元彼女|元カノ|友達|親友|上司|部下|同僚|社長|先生|母|父|親|子ども|息子|娘|兄|弟|姉|妹|家族|お客|顧客)/u.test(
+                    diagnosisFollowupTargetNormForFinal
+                  )
+                ) {
+                  return 'other';
+                }
+
+                if (
+                  /(仕事|計画|企画|事業|申請|助成金|映像|動画|投稿|サービス|アプリ|実装|開発|設計|資料|文章|プロンプト|プロジェクト|契約|会議|打ち合わせ|この件|この問題|問題|課題|状況|状態|流れ|関係|関係性|浮気|不倫|離婚|連絡|返信|返事|予定|お金|売上|集客|TikTok|SNS|サイト|LP|講座|商品|企画書)/u.test(
+                    diagnosisFollowupTargetNormForFinal
+                  )
+                ) {
+                  return 'situation';
+                }
+
+                return 'other';
+              })();
+
+              const isDiagnosisConversationContinuationForFinal =
+                writerPatternKey === 'IR_DETAIL_V1' &&
+                /実際の会話|会話の続き|そのまま送れる|会話文|送れる形/u.test(
+                  String(writerPatternFollowupText ?? '')
+                );
+
+              const isDiagnosisSpouseTargetForFinal =
+                /(妻|嫁|奥さん|夫|旦那|主人|配偶者|パートナー)/u.test(
+                  diagnosisFollowupTargetNormForFinal
+                );
+
+              const diagnosisConversationTargetSideLabelForFinal =
+                isDiagnosisSpouseTargetForFinal
+                  ? /(妻|嫁|奥さん)/u.test(diagnosisFollowupTargetNormForFinal)
+                    ? '妻側'
+                    : /(夫|旦那|主人)/u.test(diagnosisFollowupTargetNormForFinal)
+                      ? '夫側'
+                      : '配偶者側'
+                  : '相手側';
+
+              const diagnosisScopeConstraintsForFinal =
                 writerPatternKey === 'IR_DETAIL_V1'
-                  ? {
-                      ...mergeUserStateWriterDirectives(writerDirectivesForFinalRaw),
-                      pattern_key: 'IR_DETAIL_V1',
-                      pattern_mode: 'diagnosis_detail',
-                    }
-                  : mergeUserStateWriterDirectives(writerDirectivesForFinalRaw);
+                  ? [
+                      `DIAGNOSIS_TARGET_SCOPE: targetLabel=${diagnosisFollowupTargetLabelForFinal || '対象未指定'}`,
+                      `DIAGNOSIS_TARGET_SCOPE: targetScope=${diagnosisFollowupTargetScopeForFinal}`,
+
+                      ...(isDiagnosisSpouseTargetForFinal
+                        ? [
+                            'DIAGNOSIS_SPOUSE_TARGET: 妻・夫・配偶者の診断フォローでは、恋愛相手向けの「先の約束」「一緒になる」「選ばれる」「待つ理由」に寄せすぎない',
+                            'DIAGNOSIS_SPOUSE_TARGET: 夫婦文脈では、説明の一貫性、言葉と行動の整合、予定・連絡・態度の不自然さ、家の中での安心材料を中心に書く',
+                            'DIAGNOSIS_SPOUSE_TARGET: 相手側が求めているものは、未来の約束より、今の言葉と行動が信用できるかとして扱う',
+                            'DIAGNOSIS_SPOUSE_TARGET: 実際の会話に接続する場合は、相手を安心させる甘い言葉ではなく、曖昧さやごまかしを増やさない一点へ落とす',
+                          ]
+                        : []),
+
+                      ...(diagnosisFollowupTargetScopeForFinal === 'other'
+                        ? [
+                            'DIAGNOSIS_TARGET_SCOPE: この診断フォローは、直前診断の対象である相手側の状態・反応・動きの見立てとして書く',
+                            'DIAGNOSIS_TARGET_SCOPE: ユーザーの内面整理を主語にしない。「あなたは〜」「あなたの中では〜」で展開しない',
+                            'DIAGNOSIS_TARGET_SCOPE: ユーザー側は「こちらから見ると」「ユーザーには〜と見えやすい」程度の補助に留める',
+                            'DIAGNOSIS_TARGET_SCOPE: 相手の本心や事実は断定しない。「相手側には〜が出ているように見えます」「〜になりやすいです」の温度で書く',
+                          ]
+                        : []),
+
+                      ...(diagnosisFollowupTargetScopeForFinal === 'self'
+                        ? [
+                            'DIAGNOSIS_TARGET_SCOPE: この診断フォローは、ユーザー自身の状態・反応・選び方の見立てとして書く',
+                            'DIAGNOSIS_TARGET_SCOPE: 相手の本心を読んだように断定しない',
+                          ]
+                        : []),
+
+                      ...(diagnosisFollowupTargetScopeForFinal === 'situation'
+                        ? [
+                            'DIAGNOSIS_TARGET_SCOPE: この診断フォローは、人物の本心ではなく、出来事・状況・関係の流れとして書く',
+                            'DIAGNOSIS_TARGET_SCOPE: 誰か一人の気持ちに寄せすぎない',
+                          ]
+                        : []),
+
+                      ...(isDiagnosisConversationContinuationForFinal
+                        ? [
+                            'DIAGNOSIS_CONVERSATION_CONTINUATION: 診断の説明ではなく、実際の相談の会話に接続する文として書く',
+                            'DIAGNOSIS_CONVERSATION_CONTINUATION: 「診断の続きとして見るなら」で始めない',
+                            `DIAGNOSIS_CONVERSATION_CONTINUATION: 「この流れで見ると、${diagnosisConversationTargetSideLabelForFinal}は〜」のように、対象側の見立てから始める`,
+                            'DIAGNOSIS_CONVERSATION_CONTINUATION: 固定見出しを使わない',
+                            'DIAGNOSIS_CONVERSATION_CONTINUATION: 最後は一般的なまとめではなく、今の会話で何を見ればよいかに接続する',
+                          ]
+                        : []),
+                    ]
+                  : [];
+
+              const writerDirectivesBaseForFinal = (() => {
+                const merged = mergeUserStateWriterDirectives(writerDirectivesForFinalRaw);
+
+                if (writerPatternKey !== 'IR_DETAIL_V1') {
+                  return merged;
+                }
+
+                const mergedWriteConstraintsForFinal =
+                  ((merged as any)?.writeConstraints && Array.isArray((merged as any).writeConstraints)
+                    ? (merged as any).writeConstraints
+                    : []);
+
+                const filteredWriteConstraintsForDiagnosisContinuation =
+                  isDiagnosisConversationContinuationForFinal
+                    ? mergedWriteConstraintsForFinal.filter((line: any) => {
+                        const s = String(line ?? '');
+
+                        return !(
+                          s.includes('4つの段落は、見えていること') ||
+                          s.includes('見出しを使う場合は') ||
+                          s.includes('ユーザーから見えやすい感覚') ||
+                          s.includes('ユーザー側からどう見えやすいか') ||
+                          s.includes('相手の状態だけで終わらせず') ||
+                          s.includes('current_state は') ||
+                          s.includes('misrecognition_negation は') ||
+                          s.includes('structural_reframe は') ||
+                          s.includes('breakdown_core_gap は') ||
+                          s.includes('breakdown_defense は') ||
+                          s.includes('breakdown_rejection_target は') ||
+                          s.includes('reading_direction は') ||
+                          s.includes('concrete_sort_axis は') ||
+                          s.includes('concrete_sort_boundary は') ||
+                          s.includes('conclusion は') ||
+                          s.includes('caution は') ||
+                          s.includes('closing_line は')
+                        );
+                      })
+                    : mergedWriteConstraintsForFinal;
+
+                const diagnosisConversationContinuationOverrides =
+                  isDiagnosisConversationContinuationForFinal
+                    ? {
+                        block_current_state:
+                          `1段落目は、診断対象側の見立てから始める。「この流れで見ると、${diagnosisConversationTargetSideLabelForFinal}は〜」のように書く。ユーザーの内面を主語にしない。`,
+                        block_misrecognition_negation:
+                          '相手の本心を断定せず、「〜に寄りやすい」「〜として受け取りやすい」の温度で書く。ユーザーの気持ちの説明に戻らない。',
+                        block_structural_reframe:
+                          '診断本文の要点を、実際の相談の流れへつなぐ。診断結果の解説ではなく、今の会話で何が起きやすいかを書く。',
+                        block_breakdown_core_gap: isDiagnosisSpouseTargetForFinal
+                          ? `${diagnosisConversationTargetSideLabelForFinal}の受け取り方、説明の筋、予定・連絡・態度のズレを書く。ユーザーの「納得したい」「答えを急ぎたい」は主語にしない。`
+                          : '2段落目は、相手側の動き・連絡・期待・確認したい気持ちのズレを書く。ユーザーの「納得したい」「答えを急ぎたい」は主語にしない。',
+                        block_breakdown_defense: isDiagnosisSpouseTargetForFinal
+                          ? `${diagnosisConversationTargetSideLabelForFinal}が確かめようとしているものを書く。説明の一貫性、家の中で安心できる材料、言葉と行動の整合など、夫婦文脈に寄せる。`
+                          : '相手側が守ろうとしているものを書く。待つ姿勢、確かめたい気持ち、約束として受け取りたい動きなど、対象側に寄せる。',
+                        block_breakdown_rejection_target: isDiagnosisSpouseTargetForFinal
+                          ? '避けたいことは、説明が曖昧なまま残ること、予定・連絡・態度が不自然に見えること、ごまかしが増えることとして書く。'
+                          : '避けたいことは、相手側が曖昧なまま置かれること、先の約束が見えないこと、言葉と行動が合わないこととして書く。',
+                        block_reading_direction: isDiagnosisSpouseTargetForFinal
+                          ? '3段落目は、今の会話で見るべき点を書く。相手の本心ではなく、説明の一貫性、予定・連絡・態度、言葉と行動が合っているかに接続する。'
+                          : '3段落目は、今の会話で見るべき点を書く。相手の本心ではなく、連絡の温度・会う約束・先の言葉をどう受け取っているかに接続する。',
+                        block_concrete_sort_axis: isDiagnosisSpouseTargetForFinal
+                          ? '判断軸は、相手の気持ちの有無ではなく、言葉と行動が合っているか、説明がぶれていないか、家の中で信用できる材料が増えているかに置く。'
+                          : '判断軸は、相手の気持ちの有無ではなく、相手側が「先がある」と受け取る言葉が増えているかどうかに置く。',
+                        block_concrete_sort_boundary: isDiagnosisSpouseTargetForFinal
+                          ? 'まだ決めきらない範囲は残してよい。ただし、最後は会話の中で説明のブレ・ごまかし・態度の不自然さを増やさないことへ接続する。'
+                          : 'まだ決めきらない範囲は残してよい。ただし、最後は会話の中で何を増やさないか、何を確認しすぎないかへ接続する。',
+                        block_conclusion:
+                          `最後は、${diagnosisConversationTargetSideLabelForFinal}の見立てから、今の会話で注意する一点へ落とす。一般的なまとめにしない。`,
+                        block_caution: isDiagnosisSpouseTargetForFinal
+                          ? `${diagnosisConversationTargetSideLabelForFinal}の不安や疑いが強まりやすい言葉、または曖昧さやごまかしが続くことで起きる反応に留める。ユーザーの内面整理で締めない。`
+                          : 'ユーザーの内面整理で締めない。相手側が期待を強めやすい言葉、または曖昧さが続くことで起きる反応に留める。',
+                        block_closing_line:
+                          '締めは、今の会話で見るべき一点を短く残す。「静かに」「余韻」「ごまかさず」などの抽象的な締めにしない。',
+                        bodyStyle: {
+                          preferBlockSplit: true,
+                          minBlocks: 2,
+                          maxSentencesPerBlock: 3,
+                          minSentences: 5,
+                          maxSentences: 9,
+                        },
+                      }
+                    : {};
+
+                return {
+                  ...merged,
+                  ...diagnosisConversationContinuationOverrides,
+                  pattern_key: 'IR_DETAIL_V1',
+                  pattern_mode: isDiagnosisConversationContinuationForFinal
+                    ? 'diagnosis_conversation_continuation'
+                    : 'diagnosis_detail',
+                  writeConstraints: [
+                    ...filteredWriteConstraintsForDiagnosisContinuation,
+                    ...diagnosisScopeConstraintsForFinal,
+                  ],
+                };
+              })();
 
               const openEdgeClosingLineForFinal = (() => {
                 const raw = [
@@ -10040,7 +10270,7 @@ const isResonanceStructureFollowup =
               ).trim();
 
               const isPlainMeaningQuestionForFinal =
-                /(どういう意味|どういう事|どういうこと|とは|という意味|何を指す|何のこと|それが.+ですか|それは.+ですか|未来という意味|意味ですか)/u.test(
+                /(どういう意味|どういう事|どういうこと|とは|という意味|何を指す|何のこと|.+ってなんですか|.+って何ですか|.+はなんですか|.+は何ですか|.+とはなんですか|.+とは何ですか|それが.+ですか|それは.+ですか|未来という意味|意味ですか)/u.test(
                   plainMeaningQuestionTextForFinal
                 );
 
@@ -10050,7 +10280,18 @@ const isResonanceStructureFollowup =
                   plainMeaningQuestionTextForFinal
                 );
 
+              const shouldSuppressDeepRevealForDiagnosisFollowup =
+                writerPatternKey === 'IR_DETAIL_V1' &&
+                (
+                  writerPatternEffectiveHasPriorDiagnosis === true ||
+                  (ctxPackForWriter as any)?.diagnosisFollowup === true ||
+                  String((ctxPackForWriter as any)?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+                  (opts as any)?.ctxPack?.diagnosisFollowup === true ||
+                  (opts as any)?.userContext?.ctxPack?.diagnosisFollowup === true
+                );
+
               const shouldSuppressDeepRevealForFinal =
+                shouldSuppressDeepRevealForDiagnosisFollowup ||
                 (
                   Array.isArray((writerDirectivesBaseForFinal as any)?.writeConstraints) &&
                   (writerDirectivesBaseForFinal as any).writeConstraints.some((line: any) =>
@@ -10059,8 +10300,14 @@ const isResonanceStructureFollowup =
                 ) ||
                 isPlainMeaningQuestionForFinal;
 
+              // ✅ 診断フォローでは deepReveal だけ止める。
+              // self_definition_acceptance / plain_meaning_answer への上書きはしない。
+              const shouldApplyDeepReadSuppressionDirectivesForFinal =
+                shouldSuppressDeepRevealForFinal &&
+                !shouldSuppressDeepRevealForDiagnosisFollowup;
+
               const deepReadSuppressionConstraintsForFinal =
-                shouldSuppressDeepRevealForFinal
+                shouldApplyDeepReadSuppressionDirectivesForFinal
                   ? [
                       'DEEP_READ_CONTROL_FINAL: このターンは自己定義の受領として返す。奥の本音・残り・余白・別解釈を作らない',
                       'DEEP_READ_CONTROL_FINAL: 出力本文で「ただ」「でも」「本当は」「見られやすい」「〜に見える」を使わない',
@@ -10073,10 +10320,10 @@ const isResonanceStructureFollowup =
                             'PLAIN_MEANING_CONTROL: 「中心の意図」「名前のついていない」「形になる前」「気配」「奥」「本音」「余白」「未来を生む前」へ先に広げない',
                             'PLAIN_MEANING_CONTROL: ユーザーの質問に対して、未来かどうか・何を指すかを先に明確に答える',
                             'PLAIN_MEANING_CONTROL: 詩的表現やI層表現は必要な場面では使ってよいが、意味確認では説明の後に短く添える程度にする',
-                            'PLAIN_MEANING_CONTROL_FINAL: 冒頭で「はい、そう受け取れます」「そう読めます」と同意から始めない。まず「未来という意味ではありません」と答える',
-                            'PLAIN_MEANING_CONTROL_FINAL: 「まだ形になる前」「名前のついていない」「可能性」「未来の感じ」「未来は形より先」「未来を生む前」を使わない',
-                            'PLAIN_MEANING_CONTROL_FINAL: この質問では「ずっと先」を、未来ではなく、鳥の飛び方が飛行機より前から自然界に存在していたという意味として説明する',
-                            'PLAIN_MEANING_CONTROL_FINAL: 飛行機は後から作られた技術、鳥は先に自然界に存在していた飛び方、という日常語の対比で答える',
+                            'PLAIN_MEANING_CONTROL_FINAL: 冒頭で「はい、そう受け取れます」「そう読めます」と同意から始めない。まず質問された言葉の意味を日常語で答える',
+                            'PLAIN_MEANING_CONTROL_FINAL: 質問に出ていない別テーマ・過去テーマ・固定例を混ぜない',
+                            'PLAIN_MEANING_CONTROL_FINAL: 抽象語を使う場合は、安心感・寂しさ・不安・休みたい気持ちなど、実際の感情に言い換える',
+                            'PLAIN_MEANING_CONTROL_FINAL: 必要な場合だけ、今の質問に沿った短い例を一つ添える',
                           ]
                         : []),
                     ]
@@ -10115,7 +10362,7 @@ const isResonanceStructureFollowup =
                       block_closing_line: openEdgeClosingLineForFinal,
                     }
                   : {}),
-                ...(shouldSuppressDeepRevealForFinal
+                ...(shouldApplyDeepReadSuppressionDirectivesForFinal
                   ? {
                       pattern_mode: isPlainMeaningQuestionForFinal
                         ? 'plain_meaning_answer'
@@ -10142,7 +10389,7 @@ const isResonanceStructureFollowup =
                       block_closing_line: isPlainMeaningConfirmationForFinal
                         ? '最後は「はい。ここでは未来ではなく、前からあったという意味です。」の方向で短く閉じる。'
                         : isPlainMeaningQuestionForFinal
-                          ? '最後は「未来ではなく、先に存在していた原型という意味です。」の方向で閉じる。'
+                          ? '最後は、質問された言葉が何を指すかを日常語で短く閉じる。'
                           : '最後は「選んでいない、止めていない、受け入れている。そこをそのまま採用します。」の方向で閉じる。',
                     }
                   : {}),
@@ -10528,6 +10775,239 @@ const finalWriterDirectivesMsg =
                   ].join('\n'),
         } as const)
       : null;
+      const diagnosisSourceMsg = (() => {
+        if (writerPatternKey !== 'IR_DETAIL_V1') return null;
+
+        const pickStringForDiagnosisSource = (...values: any[]) => {
+          for (const value of values) {
+            const s = String(value ?? '').trim();
+            if (s) return s;
+          }
+          return '';
+        };
+
+        const normalizeDiagnosisTargetForSource = (value: any) =>
+          String(value ?? '')
+            .trim()
+            .replace(/[\\s　]+/g, '')
+            .replace(/さん|様|先生|くん|ちゃん/g, '');
+
+        const packCandidates = [
+          ctxPackForWriter,
+          (opts as any)?.ctxPack,
+          (opts as any)?.userContext?.ctxPack,
+          (opts as any)?.meta?.extra?.ctxPack,
+          (opts as any)?.userContext?.meta?.extra?.ctxPack,
+          (opts as any)?.extra?.ctxPack,
+        ].filter((pack: any) => pack && typeof pack === 'object');
+
+        const activeDiagnosisIdForSource = pickStringForDiagnosisSource(
+          ...packCandidates.map((pack: any) => (pack as any)?.activeDiagnosisId),
+          (opts as any)?.activeDiagnosisId,
+          (opts as any)?.userContext?.activeDiagnosisId,
+          (opts as any)?.meta?.extra?.activeDiagnosisId
+        );
+
+        const targetRequestForDiagnosisSource = pickStringForDiagnosisSource(
+          writerPatternTargetLabel,
+          ...packCandidates.map((pack: any) => (pack as any)?.targetLabel),
+          ...packCandidates.map((pack: any) => (pack as any)?.irMeta?.targetLabel),
+          ...packCandidates.map((pack: any) => (pack as any)?.lastIrDiagnosis?.targetLabel),
+          ...packCandidates.map((pack: any) => (pack as any)?.lastIrDiagnosis?.target),
+          (opts as any)?.targetLabel,
+          (opts as any)?.userContext?.targetLabel
+        );
+
+        const targetRequestNormForDiagnosisSource =
+          normalizeDiagnosisTargetForSource(targetRequestForDiagnosisSource);
+
+        const diagnosisHistoryForSource = packCandidates.flatMap((pack: any) => {
+          const rows = (pack as any)?.diagnosisHistory;
+          return Array.isArray(rows)
+            ? rows.filter((item: any) => item && typeof item === 'object')
+            : [];
+        });
+
+        const diagnosisTextFromItem = (item: any) =>
+          pickStringForDiagnosisSource(
+            item?.diagnosisText,
+            item?.text,
+            item?.assistantText,
+            item?.content,
+            item?.message
+          );
+
+        const diagnosisTargetNormFromItem = (item: any) =>
+          normalizeDiagnosisTargetForSource(
+            pickStringForDiagnosisSource(
+              item?.targetLabel,
+              item?.target,
+              item?.irMeta?.targetLabel,
+              item?.irMeta?.target
+            )
+          );
+
+        const diagnosisByActiveId =
+          activeDiagnosisIdForSource
+            ? [...diagnosisHistoryForSource].reverse().find((item: any) => {
+                return (
+                  String(item?.id ?? '').trim() === activeDiagnosisIdForSource &&
+                  diagnosisTextFromItem(item)
+                );
+              }) ?? null
+            : null;
+
+        const diagnosisByTarget =
+          !diagnosisByActiveId && targetRequestNormForDiagnosisSource
+            ? [...diagnosisHistoryForSource].reverse().find((item: any) => {
+                return (
+                  diagnosisTargetNormFromItem(item) === targetRequestNormForDiagnosisSource &&
+                  diagnosisTextFromItem(item)
+                );
+              }) ?? null
+            : null;
+
+        const diagnosisLatest =
+          !diagnosisByActiveId && !diagnosisByTarget
+            ? [...diagnosisHistoryForSource].reverse().find((item: any) => diagnosisTextFromItem(item)) ??
+              null
+            : null;
+
+        const lastIrDiagnosisForSource =
+          diagnosisByActiveId ||
+          diagnosisByTarget ||
+          diagnosisLatest ||
+          packCandidates
+            .map((pack: any) => (pack as any)?.lastIrDiagnosis)
+            .find((item: any) => item && typeof item === 'object' && diagnosisTextFromItem(item)) ||
+          ((opts as any)?.lastIrDiagnosis &&
+          typeof (opts as any).lastIrDiagnosis === 'object'
+            ? (opts as any).lastIrDiagnosis
+            : null) ||
+          ((opts as any)?.userContext?.lastIrDiagnosis &&
+          typeof (opts as any).userContext.lastIrDiagnosis === 'object'
+            ? (opts as any).userContext.lastIrDiagnosis
+            : null) ||
+          ((opts as any)?.meta?.extra?.lastIrDiagnosis &&
+          typeof (opts as any).meta.extra.lastIrDiagnosis === 'object'
+            ? (opts as any).meta.extra.lastIrDiagnosis
+            : null);
+
+        const diagnosisTextFromHistory = diagnosisTextFromItem(lastIrDiagnosisForSource);
+
+        const historyRowsRaw =
+          Array.isArray((ctxPackForWriter as any)?.historyForWriter)
+            ? (ctxPackForWriter as any).historyForWriter
+            : Array.isArray((opts as any)?.ctxPack?.historyForWriter)
+              ? (opts as any).ctxPack.historyForWriter
+              : Array.isArray((opts as any)?.userContext?.ctxPack?.historyForWriter)
+                ? (opts as any).userContext.ctxPack.historyForWriter
+                : Array.isArray((opts as any)?.userContext?.historyForWriter)
+                  ? (opts as any).userContext.historyForWriter
+                  : [];
+
+        const historyRows = Array.isArray(historyRowsRaw) ? historyRowsRaw : [];
+
+        const diagnosisAssistant = [...historyRows].reverse().find((m: any) => {
+          const role = String(m?.role ?? '').toLowerCase();
+          const content = String(m?.content ?? m?.text ?? m?.message ?? '').trim();
+
+          return (
+            role === 'assistant' &&
+            /観測対象|🧭|🧩|🌿|🌱\\s*メッセージ/u.test(content)
+          );
+        });
+
+        const diagnosisText =
+          diagnosisTextFromHistory ||
+          String(
+            (diagnosisAssistant as any)?.content ??
+              (diagnosisAssistant as any)?.text ??
+              (diagnosisAssistant as any)?.message ??
+              ''
+          ).trim();
+
+        try {
+          console.log('[IROS/DIAGNOSIS_SOURCE][CHECK]', {
+            traceId: debug?.traceId ?? null,
+            conversationId: debug?.conversationId ?? null,
+            userCode: debug?.userCode ?? null,
+            writerPatternKey,
+            activeDiagnosisIdForSource: activeDiagnosisIdForSource || null,
+            diagnosisHistoryLen: diagnosisHistoryForSource.length,
+            pickedFrom:
+              diagnosisByActiveId
+                ? 'diagnosisHistory.activeDiagnosisId'
+                : diagnosisByTarget
+                  ? 'diagnosisHistory.targetLabel'
+                  : diagnosisLatest
+                    ? 'diagnosisHistory.latest'
+                    : diagnosisTextFromHistory
+                      ? 'lastIrDiagnosis'
+                      : diagnosisAssistant
+                        ? 'historyForWriter.assistant'
+                        : 'none',
+            targetRequestForDiagnosisSource,
+            pickedDiagnosisTarget: pickStringForDiagnosisSource(
+              (lastIrDiagnosisForSource as any)?.targetLabel,
+              (lastIrDiagnosisForSource as any)?.target,
+              (lastIrDiagnosisForSource as any)?.irMeta?.targetLabel
+            ),
+            diagnosisTextFromHistoryLen: diagnosisTextFromHistory.length,
+            historyRowsLen: historyRows.length,
+            historyRowsHead: historyRows.slice(-6).map((m: any) => ({
+              role: String(m?.role ?? ''),
+              head: String(m?.content ?? m?.text ?? m?.message ?? '').slice(0, 180),
+            })),
+            diagnosisTextLen: diagnosisText.length,
+            diagnosisTextHead: diagnosisText.slice(0, 240),
+          });
+        } catch {}
+
+        if (!diagnosisText) return null;
+
+        const targetForDiagnosisSource =
+          pickStringForDiagnosisSource(
+            (lastIrDiagnosisForSource as any)?.targetLabel,
+            (lastIrDiagnosisForSource as any)?.target,
+            (lastIrDiagnosisForSource as any)?.irMeta?.targetLabel,
+            targetRequestForDiagnosisSource,
+            writerPatternTargetLabel,
+            (ctxPackForWriter as any)?.targetLabel,
+            (ctxPackForWriter as any)?.irMeta?.targetLabel,
+            (ctxPackForWriter as any)?.lastIrDiagnosis?.target,
+            ''
+          ) || '対象未指定';
+
+        const followupRequestForDiagnosisSource =
+          String(
+            writerPatternFollowupText ??
+              (opts as any)?.userText ??
+              (opts as any)?.followupText ??
+              ''
+          ).trim();
+
+        return {
+          role: 'assistant',
+          content: [
+            'DIAGNOSIS_SOURCE (DO NOT OUTPUT):',
+            `target=${targetForDiagnosisSource}`,
+            `activeDiagnosisId=${activeDiagnosisIdForSource || ''}`,
+            `followupRequest=${followupRequestForDiagnosisSource}`,
+            'diagnosisText:',
+            diagnosisText,
+            '',
+            'DIAGNOSIS_SOURCE_RULES:',
+            '- この診断本文を材料にして、ユーザーの依頼に合わせて日常語へ翻訳する',
+            '- diagnosisHistory / activeDiagnosisId がある場合は、それを正本として扱う',
+            '- ユーザーの依頼文そのものを深掘りしない',
+            '- 相手の本心や事実として断定しない',
+            '- 初回診断の内容を別の意味に変えない',
+            '- 診断結果を実際の会話の続きにする場合は、診断本文の要点を現実のやり取りに接続する',
+          ].join('\\n'),
+        } as const;
+      })();
+
       const messagesForWriterFinal = (() => {
         const seedDraftForWriter = String(seedDraft ?? '').replace(/\s+/g, ' ').trim();
 
@@ -10562,7 +11042,7 @@ const finalWriterDirectivesMsg =
           return rewritten === content ? m : { ...m, content: rewritten };
         });
 
-        const inserts = [finalWriterDirectivesMsg, finalPatternContractMsg].filter(Boolean) as Array<{
+        const inserts = [diagnosisSourceMsg, finalWriterDirectivesMsg, finalPatternContractMsg].filter(Boolean) as Array<{
           role: 'assistant';
           content: string;
         }>;

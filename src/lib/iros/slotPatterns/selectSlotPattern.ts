@@ -146,6 +146,7 @@ export function selectSlotPattern(input: SelectSlotPatternInput): PatternKey {
   const followupText = String(input?.followupText ?? '').trim();
   const userText = String(input?.userText ?? '').trim();
   const detailMode = Boolean(input?.detailMode);
+  const hasPriorDiagnosis = Boolean(input?.hasPriorDiagnosis);
 
   const irLike = isIrLikeLine(line);
   const truthLike = isTruthLikeQuestionType(questionType);
@@ -159,9 +160,12 @@ export function selectSlotPattern(input: SelectSlotPatternInput): PatternKey {
   const declarationLike = looksLikeDeclarationResonance(followupText || userText);
 
   // ir診断の詳細化は IR_DETAIL_V1
-  // ✅ 深読み解放:
-  // diagnosis履歴が残っていても、
-  // 通常会話は resonance 側へ戻す
+  // ✅ 診断履歴がある followup だけ、診断詳細として扱う。
+  // 通常会話は diagnosis 履歴が残っていても resonance 側へ戻す。
+  if (irLike && detailLike && hasPriorDiagnosis) {
+    return 'IR_DETAIL_V1';
+  }
+
   if (irLike && detailLike) {
     return 'NORMAL_RESONANCE_V1';
   }

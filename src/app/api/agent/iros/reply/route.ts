@@ -1449,13 +1449,50 @@ extraSoT = {
           '',
       ).trim();
 
-const baseDiagExtra =
+const baseDiagExtraFromResultMeta =
+  (((result as any)?.meta?.extra ?? {}) as any);
+
+const baseDiagExtraFromResultMetaForSave =
   (((result as any)?.metaForSave?.extra ?? {}) as any);
 
-const baseDiagCtxPack =
-  (baseDiagExtra?.ctxPack && typeof baseDiagExtra.ctxPack === 'object')
-    ? baseDiagExtra.ctxPack
-    : {};
+const baseDiagExtraFromTopMetaForSave =
+  (((metaForSave as any)?.extra ?? {}) as any);
+
+// ✅ 診断保存では、result 側だけを正本にしない。
+// handleIrosReply の top-level metaForSave 側に diagnosisHistory / activeDiagnosisId / lastIrDiagnosis が
+// 入っている経路があるため、保存直前に全て合流して落とさない。
+const baseDiagExtra = {
+  ...(baseDiagExtraFromResultMeta && typeof baseDiagExtraFromResultMeta === 'object'
+    ? baseDiagExtraFromResultMeta
+    : {}),
+  ...(baseDiagExtraFromResultMetaForSave && typeof baseDiagExtraFromResultMetaForSave === 'object'
+    ? baseDiagExtraFromResultMetaForSave
+    : {}),
+  ...(baseDiagExtraFromTopMetaForSave && typeof baseDiagExtraFromTopMetaForSave === 'object'
+    ? baseDiagExtraFromTopMetaForSave
+    : {}),
+};
+
+const baseDiagCtxPack = {
+  ...(
+    baseDiagExtraFromResultMeta?.ctxPack &&
+    typeof baseDiagExtraFromResultMeta.ctxPack === 'object'
+      ? baseDiagExtraFromResultMeta.ctxPack
+      : {}
+  ),
+  ...(
+    baseDiagExtraFromResultMetaForSave?.ctxPack &&
+    typeof baseDiagExtraFromResultMetaForSave.ctxPack === 'object'
+      ? baseDiagExtraFromResultMetaForSave.ctxPack
+      : {}
+  ),
+  ...(
+    baseDiagExtraFromTopMetaForSave?.ctxPack &&
+    typeof baseDiagExtraFromTopMetaForSave.ctxPack === 'object'
+      ? baseDiagExtraFromTopMetaForSave.ctxPack
+      : {}
+  ),
+};
 
 const persistMeta = {
   ...((result as any)?.metaForSave ?? {}),
