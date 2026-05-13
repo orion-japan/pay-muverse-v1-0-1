@@ -12,6 +12,7 @@ import { loadLatestIrDiagnosisSnapshot } from '@/lib/iros/memoryRecall';
 import { buildFramePlan, type InputKind, type IrosStateLite } from '@/lib/iros/language/frameSlots';
 import { resolveFocusResolution } from '@/lib/iros/conversation/focusResolution';
 import { resolveMuSelfKnowledge } from '@/lib/iros/knowledge/muSelfKnowledge';
+import { resolveTurnFrame } from '@/lib/iros/turnFrame/resolveTurnFrame';
 
 // ✅ 外部conversationId(string) -> DB conversation_id(uuid) 変換
 import { ensureIrosConversationUuid } from './ensureIrosConversationUuid';
@@ -972,76 +973,59 @@ export async function buildTurnContext(
     console.warn('[IROS/FOCUS_RESOLUTION][FAILED]', { error: e });
   }
 
-  // ✅ eventFrame / turnFrame:
-  // 接続語・操作語ターンでは、メタ・診断・深読みより先に「前イベント操作」として正本化する。
-  // 例:
-  // user: もう少しリアルに書いてください
-  // => ユーザー発話の奥を読むのではなく、直前assistant返答をリアル寄りに書き直す操作として扱う。
+  // ✅ eventFrame / seedMode / sourceKind:
+  // 接続語・操作語・画像読み・WEB調査などを、メタ・診断・深読みより先に正本化する。
   try {
-    const currentTextForEventFrame = String(text ?? '').trim();
+    const turnFrame = resolveTurnFrame({
+      userText: text,
+    });
 
-    const isPreviousReplyStyleRewriteEvent =
-      /(もう少しリアル|もっとリアル|リアルに書いて|現実味|生々しく|もっと自然|自然に|自然文寄り|会話っぽく|少し崩して|柔らかく|やわらかく|短くして|長くして|詳しく書いて|具体的に書いて|もっと具体的に|もう少し具体的に)/u.test(
-        currentTextForEventFrame,
-      );
-
-    if (isPreviousReplyStyleRewriteEvent) {
+    if (turnFrame.kind !== 'normal' || turnFrame.seedMode !== 'normal') {
       (baseMetaForTurn as any).extra ??= {};
       (baseMetaForTurn as any).extra.ctxPack ??= {};
 
-      const eventFrame = {
-        kind: 'operate_previous_event',
-        operation: 'rewrite',
-        target: 'last_assistant_content',
-        style: /リアル|現実|生々/u.test(currentTextForEventFrame)
-          ? 'more_realistic'
-          : /自然|自然文|会話っぽく/u.test(currentTextForEventFrame)
-            ? 'more_natural'
-            : /具体/u.test(currentTextForEventFrame)
-              ? 'more_concrete'
-              : 'style_rewrite',
-        sourceUserText: currentTextForEventFrame,
-        suppressMetaRead: true,
-        suppressDeepReveal: true,
-        suppressMemoryRecall: true,
-        suppressStateInterpretation: true,
-        targetPolicy: '直前assistant返答だけを対象にする。現在のユーザー文そのものを分析・診断・深読みしない。',
-        noInventPolicy: '直前assistant返答にない題材・人物・状況を足さない。恋愛・連絡待ち・スマホ・LINE・返事待ち文脈を元文にない限り足さない。',
-      };
+      (baseMetaForTurn as any).extra.eventFrame = turnFrame;
+      (baseMetaForTurn as any).extra.turnFrame = turnFrame;
+      (baseMetaForTurn as any).extra.seedMode = turnFrame.seedMode;
+      (baseMetaForTurn as any).extra.sourceKind = turnFrame.sourceKind;
 
-      (baseMetaForTurn as any).extra.eventFrame = eventFrame;
-      (baseMetaForTurn as any).extra.turnFrame = eventFrame;
-      (baseMetaForTurn as any).extra.ctxPack.eventFrame = eventFrame;
-      (baseMetaForTurn as any).extra.ctxPack.turnFrame = eventFrame;
+      (baseMetaForTurn as any).extra.ctxPack.eventFrame = turnFrame;
+      (baseMetaForTurn as any).extra.ctxPack.turnFrame = turnFrame;
+      (baseMetaForTurn as any).extra.ctxPack.seedMode = turnFrame.seedMode;
+      (baseMetaForTurn as any).extra.ctxPack.sourceKind = turnFrame.sourceKind;
 
-      (baseMetaForTurn as any).extra.ctxPack.previousReplyRephrase = true;
-      (baseMetaForTurn as any).extra.ctxPack.previousReplyStyleRewrite = true;
-      (baseMetaForTurn as any).extra.ctxPack.patternKey = 'previous_reply_rephrase';
-      (baseMetaForTurn as any).extra.ctxPack.pattern_key = 'previous_reply_rephrase';
-      (baseMetaForTurn as any).extra.ctxPack.patternMode = 'previous_reply_rephrase';
-      (baseMetaForTurn as any).extra.ctxPack.pattern_mode = 'previous_reply_rephrase';
-      (baseMetaForTurn as any).extra.ctxPack.goalKind = 'rewrite';
-      (baseMetaForTurn as any).extra.ctxPack.replyGoal = { kind: 'rewrite' };
-      (baseMetaForTurn as any).extra.ctxPack.continuityKind = 'operate_previous_event';
-      (baseMetaForTurn as any).extra.ctxPack.situationSummary =
-        '直前assistant返答の書き直し。現在のユーザー文そのものを分析せず、直前assistant返答を対象にする。';
-      (baseMetaForTurn as any).extra.ctxPack.situationTopic =
-        '直前assistant返答の書き直し';
+      if (turnFrame.kind === 'operate_previous_event') {
+        (baseMetaForTurn as any).extra.ctxPack.previousReplyRephrase = true;
+        (baseMetaForTurn as any).extra.ctxPack.previousReplyStyleRewrite = true;
+        (baseMetaForTurn as any).extra.ctxPack.patternKey = 'previous_reply_rephrase';
+        (baseMetaForTurn as any).extra.ctxPack.pattern_key = 'previous_reply_rephrase';
+        (baseMetaForTurn as any).extra.ctxPack.patternMode = 'previous_reply_rephrase';
+        (baseMetaForTurn as any).extra.ctxPack.pattern_mode = 'previous_reply_rephrase';
+        (baseMetaForTurn as any).extra.ctxPack.goalKind = 'rewrite';
+        (baseMetaForTurn as any).extra.ctxPack.replyGoal = { kind: 'rewrite' };
+        (baseMetaForTurn as any).extra.ctxPack.continuityKind = 'operate_previous_event';
+        (baseMetaForTurn as any).extra.ctxPack.situationSummary =
+          '直前assistant返答の書き直し。現在のユーザー文そのものを分析せず、直前assistant返答を対象にする。';
+        (baseMetaForTurn as any).extra.ctxPack.situationTopic =
+          '直前assistant返答の書き直し';
+      }
 
       console.log(
-        '[IROS/EVENT_FRAME][OPERATE_PREVIOUS_EVENT]',
+        '[IROS/TURN_FRAME][SET]',
         JSON.stringify({
           enabled: true,
-          kind: eventFrame.kind,
-          operation: eventFrame.operation,
-          target: eventFrame.target,
-          style: eventFrame.style,
-          sourceUserText: currentTextForEventFrame.slice(0, 120),
+          kind: turnFrame.kind,
+          seedMode: turnFrame.seedMode,
+          sourceKind: turnFrame.sourceKind,
+          operation: turnFrame.operation,
+          target: turnFrame.target,
+          style: turnFrame.style,
+          sourceUserText: turnFrame.sourceUserText.slice(0, 120),
         }),
       );
     }
   } catch (e) {
-    console.warn('[IROS/EVENT_FRAME][FAILED]', { error: e });
+    console.warn('[IROS/TURN_FRAME][FAILED]', { error: e });
   }
 
   // ✅ スタイル書き直し系では、前ターン由来の creative_continuation を持ち越さない
