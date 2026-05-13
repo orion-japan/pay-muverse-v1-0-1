@@ -177,7 +177,7 @@ function detectInputKind(userText: string): InputKind {
 
   // ✅ compose / writing task
   // 「使える文ください」「返信文ください」などは、共鳴会話ではなく文面作成タスクとして扱う。
-  if (/(文章|文面|例文|使える文|返信文|LINE文|ライン文|送る文|送信文|返す文|返事文|文ください|文をください|文を作って|書いて|まとめて)/.test(s)) {
+  if (/(文章|文面|例文|使える文|返信文|LINE文|ライン文|送る文|送信文|返す文|返事文|相手に送る|なんて送れば|どう送れば|どう返せば|文ください|文をください|文を作って|まとめて)/.test(s)) {
     return 'task';
   }
 
@@ -503,12 +503,20 @@ export async function buildTurnContext(
       followupSourceText
     );
 
+  // ✅ 創作・書き直し系の継続要求は、診断 followup に入れない。
+  // 例: 「はい、書いてください」「もう少しリアルに書いてください」「それを書いて」「続きを書いて」
+  // これらは直前イベントの継続であり、IR_DETAIL_V1 の診断深掘りではない。
+  const isCreativeContinuationRequest =
+    /(はい、?書いて|書いてください|書いて下さい|それを書いて|あれを書いて|これを書いて|続きを書いて|続き書いて|書き起こして|書き直して|リアルに書いて|もっとリアル|もう少しリアル|自然文寄り|会話っぽく)/.test(
+      followupSourceText
+    );
+
   // 🔶 先に DB 側の最新診断 snapshot を読む
   // いままでは isDiagnosisFollowup が true の時しか読まなかったため、
   // prevIrMeta が null のケースで永久に発火しない循環になっていた
   let lastIrDiagnosis: any = null;
 
-  if (!isIrDiagnosisTurn && isFollowupRequest) {
+  if (!isIrDiagnosisTurn && isFollowupRequest && !isCreativeContinuationRequest) {
     try {
       lastIrDiagnosis = await loadLatestIrDiagnosisSnapshot(supabase, userCode, diagnosisFollowupTargetLabel);
     } catch (e) {
@@ -519,6 +527,7 @@ export async function buildTurnContext(
   const hasDiagnosisSource = !!prevIrMeta || !!lastIrDiagnosis;
 
   const isDiagnosisFollowup =
+    !isCreativeContinuationRequest &&
     !isIrDiagnosisTurn &&
     hasDiagnosisSource &&
     isFollowupRequest;
@@ -536,6 +545,7 @@ export async function buildTurnContext(
 
   // 🔥 履歴ベース再診断フラグ
   const isDiagnosisDetailTurn =
+    !isCreativeContinuationRequest &&
     !isIrDiagnosisTurn &&
     !isDiagnosisFollowup &&
     wantsDetail &&
@@ -962,6 +972,131 @@ export async function buildTurnContext(
     console.warn('[IROS/FOCUS_RESOLUTION][FAILED]', { error: e });
   }
 
+  // ✅ eventFrame / turnFrame:
+  // 接続語・操作語ターンでは、メタ・診断・深読みより先に「前イベント操作」として正本化する。
+  // 例:
+  // user: もう少しリアルに書いてください
+  // => ユーザー発話の奥を読むのではなく、直前assistant返答をリアル寄りに書き直す操作として扱う。
+  try {
+    const currentTextForEventFrame = String(text ?? '').trim();
+
+    const isPreviousReplyStyleRewriteEvent =
+      /(もう少しリアル|もっとリアル|リアルに書いて|現実味|生々しく|もっと自然|自然に|自然文寄り|会話っぽく|少し崩して|柔らかく|やわらかく|短くして|長くして|詳しく書いて|具体的に書いて|もっと具体的に|もう少し具体的に)/u.test(
+        currentTextForEventFrame,
+      );
+
+    if (isPreviousReplyStyleRewriteEvent) {
+      (baseMetaForTurn as any).extra ??= {};
+      (baseMetaForTurn as any).extra.ctxPack ??= {};
+
+      const eventFrame = {
+        kind: 'operate_previous_event',
+        operation: 'rewrite',
+        target: 'last_assistant_content',
+        style: /リアル|現実|生々/u.test(currentTextForEventFrame)
+          ? 'more_realistic'
+          : /自然|自然文|会話っぽく/u.test(currentTextForEventFrame)
+            ? 'more_natural'
+            : /具体/u.test(currentTextForEventFrame)
+              ? 'more_concrete'
+              : 'style_rewrite',
+        sourceUserText: currentTextForEventFrame,
+        suppressMetaRead: true,
+        suppressDeepReveal: true,
+        suppressMemoryRecall: true,
+        suppressStateInterpretation: true,
+        targetPolicy: '直前assistant返答だけを対象にする。現在のユーザー文そのものを分析・診断・深読みしない。',
+        noInventPolicy: '直前assistant返答にない題材・人物・状況を足さない。恋愛・連絡待ち・スマホ・LINE・返事待ち文脈を元文にない限り足さない。',
+      };
+
+      (baseMetaForTurn as any).extra.eventFrame = eventFrame;
+      (baseMetaForTurn as any).extra.turnFrame = eventFrame;
+      (baseMetaForTurn as any).extra.ctxPack.eventFrame = eventFrame;
+      (baseMetaForTurn as any).extra.ctxPack.turnFrame = eventFrame;
+
+      (baseMetaForTurn as any).extra.ctxPack.previousReplyRephrase = true;
+      (baseMetaForTurn as any).extra.ctxPack.previousReplyStyleRewrite = true;
+      (baseMetaForTurn as any).extra.ctxPack.patternKey = 'previous_reply_rephrase';
+      (baseMetaForTurn as any).extra.ctxPack.pattern_key = 'previous_reply_rephrase';
+      (baseMetaForTurn as any).extra.ctxPack.patternMode = 'previous_reply_rephrase';
+      (baseMetaForTurn as any).extra.ctxPack.pattern_mode = 'previous_reply_rephrase';
+      (baseMetaForTurn as any).extra.ctxPack.goalKind = 'rewrite';
+      (baseMetaForTurn as any).extra.ctxPack.replyGoal = { kind: 'rewrite' };
+      (baseMetaForTurn as any).extra.ctxPack.continuityKind = 'operate_previous_event';
+      (baseMetaForTurn as any).extra.ctxPack.situationSummary =
+        '直前assistant返答の書き直し。現在のユーザー文そのものを分析せず、直前assistant返答を対象にする。';
+      (baseMetaForTurn as any).extra.ctxPack.situationTopic =
+        '直前assistant返答の書き直し';
+
+      console.log(
+        '[IROS/EVENT_FRAME][OPERATE_PREVIOUS_EVENT]',
+        JSON.stringify({
+          enabled: true,
+          kind: eventFrame.kind,
+          operation: eventFrame.operation,
+          target: eventFrame.target,
+          style: eventFrame.style,
+          sourceUserText: currentTextForEventFrame.slice(0, 120),
+        }),
+      );
+    }
+  } catch (e) {
+    console.warn('[IROS/EVENT_FRAME][FAILED]', { error: e });
+  }
+
+  // ✅ スタイル書き直し系では、前ターン由来の creative_continuation を持ち越さない
+  // 例:
+  // user: はい、書いてください
+  // assistant: 物語本文を書く
+  // user: もう少しリアルに書いてください
+  // => このターンは「直前assistant返答の書き直し」であり、古い creative_continuation resolvedAsk を正本にしない
+  try {
+    const currentTextForStaleCreativeClear = String(text ?? '').trim();
+
+    const isPreviousReplyStyleRewriteText =
+      /(もう少しリアル|もっとリアル|リアルに書いて|現実味|生々しく|もっと自然|自然に|自然文寄り|会話っぽく|少し崩して|柔らかく|やわらかく|短くして|長くして|詳しく書いて|具体的に書いて|もっと具体的に|もう少し具体的に)/u.test(
+        currentTextForStaleCreativeClear,
+      );
+
+    const extraForStaleCreativeClear = (baseMetaForTurn as any)?.extra ?? {};
+    const ctxPackForStaleCreativeClear = extraForStaleCreativeClear?.ctxPack ?? {};
+
+    const staleResolvedAskType =
+      String((extraForStaleCreativeClear as any)?.resolvedAsk?.askType ?? '').trim() ||
+      String((ctxPackForStaleCreativeClear as any)?.resolvedAsk?.askType ?? '').trim() ||
+      String((ctxPackForStaleCreativeClear as any)?.resolvedAskType ?? '').trim();
+
+    if (isPreviousReplyStyleRewriteText && staleResolvedAskType === 'creative_continuation') {
+      (baseMetaForTurn as any).extra ??= {};
+      (baseMetaForTurn as any).extra.ctxPack ??= {};
+
+      delete (baseMetaForTurn as any).extra.resolvedAsk;
+      delete (baseMetaForTurn as any).extra.ctxPack.resolvedAsk;
+      delete (baseMetaForTurn as any).extra.ctxPack.resolvedAskType;
+
+      if (String((baseMetaForTurn as any).extra.ctxPack.continuityKind ?? '').trim() === 'creative_continuation') {
+        (baseMetaForTurn as any).extra.ctxPack.continuityKind = 'previous_reply_rephrase';
+      }
+
+      (baseMetaForTurn as any).extra.ctxPack.previousReplyStyleRewrite = true;
+      (baseMetaForTurn as any).extra.ctxPack.situationSummary =
+        '直前assistant返答のスタイル書き直し。現在のユーザー文そのものを分析せず、直前assistant返答を対象にする。';
+      (baseMetaForTurn as any).extra.ctxPack.situationTopic =
+        '直前assistant返答の書き直し';
+
+      console.log(
+        '[IROS/STALE_CREATIVE_CONTINUATION_CLEARED]',
+        JSON.stringify({
+          enabled: true,
+          sourceUserText: currentTextForStaleCreativeClear.slice(0, 120),
+          staleResolvedAskType,
+        }),
+      );
+    }
+  } catch {
+    // 補完に失敗しても通常会話は止めない
+  }
+
   // ✅ 直前Mu発話への参照質問を、通常会話の「意味補足」として補完する
   // 例:
   // assistant: 黙って飲み込むより、短く境界を置くほうがいいです。
@@ -1036,6 +1171,104 @@ export async function buildTurnContext(
           enabled: true,
           sourceUserText: currentTextForReference.slice(0, 120),
           sourceAssistantText: lastAssistantForReference.slice(0, 160),
+        }),
+      );
+    }
+  } catch {
+    // 補完に失敗しても通常会話は止めない
+  }
+
+  // ✅ 創作・物語化・書き直しの継続要求を、直前イベントへ接続する
+  // 例:
+  // assistant: 必要なら次に、この闇を物語としてやわらかく書き起こせます。
+  // user: はい、書いてください
+  // user: もう少しリアルに書いてください
+  // => ユーザー発話そのものを診断せず、直前の創作対象を継続・書き直しとして扱う
+  try {
+    const currentTextForCreativeContinuation = String(text ?? '').trim();
+
+    const historyForCreativeContinuation =
+      (baseMetaForTurn as any)?.extra?.ctxPack?.historyForWriter ??
+      (baseMetaForTurn as any)?.extra?.historyForWriter ??
+      (args as any)?.history ??
+      [];
+
+    const pickLastByRole = (historyLike: any, roleName: 'user' | 'assistant'): string => {
+      if (!Array.isArray(historyLike)) return '';
+
+      const found = [...historyLike]
+        .reverse()
+        .find((turn: any) => String(turn?.role ?? '').toLowerCase().trim() === roleName);
+
+      return (
+        (typeof (found as any)?.content === 'string' && String((found as any).content).trim()) ||
+        (typeof (found as any)?.text === 'string' && String((found as any).text).trim()) ||
+        (typeof (found as any)?.message === 'string' && String((found as any).message).trim()) ||
+        ''
+      );
+    };
+
+    const lastAssistantForCreativeContinuation =
+      pickLastByRole(historyForCreativeContinuation, 'assistant') ||
+      pickLastByRole((args as any)?.history, 'assistant') ||
+      String(latestAssistantCore ?? '').trim();
+
+    const lastUserForCreativeContinuation =
+      pickLastByRole(historyForCreativeContinuation, 'user') ||
+      pickLastByRole((args as any)?.history, 'user') ||
+      '';
+
+    const isCreativeContinuationRequest =
+      /(はい、?書いて|書いてください|書いて下さい|それを書いて|あれを書いて|これを書いて|続きを書いて|続き書いて|書き起こして)/.test(
+        currentTextForCreativeContinuation,
+      );
+
+    const looksLikeCreativeSource =
+      /(物語|闇|先祖|家系|書き起こ|書けます|書きます|リアル|自然文|会話っぽく|土着|生々しく|文章|文)/.test(
+        [
+          lastAssistantForCreativeContinuation,
+          lastUserForCreativeContinuation,
+          (baseMetaForTurn as any)?.extra?.ctxPack?.situationSummary,
+          (baseMetaForTurn as any)?.extra?.ctxPack?.topicDigest,
+        ]
+          .map((v) => String(v ?? '').trim())
+          .filter(Boolean)
+          .join('\n'),
+      );
+
+    if (isCreativeContinuationRequest && looksLikeCreativeSource) {
+      const resolvedAsk = {
+        askType: 'creative_continuation',
+        topic:
+          '直前の創作・物語化・書き直し要求を継続する。ユーザー発話そのものを診断せず、直前の対象を本文として書く。説明ではなく、完成文・物語本文を出す。',
+        sourceUserText: currentTextForCreativeContinuation,
+        sourceAssistantText: lastAssistantForCreativeContinuation.slice(0, 700),
+        sourcePriorUserText: lastUserForCreativeContinuation.slice(0, 300),
+      };
+
+      (baseMetaForTurn as any).extra ??= {};
+      (baseMetaForTurn as any).extra.ctxPack ??= {};
+
+      (baseMetaForTurn as any).extra.resolvedAsk = resolvedAsk;
+      (baseMetaForTurn as any).extra.ctxPack.resolvedAsk = resolvedAsk;
+      (baseMetaForTurn as any).extra.ctxPack.resolvedAskType = 'creative_continuation';
+      (baseMetaForTurn as any).extra.ctxPack.goalKind = 'creative';
+      (baseMetaForTurn as any).extra.ctxPack.replyGoal = { kind: 'creative' };
+      (baseMetaForTurn as any).extra.ctxPack.continuityKind = 'creative_continuation';
+      (baseMetaForTurn as any).extra.ctxPack.situationSummary =
+        '直前の創作・物語化・書き直し要求の継続。説明ではなく本文を書く。';
+      (baseMetaForTurn as any).extra.ctxPack.situationTopic =
+        '直前の創作・物語化要求の継続';
+      (baseMetaForTurn as any).extra.ctxPack.outputShape =
+        'creative_continuation_text';
+
+      console.log(
+        '[IROS/CREATIVE_CONTINUATION_RESOLVED]',
+        JSON.stringify({
+          enabled: true,
+          sourceUserText: currentTextForCreativeContinuation.slice(0, 120),
+          sourceAssistantText: lastAssistantForCreativeContinuation.slice(0, 160),
+          sourcePriorUserText: lastUserForCreativeContinuation.slice(0, 120),
         }),
       );
     }
@@ -1252,7 +1485,7 @@ export async function buildTurnContext(
       );
 
     const assistantOfferedCompose =
-      /(そのまま使える|使える短い文|短い文|文だけ|一文|整えます|整えられます|作れます|出せます|送る|返事|返信|連絡|言葉|例文|文面|提案|すすめる|進める)/.test(
+      /(そのまま使える|使える短い文|返信文|LINE文|ライン文|送る文|送信文|返す文|返事文|相手に送る|相手へ送る|例文|文面)/.test(
         lastAssistantForPriorOffer,
       );
 

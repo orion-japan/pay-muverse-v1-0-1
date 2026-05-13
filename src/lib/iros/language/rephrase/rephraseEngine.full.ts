@@ -6601,16 +6601,27 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
         ''
     ).trim();
 
+    // ✅ 創作・書き直し系の継続要求は、診断詳細パターンに入れない。
+    // 例: 「はい、書いてください」「もう少しリアルに書いてください」「それを書いて」「続きを書いて」
+    const isCreativeContinuationForPattern =
+      /(はい、?書いて|書いてください|書いて下さい|それを書いて|あれを書いて|これを書いて|続きを書いて|続き書いて|書き起こして|書き直して|リアルに書いて|もっとリアル|もう少しリアル|自然文寄り|会話っぽく)/u.test(
+        patternFollowupText
+      );
+
     const isDiagnosisFollowupPhrase =
+      !isCreativeContinuationForPattern &&
       /診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|さっきの診断|前の診断|この診断|今の診断|深めて|深める|掘り下げ|掘って/u.test(
         patternFollowupText
       );
 
     const hasPriorDiagnosisForPattern =
-      patternPresentationKind === 'diagnosis' ||
-      !!patternIrMeta ||
-      !!patternLastIrDiagnosis ||
-      (!!patternTargetLabel && isDiagnosisFollowupPhrase);
+      !isCreativeContinuationForPattern &&
+      (
+        patternPresentationKind === 'diagnosis' ||
+        !!patternIrMeta ||
+        !!patternLastIrDiagnosis ||
+        (!!patternTargetLabel && isDiagnosisFollowupPhrase)
+      );
 
     const patternFollowupKindForConsult = String(
       (ctxPackForWriter as any)?.followupKind ??
@@ -6664,7 +6675,7 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
 
     const preSelectedPatternKeyRaw = String((opts as any)?.meta?.extra?.patternKey ?? '').trim();
     const preSelectedPatternKey =
-      isConsultAnswerLikeForPattern &&
+      (isConsultAnswerLikeForPattern || isCreativeContinuationForPattern) &&
       (preSelectedPatternKeyRaw === 'IR_DETAIL_V1' || preSelectedPatternKeyRaw === 'NORMAL_DETAIL_V1')
         ? ''
         : preSelectedPatternKeyRaw;
@@ -6710,7 +6721,8 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
         ? 'PARTNER_SIDE_RESONANCE_V1'
         : effectiveHasPriorDiagnosisForPattern && selectedByFunction === 'IR_DETAIL_V1'
           ? 'IR_DETAIL_V1'
-          : preSelectedPatternKey === 'IR_DETAIL_V1' ||
+          : preSelectedPatternKey === 'previous_reply_rephrase' ||
+              preSelectedPatternKey === 'IR_DETAIL_V1' ||
               preSelectedPatternKey === 'NORMAL_DETAIL_V1' ||
               preSelectedPatternKey === 'NORMAL_RESONANCE_V1' ||
               preSelectedPatternKey === 'NORMAL_PRACTICAL_RESONANCE_V1' ||
@@ -8948,9 +8960,16 @@ console.log('[IROS/rephraseEngine][CONSULT_PATTERN_DETECT]', {
   hasConsultModeInPack: /consultAnswerMode=enabled/u.test(String(__writerInjectedPack ?? '')),
 });
 
-const writerPatternEffectiveHasPriorDiagnosis = writerPatternIsConsultAnswerLike
-  ? false
-  : writerPatternHasPriorDiagnosis;
+// ✅ 創作・書き直し系の継続要求は、writer側でも診断詳細パターンに入れない。
+const writerPatternIsCreativeContinuation =
+  /(はい、?書いて|書いてください|書いて下さい|それを書いて|あれを書いて|これを書いて|続きを書いて|続き書いて|書き起こして|書き直して|リアルに書いて|もっとリアル|もう少しリアル|自然文寄り|会話っぽく)/u.test(
+    writerPatternFollowupText
+  );
+
+const writerPatternEffectiveHasPriorDiagnosis =
+  writerPatternIsConsultAnswerLike || writerPatternIsCreativeContinuation
+    ? false
+    : writerPatternHasPriorDiagnosis;
 
 const writerPatternEffectivePresentationKind = writerPatternIsConsultAnswerLike
   ? 'consult'
@@ -8969,6 +8988,7 @@ const writerPatternEarlySelected = selectSlotPattern({
     ).trim() || null,
   detailMode:
     !writerPatternIsConsultAnswerLike &&
+    !writerPatternIsCreativeContinuation &&
     (
       (opts as any)?.ctxPack?.detailMode === true ||
       (opts as any)?.userContext?.ctxPack?.detailMode === true ||
@@ -9085,7 +9105,7 @@ const isComposeRequestForPattern =
   resolvedAskTypeForPattern === 'compose_from_prior_offer' ||
   (
     inputKindForPattern === 'task' &&
-    /(使える文|返信文|LINE文|ライン文|送る文|送信文|返す文|返事文|例文|文ください|文をください|文を作って|書いて|まとめて)/u.test(
+    /(使える文|返信文|LINE文|ライン文|送る文|送信文|返す文|返事文|例文|相手に送る|なんて送れば|どう送れば|どう返せば|文ください|文をください|文を作って|まとめて)/u.test(
       userTextForTranscendPattern,
     )
   );
@@ -9231,7 +9251,19 @@ const isCategoryOnlyConsultationForWriter =
       (opts as any)?.userContext?.meta?.extra?.ctxPack?.categoryOnlyConsultation === true
   );
 
-const resolvedAskForWriter =
+const resolvedAskCurrentTextForWriter = String(
+  userText ??
+    (opts as any)?.userText ??
+    (opts as any)?.message ??
+    ''
+).trim();
+
+const isPreviousReplyStyleRewriteForWriter =
+  /(もう少しリアル|もっとリアル|リアルに書いて|現実味|生々しく|もっと自然|自然に|自然文寄り|会話っぽく|少し崩して|柔らかく|やわらかく|短くして|長くして|詳しく書いて|具体的に書いて|もっと具体的に|もう少し具体的に)/u.test(
+    resolvedAskCurrentTextForWriter
+  );
+
+const resolvedAskForWriterRaw =
   (ctxPackForWriter && typeof ctxPackForWriter === 'object'
     ? (ctxPackForWriter as any).resolvedAsk
     : null) ??
@@ -9240,6 +9272,15 @@ const resolvedAskForWriter =
   (opts as any)?.userContext?.ctxPack?.resolvedAsk ??
   (opts as any)?.userContext?.meta?.extra?.ctxPack?.resolvedAsk ??
   null;
+
+// ✅ スタイル書き直し系では、前ターン由来の creative_continuation を writer 正本にしない。
+// 例: 「もう少しリアルに書いてください」は、直前assistant返答の書き直しであり、
+// 古い creative_continuation の持ち越しではない。
+const resolvedAskForWriter =
+  isPreviousReplyStyleRewriteForWriter &&
+  String((resolvedAskForWriterRaw as any)?.askType ?? '').trim() === 'creative_continuation'
+    ? null
+    : resolvedAskForWriterRaw;
 
 const resolvedAskTopicForWriter = String(
   (resolvedAskForWriter as any)?.topic ?? ''
@@ -9837,20 +9878,63 @@ const isResonanceStructureFollowup =
                     }
                   : null;
 
+              const creativeContinuationWriterDirectives =
+                String((resolvedAskForWriter as any)?.askType ?? '').trim() === 'creative_continuation'
+                  ? {
+                      ...(baseWriterDirectivesForFinal ?? {}),
+                      pattern_key: 'NORMAL_RESONANCE_V1',
+                      pattern_mode: 'creative_continuation',
+                      bodyStyle: {
+                        preferBlockSplit: true,
+                        minBlocks: 3,
+                        maxBlocks: 6,
+                        maxSentencesPerBlock: 4,
+                        minSentences: 6,
+                        maxSentences: 16,
+                      },
+                      writeConstraints: [
+                        ...(
+                          Array.isArray((baseWriterDirectivesForFinal as any)?.writeConstraints)
+                            ? (baseWriterDirectivesForFinal as any).writeConstraints
+                            : []
+                        ),
+                        'CREATIVE_CONTINUATION: ユーザー発話そのものを分析・解説しない',
+                        'CREATIVE_CONTINUATION: 「もっとリアルに書いてください」「はい、書いてください」という依頼文の気持ちを説明しない',
+                        'CREATIVE_CONTINUATION: resolvedAsk.sourceAssistantText を書き直し元として扱う',
+                        'CREATIVE_CONTINUATION: resolvedAsk.sourcePriorUserText がある場合は、元の創作対象・物語化対象として扱う',
+                        'CREATIVE_CONTINUATION: 返答は説明ではなく、完成文・物語本文として出す',
+                        'CREATIVE_CONTINUATION: 「たとえば」「必要なら」「できます」「この感じで書けます」で終わらない',
+                        'CREATIVE_CONTINUATION: 「あなたが欲しいのは」「いま欲しいのは」「手触りのある言葉がほしい」という依頼分析をしない',
+                        'CREATIVE_CONTINUATION: 前置きは最小にし、すぐ本文へ入る',
+                        'CREATIVE_CONTINUATION: 闇・先祖・家系などは事実断定せず、物語として描く',
+                        'CREATIVE_CONTINUATION: 相手本人や先祖の罪・事実・本心を断定しない',
+                        'CREATIVE_CONTINUATION: ユーザーへ送る文面やLINE文に変換しない',
+                      ],
+                      block_creative_source:
+                        `書き直し元: ${String((resolvedAskForWriter as any)?.sourceAssistantText ?? '').slice(0, 700)}`,
+                      block_creative_prior_user:
+                        `元の依頼: ${String((resolvedAskForWriter as any)?.sourcePriorUserText ?? '').slice(0, 300)}`,
+                      block_creative_output:
+                        '依頼の解説ではなく、直前の創作対象を本文として書く。ユーザーが「リアルに」と言った場合は、抽象語を減らし、生活感・沈黙・家の空気・言えなかった感情が伝わる自然文にする。',
+                    }
+                  : null;
+
               const writerDirectivesForFinalRaw = relationshipAdviceRepairWriterDirectives
                 ? relationshipAdviceRepairWriterDirectives
                 : consultAnswerWriterDirectives
                   ? consultAnswerWriterDirectives
                   : composeRequestWriterDirectives
                     ? composeRequestWriterDirectives
-                    : referenceClarificationWriterDirectives
-                      ? referenceClarificationWriterDirectives
-                      : shouldApplyDeepReadDirectives
-                      ? {
-                          ...baseWriterDirectivesForFinal,
-                          ...deepReadWriterDirectives,
-                        }
-                      : baseWriterDirectivesForFinal;
+                    : creativeContinuationWriterDirectives
+                      ? creativeContinuationWriterDirectives
+                      : referenceClarificationWriterDirectives
+                        ? referenceClarificationWriterDirectives
+                        : shouldApplyDeepReadDirectives
+                        ? {
+                            ...baseWriterDirectivesForFinal,
+                            ...deepReadWriterDirectives,
+                          }
+                        : baseWriterDirectivesForFinal;
 
               const userStateWriterDirectivesForFinal = (() => {
                 const depth = String(depthStageForUnderstanding ?? '').trim().toUpperCase();
@@ -10290,7 +10374,47 @@ const isResonanceStructureFollowup =
                   (opts as any)?.userContext?.ctxPack?.diagnosisFollowup === true
                 );
 
+              const isCreativeContinuationForFinal =
+                !isPreviousReplyStyleRewriteForWriter &&
+                (
+                  String((resolvedAskForWriter as any)?.askType ?? '').trim() === 'creative_continuation' ||
+                  String((ctxPackForWriter as any)?.resolvedAskType ?? '').trim() === 'creative_continuation' ||
+                  String((ctxPackForWriter as any)?.continuityKind ?? '').trim() === 'creative_continuation' ||
+                  String((opts as any)?.ctxPack?.resolvedAskType ?? '').trim() === 'creative_continuation' ||
+                  String((opts as any)?.userContext?.ctxPack?.resolvedAskType ?? '').trim() === 'creative_continuation'
+                );
+
+              const isPreviousReplyRephraseForFinal =
+                writerPatternKey === 'previous_reply_rephrase' ||
+                String((ctxPackForWriter as any)?.patternKey ?? '').trim() === 'previous_reply_rephrase' ||
+                String((ctxPackForWriter as any)?.pattern_key ?? '').trim() === 'previous_reply_rephrase' ||
+                String((ctxPackForWriter as any)?.patternMode ?? '').trim() === 'previous_reply_rephrase' ||
+                String((ctxPackForWriter as any)?.pattern_mode ?? '').trim() === 'previous_reply_rephrase' ||
+                (ctxPackForWriter as any)?.previousReplyRephrase === true ||
+                (ctxPackForWriter as any)?.previousReplyStyleRewrite === true ||
+                String((opts as any)?.ctxPack?.patternKey ?? '').trim() === 'previous_reply_rephrase' ||
+                String((opts as any)?.userContext?.ctxPack?.patternKey ?? '').trim() === 'previous_reply_rephrase';
+
+              const eventFrameForWriter =
+                (ctxPackForWriter as any)?.eventFrame ??
+                (ctxPackForWriter as any)?.turnFrame ??
+                (opts as any)?.ctxPack?.eventFrame ??
+                (opts as any)?.ctxPack?.turnFrame ??
+                (opts as any)?.userContext?.ctxPack?.eventFrame ??
+                (opts as any)?.userContext?.ctxPack?.turnFrame ??
+                null;
+
+              const shouldSuppressDeepRevealByEventFrame =
+                (eventFrameForWriter as any)?.suppressDeepReveal === true ||
+                String((eventFrameForWriter as any)?.kind ?? '').trim() === 'operate_previous_event' ||
+                String((eventFrameForWriter as any)?.target ?? '').trim() === 'last_assistant_content';
+
+              const shouldSuppressDeepRevealByPreviousReply =
+                isPreviousReplyRephraseForFinal || shouldSuppressDeepRevealByEventFrame;
+
               const shouldSuppressDeepRevealForFinal =
+                shouldSuppressDeepRevealByPreviousReply ||
+                isCreativeContinuationForFinal ||
                 shouldSuppressDeepRevealForDiagnosisFollowup ||
                 (
                   Array.isArray((writerDirectivesBaseForFinal as any)?.writeConstraints) &&
@@ -10300,11 +10424,12 @@ const isResonanceStructureFollowup =
                 ) ||
                 isPlainMeaningQuestionForFinal;
 
-              // ✅ 診断フォローでは deepReveal だけ止める。
+              // ✅ 診断フォロー / 前回返答リライト / eventFrame操作では deepReveal だけ止める。
               // self_definition_acceptance / plain_meaning_answer への上書きはしない。
               const shouldApplyDeepReadSuppressionDirectivesForFinal =
                 shouldSuppressDeepRevealForFinal &&
-                !shouldSuppressDeepRevealForDiagnosisFollowup;
+                !shouldSuppressDeepRevealForDiagnosisFollowup &&
+                !shouldSuppressDeepRevealByPreviousReply;
 
               const deepReadSuppressionConstraintsForFinal =
                 shouldApplyDeepReadSuppressionDirectivesForFinal
@@ -10396,6 +10521,17 @@ const isResonanceStructureFollowup =
                 writeConstraints: [
                   ...relaxedWriteConstraintsForFinal,
                   ...deepReadSuppressionConstraintsForFinal,
+                  ...(isPreviousReplyRephraseForFinal
+                    ? [
+                        'PREVIOUS_REPLY_REPHRASE: 現在のユーザー文そのものに答えない',
+                        'PREVIOUS_REPLY_REPHRASE: 直前assistant返答を、現在のユーザー指定に合わせて書き直す',
+                        'PREVIOUS_REPLY_REPHRASE: 返答は説明・提案・分析ではなく、書き直した本文だけにする',
+                        'PREVIOUS_REPLY_REPHRASE: 「うん、できます」「了解です」「たとえば」「必要なら」「今の文を貼ってください」で始めない',
+                        'PREVIOUS_REPLY_REPHRASE: 聞き返さない。選択肢を出さない。次にどうするかを提案しない',
+                        'PREVIOUS_REPLY_REPHRASE: 元の主題・対象・世界観を変えない',
+                        'PREVIOUS_REPLY_REPHRASE: ユーザーが「リアルに」と言った場合は、抽象語を減らし、生活感・沈黙・家の空気・言えなかった感情が伝わる自然文にする',
+                      ]
+                    : []),
                   ...(isPlainMeaningConfirmationForFinal
                     ? [
                         'MEANING_CONFIRMATION_RELAXED: このターンは言い換え確認。深読みの圧を下げ、短く自然に確定する',
@@ -11033,16 +11169,155 @@ const finalWriterDirectivesMsg =
           return next;
         };
 
-        const base = [...messagesForWriter].map((m: any) => {
-          if (String(m?.role ?? '') !== 'assistant') return m;
+        const shouldUsePreviousEventOnlyMessages =
+          isPreviousReplyRephraseForFinal ||
+          String((eventFrameForWriter as any)?.kind ?? '').trim() === 'operate_previous_event' ||
+          String((eventFrameForWriter as any)?.target ?? '').trim() === 'last_assistant_content';
 
-          const content = String(m?.content ?? '');
-          const rewritten = rewriteSeedPackContent(content);
+        const base = [...messagesForWriter]
+          .filter((m: any) => {
+            if (!shouldUsePreviousEventOnlyMessages) return true;
 
-          return rewritten === content ? m : { ...m, content: rewritten };
-        });
+            const role = String(m?.role ?? '').trim();
+            if (role !== 'assistant') return true;
 
-        const inserts = [diagnosisSourceMsg, finalWriterDirectivesMsg, finalPatternContractMsg].filter(Boolean) as Array<{
+            const content = String(m?.content ?? '');
+
+            // ✅ 前イベント操作ターンでは、現在user文を主題化する通常メタを writer へ渡さない。
+            // PREVIOUS_EVENT_SOURCE / WRITER_DIRECTIVES / PATTERN_OUTPUT_CONTRACT は後段の inserts で入れる。
+            if (
+              /(STATE_CUES|HISTORY_LITE|MIRROR_FLOW_SEED|SEED_INSTRUCTION|INTERNAL PACK|USER_UNDERSTANDING_STATE|PAST_STATE_NOTE|HUMAN_CONTEXT_ORCHESTRATION|TRANSITION_MEANING|FLOW_V2)/i.test(
+                content,
+              )
+            ) {
+              return false;
+            }
+
+            return true;
+          })
+          .map((m: any) => {
+            if (String(m?.role ?? '') !== 'assistant') return m;
+
+            const content = String(m?.content ?? '');
+            const rewritten = rewriteSeedPackContent(content);
+
+            return rewritten === content ? m : { ...m, content: rewritten };
+          });
+
+        const previousEventSourceMsg = (() => {
+          const isOperatePreviousEvent =
+            isPreviousReplyRephraseForFinal ||
+            String((eventFrameForWriter as any)?.kind ?? '').trim() === 'operate_previous_event' ||
+            String((eventFrameForWriter as any)?.target ?? '').trim() === 'last_assistant_content';
+
+          if (!isOperatePreviousEvent) return null;
+
+          const pickLastAssistantText = (...sources: any[]): string => {
+            for (const source of sources) {
+              if (!Array.isArray(source)) continue;
+
+              const found = [...source]
+                .reverse()
+                .find((m: any) => {
+                  const role = String(m?.role ?? m?.type ?? '').toLowerCase().trim();
+                  if (!/^(assistant|ai|model|iros)$/i.test(role)) return false;
+
+                  const content = String(
+                    m?.content ??
+                      m?.text ??
+                      m?.assistantText ??
+                      m?.message ??
+                      '',
+                  ).trim();
+
+                  if (!content) return false;
+                  if (/(DO NOT OUTPUT|INTERNAL PACK|STATE_CUES|MIRROR_FLOW_SEED|WRITER_DIRECTIVES|PATTERN_OUTPUT_CONTRACT|HISTORY_LITE)/i.test(content)) return false;
+
+                  return true;
+                });
+
+              const content = String(
+                (found as any)?.content ??
+                  (found as any)?.text ??
+                  (found as any)?.assistantText ??
+                  (found as any)?.message ??
+                  '',
+              ).trim();
+
+              if (content) {
+                return content
+                  .replace(/\s+/g, ' ')
+                  .replace(/[🌀🪔]/g, '')
+                  .trim()
+                  .slice(0, 2400);
+              }
+            }
+
+            return '';
+          };
+
+          const sourceText = pickLastAssistantText(
+            (ctxPackForWriter as any)?.historyForWriter,
+            (opts as any)?.ctxPack?.historyForWriter,
+            (opts as any)?.userContext?.ctxPack?.historyForWriter,
+            (opts as any)?.meta?.extra?.ctxPack?.historyForWriter,
+            (opts as any)?.userContext?.meta?.extra?.ctxPack?.historyForWriter,
+          );
+
+          const sourceTextLenForRewrite = sourceText.length;
+          const minOutputCharsForRewrite = Math.max(
+            180,
+            Math.floor(sourceTextLenForRewrite * 0.7),
+          );
+
+          console.log(
+            '[IROS/PREVIOUS_EVENT_SOURCE_PICK]',
+            JSON.stringify({
+              traceId: debug.traceId ?? null,
+              conversationId: debug.conversationId ?? null,
+              userCode: debug.userCode ?? null,
+              enabled: true,
+              sourceTextLen: sourceTextLenForRewrite,
+              minOutputChars: minOutputCharsForRewrite,
+              sourceTextHead: sourceText.slice(0, 320),
+              sourceTextTail: sourceText.slice(-220),
+            }),
+          );
+
+          if (!sourceText) return null;
+
+          return {
+            role: 'assistant',
+            content: [
+              'PREVIOUS_EVENT_SOURCE (DO NOT OUTPUT):',
+              'このターンは、現在のユーザー文を読解・診断・深読みするターンではない。',
+              '現在のユーザー文は、直前イベントへの操作条件として扱う。',
+              '',
+              'OPERATION:',
+              `kind=${String((eventFrameForWriter as any)?.kind ?? 'operate_previous_event')}`,
+              `operation=${String((eventFrameForWriter as any)?.operation ?? 'rewrite')}`,
+              `target=${String((eventFrameForWriter as any)?.target ?? 'last_assistant_content')}`,
+              `style=${String((eventFrameForWriter as any)?.style ?? 'style_rewrite')}`,
+              `user_instruction=${resolvedAskCurrentTextForWriter}`,
+              '',
+              'SOURCE_TEXT:',
+              sourceText,
+              '',
+              'OUTPUT_RULES:',
+              `source_text_chars=${sourceTextLenForRewrite}`,
+              `min_output_chars=${minOutputCharsForRewrite}`,
+              '- SOURCE_TEXT だけを書き直し対象にする',
+              '- 現在のユーザー文そのものに答えない',
+              '- 説明・提案・分析・確認で終わらない',
+              '- 元文にない人物・関係・出来事・場所・小道具を足さない',
+              '- 元文にない恋愛・連絡待ち・スマホ・LINE・返事待ち・彼・彼女の文脈を足さない',
+              '- 出力は、操作後の本文だけにする',
+              '- min_output_chars 未満に短縮しない',
+            ].join('\n'),
+          } as const;
+        })();
+
+        const inserts = [diagnosisSourceMsg, previousEventSourceMsg, finalWriterDirectivesMsg, finalPatternContractMsg].filter(Boolean) as Array<{
           role: 'assistant';
           content: string;
         }>;
@@ -11097,7 +11372,45 @@ const finalWriterDirectivesMsg =
       model: opts.model ?? 'gpt-5',
       temperature: opts.temperature ?? 0.7,
       messages: (() => {
+        const hasPreviousEventSourceForCall =
+          Array.isArray(messagesForWriterFinal) &&
+          messagesForWriterFinal.some((m: any) =>
+            String(m?.content ?? '').includes('PREVIOUS_EVENT_SOURCE (DO NOT OUTPUT):')
+          );
 
+        const messagesForWriterCall =
+          hasPreviousEventSourceForCall && Array.isArray(messagesForWriterFinal)
+            ? messagesForWriterFinal.map((m: any, i: number) => {
+                const isLast = i === messagesForWriterFinal.length - 1;
+                if (!isLast || String(m?.role ?? '') !== 'user') return m;
+
+                // ✅ 前イベント操作ターンでは、最後の user 文を読解対象にしない。
+                // user 文は PREVIOUS_EVENT_SOURCE 内の user_instruction として扱い、
+                // 最終 user message は「SOURCE_TEXT を操作せよ」という実行命令に置き換える。
+                return {
+                  ...m,
+                  content: [
+                    'PREVIOUS_EVENT_OPERATION_EXECUTE:',
+                    'PREVIOUS_EVENT_SOURCE の SOURCE_TEXT を、user_instruction に従って直接書き直す。',
+                    '出力するのは、書き直した本文そのものだけ。',
+                    '命令文・依頼文・説明文・提案文・確認文を出力しない。',
+                    '「〜してください」「〜したいです」「〜にしてください」「必要なら」「たとえば」で終わらない。',
+                    '現在のユーザー文そのものに答えない。',
+                    'SOURCE_TEXT にない人物・関係・出来事・場所・小道具を足さない。',
+                    'SOURCE_TEXT にない恋愛・連絡待ち・スマホ・LINE・返事待ち・彼・彼女の文脈を足さない。',
+                    'SOURCE_TEXT の主題・対象・世界観を保持したまま、本文として完成させる。',
+                    'SOURCE_TEXT を短く要約しない。元文の長さ・情報量・場面数をできるだけ保つ。',
+                    'SOURCE_TEXT にある固有イメージ・場所・人物・小道具・出来事を落とさない。',
+                    'SOURCE_TEXT にある海・家・潮・塩・祖母・庭・泣くこと・井戸・影などの具体要素がある場合、それらを保持して現実寄りに書き直す。',
+                    '抽象的な心情文だけに置き換えない。',
+                    '元文が物語なら、物語本文として書き直す。心情説明だけにしない。',
+                    '最低でも PREVIOUS_EVENT_SOURCE の min_output_chars 以上の文量を維持する。',
+                    '短い一段落へ圧縮しない。SOURCE_TEXT の場面を複数段落で残す。',
+                    '出力が SOURCE_TEXT の要約になっている場合は失敗。リライト本文として、元の場面を展開して残す。',
+                  ].join('\n'),
+                };
+              })
+            : messagesForWriterFinal;
 
         console.log(
           '[IROS/rephraseEngine][FINAL_MESSAGES_FOR_WRITER]',
@@ -11105,16 +11418,18 @@ const finalWriterDirectivesMsg =
             traceId: debug.traceId ?? null,
             conversationId: debug.conversationId ?? null,
             userCode: debug.userCode ?? null,
-            len: Array.isArray(messagesForWriterFinal) ? messagesForWriterFinal.length : 0,
-            roles: Array.isArray(messagesForWriterFinal)
-              ? messagesForWriterFinal.map((m: any) => String(m?.role ?? ''))
+            previousEventSourceForCall: hasPreviousEventSourceForCall,
+            len: Array.isArray(messagesForWriterCall) ? messagesForWriterCall.length : 0,
+            roles: Array.isArray(messagesForWriterCall)
+              ? messagesForWriterCall.map((m: any) => String(m?.role ?? ''))
               : [],
-            heads: Array.isArray(messagesForWriterFinal)
-              ? messagesForWriterFinal.map((m: any) => safeHead(String(m?.content ?? ''), 140))
+            heads: Array.isArray(messagesForWriterCall)
+              ? messagesForWriterCall.map((m: any) => safeHead(String(m?.content ?? ''), 160))
               : [],
           })
         );
-        return messagesForWriterFinal;
+
+        return messagesForWriterCall;
       })(),
       ...({ slotDecision: slotDecisionForWriter } as any),
       writerDirectives: {

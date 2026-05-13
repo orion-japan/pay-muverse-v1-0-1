@@ -3387,12 +3387,20 @@ function normForRecall(v: any): string {
             currentText,
           );
 
+        // ✅ 一般的な「直前返答の書き直し」要求
+        // 例: 「もう少しリアルに書いてください」「もっと自然に」「会話っぽく」
+        // これは現在のユーザー文を分析するのではなく、直前assistant返答を対象にする。
+        const wantsPreviousReplyStyleRewrite =
+          /(もう少しリアル|もっとリアル|リアルに書いて|現実味|生々しく|もっと自然|自然に|自然文寄り|会話っぽく|少し崩して|柔らかく|やわらかく|短くして|長くして|詳しく書いて|具体的に書いて|もっと具体的に|もう少し具体的に)/u.test(
+            currentText,
+          );
+
         const asksRealTranslation =
           /(英語|日本語|中国語|韓国語|フランス語|スペイン語|ドイツ語|translate|translation|English|Japanese)/i.test(
             currentText,
           );
 
-        if (!wantsPreviousReplyRephrase || asksRealTranslation) return null;
+        if (!(wantsPreviousReplyRephrase || wantsPreviousReplyStyleRewrite) || asksRealTranslation) return null;
 
         const historyCandidates = [
           Array.isArray(historyForTurn) ? historyForTurn : [],
@@ -3438,28 +3446,49 @@ function normForRecall(v: any): string {
             .flatMap((items) => [...items].reverse())
             .map(pickContent)
             .find(Boolean) ?? '';
-            console.log('[IROS/PREV_REPLY_REPHRASE_SEED_CHECK]', {
-              currentText,
-              wantsPreviousReplyRephrase,
-              asksRealTranslation,
-              historyCandidateLens: historyCandidates.map((items) => items.length),
-              historyCandidateTails: historyCandidates.map((items) =>
-                items.slice(-3).map((m: any) => ({
-                  keys: m && typeof m === 'object' ? Object.keys(m).slice(0, 12) : [],
-                  role: String(m?.role ?? m?.type ?? ''),
-                  contentHead: String(
-                    m?.content ??
-                      m?.text ??
-                      m?.assistantText ??
-                      m?.message ??
-                      '',
-                  ).slice(0, 160),
-                })),
-              ),
-              previousAssistantTextHead: previousAssistantText.slice(0, 160),
-              previousReplyRephraseSeedWillApply: Boolean(previousAssistantText),
-            });
+            console.log(
+              '[IROS/PREV_REPLY_REPHRASE_SEED_CHECK]',
+              JSON.stringify({
+                currentText,
+                wantsPreviousReplyRephrase,
+                wantsPreviousReplyStyleRewrite,
+                asksRealTranslation,
+                historyCandidateLens: historyCandidates.map((items) => items.length),
+                historyCandidateTails: historyCandidates.map((items) =>
+                  items.slice(-3).map((m: any) => ({
+                    keys: m && typeof m === 'object' ? Object.keys(m).slice(0, 12) : [],
+                    role: String(m?.role ?? m?.type ?? ''),
+                    contentHead: String(
+                      m?.content ??
+                        m?.text ??
+                        m?.assistantText ??
+                        m?.message ??
+                        '',
+                    ).slice(0, 220),
+                  })),
+                ),
+                previousAssistantTextHead: previousAssistantText.slice(0, 220),
+                previousAssistantTextLen: previousAssistantText.length,
+                previousReplyRephraseSeedWillApply: Boolean(previousAssistantText),
+              }),
+            );
         if (!previousAssistantText) return null;
+
+        if (wantsPreviousReplyStyleRewrite) {
+          return [
+            '直前のassistant返答を、現在のユーザー指定に合わせて書き直す。',
+            '現在のユーザー文そのものを分析・診断・意味説明しない。',
+            '新しい助言や相手側の断定を足さない。',
+            '前置きせず、書き直した本文から始める。',
+            '「了解です」「たとえば」「必要なら」「あなたが欲しいのは」で始めない。',
+            '直前assistant返答の主題・世界観・対象を変えない。',
+            '元の返答にない題材へ移動しない。',
+            currentText.includes('リアル') || currentText.includes('現実') || currentText.includes('生々')
+              ? '抽象語を減らし、生活感・場の空気・人の手触りが伝わる文にする。'
+              : 'ユーザー指定の文体に合わせて、自然な本文へ整える。',
+            `直前assistant返答：${previousAssistantText}`,
+          ].join('\n');
+        }
 
         return [
           '直前のassistant返答を、ユーザーにわかる普通の言葉へ言い換える。',
@@ -3469,6 +3498,31 @@ function normForRecall(v: any): string {
           `直前assistant返答：${previousAssistantText}`,
         ].join('\n');
       })();
+
+      if (previousReplyRephraseSeed) {
+        (extraLocal as any).ctxPack ??= {};
+        (extraLocal as any).ctxPack.previousReplyRephrase = true;
+        (extraLocal as any).ctxPack.previousReplyStyleRewrite = true;
+        (extraLocal as any).ctxPack.patternKey = 'previous_reply_rephrase';
+        (extraLocal as any).ctxPack.pattern_key = 'previous_reply_rephrase';
+        (extraLocal as any).ctxPack.patternMode = 'previous_reply_rephrase';
+        (extraLocal as any).ctxPack.pattern_mode = 'previous_reply_rephrase';
+        (extraLocal as any).ctxPack.goalKind = 'rewrite';
+        (extraLocal as any).ctxPack.replyGoal = { kind: 'rewrite' };
+        (extraLocal as any).ctxPack.situationSummary =
+          '直前assistant返答の書き直し。現在のユーザー文そのものを分析せず、直前assistant返答を対象にする。';
+        (extraLocal as any).ctxPack.situationTopic = '直前assistant返答の書き直し';
+
+        console.log(
+          '[IROS/PREV_REPLY_REPHRASE_CTXPACK_MARK]',
+          JSON.stringify({
+            enabled: true,
+            patternKey: (extraLocal as any).ctxPack.patternKey,
+            patternMode: (extraLocal as any).ctxPack.patternMode,
+            currentText: String(text ?? '').slice(0, 120),
+          }),
+        );
+      }
 
       const flowSeedUserCore =
         previousReplyRephraseSeed ??
@@ -4366,7 +4420,7 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
         assistantNatural,
       );
 
-      if (isIrDiagnosis && assistantNatural && !isInternalAssistant) {
+      if (assistantNatural && !isInternalAssistant) {
         tail = [
           ...tail,
           {
