@@ -7,6 +7,7 @@ import type { IrosUserProfileRow } from './loadUserProfile';
 
 import { loadBaseMetaFromMemoryState } from './handleIrosReply.state';
 import { loadLatestIrDiagnosisSnapshot } from '@/lib/iros/memoryRecall';
+import { routeIrosMemory } from '@/lib/iros/memory/memoryRouter';
 
 // ✅ FramePlan（器＋スロット）(Layer C/D)
 import { buildFramePlan, type InputKind, type IrosStateLite } from '@/lib/iros/language/frameSlots';
@@ -496,7 +497,11 @@ export async function buildTurnContext(
 
   // 🔥 診断 followup 判定
   const followupSourceText = detailSourceText.trim();
+  const memoryDecision = routeIrosMemory({ userText: followupSourceText });
   const diagnosisFollowupTargetLabel =
+    (memoryDecision.memoryIntent === 'diagnosis_recall'
+      ? memoryDecision.targetLabel
+      : null) ||
     extractDiagnosisFollowupTargetLabel(followupSourceText);
 
   const isFollowupRequest =
@@ -577,6 +582,26 @@ export async function buildTurnContext(
     (baseMetaForTurn as any).extra = (baseMetaForTurn as any).extra ?? {};
     (baseMetaForTurn as any).extra.ctxPack =
       (baseMetaForTurn as any).extra.ctxPack ?? {};
+    (baseMetaForTurn as any).extra.memoryDecision = memoryDecision;
+    (baseMetaForTurn as any).extra.memoryIntent = memoryDecision.memoryIntent;
+    (baseMetaForTurn as any).extra.memorySpace = memoryDecision.memorySpace;
+    (baseMetaForTurn as any).extra.memoryTargetLabel = memoryDecision.targetLabel;
+    (baseMetaForTurn as any).extra.memoryTargetKey = memoryDecision.targetKey;
+    (baseMetaForTurn as any).extra.memoryRecallMode = memoryDecision.recallMode;
+
+    (baseMetaForTurn as any).extra.ctxPack.memoryDecision = memoryDecision;
+    (baseMetaForTurn as any).extra.ctxPack.memoryIntent = memoryDecision.memoryIntent;
+    (baseMetaForTurn as any).extra.ctxPack.memorySpace = memoryDecision.memorySpace;
+    (baseMetaForTurn as any).extra.ctxPack.memoryTargetLabel = memoryDecision.targetLabel;
+    (baseMetaForTurn as any).extra.ctxPack.memoryTargetKey = memoryDecision.targetKey;
+    (baseMetaForTurn as any).extra.ctxPack.memoryRecallMode = memoryDecision.recallMode;
+
+    // Diagnosis follow-up must not inherit unrelated pastStateNoteText.
+    // lastIrDiagnosis / irMeta are the source of truth for this branch.
+    (baseMetaForTurn as any).extra.pastStateNoteText = null;
+    (baseMetaForTurn as any).extra.pastStateTriggerKind = null;
+    (baseMetaForTurn as any).extra.ctxPack.pastStateNoteText = null;
+    (baseMetaForTurn as any).extra.ctxPack.pastStateTriggerKind = null;
 
     if (diagnosisFollowupTargetLabel) {
       (baseMetaForTurn as any).extra.diagnosisFollowupTargetLabel =
@@ -585,7 +610,7 @@ export async function buildTurnContext(
         diagnosisFollowupTargetLabel;
     }
 
-      const lastIrDiagnosisResolved =
+    const lastIrDiagnosisResolved =
       lastIrDiagnosis ??
       (prevIrMeta
         ? {
@@ -602,8 +627,7 @@ export async function buildTurnContext(
         : null);
 
     const normalizedIrMeta =
-      prevIrMeta ??
-      (lastIrDiagnosisResolved
+      lastIrDiagnosisResolved
         ? {
             targetLabel:
               String((lastIrDiagnosisResolved as any)?.target ?? '').trim() || null,
@@ -614,7 +638,7 @@ export async function buildTurnContext(
             summaryText:
               String((lastIrDiagnosisResolved as any)?.summary ?? '').trim() || null,
           }
-        : null);
+        : prevIrMeta;
 
     const resolvedDiagnosisTargetLabel =
       diagnosisFollowupTargetLabel ||

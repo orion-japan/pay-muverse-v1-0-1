@@ -371,6 +371,80 @@ export async function diagnosisEngine(input: any): Promise<any> {
     targetScope,
   );
 
+
+  const ctxPackForDiagnosis = ((input?.meta as any)?.extra?.ctxPack ?? {}) as any;
+  const relationshipMemoryForDiagnosis = ctxPackForDiagnosis?.relationshipMemory;
+
+  const relationshipMemoryMaterial = (() => {
+    if (!relationshipMemoryForDiagnosis || typeof relationshipMemoryForDiagnosis !== 'object') {
+      return '（なし）';
+    }
+
+    const displayName = norm(
+      relationshipMemoryForDiagnosis.display_name ??
+        relationshipMemoryForDiagnosis.displayName ??
+        ctxPackForDiagnosis.memoryTargetLabel,
+    );
+
+    const role = norm(relationshipMemoryForDiagnosis.role);
+
+    const unresolvedTopics = Array.isArray(
+      relationshipMemoryForDiagnosis.unresolved_topics ??
+        relationshipMemoryForDiagnosis.unresolvedTopics,
+    )
+      ? (
+          relationshipMemoryForDiagnosis.unresolved_topics ??
+          relationshipMemoryForDiagnosis.unresolvedTopics
+        )
+          .map((v: unknown) => norm(v))
+          .filter(Boolean)
+          .slice(0, 4)
+          .join(' / ')
+      : '';
+
+    const reactionPattern = Array.isArray(
+      relationshipMemoryForDiagnosis.user_reaction_pattern ??
+        relationshipMemoryForDiagnosis.userReactionPattern,
+    )
+      ? (
+          relationshipMemoryForDiagnosis.user_reaction_pattern ??
+          relationshipMemoryForDiagnosis.userReactionPattern
+        )
+          .map((v: unknown) => norm(v))
+          .filter(Boolean)
+          .slice(0, 3)
+          .join(' / ')
+      : '';
+
+    const factsText = Array.isArray(relationshipMemoryForDiagnosis.facts)
+      ? relationshipMemoryForDiagnosis.facts
+          .map((item: any) => norm(item?.value ?? item?.note ?? item?.key ?? item))
+          .filter(Boolean)
+          .slice(0, 3)
+          .join(' / ')
+      : '';
+
+    const patternsText = Array.isArray(relationshipMemoryForDiagnosis.patterns)
+      ? relationshipMemoryForDiagnosis.patterns
+          .map((item: any) => norm(item?.note ?? item?.value ?? item?.key ?? item))
+          .filter(Boolean)
+          .slice(0, 3)
+          .join(' / ')
+      : '';
+
+    const lines = [
+      displayName ? `対象名：${displayName}` : '',
+      role ? `関係上の役割：${role}` : '',
+      unresolvedTopics ? `未整理テーマ：${unresolvedTopics}` : '',
+      reactionPattern ? `ユーザー側の見方：${reactionPattern}` : '',
+      factsText ? `関係メモ：${factsText}` : '',
+      patternsText ? `読み方の補助：${patternsText}` : '',
+      '使い方：相手の本心や事実として断定せず、関係の中に出ている反応点・距離感・進め方のズレを読む補助素材として使う。',
+    ].filter(Boolean);
+
+    return lines.length > 0 ? lines.join('\n') : '（なし）';
+  })();
+
   const currentMaterial = norm((built.debug as any)?.observationResult);
   const pointMaterial = delta;
   const directionMaterial = norm((built.debug as any)?.awarenessText || delta);
@@ -401,6 +475,7 @@ ${observed || '（入力なし）'}
 【対象の読み方】
 ${targetScopeMaterial}
 
+
 【現状の素材】
 ${currentMaterial}
 
@@ -420,6 +495,10 @@ ${messageMaterial}
 
 【自己受容の素材】
 ${selfAcceptanceMaterial}
+
+【関係記憶の素材】
+${relationshipMemoryMaterial}
+
 
 ---
 
@@ -444,11 +523,13 @@ ${selfAcceptanceMaterial}
 ・会話の流れを読んでいるように書かない
 ・「これまで」「今まで」「前から」「最近」「ずっと」など、履歴を見ているような言い方は使わない
 ・ユーザーの過去、性格、背景、相手の本心を推測しない
+・関係記憶の素材がある場合も、相手の本心や事実として断定せず、関係の中に出ている反応点・距離感・進め方のズレとして自然に反映する
 
 ・自分診断では、出たフローを本人の今の状態として書く
 ・相手診断では、相手側に出ている状態を必ず書く。ただし、本心・事実・確定判断として断定しない
 ・相手診断では、「相手側には〜が出ているように見える」「こちらから見ると〜に見える」の温度で書く
 ・相手診断では、一般論で終わらせず、具体的な状態を一つ入れる
+
 ・状況診断では、人の内面ではなく、場の動き・詰まり・優先順位・判断・作業の進み方として書く
 ・状況診断では、「内側」「気持ち」「心」「相手の反応」など、人の心理に見える言葉に寄せすぎない
 ・状況診断では、「表では動いているのに内側では慎重」ではなく、「表では進んでいるように見えても、判断や優先順位が固まりにくい」のように書く
@@ -492,6 +573,7 @@ ${observed || '（入力なし）'}
 【対象の読み方】
 ${targetScopeMaterial}
 
+
 【現状の素材】
 ${currentMaterial}
 
@@ -511,6 +593,10 @@ ${messageMaterial}
 
 【自己受容の素材】
 ${selfAcceptanceMaterial}
+
+【関係記憶の素材】
+${relationshipMemoryMaterial}
+
 
 ---
 
@@ -538,11 +624,13 @@ ${selfAcceptanceMaterial}
 ・会話の流れを読んでいるように書かない
 ・「これまで」「今まで」「前から」「最近」「ずっと」など、履歴を見ているような言い方は使わない
 ・ユーザーの過去、性格、背景、相手の本心を推測しない
+・関係記憶の素材がある場合も、相手の本心や事実として断定せず、関係の中に出ている反応点・距離感・進め方のズレとして自然に反映する
 
 ・自分診断では、出たフローを本人の今の状態として書く
 ・相手診断では、相手側に出ている状態を必ず書く。ただし、本心・事実・確定判断として断定しない
 ・相手診断では、「相手側には〜が出ているように見える」「こちらから見ると〜に見える」の温度で書く
 ・相手診断では、一般論で終わらせず、具体的な状態を一つ入れる
+
 ・状況診断では、人の内面ではなく、場の動き・詰まり・優先順位・判断・作業の進み方として書く
 ・状況診断では、「内側」「気持ち」「心」「相手の反応」など、人の心理に見える言葉に寄せすぎない
 ・状況診断では、「表では動いているのに内側では慎重」ではなく、「表では進んでいるように見えても、判断や優先順位が固まりにくい」のように書く
@@ -581,11 +669,26 @@ ${selfAcceptanceMaterial}
 ---
 
 出力例：
+自分診断の例：
 🌀 観測対象：今の自分
 🧭 現状：やりたいことは見えてきていますが、周りの反応が気になって、まだ何から形にするかが少し定まりにくい状態です。
 🧩 ポイント：考えを広げすぎることで迷いが出やすく、まず一つの方向に絞ろうとしている状態です。
 🌿 意識の向かう先：表面の反応より、自分が今進めたいことへ意識を戻す方向です。
 🌱 メッセージ：今は、全部を同時に動かすより、まず扱う範囲を小さくする流れが合っています。
+
+相手診断の例：
+🌀 観測対象：彼
+🧭 現状：こちらから見ると、相手側には関係をはっきりさせたい気持ちと、踏み込みきれない感じが同時に出ているように見えます。
+🧩 ポイント：相手側では、期待を持ちながらも、どこまで関わるかを決めきれずに少し止まりやすい状態です。
+🌿 意識の向かう先：相手側の意識は、今の距離を保つことより、関係の扱い方を確かめたいほうへ向きやすい状態です。
+🌱 メッセージ：今は、相手側に出ている迷いと期待を分けて見るところです。
+
+状況診断の例：
+🌀 観測対象：この件
+🧭 現状：表では進んでいるように見えても、判断する範囲と優先順位がまだ固まりにくい状態です。
+🧩 ポイント：動かす内容を増やすより、まず何を先に扱うかが分かれ始めている状態です。
+🌿 意識の向かう先：次に扱う範囲を絞り、判断しやすい順番に並べるほうへ向かっています。
+🌱 メッセージ：今は、全部を一度に動かすより、先に見る場所を分けるところです。
 `;
 
   const text = await chatComplete({

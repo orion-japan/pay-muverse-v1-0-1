@@ -577,6 +577,7 @@ const obsCard = (() => {
     const allowHighMetaInPack =
       depthBandForMeta !== 'S' && depthBandForMeta !== 'F';
 
+
     const lines: string[] = [];
     if (inputKind) lines.push(`inputKind=${inputKind}`);
     if (depthStage) lines.push(`depthStage=${depthStage}`);
@@ -1298,12 +1299,12 @@ function stripHedgeLite(text: string): string {
   // 概念説明の末尾に出やすい「次回案内」「追加できます」系は削る。
   // 本文の途中にある能力説明までは削らず、段落末尾だけを対象にする。
   t = t.replace(
-    /(?:\n\n|\n|^)?必要なら次に、?[^\n。]*(?:できます|できる|出せます|出せる|ほどけます|深められます|整理できます|説明できます)[。.!！]?$/u,
+    /(?:\n\n|\n|^)?(?:触れられる入口\s*)?(?:もし必要なら|必要なら次に|必要なら)、?[^\n。]*(?:できます|できる|出せます|出せる|ほどけます|深められます|整理できます|説明できます)[。.!！]?$/u,
     ''
   );
 
   t = t.replace(
-    /(?:\n\n|\n|^)?(?:必要なら|次に|もっと詳しく|さらに詳しく)[^\n。]*(?:できます|できる|出せます|出せる|ほどけます|深められます|整理できます|説明できます)[。.!！]?$/u,
+    /(?:\n\n|\n|^)?(?:触れられる入口\s*)?(?:もし必要なら|必要なら|次に|もっと詳しく|さらに詳しく)[^\n。]*(?:できます|できる|出せます|出せる|ほどけます|深められます|整理できます|説明できます)[。.!！]?$/u,
     ''
   );
 
@@ -3383,20 +3384,96 @@ if (isIrDiagnosis) {
     }
   })();
 
+  const diagnosisFollowupSeedFromCtx = (() => {
+    const candidates = [
+      (opts as any)?.meta?.extra?.ctxPack?.lastIrDiagnosis?.summary,
+      (opts as any)?.meta?.extra?.ctxPack?.lastIrDiagnosis?.diagnosisText,
+      (opts as any)?.meta?.extra?.ctxPack?.lastIrDiagnosis?.text,
+      (opts as any)?.meta?.extra?.ctxPack?.lastIrDiagnosis?.assistantText,
+      (opts as any)?.meta?.extra?.ctxPack?.lastIrDiagnosis?.observation,
+      (opts as any)?.meta?.extra?.ctxPack?.lastIrDiagnosis?.state,
+
+      (opts as any)?.meta?.extra?.lastIrDiagnosis?.summary,
+      (opts as any)?.meta?.extra?.lastIrDiagnosis?.diagnosisText,
+      (opts as any)?.meta?.extra?.lastIrDiagnosis?.text,
+      (opts as any)?.meta?.extra?.lastIrDiagnosis?.assistantText,
+      (opts as any)?.meta?.extra?.lastIrDiagnosis?.observation,
+      (opts as any)?.meta?.extra?.lastIrDiagnosis?.state,
+
+      (opts as any)?.ctxPack?.lastIrDiagnosis?.summary,
+      (opts as any)?.ctxPack?.lastIrDiagnosis?.diagnosisText,
+      (opts as any)?.ctxPack?.lastIrDiagnosis?.text,
+      (opts as any)?.ctxPack?.lastIrDiagnosis?.assistantText,
+      (opts as any)?.ctxPack?.lastIrDiagnosis?.observation,
+      (opts as any)?.ctxPack?.lastIrDiagnosis?.state,
+
+      (opts as any)?.userContext?.ctxPack?.lastIrDiagnosis?.summary,
+      (opts as any)?.userContext?.ctxPack?.lastIrDiagnosis?.diagnosisText,
+      (opts as any)?.userContext?.ctxPack?.lastIrDiagnosis?.text,
+      (opts as any)?.userContext?.ctxPack?.lastIrDiagnosis?.assistantText,
+      (opts as any)?.userContext?.ctxPack?.lastIrDiagnosis?.observation,
+      (opts as any)?.userContext?.ctxPack?.lastIrDiagnosis?.state,
+
+      (opts as any)?.meta?.extra?.ctxPack?.topicHint,
+      (opts as any)?.ctxPack?.topicHint,
+      (opts as any)?.userContext?.ctxPack?.topicHint,
+    ];
+
+    return candidates
+      .map((v) => String(v ?? '').trim())
+      .find((v) => v.length > 0) ?? '';
+  })();
+
+  const isDiagnosisFollowupSeed =
+    (opts as any)?.meta?.extra?.ctxPack?.diagnosisFollowup === true ||
+    (opts as any)?.meta?.extra?.diagnosisFollowup === true ||
+    (opts as any)?.ctxPack?.diagnosisFollowup === true ||
+    (opts as any)?.userContext?.ctxPack?.diagnosisFollowup === true ||
+    String((opts as any)?.meta?.extra?.ctxPack?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+    String((opts as any)?.ctxPack?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+    String((opts as any)?.userContext?.ctxPack?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+    Boolean((opts as any)?.meta?.extra?.ctxPack?.lastIrDiagnosis) ||
+    Boolean((opts as any)?.meta?.extra?.lastIrDiagnosis) ||
+    Boolean((opts as any)?.ctxPack?.lastIrDiagnosis) ||
+    Boolean((opts as any)?.userContext?.ctxPack?.lastIrDiagnosis);
+
   const FALLBACK_SEED =
     'ユーザーの最後の発話に、結論を先にして短く直接答えてください。';
 
   seedFinal =
+    (isDiagnosisFollowupSeed ? diagnosisFollowupSeedFromCtx : '') ||
     resolvedAskSeedFromShift ||
     chooseSeedForLLM(seedDraftSanitized, '') ||
     canonicalOneLineSeed ||
     FALLBACK_SEED;
+
+  console.log('[IROS/DIAG_FOLLOWUP_SEED_PICK]', {
+    isDiagnosisFollowupSeed,
+    diagnosisFollowupSeedLen: String(diagnosisFollowupSeedFromCtx ?? '').length,
+    diagnosisFollowupSeedHead: safeHead(String(diagnosisFollowupSeedFromCtx ?? ''), 180),
+    seedFinalLen: String(seedFinal ?? '').length,
+    seedFinalHead: safeHead(String(seedFinal ?? ''), 180),
+    hasMetaExtraCtxLastIrDiagnosis: Boolean((opts as any)?.meta?.extra?.ctxPack?.lastIrDiagnosis),
+    hasMetaExtraLastIrDiagnosis: Boolean((opts as any)?.meta?.extra?.lastIrDiagnosis),
+    hasCtxPackLastIrDiagnosis: Boolean((opts as any)?.ctxPack?.lastIrDiagnosis),
+    hasUserContextCtxPackLastIrDiagnosis: Boolean((opts as any)?.userContext?.ctxPack?.lastIrDiagnosis),
+    metaExtraCtxLastIrDiagnosisKeys: Object.keys((opts as any)?.meta?.extra?.ctxPack?.lastIrDiagnosis ?? {}),
+    userContextCtxLastIrDiagnosisKeys: Object.keys((opts as any)?.userContext?.ctxPack?.lastIrDiagnosis ?? {}),
+  });
 }
 
 // 正本
 // ✅ seedDraft は seedFinal を正本とする（userText遮断の一貫性）
 const seedDraft = seedFinal;
 
+console.log('[IROS/SEED_FINAL_AFTER_PICK]', {
+  seedFinalLen: String(seedFinal ?? '').length,
+  seedFinalHead: safeHead(String(seedFinal ?? ''), 220),
+  seedDraftHead: safeHead(String(seedDraft ?? ''), 220),
+  isIrDiagnosis,
+  hasMetaExtraCtxLastIrDiagnosis: Boolean((opts as any)?.meta?.extra?.ctxPack?.lastIrDiagnosis),
+  hasUserContextCtxPackLastIrDiagnosis: Boolean((opts as any)?.userContext?.ctxPack?.lastIrDiagnosis),
+});
 // writer向けの軽いヒント（※ここも userText を足さない前提）
 const seedInstruction = (() => {
   const s = String(seedDraft ?? '')
@@ -5367,6 +5444,16 @@ const writerDirectivesFromSlotForFirstPass = isDetailPatternWriterForFirstPass
         (opts as any)?.userContext?.pastStateKeyword ??
         (opts as any)?.userContext?.meta?.extra?.pastStateKeyword ??
         null,
+      referenceJudgeSeedForFirstPass:
+        ((opts as any)?.extra?.referenceJudgeSeed) ??
+        ((opts as any)?.userContext?.ctxPack?.referenceJudgeSeed) ??
+        ((opts as any)?.userContext?.meta?.extra?.referenceJudgeSeed) ??
+        null,
+      referenceJudgeSeed:
+        ((opts as any)?.extra?.referenceJudgeSeed) ??
+        ((opts as any)?.userContext?.ctxPack?.referenceJudgeSeed) ??
+        ((opts as any)?.userContext?.meta?.extra?.referenceJudgeSeed) ??
+        null,
       goalKind:
         (opts as any)?.goalKind ??
         (opts as any)?.userContext?.goalKind ??
@@ -6719,19 +6806,25 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
         ? 'NORMAL_COMPRESSED_V1'
         : isPartnerSideResonanceForMaterialize
         ? 'PARTNER_SIDE_RESONANCE_V1'
-        : effectiveHasPriorDiagnosisForPattern && selectedByFunction === 'IR_DETAIL_V1'
-          ? 'IR_DETAIL_V1'
-          : preSelectedPatternKey === 'previous_reply_rephrase' ||
-              preSelectedPatternKey === 'IR_DETAIL_V1' ||
-              preSelectedPatternKey === 'NORMAL_DETAIL_V1' ||
-              preSelectedPatternKey === 'NORMAL_RESONANCE_V1' ||
-              preSelectedPatternKey === 'NORMAL_PRACTICAL_RESONANCE_V1' ||
-              preSelectedPatternKey === 'DECLARATION_RESONANCE_V1' ||
-              preSelectedPatternKey === 'PARTNER_SIDE_RESONANCE_V1'
-            ? preSelectedPatternKey
-            : selectedByFunction ||
-              preSelectedPatternKey ||
-              'NORMAL_RESONANCE_V1'
+        // ✅ storyMode は診断フォローより優先する。
+        // story_remake / story_undigested を IR_DETAIL_V1 に戻すと、
+        // 「いま見えていること」等の診断テンプレが再付与されるため。
+        : preSelectedPatternKey === 'story_undigested' ||
+            preSelectedPatternKey === 'story_remake'
+          ? preSelectedPatternKey
+          : effectiveHasPriorDiagnosisForPattern && selectedByFunction === 'IR_DETAIL_V1'
+            ? 'IR_DETAIL_V1'
+            : preSelectedPatternKey === 'previous_reply_rephrase' ||
+                preSelectedPatternKey === 'IR_DETAIL_V1' ||
+                preSelectedPatternKey === 'NORMAL_DETAIL_V1' ||
+                preSelectedPatternKey === 'NORMAL_RESONANCE_V1' ||
+                preSelectedPatternKey === 'NORMAL_PRACTICAL_RESONANCE_V1' ||
+                preSelectedPatternKey === 'DECLARATION_RESONANCE_V1' ||
+                preSelectedPatternKey === 'PARTNER_SIDE_RESONANCE_V1'
+              ? preSelectedPatternKey
+              : selectedByFunction ||
+                preSelectedPatternKey ||
+                'NORMAL_RESONANCE_V1'
     ) as any;
 
     console.log(
@@ -7490,6 +7583,7 @@ if (slotDecision && typeof slotDecision === 'object') {
         const shouldPreferCanonicalBlocks =
           isIRDetailPatternForDisplay ||
           activePatternKeyForDisplay === 'DECLARATION_RESONANCE_V1' ||
+          activePatternKeyForDisplay === 'IR_LIGHT_V1' ||
           (activePatternKeyForDisplay === 'NORMAL_COMPRESSED_V1'
             ? canonicalBlocksBySlot.length >= 2
             : canonicalBlocksBySlot.length >= expectedDisplayBlocks);
@@ -7503,6 +7597,93 @@ if (slotDecision && typeof slotDecision === 'object') {
       slotBlocksText.push(...slotDisplayBlocks);
       blocksText = [...slotDisplayBlocks];
       usedSlotBlocksForDisplay = true;
+    }
+
+
+    // REFERENCE_JUDGEMENT_DISPLAY_BLOCK_GUARD
+    // reference_check の writerFirstLine を、renderGateway に渡る表示ブロックでも必ず先頭単独ブロックに固定する。
+    {
+      const referenceJudgeSeedForDisplayGuard =
+        String((opts as any)?.extra?.referenceJudgeSeed ?? '').trim() ||
+        String((opts as any)?.userContext?.ctxPack?.referenceJudgeSeed ?? '').trim() ||
+        String((opts as any)?.userContext?.meta?.extra?.referenceJudgeSeed ?? '').trim() ||
+        '';
+
+      const writerFirstLineForDisplayGuard = (() => {
+        const m = referenceJudgeSeedForDisplayGuard.match(/(?:^|\n)writerFirstLine=([^\n]+)/u);
+        return String(m?.[1] ?? '').trim();
+      })();
+
+      const isReferenceCheckForDisplayGuard =
+        /(?:^|\n)REFERENCE_JUDGEMENT:/u.test(referenceJudgeSeedForDisplayGuard) &&
+        /(?:^|\n)askType=reference_check/u.test(referenceJudgeSeedForDisplayGuard) &&
+        writerFirstLineForDisplayGuard.length > 0;
+
+      if (isReferenceCheckForDisplayGuard) {
+        const stripWriterFirstLine = (value: unknown): string => {
+          const raw = String(value ?? '').trim();
+          if (!raw) return '';
+          if (raw === writerFirstLineForDisplayGuard) return '';
+          if (raw.startsWith(writerFirstLineForDisplayGuard)) {
+            return raw
+              .slice(writerFirstLineForDisplayGuard.length)
+              .replace(/^[\s　。．、,：:;；-]+/u, '')
+              .trim();
+          }
+          return raw;
+        };
+
+        const sourceBlocksForDisplayGuard = Array.isArray(blocksText)
+          ? blocksText.map((x) => String(x ?? '').trim()).filter(Boolean)
+          : [];
+
+        const restBlocksForDisplayGuard = sourceBlocksForDisplayGuard
+          .map((x) => stripWriterFirstLine(x))
+          .flatMap((x) =>
+            String(x ?? '')
+              .split(/\n{2,}/u)
+              .map((v) => v.trim())
+              .filter(Boolean)
+          );
+
+        const firstDisplayBlockForDisplayGuard =
+          sourceBlocksForDisplayGuard[0]?.trim() ?? '';
+
+        const startsWithJudgeForDisplayGuard =
+          firstDisplayBlockForDisplayGuard.startsWith(writerFirstLineForDisplayGuard);
+
+        const startsWithCompatibleJudgementForDisplayGuard =
+          !startsWithJudgeForDisplayGuard &&
+          (
+            /^(いいえ|いえ|一致とは言えません|一致していません|完全には一致しません|沿っていません|その意味にはなりません|部分的には|一部は)/u.test(firstDisplayBlockForDisplayGuard) ||
+            /(一致していません|沿っていません|とは言えません|その意味にはなりません|ではありません)/u.test(firstDisplayBlockForDisplayGuard)
+          );
+
+        const fixedBlocksForDisplayGuard = [
+          ...(startsWithCompatibleJudgementForDisplayGuard ? [] : [writerFirstLineForDisplayGuard]),
+          ...restBlocksForDisplayGuard,
+        ].filter((v, i, arr) => {
+          const s = String(v ?? '').trim();
+          if (!s) return false;
+          return i === 0 || s !== String(arr[0] ?? '').trim();
+        });
+
+        if (fixedBlocksForDisplayGuard.length > 0) {
+          blocksText = [...fixedBlocksForDisplayGuard];
+          slotBlocksText.splice(0, slotBlocksText.length, ...fixedBlocksForDisplayGuard);
+          usedSlotBlocksForDisplay = true;
+
+          console.log(
+            '[IROS/rephraseEngine][REFERENCE_JUDGEMENT_DISPLAY_BLOCK_GUARD]',
+            JSON.stringify({
+              writerFirstLine: writerFirstLineForDisplayGuard,
+              beforeHead: sourceBlocksForDisplayGuard.slice(0, 4),
+              afterHead: fixedBlocksForDisplayGuard.slice(0, 4),
+              blocksLen: fixedBlocksForDisplayGuard.length,
+            })
+          );
+        }
+      }
     }
 
     const directSlotDisplayUsed =
@@ -8154,12 +8335,49 @@ raw = await (async () => {
     (opts as any)?.userContext?.meta?.extra?.pastStateKeyword ??
     ''
   ).trim();
+
+  const storyModeForPastStateNote = String(
+    (opts as any)?.ctxPack?.storyMode ??
+      (opts as any)?.userContext?.ctxPack?.storyMode ??
+      (opts as any)?.meta?.extra?.ctxPack?.storyMode ??
+      (opts as any)?.extra?.ctxPack?.storyMode ??
+      ''
+  ).trim();
+
+  const isStoryModeForPastStateNote =
+    storyModeForPastStateNote === 'undigested_story' ||
+    storyModeForPastStateNote === 'remake_story';
+
+  const isStoryLikePastStateNote =
+    /(未消化|闇の物語|先祖からつながる闇|リメイク物語|リメイクしてください|再統合|統合へ向かう物語)/u.test(
+      pastStateNoteText,
+    );
+
+  const effectivePastStateNoteText =
+    isStoryLikePastStateNote && !isStoryModeForPastStateNote
+      ? ''
+      : pastStateNoteText;
+
+  if (isStoryLikePastStateNote && !isStoryModeForPastStateNote) {
+    console.log(
+      '[IROS/PAST_STATE][story_note_filtered]',
+      JSON.stringify({
+        traceId: String((opts as any)?.traceId ?? (opts as any)?.extra?.traceId ?? ''),
+        storyMode: storyModeForPastStateNote || null,
+        pastStateTriggerKind: pastStateTriggerKind || null,
+        pastStateKeyword: pastStateKeyword || null,
+        originalLen: pastStateNoteText.length,
+        head: safeHead(pastStateNoteText, 200),
+      }),
+    );
+  }
+
   console.log(
     `[IROS/PAST_STATE][raw_values] traceId=${String((opts as any)?.traceId ?? (opts as any)?.extra?.traceId ?? '')}` +
-      ` len=${pastStateNoteText.length}` +
+      ` len=${effectivePastStateNoteText.length}` +
       ` trigger=${pastStateTriggerKind || '(null)'}` +
       ` keyword=${pastStateKeyword || '(null)'}` +
-      ` head=${safeHead(pastStateNoteText, 200)}`
+      ` head=${safeHead(effectivePastStateNoteText, 200)}`
   );
   const questionForWriter =
     ((opts as any)?.ctxPack?.question &&
@@ -8248,7 +8466,20 @@ raw = await (async () => {
                 return keys.length > 0 ? keys : [];
               })();
 
-          const stateCuesText = (() => {
+          const isDiagnosisFollowupForStateCues =
+    (opts as any)?.meta?.extra?.ctxPack?.diagnosisFollowup === true ||
+    (opts as any)?.meta?.extra?.diagnosisFollowup === true ||
+    (opts as any)?.ctxPack?.diagnosisFollowup === true ||
+    (opts as any)?.userContext?.ctxPack?.diagnosisFollowup === true ||
+    String((opts as any)?.meta?.extra?.ctxPack?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+    String((opts as any)?.ctxPack?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+    String((opts as any)?.userContext?.ctxPack?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+    Boolean((opts as any)?.meta?.extra?.ctxPack?.lastIrDiagnosis) ||
+    Boolean((opts as any)?.meta?.extra?.lastIrDiagnosis) ||
+    Boolean((opts as any)?.ctxPack?.lastIrDiagnosis) ||
+    Boolean((opts as any)?.userContext?.ctxPack?.lastIrDiagnosis);
+
+  const stateCuesText = (() => {
             const currentStateBits = [
               `depthStage=${typeof pickedDepthStage !== 'undefined' ? String(pickedDepthStage) : 'null'}`,
               `phase=${typeof pickedPhase !== 'undefined' ? String(pickedPhase) : 'null'}`,
@@ -8325,6 +8556,183 @@ raw = await (async () => {
       digestTopic ||
       safeHead(String((opts as any)?.userText ?? ''), 200);
 
+    const relationshipContextForWriter = (() => {
+      const raw = [
+        (opts as any)?.userText,
+        digestTopic,
+        digestSummary,
+        lastUserCore,
+        effectivePastStateNoteText,
+        (ctxPackForWriter as any)?.relationship?.label,
+        (ctxPackForWriter as any)?.relationship?.kind,
+        (ctxPackForWriter as any)?.targetKind,
+        (ctxPackForWriter as any)?.targetLabel,
+      ]
+        .map((v) => String(v ?? '').trim())
+        .filter(Boolean)
+        .join('\n');
+
+      const norm = raw.toLowerCase();
+
+      const hasAny = (words: string[]) => words.some((word) => norm.includes(word.toLowerCase()));
+
+      const memoryIntentForWriter = String((ctxPackForWriter as any)?.memoryIntent ?? '').trim();
+      const memoryTargetLabelForWriter = String((ctxPackForWriter as any)?.memoryTargetLabel ?? '').trim();
+      const memoryTargetKeyForWriter = String((ctxPackForWriter as any)?.memoryTargetKey ?? '').trim();
+      const relationshipMemoryTargetForWriter =
+        memoryIntentForWriter === 'relationship_recall'
+          ? memoryTargetLabelForWriter || memoryTargetKeyForWriter
+          : '';
+
+      const businessWords = [
+        'クライアント',
+        '顧客',
+        '案件',
+        '仕事',
+        '提案',
+        '契約',
+        '法人',
+        '経営',
+        '事業',
+        '共同研究',
+        '研究',
+        '管理',
+        '責任範囲',
+        '責任',
+        '進行',
+        '段取り',
+        '打ち合わせ',
+        'ミーティング',
+        '商談',
+        '納品',
+        '見積',
+        '請求',
+      ];
+
+      const collaborationWords = [
+        '共同',
+        '協業',
+        'パートナー',
+        'チーム',
+        'プロジェクト',
+        '一緒に進める',
+        '連携',
+      ];
+
+      const familyWords = [
+        '家族',
+        '父',
+        '母',
+        '親',
+        '子ども',
+        '子供',
+        '兄',
+        '弟',
+        '姉',
+        '妹',
+        '夫',
+        '妻',
+        '旦那',
+      ];
+
+      const friendshipWords = [
+        '友達',
+        '友人',
+        '親友',
+        '仲間',
+      ];
+
+      const romanceWords = [
+        '恋愛',
+        '好き',
+        '付き合',
+        '彼氏',
+        '彼女',
+        '元彼',
+        '元カレ',
+        '元彼女',
+        '元カノ',
+        'デート',
+        '復縁',
+        '片思い',
+        '告白',
+        '会いたい',
+        'line',
+        'ライン',
+        '既読',
+        '未読',
+      ];
+
+      if (hasAny(businessWords)) {
+        return {
+          domain: 'business',
+          relation: hasAny(['クライアント', '顧客']) ? 'client' : 'work_person',
+          certainty: 'high',
+          instruction:
+            '仕事・案件・合意・責任範囲・段取り・進行の文脈として補完する。恋愛文脈へ寄せない。',
+        };
+      }
+
+      if (hasAny(collaborationWords)) {
+        return {
+          domain: 'collaboration',
+          relation: 'collaborator',
+          certainty: 'medium',
+          instruction:
+            '共同作業・役割分担・進行温度差の文脈として補完する。恋愛文脈へ寄せない。',
+        };
+      }
+
+      if (hasAny(familyWords)) {
+        return {
+          domain: 'family',
+          relation: 'family',
+          certainty: 'medium',
+          instruction:
+            '家族内の距離感・役割・守ろうとしているものの文脈として補完する。',
+        };
+      }
+
+      if (hasAny(friendshipWords)) {
+        return {
+          domain: 'friendship',
+          relation: 'friend',
+          certainty: 'medium',
+          instruction:
+            '友人関係・信頼・距離感の文脈として補完する。恋愛文脈へ寄せない。',
+        };
+      }
+
+      if (hasAny(romanceWords)) {
+        return {
+          domain: 'romance',
+          relation: 'romantic_person',
+          certainty: 'high',
+          instruction:
+            '恋愛・好意・連絡温度・関係進行の文脈として補完してよい。',
+        };
+      }
+
+      if (relationshipMemoryTargetForWriter) {
+        return {
+          domain: 'neutral_person',
+          relation: 'unknown_person',
+          certainty: 'medium',
+          instruction:
+            `対象名は「${safeHead(relationshipMemoryTargetForWriter, 80)}」として特定済み。ただし恋愛・仕事・家族などの関係種別は未確定。名前そのものではなく、その人との関係のズレ・距離感・反応点として読む。`,
+        };
+      }
+
+      return {
+        domain: 'neutral_person',
+        relation: 'unknown_person',
+        certainty: 'low',
+        instruction:
+          '関係性は未確定。恋愛・仕事・家族などへ決めつけず、一般的な対人文脈として補完する。',
+      };
+    })();
+
+
     const lines: string[] = [];
     lines.push('【STATE_CUES (DO NOT OUTPUT)】');
     lines.push(`CURRENT_STATE: ${currentStateBits}`);
@@ -8345,6 +8753,74 @@ raw = await (async () => {
 
     if (intentBits.length > 0) {
       lines.push(`INTENT: ${intentBits.join(' / ')}`);
+    }
+
+    if (relationshipContextForWriter) {
+      lines.push(
+        `RELATIONSHIP_CONTEXT: domain=${relationshipContextForWriter.domain} / relation=${relationshipContextForWriter.relation} / certainty=${relationshipContextForWriter.certainty}`,
+      );
+      lines.push(`RELATIONSHIP_INSTRUCTION: ${relationshipContextForWriter.instruction}`);
+
+      const relationshipMemoryForStateCues = (ctxPackForWriter as any)?.relationshipMemory;
+      if (relationshipMemoryForStateCues && typeof relationshipMemoryForStateCues === 'object') {
+        const relationshipMemoryDisplayName = String(
+          relationshipMemoryForStateCues.displayName ??
+            relationshipMemoryForStateCues.display_name ??
+            '',
+        ).trim();
+
+        const relationshipMemoryRole = String(
+          relationshipMemoryForStateCues.role ?? '').trim();
+
+        const relationshipMemoryConfidence = String(
+          relationshipMemoryForStateCues.confidence ?? '').trim();
+
+        const relationshipMemoryTopics = Array.isArray(
+          relationshipMemoryForStateCues.unresolvedTopics ??
+            relationshipMemoryForStateCues.unresolved_topics,
+        )
+          ? (
+              relationshipMemoryForStateCues.unresolvedTopics ??
+              relationshipMemoryForStateCues.unresolved_topics
+            )
+              .map((v: unknown) => String(v ?? '').trim())
+              .filter(Boolean)
+              .slice(0, 3)
+              .join(' / ')
+          : '';
+
+        const relationshipMemoryReactions = Array.isArray(
+          relationshipMemoryForStateCues.userReactionPattern ??
+            relationshipMemoryForStateCues.user_reaction_pattern,
+        )
+          ? (
+              relationshipMemoryForStateCues.userReactionPattern ??
+              relationshipMemoryForStateCues.user_reaction_pattern
+            )
+              .map((v: unknown) => String(v ?? '').trim())
+              .filter(Boolean)
+              .slice(0, 2)
+              .join(' / ')
+          : '';
+
+        const relationshipMemoryBits = [
+          relationshipMemoryDisplayName ? `displayName=${safeHead(relationshipMemoryDisplayName, 80)}` : '',
+          relationshipMemoryRole ? `role=${safeHead(relationshipMemoryRole, 40)}` : '',
+          relationshipMemoryConfidence ? `confidence=${safeHead(relationshipMemoryConfidence, 40)}` : '',
+        ].filter(Boolean);
+
+        if (relationshipMemoryBits.length > 0) {
+          lines.push(`RELATIONSHIP_MEMORY: ${relationshipMemoryBits.join(' / ')}`);
+        }
+
+        if (relationshipMemoryTopics) {
+          lines.push(`RELATIONSHIP_MEMORY_TOPICS: ${safeHead(relationshipMemoryTopics, 240)}`);
+        }
+
+        if (relationshipMemoryReactions) {
+          lines.push(`RELATIONSHIP_MEMORY_REACTION: ${safeHead(relationshipMemoryReactions, 260)}`);
+        }
+      }
     }
 
     if (responseGoal) {
@@ -8369,11 +8845,11 @@ raw = await (async () => {
       lines.push(`HYPOTHESIS_KEYS: ${questionIFrameKeysForWriter.join(', ')}`);
     }
 
-    if (pastStateNoteText) {
+    if (effectivePastStateNoteText && !isDiagnosisFollowupForStateCues) {
       lines.push('PAST_STATE_RECALL: enabled');
       if (pastStateTriggerKind) lines.push(`PAST_STATE_TRIGGER: ${safeHead(pastStateTriggerKind, 80)}`);
       if (pastStateKeyword) lines.push(`PAST_STATE_KEYWORD: ${safeHead(pastStateKeyword, 120)}`);
-      lines.push(`PAST_STATE_NOTE: ${safeHead(pastStateNoteText, 900)}`);
+      lines.push(`PAST_STATE_NOTE: ${safeHead(effectivePastStateNoteText, 900)}`);
     }
 
     return lines.join('\n');
@@ -8383,7 +8859,8 @@ raw = await (async () => {
     stateCuesPatternKey !== 'NORMAL_COMPRESSED_V1' &&
     !alreadyHasStateCues &&
     !!stateCuesText.trim() &&
-    !!pastStateNoteText;
+    !!effectivePastStateNoteText &&
+    !isDiagnosisFollowupForStateCues;
 
   const stateCuesMsg =
     shouldInjectStateCues
@@ -9001,21 +9478,36 @@ const writerPatternEarlySelected = selectSlotPattern({
   hasPriorDiagnosis: writerPatternEffectiveHasPriorDiagnosis,
 });
 
+const storyModeForPatternKey = String(
+  (ctxPackForWriter as any)?.storyMode ??
+    (opts as any)?.ctxPack?.storyMode ??
+    (opts as any)?.userContext?.ctxPack?.storyMode ??
+    ''
+).trim();
+
+const storyPatternKeyForPattern =
+  storyModeForPatternKey === 'remake_story'
+    ? 'story_remake'
+    : storyModeForPatternKey === 'undigested_story'
+      ? 'story_undigested'
+      : '';
+
 const selectedPatternKey = String(
-  writerPatternIsConsultAnswerLike
-    ? 'NORMAL_COMPRESSED_V1'
-    : writerPatternEffectiveHasPriorDiagnosis && writerPatternEarlySelected === 'IR_DETAIL_V1'
-      ? 'IR_DETAIL_V1'
-      : (debug as any)?.patternKey ??
-      (ctxPackForWriter && typeof ctxPackForWriter === 'object'
-        ? (ctxPackForWriter as any).patternKey
-        : null) ??
-      (opts as any)?.meta?.extra?.ctxPack?.patternKey ??
-      (opts as any)?.meta?.extra?.patternKey ??
-      (opts as any)?.ctxPack?.patternKey ??
-      (opts as any)?.userContext?.ctxPack?.patternKey ??
-      writerPatternEarlySelected ??
-      ''
+  storyPatternKeyForPattern ||
+    (writerPatternIsConsultAnswerLike
+      ? 'NORMAL_COMPRESSED_V1'
+      : writerPatternEffectiveHasPriorDiagnosis && writerPatternEarlySelected === 'IR_DETAIL_V1'
+        ? 'IR_DETAIL_V1'
+        : (debug as any)?.patternKey ??
+          (ctxPackForWriter && typeof ctxPackForWriter === 'object'
+            ? (ctxPackForWriter as any).patternKey
+            : null) ??
+          (opts as any)?.meta?.extra?.ctxPack?.patternKey ??
+          (opts as any)?.meta?.extra?.patternKey ??
+          (opts as any)?.ctxPack?.patternKey ??
+          (opts as any)?.userContext?.ctxPack?.patternKey ??
+          writerPatternEarlySelected ??
+          '')
 ).trim();
 
 const questionTypeForPattern = (() => {
@@ -9386,11 +9878,12 @@ const isResonanceStructureFollowup =
         ],
       }
     : {};
+    const hasCurrentContactTopicForRelationshipSolve =
+      /(連絡|返信|返事|LINE|ライン|既読|未読)/u.test(resolvedAskSourceTextForWriter);
+
     const isRelationshipReflectionSolve =
-    isRelationshipUserSideSupport &&
-    /(どうしたら|どうすれば|解決|連絡|返信|返事|不安|距離感|今の状態|今どう|どう見え|どう映)/u.test(
-      resolvedAskSourceTextForWriter,
-    );
+      isRelationshipUserSideSupport &&
+      hasCurrentContactTopicForRelationshipSolve;
 
   const relationshipUserSideSupportWriterDirectives =
     isRelationshipUserSideSupport
@@ -9405,40 +9898,31 @@ const isResonanceStructureFollowup =
               minSentences: 3,
               maxSentences: 4,
             },
-            // ✅ relationship_reflection_solve では、通常の practical block 指示を上書きする。
-            // ここを上書きしないと、NORMAL_PRACTICAL_RESONANCE_V1 側の
-            // 「何が揺れているか」「今見る選択肢」系が残って解説文に戻る。
             block_current_state:
-              '1段落目は「返事が来ないと、不安になりますね。」くらいの短い自然文で受ける。理由説明を足しすぎない。',
+              '1段落目は、ユーザーが書いた連絡状況だけを短く受ける。返事が来ていない・遅い・既読無視などは、発話にある場合だけ書く。',
             block_state_action:
-              '2段落目は「でも、返事がないだけで彼の気持ちまで決まったわけではありません。」のように、相手の本心を決めつけない言葉にする。「何が揺れているか」は書かない。',
+              '2段落目は、連絡状況だけで相手の本心や関係の結論を決めない方向にする。相手の事情は推測しない。',
             block_caution:
-              '3段落目を入れる場合は「今わかっているのは、まだ返事が来ていないことだけです。」くらいで短く閉じる。不安が相手に向かう説明や、心理分析を足さない。',
+              '3段落目を入れる場合は、今確認できている事実と、まだ確認できていない範囲を短く分ける。発話にない未返信状態を作らない。',
             block_closing_line:
-              '最後は、状況がまだ不足している初回相談では、事実に戻したあとに短い確認質問を1つだけ置いてよい。例：「最後に連絡したのは、あなたからですか？彼からですか？」。状況が足りている場合は、「今わかっているのは、まだ返事が来ていないことだけです。」または「彼の気持ちまで、ここで決まったわけではありません。」で自然に閉じる。',
+              '最後は送信文や行動指示に急がない。送る文はユーザーが明示的に求めた時だけ出す。',
             block_user_side_receive:
-              'まず普通の相談相手として受ける。「返事が来ないと、不安になりますね。」くらいの短い自然文で入る。',
+              'まず普通の相談相手として、ユーザーが書いた連絡状況だけを受ける。発話にない未返信・遅延・既読無視を作らない。',
             block_user_side_boundary:
-              '相手の本心を読みに行かない。返事がないだけで、彼の気持ちまで決まったわけではないと、日常語で伝える。',
+              '連絡状況だけで、相手の本心・愛情・関係の結論を断定しない。',
             block_user_side_next:
-              '最後は分析で閉じない。状況がまだ不足している場合だけ、事実に戻したうえで短い確認質問を1つ置く。質問は詰問にせず、「最後に連絡したのは、あなたからですか？彼からですか？」のように、次の返答で状況が見えるものにする。',
+              '最後は分析で閉じない。必要な場合だけ、最後に連絡した状況など事実確認に限って短く返す。',
             writeConstraints: [
-              'relationship_reflection_solve は、解説文ではなく、普通の相談相手の返答にする',
+              'relationship_reflection_solve は、返信待ちテンプレではなく、連絡状況を安全に扱うモードにする',
+              'ユーザー発話にある連絡状況だけを扱う。返事が来ていない・遅い・冷たい・既読無視などを発話にない場合は作らない',
               '相手の本心・事情・愛情の有無は断定しない',
-              '返事がない＝終わり、と決めつけない方向で受ける',
-              'ユーザーの不安を分析しすぎない。「なぜ苦しいか」を説明し続けない',
-              '「沈黙が重く見える」「不安の状態」「構造」「選択肢を示す」「今見るべき」は使わない',
-              '状況がまだ不足している場合は、短い確認質問を1つだけ許可する。質問は内面整理系ではなく、次の行動や状況を確認するものにする',
-              '「彼を諦めるかどうか」など、大きい判断に話を広げない',
+              '連絡状況だけで、関係の結論を決めない',
+              '追撃・連投・責める言い方を勧めない',
               '送信文・例文・具体行動は、ユーザーが明示的に求めた時だけ出す',
+              '不安の理由づけ・心理説明・内面分析を足さない',
               '本文は2〜3段落。全体は3〜4文までにする',
               '各段落は1〜2文まで。長く説明しない',
-              '書いてよい内容は、①不安を受ける、②返事がないだけで彼の気持ちは決まらない、③今見えている事実、④まだ事実として確認できていない範囲、の4つだけにする。「まだ言い切れないこと」「知りたい気持ちとまだ言い切れないことのぶつかり方」は使わない',
-              '不安の理由づけ・心理説明・内面分析を足さない',
-              '「それは自然なことです」は使わない。受ける場合は「返事を待つ側だけが、時間を長く感じてしまいます」のように、この状況に沿った短い自然文にする',
-              '「だから」「いま必要なのは」「結論」「大丈夫」「不安に引っぱられ」「分けて」「置いておく」「崩れにくい」は使わない',
-              '「待っているあいだ」「気持ちだけが先に行く」「相手を疑いたい」「ちゃんと届いている」「確かめたい気持ち」「事実と想像」は使わない',
-              '最後は固定文にしない。まだ確認できていない範囲を短く残し、状況が不足している場合は、そのまま短い状況確認の質問へつなげる。「ここから先はまだ言い切れない」「まだ言い切れないところがあります」は使わない',
+              '最後は固定文にしない。今わかっている連絡状況と、まだ確認できていない範囲を短く残す',
             ],
           }
         : {
@@ -9452,17 +9936,19 @@ const isResonanceStructureFollowup =
               maxSentences: 4,
             },
             block_user_side_receive:
-              '普通の会話として、まず心配を受ける。「それは心配になりますね」のように自然に入る。',
+              '普通の会話として、ユーザーの不安や確認したい気持ちを短く受ける。',
             block_user_side_boundary:
-              '彼側の事情・本心・仕事などは推測しない。相手側を読むのではなく、連絡が来ないことで心配しているユーザー側を受ける。',
+              '相手側の本心・事情・愛情の有無は推測しない。ユーザーが書いた事実と気持ちだけを扱う。',
             block_user_side_next:
-              '最後は助言ではなく、今はその心配を受け取っていることを短く返す。構造語で締めない。',
+              '最後は助言や結論に急がず、今言える範囲だけを短く返す。構造語で締めない。',
             writeConstraints: [
-              'relationship_user_side_support では、彼側の本心・事情を推測しない',
-              '仕事の忙しさを出さない',
-              '「返す余裕」「冷めた」「気持ちがない」など相手側の状態を読まない',
-              '「前にある」「残る」「置く」「空白」「ほどく」「気配」「余白」を使わない',
-              '普通の会話として、心配を受ける',
+              'relationship_user_side_support では、彼側の本心・事情・愛情の有無を断定しない',
+              '連絡が来ない・返事がない・既読無視などを、ユーザー発話にない場合は作らない',
+              '恋愛相談を自動的に返信待ち相談へ変換しない',
+              'ユーザーが書いた事実と気持ちだけを扱う',
+              '不安を受けても、原因や相手の心理を決めつけない',
+              '仕事の忙しさ・冷めた・気持ちがない等の相手側事情を出さない',
+              '普通の会話として短く返す',
               '2〜4文で返す',
             ],
           }
@@ -10321,6 +10807,18 @@ const isResonanceStructureFollowup =
 
                 if (!raw) return null;
 
+                const isDiagnosisFollowupOpenEdgeBlocked =
+                  writerPatternKey === 'IR_DETAIL_V1' &&
+                  (
+                    writerPatternEffectiveHasPriorDiagnosis === true ||
+                    (ctxPackForWriter as any)?.diagnosisFollowup === true ||
+                    String((ctxPackForWriter as any)?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+                    (opts as any)?.ctxPack?.diagnosisFollowup === true ||
+                    (opts as any)?.userContext?.ctxPack?.diagnosisFollowup === true
+                  );
+
+                if (isDiagnosisFollowupOpenEdgeBlocked) return null;
+
                 const isEventOpenEdge =
                   /(イベント|開催|日程|場所|会場|福岡|打ち合わせ|ミーティング|予定|販売|制作|投稿|公開|告知|演出|導入|関わる人|誰と|一緒に動く|現実に動|現実の側|動き始め)/.test(raw);
 
@@ -10340,7 +10838,7 @@ const isResonanceStructureFollowup =
                     'relationship_last_contact_answer';
 
                 if (isRelationshipOpenEdge && !isLastContactAnswerForFinal) {
-                  return '最後は抽象的な余韻で閉じず、「この話は、今わかっている事実、不安、相手への言葉、待つ時間のどこからでも続けられます。」のように、次に話せる現実の入口を自然文で残す。相手の本心は断定しない。';
+                  return '最後は抽象的な余韻で閉じず、「この話は、今わかっている事実、不安、相手への言葉のどこからでも続けられます。」のように、次に話せる現実の入口を自然文で残す。相手の本心は断定しない。';
                 }
 
                 return null;
@@ -10480,6 +10978,70 @@ const isResonanceStructureFollowup =
                   })
                 : baseWriteConstraintsForFinal;
 
+              const storyModeForFinal =
+                String((ctxPackForWriter as any)?.storyMode ?? '').trim() ||
+                String((opts as any)?.ctxPack?.storyMode ?? '').trim() ||
+                String((opts as any)?.userContext?.ctxPack?.storyMode ?? '').trim();
+
+              const storyPolicyForFinal =
+                (ctxPackForWriter as any)?.storyPolicy ??
+                (opts as any)?.ctxPack?.storyPolicy ??
+                (opts as any)?.userContext?.ctxPack?.storyPolicy ??
+                null;
+
+              const storyFlowSnapshotForFinal =
+                (ctxPackForWriter as any)?.storyFlowSnapshot ??
+                (opts as any)?.ctxPack?.storyFlowSnapshot ??
+                (opts as any)?.userContext?.ctxPack?.storyFlowSnapshot ??
+                null;
+
+              const wordingPolicyForStoryFinal =
+                (ctxPackForWriter as any)?.wordingPolicy ??
+                (opts as any)?.ctxPack?.wordingPolicy ??
+                (opts as any)?.userContext?.ctxPack?.wordingPolicy ??
+                null;
+
+              const isStoryModeForFinal =
+                storyModeForFinal === 'undigested_story' ||
+                storyModeForFinal === 'remake_story';
+
+              const storyModeConstraintsForFinal = isStoryModeForFinal
+                ? [
+                    `STORY_MODE: seedMode=${storyModeForFinal}`,
+                    'STORY_MODE: このターンは通常相談・診断・創作の自由生成ではなく、storyModeに従う',
+                    'STORY_MODE: storySource=flow_based の場合、storyFlowSnapshot の qCode / depthStage / phase / flow / topicDigest を物語の方向決定に使う',
+                    'STORY_MODE: STORY_META_SEED がある場合、メタを説明せず、人物・場面・温度・光への変化として物語化する',
+                    `STORY_MODE_FLOW: ${JSON.stringify(storyFlowSnapshotForFinal ?? {})}`,
+                    `STORY_MODE_POLICY: ${JSON.stringify(storyPolicyForFinal ?? {})}`,
+                    `STORY_WORDING_POLICY: ${JSON.stringify(wordingPolicyForStoryFinal ?? {})}`,
+                    'STORY_MODE: 表では「闇」という語を使わず、「未消化」に寄せる',
+                    'STORY_MODE: 本人・先祖・家系の事実や罪を断定しない',
+                    'STORY_MODE: フロー結果に基づく物語化として扱い、入力にない事件・人物・罪・家系事情を足さない',
+                    ...(storyModeForFinal === 'undigested_story'
+                      ? [
+                          'UNDIGESTED_STORY: 未消化の物語として描く',
+                          'UNDIGESTED_STORY: リメイク・再統合まで勝手に進めない',
+                          'UNDIGESTED_STORY: 物語の最後は、未消化として残っている核を示すところまでにする',
+                        ]
+                      : []),
+                    ...(storyModeForFinal === 'remake_story'
+                      ? [
+                          'REMAKE_STORY: 未消化の物語を否定せず、リメイク物語として書く',
+                          'REMAKE_STORY: リメイクは説明・整理ではなく、物語本文として書く',
+                          'REMAKE_STORY: 未消化だった感情を必ず受け取る',
+                          'REMAKE_STORY: 誰にもわかってもらえなかった痛みが、物語の中で初めて理解される場面を入れる',
+                          'REMAKE_STORY: 痛みを消さない。受け取られることで意味が変わる流れにする',
+                          'REMAKE_STORY: 未消化だった物語が、光に変わるストーリーとして書く',
+                          'REMAKE_STORY: 最後は、感情が光へ変わり、統合へ向かう流れにする',
+                          'REMAKE_STORY: 「いま見えていること」「いま内側で起きていること」「ポイント」「まとめ」などの診断テンプレを使わない',
+                          'REMAKE_STORY: 「リメイクは」「物語はここで」「そしてリメイクされた物語では」「こうなります」など、方法説明の文で進めない',
+                          'REMAKE_STORY: SOURCE_STORY がある場合は、SOURCE_STORY の人物・場面・感情を受け取り、光へ変わる物語本文として書く',
+                          'REMAKE_STORY: 元の未消化を消すのではなく、わかってもらえた感覚を通して意味づけを変換して戻す',
+                        ]
+                      : []),
+                  ]
+                : [];
+
               const writerDirectivesForFinal = {
                 ...writerDirectivesBaseForFinal,
                 ...(openEdgeClosingLineForFinal
@@ -10521,6 +11083,7 @@ const isResonanceStructureFollowup =
                 writeConstraints: [
                   ...relaxedWriteConstraintsForFinal,
                   ...deepReadSuppressionConstraintsForFinal,
+                  ...storyModeConstraintsForFinal,
                   ...(isPreviousReplyRephraseForFinal
                     ? [
                         'PREVIOUS_REPLY_REPHRASE: 現在のユーザー文そのものに答えない',
@@ -10540,7 +11103,15 @@ const isResonanceStructureFollowup =
                       ]
                     : []),
                 ],
-                ...(deepRevealLineForWriter && !shouldSuppressDeepRevealForFinal
+                ...(deepRevealLineForWriter &&
+                  !shouldSuppressDeepRevealForFinal &&
+                  !Boolean(
+                    (opts as any)?.userContext?.ctxPack?.diagnosisFollowup ??
+                    (opts as any)?.extra?.ctxPack?.diagnosisFollowup ??
+                    (opts as any)?.ctxPack?.diagnosisFollowup ??
+                    (opts as any)?.diagnosisFollowup ??
+                    false
+                  )
                   ? {
                       deepRevealLine: deepRevealLineForWriter,
                       forceUseDeepReveal: true,
@@ -10697,6 +11268,32 @@ console.log(
 );
 const finalWriterDirectivesExtraLines = (() => {
   const lines: string[] = [];
+
+  if (isStoryModeForFinal) {
+    lines.push('story_order=RECEIVE,UNDERSTAND,LIGHT_TURN,INTEGRATE');
+    lines.push('story_opening_role=RECEIVE');
+    lines.push('STORY_SEED: OBS/SHIFT/NEXT/SAFEではなく、物語の流れで書く');
+    lines.push('STORY_SEED: 観測・整理・方向づけ・まとめとして書かない');
+    lines.push('STORY_SEED_RECEIVE: 未消化だった感情を受け取る場面から始める');
+    lines.push('STORY_SEED_UNDERSTAND: わかってもらえなかった痛みが理解される場面を書く');
+    lines.push('STORY_SEED_LIGHT_TURN: 痛みの意味が、光へ変わる転換を書く');
+    lines.push('STORY_SEED_INTEGRATE: 最後は、感情が統合へ向かう物語として閉じる');
+
+    for (const x of storyModeConstraintsForFinal) {
+      const s = String(x ?? '').trim();
+      if (s) lines.push(`writeConstraint${lines.length + 1}=${s}`);
+    }
+
+    const storyUserStateSummary = String(
+      (writerDirectivesForFinal as any)?.user_state_summary ?? ''
+    ).trim();
+
+    if (storyUserStateSummary) {
+      lines.push(`user_state_summary=${storyUserStateSummary}`);
+    }
+
+    return lines;
+  }
 
   for (const [key, value] of Object.entries(writerDirectivesForFinal ?? {})) {
     if (value == null) continue;
@@ -11145,8 +11742,66 @@ const finalWriterDirectivesMsg =
       })();
 
       const messagesForWriterFinal = (() => {
-        const seedDraftForWriter = String(seedDraft ?? '').replace(/\s+/g, ' ').trim();
+        const isDiagnosisFollowupForWriter = Boolean(
+          (opts as any)?.userContext?.ctxPack?.diagnosisFollowup ??
+          (opts as any)?.ctxPack?.diagnosisFollowup ??
+          (ctxPackForWriter as any)?.diagnosisFollowup ??
+          (opts as any)?.userContext?.ctxPack?.lastIrDiagnosis ??
+          (ctxPackForWriter as any)?.lastIrDiagnosis ??
+          false
+        );
 
+        const diagnosisSeedDraftForWriter = (() => {
+          if (!isDiagnosisFollowupForWriter) return '';
+
+          const pick = (...cands: any[]) => {
+            for (const v of cands) {
+              if (v === undefined || v === null) continue;
+              const s = String(v).replace(/\s+/g, ' ').trim();
+              if (s) return s;
+            }
+            return '';
+          };
+
+          const d: any =
+            (ctxPackForWriter as any)?.lastIrDiagnosis ??
+            (opts as any)?.userContext?.ctxPack?.lastIrDiagnosis ??
+            (opts as any)?.ctxPack?.lastIrDiagnosis ??
+            null;
+
+          const pickedDiagnosisSeed = pick(
+            d?.summary,
+            d?.diagnosisText,
+            d?.diagnosis_text,
+            d?.text,
+            d?.assistantText,
+            d?.observation,
+            d?.state
+          );
+
+          return pickedDiagnosisSeed ? pickedDiagnosisSeed.slice(0, 240) : '';
+        })();
+
+        const seedDraftForWriterBase = String(seedDraft ?? '').replace(/\s+/g, ' ').trim();
+        const seedDraftForWriter =
+          isDiagnosisFollowupForWriter && diagnosisSeedDraftForWriter
+            ? diagnosisSeedDraftForWriter
+            : seedDraftForWriterBase;
+
+        console.log('[IROS/DIAG_SEED_FOR_WRITER_DEBUG]', {
+          traceId: debug.traceId ?? null,
+          conversationId: debug.conversationId ?? null,
+          userCode: debug.userCode ?? null,
+          isDiagnosisFollowupForWriter,
+          diagnosisSeedDraftLen: String(diagnosisSeedDraftForWriter ?? '').length,
+          diagnosisSeedDraftHead: String(diagnosisSeedDraftForWriter ?? '').slice(0, 220),
+          seedDraftForWriterBaseLen: String(seedDraftForWriterBase ?? '').length,
+          seedDraftForWriterBaseHead: String(seedDraftForWriterBase ?? '').slice(0, 220),
+          seedDraftForWriterLen: String(seedDraftForWriter ?? '').length,
+          seedDraftForWriterHead: String(seedDraftForWriter ?? '').slice(0, 220),
+          hasCtxLastIrDiagnosis: Boolean((ctxPackForWriter as any)?.lastIrDiagnosis),
+          hasUserContextCtxLastIrDiagnosis: Boolean((opts as any)?.userContext?.ctxPack?.lastIrDiagnosis),
+        });
         const shouldRewriteSeedPack =
           seedDraftForWriter.length > 0 &&
           seedDraftForWriter.length <= 240 &&
@@ -11203,6 +11858,249 @@ const finalWriterDirectivesMsg =
 
             return rewritten === content ? m : { ...m, content: rewritten };
           });
+
+        const storySourceMsg = (() => {
+          if (storyModeForFinal !== 'remake_story') return null;
+
+          const pickLastAssistantStory = (...sources: any[]): string => {
+            for (const source of sources) {
+              if (!Array.isArray(source)) continue;
+
+              const found = [...source]
+                .reverse()
+                .find((m: any) => {
+                  const role = String(m?.role ?? m?.type ?? '').toLowerCase().trim();
+                  if (!/^(assistant|ai|model|iros)$/i.test(role)) return false;
+
+                  const content = String(
+                    m?.content ??
+                      m?.text ??
+                      m?.assistantText ??
+                      m?.message ??
+                      '',
+                  ).trim();
+
+                  if (!content) return false;
+                  if (/(DO NOT OUTPUT|INTERNAL PACK|STATE_CUES|MIRROR_FLOW_SEED|WRITER_DIRECTIVES|PATTERN_OUTPUT_CONTRACT|HISTORY_LITE)/i.test(content)) return false;
+                  if (/^(もちろんです|わかりました|了解です|できます|必要なら)/u.test(content)) return false;
+
+                  return true;
+                });
+
+              const content = String(
+                (found as any)?.content ??
+                  (found as any)?.text ??
+                  (found as any)?.assistantText ??
+                  (found as any)?.message ??
+                  '',
+              ).trim();
+
+              if (content) return content;
+            }
+
+            return '';
+          };
+
+          const sourceStory = pickLastAssistantStory(
+            (ctxPackForWriter as any)?.historyForWriter,
+            (opts as any)?.ctxPack?.historyForWriter,
+            (opts as any)?.userContext?.ctxPack?.historyForWriter,
+            (opts as any)?.meta?.extra?.ctxPack?.historyForWriter,
+            (opts as any)?.userContext?.meta?.extra?.ctxPack?.historyForWriter,
+          );
+
+          console.log(
+            '[IROS/STORY_SOURCE_PICK]',
+            JSON.stringify({
+              traceId: debug.traceId ?? null,
+              conversationId: debug.conversationId ?? null,
+              userCode: debug.userCode ?? null,
+              enabled: true,
+              storyMode: storyModeForFinal,
+              sourceStoryLen: sourceStory.length,
+              sourceStoryHead: sourceStory.slice(0, 320),
+              sourceStoryTail: sourceStory.slice(-220),
+            }),
+          );
+
+          if (!sourceStory) return null;
+
+          return {
+            role: 'assistant',
+            content: [
+              'STORY_SOURCE (DO NOT OUTPUT):',
+              'このターンは、現在のユーザー文を相談として深読みするターンではない。',
+              '現在のユーザー文は、SOURCE_STORY をリメイクする操作条件として扱う。',
+              '',
+              `storyMode=${storyModeForFinal}`,
+              `integrationIntent=${String((ctxPackForWriter as any)?.integrationIntent === true)}`,
+              '',
+              'SOURCE_STORY:',
+              sourceStory,
+              '',
+              'STORY_SOURCE_RULES:',
+              '- SOURCE_STORY をリメイク対象の正本にする',
+              '- 出力はリメイク物語本文にする',
+              '- リメイクの方法・説明・手順を書かない',
+              '- 「リメイクは」「物語はここで」「こうなります」などの説明接続で進めない',
+              '- SOURCE_STORY にある感情を受け取る場面を入れる',
+              '- わかってもらえなかった痛みが、物語の中で理解される場面を入れる',
+              '- 痛みを消さず、受け取られることで意味が変わる流れにする',
+              '- 最後は、未消化だったものが光へ変わり、統合へ向かう物語として閉じる',
+              '- SOURCE_STORY にない人物・事件・家系事情を足さない',
+            ].join('\n'),
+          } as const;
+        })();
+
+        const storyMetaSeedMsg = (() => {
+          if (!isStoryModeForFinal) return null;
+
+          const normStoryMeta = (value: any): string => {
+            if (value == null) return '';
+            if (
+              typeof value === 'string' ||
+              typeof value === 'number' ||
+              typeof value === 'boolean'
+            ) {
+              return String(value).trim();
+            }
+            if (typeof value === 'object') {
+              const picked =
+                (value as any)?.id ??
+                (value as any)?.deltaType ??
+                (value as any)?.energy ??
+                (value as any)?.stage ??
+                null;
+
+              if (picked != null) return String(picked).trim();
+
+              try {
+                return JSON.stringify(value).slice(0, 220);
+              } catch {
+                return '';
+              }
+            }
+
+            return String(value ?? '').trim();
+          };
+
+          const qCodeForStoryMeta = normStoryMeta(
+            (storyFlowSnapshotForFinal as any)?.qCode ??
+              (ctxPackForWriter as any)?.qCode ??
+              (opts as any)?.ctxPack?.qCode ??
+              (opts as any)?.userContext?.ctxPack?.qCode,
+          );
+
+          const depthStageForStoryMeta = normStoryMeta(
+            (storyFlowSnapshotForFinal as any)?.depthStage ??
+              (ctxPackForWriter as any)?.depthStage ??
+              (opts as any)?.ctxPack?.depthStage ??
+              (opts as any)?.userContext?.ctxPack?.depthStage,
+          );
+
+          const phaseForStoryMeta = normStoryMeta(
+            (storyFlowSnapshotForFinal as any)?.phase ??
+              (ctxPackForWriter as any)?.phase ??
+              (opts as any)?.ctxPack?.phase ??
+              (opts as any)?.userContext?.ctxPack?.phase,
+          );
+
+          const eTurnForStoryMeta = normStoryMeta(
+            (ctxPackForWriter as any)?.mirror?.e_turn ??
+              (ctxPackForWriter as any)?.mirrorFlowV1?.mirror?.e_turn ??
+              (ctxPackForWriter as any)?.e_turn ??
+              (opts as any)?.ctxPack?.mirror?.e_turn ??
+              (opts as any)?.userContext?.ctxPack?.mirror?.e_turn ??
+              (opts as any)?.userContext?.ctxPack?.mirrorFlowV1?.mirror?.e_turn,
+          );
+
+          const polarityForStoryMeta = normStoryMeta(
+            (ctxPackForWriter as any)?.mirror?.polarity ??
+              (ctxPackForWriter as any)?.polarity ??
+              (opts as any)?.ctxPack?.mirror?.polarity ??
+              (opts as any)?.userContext?.ctxPack?.mirror?.polarity,
+          );
+
+          const flowDeltaForStoryMeta = normStoryMeta(
+            (storyFlowSnapshotForFinal as any)?.flow?.delta ??
+              (ctxPackForWriter as any)?.flow?.delta ??
+              (ctxPackForWriter as any)?.flow?.deltaType ??
+              (ctxPackForWriter as any)?.flowDelta ??
+              (opts as any)?.ctxPack?.flow?.delta ??
+              (opts as any)?.userContext?.ctxPack?.flow?.delta,
+          );
+
+          const returnStreakForStoryMeta = normStoryMeta(
+            (storyFlowSnapshotForFinal as any)?.flow?.returnStreak ??
+              (ctxPackForWriter as any)?.flow?.returnStreak ??
+              (ctxPackForWriter as any)?.returnStreak ??
+              (opts as any)?.ctxPack?.flow?.returnStreak ??
+              (opts as any)?.userContext?.ctxPack?.flow?.returnStreak,
+          );
+
+          const futureRandomForStoryMeta = normStoryMeta(
+            (ctxPackForWriter as any)?.flow?.futureRandom ??
+              (opts as any)?.ctxPack?.flow?.futureRandom ??
+              (opts as any)?.userContext?.ctxPack?.flow?.futureRandom,
+          );
+
+          const topicDigestForStoryMeta = normStoryMeta(
+            (storyFlowSnapshotForFinal as any)?.topicDigest ??
+              (ctxPackForWriter as any)?.topicDigest ??
+              (opts as any)?.ctxPack?.topicDigest ??
+              (opts as any)?.userContext?.ctxPack?.topicDigest,
+          );
+
+          console.log(
+            '[IROS/STORY_META_SEED]',
+            JSON.stringify({
+              traceId: debug.traceId ?? null,
+              conversationId: debug.conversationId ?? null,
+              userCode: debug.userCode ?? null,
+              storyMode: storyModeForFinal,
+              qCode: qCodeForStoryMeta || null,
+              depthStage: depthStageForStoryMeta || null,
+              phase: phaseForStoryMeta || null,
+              e_turn: eTurnForStoryMeta || null,
+              polarity: polarityForStoryMeta || null,
+              flowDelta: flowDeltaForStoryMeta || null,
+              returnStreak: returnStreakForStoryMeta || null,
+              futureRandom: futureRandomForStoryMeta || null,
+              topicDigest: topicDigestForStoryMeta || null,
+            }),
+          );
+
+          return {
+            role: 'assistant',
+            content: [
+              'STORY_META_SEED (DO NOT OUTPUT):',
+              'このメタは本文で説明しない。',
+              'コード名・内部名・数値を本文に出さない。',
+              'メタは、物語の温度・深さ・場面の重さ・光への変化の方向として使う。',
+              '',
+              `storyMode=${storyModeForFinal}`,
+              qCodeForStoryMeta ? `qCode=${qCodeForStoryMeta}` : null,
+              depthStageForStoryMeta ? `depthStage=${depthStageForStoryMeta}` : null,
+              phaseForStoryMeta ? `phase=${phaseForStoryMeta}` : null,
+              eTurnForStoryMeta ? `e_turn=${eTurnForStoryMeta}` : null,
+              polarityForStoryMeta ? `polarity=${polarityForStoryMeta}` : null,
+              flowDeltaForStoryMeta ? `flowDelta=${flowDeltaForStoryMeta}` : null,
+              returnStreakForStoryMeta ? `returnStreak=${returnStreakForStoryMeta}` : null,
+              futureRandomForStoryMeta ? `futureRandom=${futureRandomForStoryMeta}` : null,
+              topicDigestForStoryMeta ? `topicDigest=${topicDigestForStoryMeta}` : null,
+              '',
+              'STORY_META_INTERPRETATION:',
+              '- depthStage / phase は、物語の深さと視点に変換する',
+              '- e_turn は、受け取られるべき感情の温度に変換する',
+              '- flowDelta / returnStreak は、繰り返してきた未消化の長さに変換する',
+              '- futureRandom は、次に光へ変わる可能性の方向としてだけ使う',
+              '- topicDigest は、物語の主題を外さないために使う',
+              '- 出力は説明ではなく、メタを通した物語本文にする',
+            ]
+              .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+              .join('\n'),
+          } as const;
+        })();
 
         const previousEventSourceMsg = (() => {
           const isOperatePreviousEvent =
@@ -11317,7 +12215,7 @@ const finalWriterDirectivesMsg =
           } as const;
         })();
 
-        const inserts = [diagnosisSourceMsg, previousEventSourceMsg, finalWriterDirectivesMsg, finalPatternContractMsg].filter(Boolean) as Array<{
+        const inserts = [diagnosisSourceMsg, storySourceMsg, storyMetaSeedMsg, previousEventSourceMsg, finalWriterDirectivesMsg, finalPatternContractMsg].filter(Boolean) as Array<{
           role: 'assistant';
           content: string;
         }>;
@@ -11434,7 +12332,15 @@ const finalWriterDirectivesMsg =
       ...({ slotDecision: slotDecisionForWriter } as any),
       writerDirectives: {
         ...writerDirectivesForFinal,
-        ...(deepRevealLineForWriter && !shouldSuppressDeepRevealForFinal
+        ...(deepRevealLineForWriter &&
+                  !shouldSuppressDeepRevealForFinal &&
+                  !Boolean(
+                    (opts as any)?.userContext?.ctxPack?.diagnosisFollowup ??
+                    (opts as any)?.extra?.ctxPack?.diagnosisFollowup ??
+                    (opts as any)?.ctxPack?.diagnosisFollowup ??
+                    (opts as any)?.diagnosisFollowup ??
+                    false
+                  )
           ? {
               deepRevealLine: deepRevealLineForWriter,
               forceUseDeepReveal: true,
@@ -11488,6 +12394,13 @@ extra: {
     (opts as any)?.userContext?.ctxPack?.goalKind ??
     (opts as any)?.userContext?.ctxPack?.replyGoal?.kind ??
     (ctxPackForWriter?.goalKind ?? null),
+
+  referenceJudgeSeed:
+    ((opts as any)?.extra?.referenceJudgeSeed) ??
+    ((opts as any)?.userContext?.referenceJudgeSeed) ??
+    ((opts as any)?.userContext?.meta?.extra?.referenceJudgeSeed) ??
+    ((opts as any)?.userContext?.ctxPack?.referenceJudgeSeed) ??
+    null,
 },
 
 userContext: {
@@ -11917,6 +12830,66 @@ userContext: {
   };
   let candidate = String(rawGuarded ?? '').trim();
 
+  // REFERENCE_JUDGEMENT_FINAL_GUARD
+  // reference_check の判定冒頭を NORMAL_RESONANCE の言い換えから守る。
+  {
+    const referenceJudgeSeedForFinalGuard =
+      String((opts as any)?.extra?.referenceJudgeSeed ?? '').trim() ||
+      String((opts as any)?.userContext?.ctxPack?.referenceJudgeSeed ?? '').trim() ||
+      String((opts as any)?.userContext?.meta?.extra?.referenceJudgeSeed ?? '').trim() ||
+      '';
+
+    const writerFirstLineForFinalGuard = (() => {
+      const m = referenceJudgeSeedForFinalGuard.match(/(?:^|\n)writerFirstLine=([^\n]+)/u);
+      return String(m?.[1] ?? '').trim();
+    })();
+
+    const hasReferenceJudgementForFinalGuard = /(?:^|\n)REFERENCE_JUDGEMENT:/u.test(referenceJudgeSeedForFinalGuard);
+    const isReferenceCheckForFinalGuard = /(?:^|\n)askType=reference_check/u.test(referenceJudgeSeedForFinalGuard);
+    const shouldApplyReferenceJudgementFinalGuard =
+      hasReferenceJudgementForFinalGuard &&
+      isReferenceCheckForFinalGuard &&
+      writerFirstLineForFinalGuard.length > 0;
+
+    if (shouldApplyReferenceJudgementFinalGuard) {
+      const currentCandidate = String(candidate ?? '').trim();
+      const startsWithJudge = currentCandidate.startsWith(writerFirstLineForFinalGuard);
+      const firstCandidateLine = currentCandidate.split(/\n+/u)[0]?.trim() ?? '';
+
+      const startsWithCompatibleJudgement =
+        /^(いいえ|いえ|一致とは言えません|一致していません|完全には一致しません|沿っていません|その意味にはなりません|部分的には|一部は)/u.test(firstCandidateLine) ||
+        /(一致していません|沿っていません|とは言えません|その意味にはなりません)/u.test(firstCandidateLine);
+
+      if (currentCandidate && !startsWithJudge && !startsWithCompatibleJudgement) {
+        const strippedCandidate = currentCandidate
+          .replace(/^はい、\*\*そのまま進んでよいとは言いません\*\*[。．]?\s*/u, '')
+          .replace(/^はい、そのまま進んでよいとは言いません[。．]?\s*/u, '')
+          .replace(/^はい、かなり沿っています[。．]?\s*/u, '')
+          .replace(/^はい、概ね沿っています[。．]?\s*/u, '')
+          .replace(/^はい、沿っています[。．]?\s*/u, '')
+          .replace(/^合っています[。．]?\s*/u, '')
+          .replace(/^正しいです[。．]?\s*/u, '')
+          .trim();
+
+        candidate = [writerFirstLineForFinalGuard, strippedCandidate]
+          .filter((v) => String(v ?? '').trim().length > 0)
+          .join('\n\n')
+          .trim();
+      }
+
+      console.log(
+        '[IROS/rephraseEngine][REFERENCE_JUDGEMENT_FINAL_GUARD]',
+        JSON.stringify({
+          applied: shouldApplyReferenceJudgementFinalGuard,
+          writerFirstLine: writerFirstLineForFinalGuard,
+          beforeHead: currentCandidate.slice(0, 160),
+          afterHead: String(candidate ?? '').slice(0, 160),
+        })
+      );
+    }
+  }
+
+
   const candidateBeforeSanitize = String(candidate ?? '');
   candidate = sanitizeNoQuestions(candidate);
 
@@ -12264,7 +13237,8 @@ userContext: {
 
       if (buf) chunks.push(buf);
 
-      const lines: string[] = [];
+  
+    const lines: string[] = [];
 
       console.log(
         '[IROS/rephraseEngine][CANDIDATE_AFTER_SANITIZE]',
@@ -14020,3 +14994,9 @@ return await runRetryPass({
     slotsForGuard,
   });
 }
+
+
+
+
+
+

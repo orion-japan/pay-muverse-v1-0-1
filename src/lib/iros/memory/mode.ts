@@ -56,7 +56,7 @@ export function normalizeIrosMode(mode?: unknown): IrosMode | null {
 export function detectMode(userText: string): IrosMode {
   const t = (userText || '').trim();
 
-  if (/^\s*(ir\s*診断|ir診断|irで見て|ir\s*お願いします)/i.test(t)) return 'diagnosis';
+  if (/(?:^|[\s\u3000])(?:ir\s*\u8a3a\u65ad|ir\u8a3a\u65ad|ir\u3067\u898b\u3066|ir\s*\u304a\u9858\u3044\u3057\u307e\u3059)/i.test(t)) return 'diagnosis';
   if (/意図(トリガー)?/i.test(t)) return 'intention';
 
   return 'auto';

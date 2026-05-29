@@ -23,6 +23,11 @@ import { buildTurnContext } from './handleIrosReply.context';
 import { runOrchestratorTurn } from './handleIrosReply.orchestrator';
 import { postProcessReply } from './handleIrosReply.postprocess';
 import { buildFlowSeedV1, formatFlowSeedV1 } from '@/lib/iros/seed/seedEngine';
+import {
+  judgeReferenceCheck,
+  formatReferenceJudgeSeed,
+} from '@/lib/iros/judge/referenceJudge';
+import { resolveWorkingReference } from '@/lib/iros/memory/workingReferenceResolver';
 import { buildBlockPlanWithDiag } from '@/lib/iros/blockPlan/blockPlanEngine';
 import { extractSlotsForRephrase, rephraseSlotsFinal } from '@/lib/iros/language/rephraseEngine';
 import {
@@ -1191,11 +1196,20 @@ export async function handleIrosReply(
 // ✅ extra は const のままなので、ローカルで更新して回す（関数スコープで宣言）
 let extraLocal: any = extra ?? null;
 
+const rawInputTextForDiagnosisCheck = String(
+  (params as any)?.userText ??
+    (params as any)?.text ??
+    (params as any)?.inputText ??
+    (params as any)?.message ??
+    ''
+).trim();
+
 const isIrDiagnosisInput =
-String(mode ?? '').trim().toLowerCase() === 'diagnosis' ||
-String((extra as any)?.mode ?? '').trim().toLowerCase() === 'diagnosis' ||
-String((extra as any)?.presentationKind ?? '').trim().toLowerCase() === 'diagnosis' ||
-(extra as any)?.isIrDiagnosisTurn === true;
+  String(mode ?? '').trim().toLowerCase() === 'diagnosis' ||
+  String((extra as any)?.mode ?? '').trim().toLowerCase() === 'diagnosis' ||
+  String((extra as any)?.presentationKind ?? '').trim().toLowerCase() === 'diagnosis' ||
+  (extra as any)?.isIrDiagnosisTurn === true ||
+  /(?:^|[\s　])(?:ir\s*診断|ir診断|irで見て|ir\s*お願いします)/i.test(rawInputTextForDiagnosisCheck);
 
 if (isIrDiagnosisInput) {
   const rawIrText = String(
@@ -1206,13 +1220,71 @@ if (isIrDiagnosisInput) {
       ''
   ).trim();
 
-  const cleanedTargetLabel = rawIrText
-    .replace(/^\s*ir診断[\s:：　-]*/u, '')
-    .replace(/^\s*irで見て[\s:：　-]*/u, '')
-    .replace(/^\s*ir[\s:：　-]*/u, '')
-    .trim();
+  const cleanedTargetLabel = (() => {
+    const source = rawIrText.replace(/\r\n/g, '\n').trim();
+    const lines = source
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const irLine =
+      lines.find((line) =>
+        /(?:^|[\s　])(?:ir\s*診断|ir診断|irで見て|ir\s*お願いします)/i.test(line),
+      ) ?? source;
+
+    return irLine
+      .replace(/(?:^|[\s　])(?:ir\s*診断|ir診断|irで見て|ir\s*お願いします)[\s:：　-]*/iu, '')
+      .trim();
+  })();
 
     const targetLabel = cleanedTargetLabel || '自分';
+
+    const diagRelationshipMemoryRows =
+      typeof userCode === 'string' &&
+      userCode.trim().length > 0 &&
+      targetLabel &&
+      targetLabel !== '自分'
+        ? await loadRelationshipMemoriesForTurn({
+            userCode,
+            displayName: targetLabel,
+            limit: 1,
+          })
+        : [];
+
+    const diagRelationshipMemory =
+      Array.isArray(diagRelationshipMemoryRows) &&
+      diagRelationshipMemoryRows.length > 0
+        ? diagRelationshipMemoryRows[0]
+        : null;
+
+    const diagRelationshipMemoryDisplayName = String(
+      (diagRelationshipMemory as any)?.display_name ??
+        (diagRelationshipMemory as any)?.displayName ??
+        targetLabel ??
+        '',
+    ).trim();
+
+    const diagRelationshipMemoryTargetKey = String(
+      Array.isArray((diagRelationshipMemory as any)?.aliases) &&
+        (diagRelationshipMemory as any).aliases.length > 0
+        ? (diagRelationshipMemory as any).aliases[0]
+        : targetLabel.replace(/さん|様|先生|くん|ちゃん/g, ''),
+    ).trim();
+
+    const diagMemoryDecision =
+      diagRelationshipMemory && diagRelationshipMemoryDisplayName
+        ? {
+            memoryIntent: 'relationship_recall',
+            memorySpace: 'relationship',
+            targetLabel: diagRelationshipMemoryDisplayName,
+            targetKey: diagRelationshipMemoryTargetKey || null,
+            projectKey: null,
+            relationId: (diagRelationshipMemory as any)?.relation_id ?? null,
+            recallMode: 'contextual',
+            confidence: 0.86,
+            reason: 'diagnosis_target_relationship_memory_hit',
+          }
+        : null;
 
     const diagMemoryState = await (async () => {
       try {
@@ -1272,6 +1344,13 @@ if (isIrDiagnosisInput) {
             selfAcceptance: diagSelfAcceptance,
             self_acceptance: diagSelfAcceptance,
             memoryStateSnapshot: diagMemoryStateSnapshot,
+            relationshipMemory: diagRelationshipMemory,
+            memoryDecision: diagMemoryDecision,
+            memoryIntent: diagMemoryDecision?.memoryIntent ?? null,
+            memorySpace: diagMemoryDecision?.memorySpace ?? null,
+            memoryTargetLabel: diagMemoryDecision?.targetLabel ?? null,
+            memoryTargetKey: diagMemoryDecision?.targetKey ?? null,
+            memoryRecallMode: diagMemoryDecision?.recallMode ?? null,
           },
           slotPlanKeys: [],
           slotPlan_keys: [],
@@ -2693,7 +2772,9 @@ function normForRecall(v: any): string {
                   ? 'action'
                   : preOrchCtxPack.followupKind === 'consult_timing'
                     ? 'resonate'
-                    : 'clarify';
+                    : preOrchCtxPack.followupKind === 'deepen'
+                      ? 'resonate'
+                      : 'clarify';
 
               // user の短い followup 文そのものをトピック正本にしない
               preOrchCtxPack.conversationLine = diagnosisTopicHint;
@@ -3552,6 +3633,81 @@ function normForRecall(v: any): string {
                 '',
             ).trim() || null;
 
+      const resolvedAskForSeedAnchor = resolveWorkingReference({
+        currentQuestion: String(text ?? ''),
+        historyForTurn,
+        orchCtxPack,
+        orchExtra,
+        extraLocal,
+      });
+
+      if (resolvedAskForSeedAnchor) {
+        (orchCtxPack as any).resolvedAsk = resolvedAskForSeedAnchor;
+        (orchExtra as any).resolvedAsk = resolvedAskForSeedAnchor;
+        (orchExtra as any).ctxPack ??= {};
+        (orchExtra as any).ctxPack.resolvedAsk = resolvedAskForSeedAnchor;
+
+        (extraLocal as any).resolvedAsk = resolvedAskForSeedAnchor;
+        (extraLocal as any).ctxPack ??= {};
+        (extraLocal as any).ctxPack.resolvedAsk = resolvedAskForSeedAnchor;
+      }
+
+      const conversationAnchorForSeed = {
+        source: resolvedAskForSeedAnchor ? 'mixed' as const : 'rule' as const,
+
+        observationTarget:
+          String(
+            resolvedAskForSeedAnchor?.referenceTarget ??
+              (orchCtxPack as any)?.observedBasedOn ??
+              (orchExtra as any)?.observedBasedOn ??
+              ''
+          ).trim() || null,
+
+        mainSubject:
+          String(
+            resolvedAskForSeedAnchor?.mainSubject ??
+              (orchCtxPack as any)?.situationTopic ??
+              (orchExtra as any)?.situationTopic ??
+              text ??
+              ''
+          ).trim() || null,
+
+        meaningCore:
+          String(
+            resolvedAskForSeedAnchor?.askFrame ??
+              (orchCtxPack as any)?.topicDigest ??
+              (orchExtra as any)?.topicDigest ??
+              (orchCtxPack as any)?.conversationLine ??
+              ''
+          ).trim() || null,
+
+        continuityMode:
+          String(
+            resolvedAskForSeedAnchor ? 'reference_check' :
+              (orchCtxPack as any)?.continuityKind ??
+              (orchExtra as any)?.continuityKind ??
+              ''
+          ).trim() || null,
+
+        forbidEscape: ['generic_empathy', 'topic_escape', 'meta_escape'],
+
+        llmHint: {
+          enabled: Boolean(resolvedAskForSeedAnchor),
+          candidate: resolvedAskForSeedAnchor?.askFrame ?? null,
+        },
+      };
+
+      if (resolvedAskForSeedAnchor) {
+        console.log('[IROS/SEED_ANCHOR][RESOLVED_ASK]', {
+          hasResolvedAskForSeedAnchor: true,
+          askType: resolvedAskForSeedAnchor.askType,
+          currentQuestion: resolvedAskForSeedAnchor.currentQuestion,
+          referenceTargetHead: String(resolvedAskForSeedAnchor.referenceTarget ?? '').slice(0, 120),
+          mainSubject: resolvedAskForSeedAnchor.mainSubject,
+          meaningCore: resolvedAskForSeedAnchor.askFrame,
+          sourceAssistantTextHead: String(resolvedAskForSeedAnchor.sourceAssistantText ?? '').slice(0, 160),
+        });
+      }
       const flowSeedObj = buildFlowSeedV1({
         flow: {
           current:
@@ -3615,6 +3771,25 @@ function normForRecall(v: any): string {
         },
 
         userCore: flowSeedUserCore,
+        conversationAnchor: conversationAnchorForSeed,
+        resolvedReference: resolvedAskForSeedAnchor
+          ? {
+              type: 'deictic_reference',
+              scope: 'current_turn',
+              sourcePhrase: /\u305d\u308c/u.test(String(resolvedAskForSeedAnchor.currentQuestion ?? ''))
+                ? '\u305d\u308c'
+                : /\u3053\u308c/u.test(String(resolvedAskForSeedAnchor.currentQuestion ?? ''))
+                  ? '\u3053\u308c'
+                  : null,
+              referenceTarget: resolvedAskForSeedAnchor.referenceTarget ?? null,
+              currentQuestion: resolvedAskForSeedAnchor.currentQuestion ?? null,
+              mainSubject: resolvedAskForSeedAnchor.mainSubject ?? null,
+              askType: resolvedAskForSeedAnchor.askType ?? 'reference_check',
+              askFrame: resolvedAskForSeedAnchor.askFrame ?? null,
+              expiresAfterTurn: true,
+            }
+          : null,
+
 
         historyLine: (() => {
           if (previousReplyRephraseSeed) return null;
@@ -3892,6 +4067,13 @@ function normForRecall(v: any): string {
       });
 
       const flowSeed = formatFlowSeedV1(flowSeedObj).trim();
+      console.log('[IROS/FLOW_SEED_RESOLVED_REFERENCE_DIAG]', {
+        hasResolvedAskForSeedAnchor: Boolean(resolvedAskForSeedAnchor),
+        hasResolvedReferenceInFlowSeed: flowSeed.includes('RESOLVED_REFERENCE:'),
+        hasReferenceCheckInFlowSeed: flowSeed.includes('askType=reference_check'),
+        hasExpiresAfterTurnInFlowSeed: flowSeed.includes('expiresAfterTurn=true'),
+        flowSeedHead: flowSeed.slice(0, 900),
+      });
     /* ---------------------------
        4) PostProcess
     ---------------------------- */
@@ -3931,6 +4113,79 @@ function normForRecall(v: any): string {
       history: historyForTurn,
       extra: extraLocal ?? null,
     });
+
+    // Sync FlowSeed into metaForSave before rephraseBridge.
+    // Writer can then read RESOLVED_REFERENCE from args/ctxPack/extra flowSeed.
+    {
+      out.metaForSave = out.metaForSave ?? {};
+      (out.metaForSave as any).extra =
+        (out.metaForSave as any).extra && typeof (out.metaForSave as any).extra === 'object'
+          ? (out.metaForSave as any).extra
+          : {};
+
+      const exForFlowSeedSync: any = (out.metaForSave as any).extra;
+      exForFlowSeedSync.flowSeed = flowSeed;
+      exForFlowSeedSync.flowSeedSyncedForRephraseBridge = true;
+
+      exForFlowSeedSync.ctxPack =
+        exForFlowSeedSync.ctxPack && typeof exForFlowSeedSync.ctxPack === 'object'
+          ? exForFlowSeedSync.ctxPack
+          : {};
+
+      exForFlowSeedSync.ctxPack.flowSeed = flowSeed;
+      exForFlowSeedSync.ctxPack.flowSeedSyncedForRephraseBridge = true;
+
+      console.log('[IROS/FLOW_SEED_SYNC_FOR_REPHRASE]', {
+        hasFlowSeed: typeof flowSeed === 'string' && flowSeed.length > 0,
+        hasResolvedReference: String(flowSeed ?? '').includes('RESOLVED_REFERENCE:'),
+        hasReferenceCheck: String(flowSeed ?? '').includes('askType=reference_check'),
+      });
+    }
+
+
+
+    // Reference Judge diagnostic only.
+    // Do not affect Writer yet.
+    if (resolvedAskForSeedAnchor?.askType === 'reference_check') {
+      const referenceJudgeResult = await judgeReferenceCheck({
+        referenceTarget: resolvedAskForSeedAnchor.referenceTarget ?? null,
+        mainSubject: resolvedAskForSeedAnchor.mainSubject ?? null,
+        currentQuestion: resolvedAskForSeedAnchor.currentQuestion ?? null,
+        askFrame: resolvedAskForSeedAnchor.askFrame ?? null,
+        sourceAssistantText: resolvedAskForSeedAnchor.sourceAssistantText ?? null,
+        sourcePreviousUserText: resolvedAskForSeedAnchor.sourcePreviousUserText ?? null,
+        traceId: null,
+        conversationId: conversationId ?? null,
+        userCode: userCode ?? null,
+      });
+
+      out.metaForSave = out.metaForSave ?? {};
+      (out.metaForSave as any).extra =
+        (out.metaForSave as any).extra && typeof (out.metaForSave as any).extra === 'object'
+          ? (out.metaForSave as any).extra
+          : {};
+
+      const exForReferenceJudge: any = (out.metaForSave as any).extra;
+      exForReferenceJudge.referenceJudge = referenceJudgeResult;
+      exForReferenceJudge.referenceJudgeSeed = formatReferenceJudgeSeed(referenceJudgeResult);
+      exForReferenceJudge.referenceJudgeDiagnosedAt = new Date().toISOString();
+
+      console.log(
+        '[IROS/referenceJudge][RESULT]',
+        JSON.stringify({
+          ok: referenceJudgeResult.ok,
+          source: referenceJudgeResult.source,
+          domain: referenceJudgeResult.domain,
+          relation: referenceJudgeResult.relation,
+          risk: referenceJudgeResult.risk,
+          answerMode: referenceJudgeResult.answerMode,
+          structureViewAllowed: referenceJudgeResult.structureViewAllowed,
+          cannotAnswerDefinitively: referenceJudgeResult.cannotAnswerDefinitively,
+          writerFirstLine: referenceJudgeResult.writerFirstLine,
+          judgementSummary: referenceJudgeResult.judgementSummary,
+        })
+      );
+    }
 
     // ✅ diagnosis followup 系を out.metaForSave.extra に明示同期
     // - rephraseEngine は opts.meta.extra.presentationKind / targetLabel を読む
@@ -4017,6 +4272,27 @@ function normForRecall(v: any): string {
         if (typeof diagnosisCtx?.topicHint === 'string' && diagnosisCtx.topicHint.trim()) {
           ex.ctxPack.topicHint = diagnosisCtx.topicHint.trim();
         }
+        const diagnosisSeedBodyForOut = [
+          String((diagnosisCtx as any)?.irMeta?.observationResult ?? '').trim(),
+          String((diagnosisCtx as any)?.lastIrDiagnosis?.observation ?? '').trim(),
+          String((diagnosisCtx as any)?.irMeta?.awarenessText ?? '').trim(),
+          String((diagnosisCtx as any)?.lastIrDiagnosis?.state ?? '').trim(),
+          String(diagnosisCtx?.topicHint ?? '').trim(),
+        ].find((v) => v.length > 0) ?? '';
+
+        const diagnosisTargetForSeed =
+          resolvedDiagnosisTargetForOut ||
+          String(diagnosisCtx?.targetLabel ?? '').trim() ||
+          String(diagnosisCtx?.diagnosisFollowupTargetLabel ?? '').trim() ||
+          '対象者';
+
+        const diagnosisStrongSeedForOut = diagnosisSeedBodyForOut
+          ? `直前のir診断結果として、${diagnosisTargetForSeed}の状態を答える。外部の診断書や本人だけが持つ事実ではなく、保存済みのir診断結果を扱う。` + '\n' + diagnosisSeedBodyForOut
+          : `直前のir診断結果として、${diagnosisTargetForSeed}の状態を答える。外部の診断書や本人だけが持つ事実ではなく、保存済みのir診断結果を扱う。`;
+
+        ex.slotPlanSeed = diagnosisStrongSeedForOut;
+        ex.llmRewriteSeed = diagnosisStrongSeedForOut;
+        ex.ctxPack.slotPlanSeed = diagnosisStrongSeedForOut;
       }
     }
 
@@ -4565,6 +4841,16 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
       if (awakenedGoalKind) {
         return awakenedGoalKind;
       }
+
+      const isDiagnosisDeepenFollowupForGoal =
+        (cpAny?.diagnosisFollowup === true ||
+          exAny?.diagnosisFollowup === true ||
+          metaAny?.diagnosisFollowup === true) &&
+        String(cpAny?.followupKind ?? exAny?.followupKind ?? metaAny?.followupKind ?? '')
+          .trim()
+          .toLowerCase() === 'deepen';
+
+      if (isDiagnosisDeepenFollowupForGoal) return 'resonate';
 
       if (existingGoalKind === 'decide') return 'decide';
       if (existingGoalKind === 'clarify') return 'clarify';
@@ -5501,13 +5787,37 @@ try {
     });
   } catch {}
 
+  const memoryIntentForRelationshipRecall = String(
+    (extra2 as any)?.ctxPack?.memoryIntent ?? '',
+  ).trim();
+
+  const memoryTargetLabelForRelationshipRecall = String(
+    (extra2 as any)?.ctxPack?.memoryTargetLabel ?? '',
+  ).trim();
+
+  const memoryTargetKeyForRelationshipRecall = String(
+    (extra2 as any)?.ctxPack?.memoryTargetKey ?? '',
+  ).trim();
+
+  const memoryDisplayNameForRelationshipRecall =
+    memoryIntentForRelationshipRecall === 'relationship_recall'
+      ? memoryTargetLabelForRelationshipRecall ||
+        memoryTargetKeyForRelationshipRecall
+      : '';
+
   const recalledRows = resolved?.relationId
     ? await loadRelationshipMemoriesForTurn({
         userCode,
         relationId: resolved.relationId,
         limit: 1,
       })
-    : [];
+    : memoryDisplayNameForRelationshipRecall
+      ? await loadRelationshipMemoriesForTurn({
+          userCode,
+          displayName: memoryDisplayNameForRelationshipRecall,
+          limit: 1,
+        })
+      : [];
 
   const recalledRow =
     Array.isArray(recalledRows) && recalledRows.length > 0
@@ -5565,6 +5875,10 @@ try {
     depthNow: (extra2 as any)?.ctxPack?.depth_now ?? null,
     emotionalTemperature,
 
+    domain: context?.relation_domain ?? null,
+    role: context?.relation_role ?? null,
+    structure: context?.relation_structure ?? null,
+
     context,
     analysis,
 
@@ -5581,9 +5895,19 @@ try {
   };
   (extra2.ctxPack as any).relationshipMemory = recalledMemory;
 
-  if (resolved?.relationId) {
+  const fallbackRelationshipRelationIdForMemory =
+    !resolved?.relationId &&
+    memoryIntentForRelationshipRecall === 'relationship_recall' &&
+    memoryTargetKeyForRelationshipRecall
+      ? `${userCode}__person_${memoryTargetKeyForRelationshipRecall}`
+      : '';
+
+  const effectiveRelationshipRelationIdForMemory =
+    resolved?.relationId || fallbackRelationshipRelationIdForMemory;
+
+  if (effectiveRelationshipRelationIdForMemory) {
     const resolvedDisplayName =
-      Array.isArray(resolved.matchedNames) && resolved.matchedNames.length > 0
+      Array.isArray(resolved?.matchedNames) && resolved.matchedNames.length > 0
         ? String(resolved.matchedNames[0] ?? '').trim()
         : '';
 
@@ -5596,29 +5920,45 @@ try {
         ).trim();
 
     const effectiveRelationshipDisplayName =
-      resolvedDisplayName || existingRelationshipDisplayName;
+      resolvedDisplayName || existingRelationshipDisplayName || memoryTargetLabelForRelationshipRecall || memoryTargetKeyForRelationshipRecall;
 
-    (extra2.ctxPack as any).relationId = resolved.relationId;
+    (extra2.ctxPack as any).relationId = effectiveRelationshipRelationIdForMemory;
 
     if (effectiveRelationshipDisplayName) {
       (extra2.ctxPack as any).relationshipDisplayName =
         effectiveRelationshipDisplayName;
       delete (extra2.ctxPack as any).pendingRelationshipDisplayName;
       delete (extra2.ctxPack as any).pendingRelationshipRelationId;
-    } else if (resolved.reason === 'generic_romantic_relation_fallback') {
+    } else if (resolved?.reason === 'generic_romantic_relation_fallback') {
       (extra2.ctxPack as any).pendingRelationshipDisplayName = true;
-      (extra2.ctxPack as any).pendingRelationshipRelationId = resolved.relationId;
+      (extra2.ctxPack as any).pendingRelationshipRelationId = effectiveRelationshipRelationIdForMemory;
     }
+
+    const effectiveRelationshipAliasesForMemory = Array.from(
+      new Set(
+        [
+          memoryTargetKeyForRelationshipRecall,
+          memoryTargetLabelForRelationshipRecall,
+          effectiveRelationshipDisplayName,
+        ]
+          .map((v) => String(v ?? '').trim())
+          .filter(Boolean),
+      ),
+    );
 
     await upsertRelationshipMemory({
       userCode,
-      relationId: resolved.relationId,
+      relationId: effectiveRelationshipRelationIdForMemory,
 
       displayName: effectiveRelationshipDisplayName || null,
+      aliases:
+        effectiveRelationshipAliasesForMemory.length > 0
+          ? effectiveRelationshipAliasesForMemory
+          : null,
       role:
-        resolved.mode === 'between_others'
+        resolved?.mode === 'between_others'
           ? 'other'
-          : resolved.mode === 'self_other'
+          : resolved?.mode === 'self_other'
             ? 'other'
             : null,
 
@@ -5629,9 +5969,9 @@ try {
       unresolvedTopics: topicDigest ? [String(topicDigest)] : null,
 
       confidence:
-        resolved.mode === 'between_others'
+        resolved?.mode === 'between_others'
           ? 0.75
-          : resolved.mode === 'self_other'
+          : resolved?.mode === 'self_other'
             ? 0.8
             : 0.5,
     });
@@ -9374,7 +9714,7 @@ try {
       },
       ctxPack: (() => {
         const baseCtx: any =
-          ((((out.metaForSave as any)?.extra?.ctxPack ?? null) as any) ?? {});
+           (((out.metaForSave as any)?.extra?.ctxPack ?? {}) as any);
 
         const textForDiagnosisFollowup = String(text ?? '').trim();
 
@@ -9389,11 +9729,7 @@ try {
         const isDiagnosisFollowupCtx =
           baseCtx?.diagnosisFollowup === true ||
           String(baseCtx?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
-          (
-            baseCtx?.detailMode === true &&
-            hasIrDiagnosisContext &&
-            asksDiagnosisFollowup
-          );
+          (hasIrDiagnosisContext && asksDiagnosisFollowup);
 
         const resolvedFollowupKind =
           typeof baseCtx?.followupKind === 'string' &&
@@ -9403,9 +9739,9 @@ try {
               ? 'concretize'
               : null;
 
-        // ✅ reference_clarification 救済
-        // context側で extra.resolvedAsk / extra.ctxPack.resolvedAsk に入った参照質問情報が、
-        // rephraseBridge到達時に ctxPack から落ちているケースをここで復元する。
+        // reference_check / reference_clarification rescue
+        // Restore resolvedAsk and flowSeed into ctxPack before rephraseBridge calls writer.
+        // flowSeed may already contain RESOLVED_REFERENCE from Memory Seed Builder.
         const resolvedAskForRephraseCtx =
           baseCtx?.resolvedAsk ??
           (out.metaForSave as any)?.extra?.resolvedAsk ??
@@ -9416,10 +9752,29 @@ try {
           String((resolvedAskForRephraseCtx as any)?.askType ?? '').trim() ||
           String((out.metaForSave as any)?.extra?.resolvedAskType ?? '').trim();
 
+        const flowSeedForRephraseCtx =
+          typeof baseCtx?.flowSeed === 'string' && String(baseCtx.flowSeed).trim()
+            ? String(baseCtx.flowSeed).trim()
+            : typeof (out.metaForSave as any)?.extra?.flowSeed === 'string' &&
+                String((out.metaForSave as any).extra.flowSeed).trim()
+              ? String((out.metaForSave as any).extra.flowSeed).trim()
+              : null;
+
+        const referenceJudgeSeedForRephraseCtx =
+          typeof baseCtx?.referenceJudgeSeed === 'string' && String(baseCtx.referenceJudgeSeed).trim()
+            ? String(baseCtx.referenceJudgeSeed).trim()
+            : typeof (out.metaForSave as any)?.extra?.referenceJudgeSeed === 'string' &&
+                String((out.metaForSave as any).extra.referenceJudgeSeed).trim()
+              ? String((out.metaForSave as any).extra.referenceJudgeSeed).trim()
+              : null;
+
         const referenceClarificationForRephraseCtx =
           baseCtx?.referenceClarification === true ||
           (out.metaForSave as any)?.extra?.referenceClarification === true ||
           resolvedAskTypeForRephraseCtx === 'reference_clarification';
+
+        const referenceCheckForRephraseCtx =
+          resolvedAskTypeForRephraseCtx === 'reference_check';
 
         return {
           ...baseCtx,
@@ -9434,12 +9789,28 @@ try {
                 resolvedAskType: resolvedAskTypeForRephraseCtx,
               }
             : {}),
+          ...(flowSeedForRephraseCtx
+            ? {
+                flowSeed: flowSeedForRephraseCtx,
+              }
+            : {}),
+          ...(referenceJudgeSeedForRephraseCtx
+            ? {
+                referenceJudgeSeed: referenceJudgeSeedForRephraseCtx,
+              }
+            : {}),
           ...(referenceClarificationForRephraseCtx
             ? {
                 referenceClarification: true,
                 continuityKind: 'reference_clarification',
                 goalKind: 'clarify',
                 replyGoal: { kind: 'clarify' },
+              }
+            : {}),
+          ...(referenceCheckForRephraseCtx
+            ? {
+                continuityKind: 'reference_check',
+                resolvedAskType: 'reference_check',
               }
             : {}),
 

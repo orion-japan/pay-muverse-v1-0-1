@@ -13,6 +13,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabaseServer } from '@/lib/supabaseServer'
 import { findSemanticSnapshotsV1 } from '@/lib/iros/memory/semanticRecall';
+import { normalizeDiagnosisTargetKey } from '@/lib/iros/memory/normalizeDiagnosisTargetKey';
 // ★ 過去記憶トリガー検出 + キーワード抽出
 
 export type MemoryRecallTriggerKind = 'none' | 'recent_topic' | 'keyword' | 'semantic';
@@ -463,6 +464,11 @@ export type IrDiagnosisSnapshot = {
   state: string | null;
   summary: string | null;
   createdAt: string | null;
+  diagnosisResultId?: number | null;
+  targetKey?: string | null;
+  qPrimary?: string | null;
+  depthStage?: string | null;
+  phase?: string | null;
 };
 
 function normalizeIrDiagnosisTargetForMatch(value: unknown): string {
@@ -532,6 +538,85 @@ export async function loadLatestIrDiagnosisSnapshot(
   const requestedTarget = normalizeIrDiagnosisTargetForMatch(targetLabel);
 
   try {
+    const requestedTargetKey = normalizeDiagnosisTargetKey(targetLabel);
+
+    if (requestedTargetKey) {
+      const { data: diagnosisResultRow, error: diagnosisResultError } = await supabase
+        .from('iros_ir_diagnosis_results')
+        .select('id, target_label, target_key, q_primary, depth_stage, phase, diagnosis_text, diagnosis_json, created_at')
+        .eq('owner_user_code', userCode)
+        .eq('target_key', requestedTargetKey)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (diagnosisResultError) {
+        console.warn('[IROS][loadLatestIrDiagnosisSnapshot] diagnosis_results query error', {
+          userCode,
+          targetLabel,
+          requestedTargetKey,
+          error: diagnosisResultError,
+        });
+      } else if (diagnosisResultRow) {
+        const diagnosisJson = (diagnosisResultRow as any)?.diagnosis_json ?? null;
+        const irMeta = diagnosisJson?.irMeta ?? diagnosisJson?.baseDiagExtra?.irMeta ?? null;
+
+        const snapshot: IrDiagnosisSnapshot = {
+          diagnosisResultId:
+            typeof (diagnosisResultRow as any)?.id === 'number'
+              ? (diagnosisResultRow as any).id
+              : null,
+          target:
+            (typeof (diagnosisResultRow as any)?.target_label === 'string'
+              ? (diagnosisResultRow as any).target_label
+              : null) ??
+            (typeof irMeta?.targetLabel === 'string' ? irMeta.targetLabel : null),
+          targetKey:
+            typeof (diagnosisResultRow as any)?.target_key === 'string'
+              ? (diagnosisResultRow as any).target_key
+              : null,
+          qPrimary:
+            typeof (diagnosisResultRow as any)?.q_primary === 'string'
+              ? (diagnosisResultRow as any).q_primary
+              : null,
+          depthStage:
+            typeof (diagnosisResultRow as any)?.depth_stage === 'string'
+              ? (diagnosisResultRow as any).depth_stage
+              : null,
+          phase:
+            typeof (diagnosisResultRow as any)?.phase === 'string'
+              ? (diagnosisResultRow as any).phase
+              : null,
+          observation:
+            typeof irMeta?.observationResult === 'string'
+              ? irMeta.observationResult
+              : null,
+          state:
+            typeof irMeta?.awarenessText === 'string'
+              ? irMeta.awarenessText
+              : null,
+          summary:
+            typeof (diagnosisResultRow as any)?.diagnosis_text === 'string'
+              ? (diagnosisResultRow as any).diagnosis_text
+              : typeof irMeta?.summaryText === 'string'
+                ? irMeta.summaryText
+                : null,
+          createdAt:
+            typeof (diagnosisResultRow as any)?.created_at === 'string'
+              ? (diagnosisResultRow as any).created_at
+              : null,
+        };
+
+        const hasDiagnosisSnapshot =
+          snapshot.target !== null ||
+          snapshot.observation !== null ||
+          snapshot.state !== null ||
+          snapshot.summary !== null;
+
+        if (hasDiagnosisSnapshot) return snapshot;
+      }
+    }
+
     if (requestedTarget) {
       const { data: messageRows, error: messageError } = await supabase
         .from('iros_messages')
