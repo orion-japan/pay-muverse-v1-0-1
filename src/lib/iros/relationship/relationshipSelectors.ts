@@ -7,12 +7,20 @@ import type { RelationshipContext } from './relationshipContext';
 import type {
   EmotionalTemperature,
   RelationshipPacket,
+  RelationDomain,
+  RelationRole,
+  RelationStructure,
 } from './relationshipTypes';
+
 
 export type BuildRelationshipPacketArgs = {
   eNow?: string | null;
   depthNow?: string | null;
   emotionalTemperature?: EmotionalTemperature | null;
+
+  domain?: RelationDomain | null;
+  role?: RelationRole | null;
+  structure?: RelationStructure | null;
 
   context?: RelationshipContext | null;
   analysis?: RelationshipAnalysis | null;
@@ -50,6 +58,9 @@ export function buildRelationshipPacket(
     },
 
     RELATION: {
+      domain: args.domain ?? null,
+      role: args.role ?? null,
+      structure: args.structure ?? null,
       distance: args.context?.distance_level ?? null,
       certainty: args.context?.certainty_level ?? null,
       power_balance: args.context?.power_balance ?? null,

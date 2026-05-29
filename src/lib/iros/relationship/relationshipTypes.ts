@@ -90,6 +90,10 @@ export type RelationshipPacket = {
   };
 
   RELATION: {
+    domain?: RelationDomain | null;
+    role?: RelationRole | null;
+    structure?: RelationStructure | null;
+
     distance?: DistanceLevel | null;
     certainty?: CertaintyLevel | null;
     power_balance?: PowerBalance | null;
@@ -108,3 +112,9 @@ export type RelationshipPacket = {
     avoid_repeated_questions?: boolean;
   };
 };
+
+export type RelationDomain = 'romance' | 'business' | 'client' | 'customer' | 'collaboration' | 'team' | 'organization' | 'family' | 'relative' | 'friendship' | 'mentor' | 'student' | 'community' | 'neighbor' | 'public' | 'neutral_person' | 'unknown';
+
+export type RelationRole = 'romantic_person' | 'partner' | 'client' | 'customer' | 'vendor' | 'coworker' | 'boss' | 'subordinate' | 'collaborator' | 'research_partner' | 'family' | 'relative' | 'parent' | 'child' | 'sibling' | 'spouse' | 'friend' | 'mentor' | 'student' | 'teacher' | 'community_member' | 'neighbor' | 'public_person' | 'unknown_person';
+
+export type RelationStructure = 'emotional_bond' | 'agreement_gap' | 'role_gap' | 'responsibility_gap' | 'progress_gap' | 'authority_gap' | 'boundary_gap' | 'trust_gap' | 'communication_gap' | 'expectation_gap' | 'care_gap' | 'inheritance_gap' | 'community_gap' | 'unknown';
