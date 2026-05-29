@@ -27,7 +27,39 @@ export type WriterDirectivesLike = {
   writeConstraints?: string[] | null;
 };
 
+export type ConversationAnchor = {
+  source?: 'rule' | 'llm' | 'mixed';
+
+  observationTarget?: string | null;
+  mainSubject?: string | null;
+  meaningCore?: string | null;
+
+  continuityMode?: string | null;
+
+  forbidEscape?: string[] | null;
+
+  llmHint?: {
+    enabled?: boolean;
+    candidate?: string | null;
+  } | null;
+};
+
+export type ResolvedReference = {
+  type?: 'deictic_reference' | string;
+  scope?: 'current_turn' | string;
+  sourcePhrase?: string | null;
+  referenceTarget?: string | null;
+  currentQuestion?: string | null;
+  mainSubject?: string | null;
+  askType?: 'reference_check' | string;
+  askFrame?: string | null;
+  expiresAfterTurn?: boolean | null;
+};
+
+
 export type SeedCanonicalInput = {
+  conversationAnchor?: ConversationAnchor | null;
+  resolvedReference?: ResolvedReference | null;
   meaningSkeleton?: MeaningSkeletonV2 | null;
   flow180?: Flow180Like | null;
 
@@ -115,6 +147,9 @@ export type SeedCanonical = {
     userCore: string | null;
     historyLine: string | null;
   };
+
+  conversationAnchor?: ConversationAnchor | null;
+  resolvedReference?: ResolvedReference | null;
 
   meta: {
     goalKind: string | null;
@@ -323,6 +358,65 @@ function buildSeedText(seed: Omit<SeedCanonical, 'text'>): string {
     .filter((v): v is string => Boolean(v))
     .join('\n');
 
+  const conversationAnchorText = [
+    clean(seed.conversationAnchor?.observationTarget)
+      ? `observationTarget=${clean(seed.conversationAnchor?.observationTarget)}`
+      : null,
+    clean(seed.conversationAnchor?.mainSubject)
+      ? `mainSubject=${clean(seed.conversationAnchor?.mainSubject)}`
+      : null,
+    clean(seed.conversationAnchor?.meaningCore)
+      ? `meaningCore=${clean(seed.conversationAnchor?.meaningCore)}`
+      : null,
+    clean(seed.conversationAnchor?.continuityMode)
+      ? `continuityMode=${clean(seed.conversationAnchor?.continuityMode)}`
+      : null,
+    Array.isArray(seed.conversationAnchor?.forbidEscape) &&
+    seed.conversationAnchor?.forbidEscape?.length
+      ? `forbidEscape=${seed.conversationAnchor.forbidEscape
+          .map((v) => clean(v))
+          .filter((v): v is string => Boolean(v))
+          .join(' / ')}`
+      : null,
+    seed.conversationAnchor?.llmHint?.enabled
+      ? `llmHint=${clean(seed.conversationAnchor?.llmHint?.candidate) ?? 'enabled'}`
+      : null,
+  ]
+    .filter((v): v is string => Boolean(v))
+    .join('\n');
+
+  const resolvedReferenceText = [
+    clean(seed.resolvedReference?.type)
+      ? `type=${clean(seed.resolvedReference?.type)}`
+      : null,
+    clean(seed.resolvedReference?.scope)
+      ? `scope=${clean(seed.resolvedReference?.scope)}`
+      : null,
+    clean(seed.resolvedReference?.sourcePhrase)
+      ? `sourcePhrase=${clean(seed.resolvedReference?.sourcePhrase)}`
+      : null,
+    clean(seed.resolvedReference?.referenceTarget)
+      ? `referenceTarget=${clean(seed.resolvedReference?.referenceTarget)}`
+      : null,
+    clean(seed.resolvedReference?.currentQuestion)
+      ? `currentQuestion=${clean(seed.resolvedReference?.currentQuestion)}`
+      : null,
+    clean(seed.resolvedReference?.mainSubject)
+      ? `mainSubject=${clean(seed.resolvedReference?.mainSubject)}`
+      : null,
+    clean(seed.resolvedReference?.askType)
+      ? `askType=${clean(seed.resolvedReference?.askType)}`
+      : null,
+    clean(seed.resolvedReference?.askFrame)
+      ? `askFrame=${clean(seed.resolvedReference?.askFrame)}`
+      : null,
+    seed.resolvedReference?.expiresAfterTurn === true
+      ? 'expiresAfterTurn=true'
+      : null,
+  ]
+    .filter((v): v is string => Boolean(v))
+    .join('\n');
+
     const surfacePlanText = [
       clean(seed.surfacePlan.obsCore) ? `OBS=${clean(seed.surfacePlan.obsCore)}` : null,
       clean(seed.surfacePlan.shiftCore) ? `SHIFT=${clean(seed.surfacePlan.shiftCore)}` : null,
@@ -351,6 +445,8 @@ function buildSeedText(seed: Omit<SeedCanonical, 'text'>): string {
         .join('\n')),
       line('CONTEXT', clean(seed.context.userCore) ?? clean(seed.focus)),
       line('DIFFERENCE', differenceText),
+      line('RESOLVED_REFERENCE', resolvedReferenceText),
+      line('ANCHOR', conversationAnchorText),
       line('TRANSFER_SEED', clean(seed.transferSeedText)),
       line('HUMAN_CONTEXT_ORCHESTRATION', clean(seed.humanContextOrchestrationText)),
       line('FOCUS', clean(seed.focus)),
@@ -495,6 +591,9 @@ export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
       userCore: clean(input.userCore) ?? clean(input.focus),
       historyLine: clean(input.historyLine),
     },
+
+    conversationAnchor: input.conversationAnchor ?? null,
+    resolvedReference: input.resolvedReference ?? null,
 
     meta: {
       goalKind,

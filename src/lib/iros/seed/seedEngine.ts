@@ -17,6 +17,8 @@ import {
   type MeaningSkeletonV2,
   type SeedCanonical,
   type WriterDirectivesLike,
+  type ConversationAnchor,
+  type ResolvedReference,
 } from './buildSeedCanonical';
 
 import {
@@ -97,6 +99,8 @@ export type FlowSeedV21Input = {
   meaningSkeleton?: MeaningSkeletonV2 | null;
   flow180?: Flow180Like | null;
   writerDirectives?: WriterDirectivesLike | null;
+  conversationAnchor?: ConversationAnchor | null;
+  resolvedReference?: ResolvedReference | null;
 
   surfacePlan?: {
     obsCore?: string | null;
@@ -720,6 +724,8 @@ export function buildFlowSeedV1(input: FlowSeedV21Input): FlowSeedV21 {
     historyLine: context.historyLine,
 
     writerDirectives: input.writerDirectives ?? null,
+    conversationAnchor: input.conversationAnchor ?? null,
+    resolvedReference: input.resolvedReference ?? null,
 
     askBackAllowed: input.askBackAllowed ?? null,
     questionsMax:
