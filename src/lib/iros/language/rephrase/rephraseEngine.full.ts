@@ -10607,6 +10607,51 @@ const isResonanceStructureFollowup =
                     }
                   : null;
 
+              const quotedConditionReadWriterDirectives =
+                (
+                  (opts as any)?.extra?.newQuotedReferenceSource === true ||
+                  (opts as any)?.extra?.ctxPack?.newQuotedReferenceSource === true ||
+                  (opts as any)?.ctxPack?.newQuotedReferenceSource === true ||
+                  (opts as any)?.userContext?.newQuotedReferenceSource === true ||
+                  (opts as any)?.userContext?.ctxPack?.newQuotedReferenceSource === true ||
+                  (opts as any)?.userContext?.meta?.extra?.newQuotedReferenceSource === true ||
+                  (opts as any)?.userContext?.meta?.extra?.ctxPack?.newQuotedReferenceSource === true ||
+                  (ctxPackForWriter as any)?.newQuotedReferenceSource === true
+                )
+                  ? {
+                      ...(baseWriterDirectivesForFinal ?? {}),
+                      pattern_key: 'PLAIN_CONDITION_READ_V1',
+                      pattern_mode: 'plain_condition_read',
+                      bodyStyle: {
+                        preferBlockSplit: true,
+                        minBlocks: 1,
+                        maxBlocks: 2,
+                        maxSentencesPerBlock: 2,
+                        minSentences: 1,
+                        maxSentences: 4,
+                      },
+                      writeConstraints: [
+                        ...(
+                          Array.isArray((baseWriterDirectivesForFinal as any)?.writeConstraints)
+                            ? (baseWriterDirectivesForFinal as any).writeConstraints
+                            : []
+                        ),
+                        'PLAIN_CONDITION_READ: このターンは通常相談ではなく、ユーザーが提示した規約文・条件文・案内文の読解として扱う',
+                        'PLAIN_CONDITION_READ: ユーザーが提示した文面に書かれている条件だけを読む',
+                        'PLAIN_CONDITION_READ: 過去文脈・長期記憶・前回の規約文を混ぜない',
+                        'PLAIN_CONDITION_READ: 共鳴表現、気持ちの読み取り、深読み、比喩表現を入れない',
+                        'PLAIN_CONDITION_READ: 1文目で条件の結論を短く言い切る',
+                        'PLAIN_CONDITION_READ: 2文目以降は、条件を外した場合の扱いを短く補足する',
+                        'PLAIN_CONDITION_READ: 「という見え方です」「必要なら」「確認すると安心です」を多用しない',
+                        'PLAIN_CONDITION_READ: 本文は1〜2段落まで。余計な提案で伸ばさない',
+                      ],
+                      block_condition_read_conclusion:
+                        '提示文の条件をそのまま読み、結論を短く出す。',
+                      block_condition_read_limit:
+                        '条件を満たさない場合にどう扱われるかだけを補足する。',
+                    }
+                  : null;
+
               const writerDirectivesForFinalRaw = relationshipAdviceRepairWriterDirectives
                 ? relationshipAdviceRepairWriterDirectives
                 : consultAnswerWriterDirectives
@@ -10615,10 +10660,12 @@ const isResonanceStructureFollowup =
                     ? composeRequestWriterDirectives
                     : creativeContinuationWriterDirectives
                       ? creativeContinuationWriterDirectives
-                      : referenceCheckWriterDirectives
-                        ? referenceCheckWriterDirectives
-                      : referenceClarificationWriterDirectives
-                        ? referenceClarificationWriterDirectives
+                      : quotedConditionReadWriterDirectives
+                        ? quotedConditionReadWriterDirectives
+                        : referenceCheckWriterDirectives
+                          ? referenceCheckWriterDirectives
+                          : referenceClarificationWriterDirectives
+                            ? referenceClarificationWriterDirectives
                         : shouldApplyDeepReadDirectives
                         ? {
                             ...baseWriterDirectivesForFinal,
