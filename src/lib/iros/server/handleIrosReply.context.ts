@@ -1171,6 +1171,42 @@ export async function buildTurnContext(
       String((ctxPackForStaleCreativeClear as any)?.resolvedAsk?.askType ?? '').trim() ||
       String((ctxPackForStaleCreativeClear as any)?.resolvedAskType ?? '').trim();
 
+    const isNewQuotedReferenceSourceText =
+      /(?:規約|規定|条件|案内|要項|保証書|募集要項|応募条件|利用条件|配送規定|入場案内|割引条件|予約規約)には[「『][\s\S]{4,}[」』]と書かれています[。.!！?？]?$/u.test(
+        currentTextForStaleCreativeClear,
+      );
+
+    if (isNewQuotedReferenceSourceText) {
+      (baseMetaForTurn as any).extra ??= {};
+      (baseMetaForTurn as any).extra.ctxPack ??= {};
+
+      delete (baseMetaForTurn as any).extra.resolvedAsk;
+      delete (baseMetaForTurn as any).extra.referenceJudgeSeed;
+      delete (baseMetaForTurn as any).extra.referenceJudgeResult;
+      delete (baseMetaForTurn as any).extra.ctxPack.resolvedAsk;
+      delete (baseMetaForTurn as any).extra.ctxPack.resolvedAskType;
+      delete (baseMetaForTurn as any).extra.ctxPack.referenceJudgeSeed;
+      delete (baseMetaForTurn as any).extra.ctxPack.referenceJudgeResult;
+      delete (baseMetaForTurn as any).extra.ctxPack.referenceJudge;
+
+      if (String((baseMetaForTurn as any).extra.ctxPack.continuityKind ?? '').trim() === 'reference_check') {
+        delete (baseMetaForTurn as any).extra.ctxPack.continuityKind;
+      }
+
+      (baseMetaForTurn as any).extra.ctxPack.newQuotedReferenceSource = true;
+      (baseMetaForTurn as any).extra.ctxPack.situationSummary = currentTextForStaleCreativeClear;
+      (baseMetaForTurn as any).extra.ctxPack.situationTopic = currentTextForStaleCreativeClear;
+
+      console.log(
+        '[IROS/STALE_REFERENCE_CHECK_CLEARED]',
+        JSON.stringify({
+          enabled: true,
+          sourceUserText: currentTextForStaleCreativeClear.slice(0, 160),
+          staleResolvedAskType,
+        }),
+      );
+    }
+
     if (isPreviousReplyStyleRewriteText && staleResolvedAskType === 'creative_continuation') {
       (baseMetaForTurn as any).extra ??= {};
       (baseMetaForTurn as any).extra.ctxPack ??= {};

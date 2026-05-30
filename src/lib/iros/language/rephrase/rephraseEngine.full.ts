@@ -611,8 +611,31 @@ const obsCard = (() => {
     return lines.length ? lines.join('\n') : '';
   })();
 
+  const isNewQuotedReferenceSourceForInternalPack =
+    (args as any)?.newQuotedReferenceSource === true ||
+    (args as any)?.extra?.newQuotedReferenceSource === true ||
+    (args as any)?.extra?.ctxPack?.newQuotedReferenceSource === true ||
+    (args as any)?.ctxPack?.newQuotedReferenceSource === true ||
+    (ctxPack as any)?.newQuotedReferenceSource === true;
+
+  const rawMetaTextForInternalPack = String((args as any)?.metaText ?? '').trim();
+
+  const effectiveMetaTextForInternalPack = isNewQuotedReferenceSourceForInternalPack
+    ? ''
+    : rawMetaTextForInternalPack;
+
+  console.log('[IROS/INTERNAL_PACK_META_GATE]', {
+    isNewQuotedReferenceSourceForInternalPack,
+    rawMetaTextLen: rawMetaTextForInternalPack.length,
+    effectiveMetaTextLen: effectiveMetaTextForInternalPack.length,
+    argsCtxPackNewQuotedReferenceSource:
+      (args as any)?.ctxPack?.newQuotedReferenceSource === true,
+    ctxPackNewQuotedReferenceSource:
+      (ctxPack as any)?.newQuotedReferenceSource === true,
+  });
+
   const mergedMetaTextForInternalPack = [
-    String((args as any)?.metaText ?? '').trim(),
+    effectiveMetaTextForInternalPack,
     String(metaText ?? '').trim(),
   ]
     .filter((v) => typeof v === 'string' && v.trim().length > 0)
@@ -2769,17 +2792,51 @@ return blocks;
     .join('\n')
     .trim();
 
-  const memoryStateNoteText = String(
+  const isNewQuotedReferenceSourceForUnderstandingMemoryGate =
+    (opts as any)?.extra?.newQuotedReferenceSource === true ||
+    (opts as any)?.extra?.ctxPack?.newQuotedReferenceSource === true ||
+    (opts as any)?.ctxPack?.newQuotedReferenceSource === true ||
+    (opts as any)?.userContext?.newQuotedReferenceSource === true ||
+    (opts as any)?.userContext?.ctxPack?.newQuotedReferenceSource === true ||
+    (opts as any)?.userContext?.meta?.extra?.newQuotedReferenceSource === true ||
+    (opts as any)?.userContext?.meta?.extra?.ctxPack?.newQuotedReferenceSource === true ||
+    ctxPackForUnderstanding?.newQuotedReferenceSource === true;
+
+  const rawMemoryStateNoteText = String(
     userCtxForUnderstanding?.memoryStateNoteText ??
     ctxPackForUnderstanding?.memoryStateNoteText ??
-    '',
+    ''
   ).trim();
 
-  const longTermMemoryNoteText = String(
+  const rawLongTermMemoryNoteText = String(
     userCtxForUnderstanding?.longTermMemoryNoteText ??
     ctxPackForUnderstanding?.longTermMemoryNoteText ??
-    '',
+    ''
   ).trim();
+
+  const memoryStateNoteText = isNewQuotedReferenceSourceForUnderstandingMemoryGate
+    ? ''
+    : rawMemoryStateNoteText;
+
+  const longTermMemoryNoteText = isNewQuotedReferenceSourceForUnderstandingMemoryGate
+    ? ''
+    : rawLongTermMemoryNoteText;
+
+  console.log('[IROS/REPHRASE_MEMORY_META_GATE]', {
+    isNewQuotedReferenceSourceForUnderstandingMemoryGate,
+    rawMemoryStateNoteTextLen: rawMemoryStateNoteText.length,
+    rawLongTermMemoryNoteTextLen: rawLongTermMemoryNoteText.length,
+    memoryStateNoteTextLen: memoryStateNoteText.length,
+    longTermMemoryNoteTextLen: longTermMemoryNoteText.length,
+    optsExtraNewQuotedReferenceSource: (opts as any)?.extra?.newQuotedReferenceSource === true,
+    optsExtraCtxPackNewQuotedReferenceSource: (opts as any)?.extra?.ctxPack?.newQuotedReferenceSource === true,
+    optsCtxPackNewQuotedReferenceSource: (opts as any)?.ctxPack?.newQuotedReferenceSource === true,
+    userContextCtxPackNewQuotedReferenceSource: (opts as any)?.userContext?.ctxPack?.newQuotedReferenceSource === true,
+    userContextMetaExtraCtxPackNewQuotedReferenceSource:
+      (opts as any)?.userContext?.meta?.extra?.ctxPack?.newQuotedReferenceSource === true,
+    ctxPackForUnderstandingNewQuotedReferenceSource:
+      ctxPackForUnderstanding?.newQuotedReferenceSource === true,
+  });
 
   const metaText = [userUnderstandingStateText, metaTextBase, memoryStateNoteText, longTermMemoryNoteText]
     .filter((v) => typeof v === 'string' && v.trim().length > 0)
@@ -3849,6 +3906,16 @@ const shiftKindForLane =
     // ✅ internalPack 本体
     let internalPack = buildInternalPackText({
       metaText,
+      ctxPack: ctxPackForUnderstanding,
+      newQuotedReferenceSource:
+        (opts as any)?.extra?.newQuotedReferenceSource === true ||
+        (opts as any)?.extra?.ctxPack?.newQuotedReferenceSource === true ||
+        (opts as any)?.ctxPack?.newQuotedReferenceSource === true ||
+        (opts as any)?.userContext?.newQuotedReferenceSource === true ||
+        (opts as any)?.userContext?.ctxPack?.newQuotedReferenceSource === true ||
+        (opts as any)?.userContext?.meta?.extra?.newQuotedReferenceSource === true ||
+        (opts as any)?.userContext?.meta?.extra?.ctxPack?.newQuotedReferenceSource === true ||
+        ctxPackForUnderstanding?.newQuotedReferenceSource === true,
 
 
 
@@ -8388,10 +8455,18 @@ raw = await (async () => {
       pastStateNoteText,
     );
 
+  const isNewQuotedReferenceSourceForStateCues =
+    (opts as any)?.extra?.ctxPack?.newQuotedReferenceSource === true ||
+    (opts as any)?.ctxPack?.newQuotedReferenceSource === true ||
+    (opts as any)?.userContext?.ctxPack?.newQuotedReferenceSource === true ||
+    (opts as any)?.userContext?.meta?.extra?.ctxPack?.newQuotedReferenceSource === true;
+
   const effectivePastStateNoteText =
-    isStoryLikePastStateNote && !isStoryModeForPastStateNote
+    isNewQuotedReferenceSourceForStateCues
       ? ''
-      : pastStateNoteText;
+      : isStoryLikePastStateNote && !isStoryModeForPastStateNote
+        ? ''
+        : pastStateNoteText;
 
   if (isStoryLikePastStateNote && !isStoryModeForPastStateNote) {
     console.log(
@@ -10399,6 +10474,98 @@ const isResonanceStructureFollowup =
                     }
                   : null;
 
+
+              const referenceCheckWriterDirectives =
+                String((resolvedAskForWriter as any)?.askType ?? '').trim() === 'reference_check'
+                  ? (() => {
+                      const referenceJudgeSeed = String(
+                        ((opts as any)?.extra?.referenceJudgeSeed) ??
+                          ((opts as any)?.userContext?.ctxPack?.referenceJudgeSeed) ??
+                          ((opts as any)?.userContext?.meta?.extra?.referenceJudgeSeed) ??
+                          ''
+                      ).trim();
+
+                      const relation = String(
+                        referenceJudgeSeed.match(/(?:^|\n)relation=([^\n]+)/u)?.[1] ?? ''
+                      ).trim();
+
+                      const writerFirstLine = String(
+                        referenceJudgeSeed.match(/(?:^|\n)writerFirstLine=([^\n]+)/u)?.[1] ?? ''
+                      ).trim();
+
+                      const judgementSummary = String(
+                        referenceJudgeSeed.match(/(?:^|\n)judgementSummary=([^\n]+)/u)?.[1] ?? ''
+                      ).trim();
+
+                      const sourceAssistantText = String(
+                        (resolvedAskForWriter as any)?.sourceAssistantText ?? ''
+                      )
+                        .replace(/\s+/g, ' ')
+                        .trim();
+
+                      const baseWriteConstraints = Array.isArray(
+                        (baseWriterDirectivesForFinal as any)?.writeConstraints
+                      )
+                        ? (baseWriterDirectivesForFinal as any).writeConstraints
+                        : [];
+
+                      return {
+                        ...(baseWriterDirectivesForFinal ?? {}),
+                        pattern_key: 'REFERENCE_CHECK_V1',
+                        pattern_mode: 'reference_check',
+                        bodyStyle: {
+                          preferBlockSplit: true,
+                          minBlocks: 1,
+                          maxBlocks: 3,
+                          maxSentencesPerBlock: 3,
+                          minSentences: 1,
+                          maxSentences: 7,
+                        },
+                        block_state_surface: writerFirstLine || '参照元と現在の主張が一致するかを先に答える。',
+                        block_state_weight:
+                          judgementSummary ||
+                          '参照元の条件と、現在の主張の違いを短く説明する。',
+                        block_state_open_edge:
+                          '一般論に戻らず、参照元の条件に照らして判断する。',
+                        writeConstraints: [
+                          ...baseWriteConstraints,
+                          'REFERENCE_CHECK: このターンは通常相談ではなく、直前assistant発話と現在の主張を比較する判定タスク',
+                          'REFERENCE_CHECK: resolvedAsk.sourceAssistantText を参照元として扱う',
+                          sourceAssistantText
+                            ? 'REFERENCE_CHECK_SOURCE: 参照元=' + sourceAssistantText.slice(0, 500)
+                            : '',
+                          writerFirstLine
+                            ? 'REFERENCE_CHECK: 1文目は必ず「' + writerFirstLine + '」の方向で始める'
+                            : '',
+                          judgementSummary
+                            ? 'REFERENCE_CHECK_SUMMARY: ' + judgementSummary
+                            : '',
+                          relation ? 'REFERENCE_CHECK_RELATION: relation=' + relation : '',
+                          'REFERENCE_CHECK: 判定後に一般論・可能性論へ戻って結論を反転させない',
+                          'REFERENCE_CHECK: writerFirstLine と矛盾する本文を書かない',
+                          relation === 'not_identical'
+                            ? 'REFERENCE_CHECK_NOT_IDENTICAL: 本文全体を「沿っていない／一致しない」方向で書く'
+                            : '',
+                          relation === 'not_identical'
+                            ? 'REFERENCE_CHECK_NOT_IDENTICAL_FORBID: 「はい」「沿っている」「その理解で大丈夫」「キャンセルできる前提に沿う」「読めます」と書かない'
+                            : '',
+                          relation === 'not_identical'
+                            ? 'REFERENCE_CHECK_NOT_IDENTICAL_EXPLAIN: 参照元の条件と現在の主張の違いを説明する'
+                            : '',
+                          sourceAssistantText
+                            ? 'REFERENCE_CHECK_USE_CONCRETE_CONDITION: 参照元に期限・条件・対象範囲が含まれる場合、その具体条件を本文に必ず出す'
+                            : '',
+                          sourceAssistantText
+                            ? 'REFERENCE_CHECK_NO_MISSING_SOURCE_ESCAPE: 参照元がある場合、「全文があれば」「文面を見せてくれれば」「別の条件があることがあります」で逃げない'
+                            : '',
+                          judgementSummary
+                            ? 'REFERENCE_CHECK_USE_SUMMARY_AS_CORE: judgementSummary の具体差分を本文の中心にする'
+                            : '',
+                        ].filter(Boolean),
+                      };
+                    })()
+                  : null;
+
               const creativeContinuationWriterDirectives =
                 String((resolvedAskForWriter as any)?.askType ?? '').trim() === 'creative_continuation'
                   ? {
@@ -10448,6 +10615,8 @@ const isResonanceStructureFollowup =
                     ? composeRequestWriterDirectives
                     : creativeContinuationWriterDirectives
                       ? creativeContinuationWriterDirectives
+                      : referenceCheckWriterDirectives
+                        ? referenceCheckWriterDirectives
                       : referenceClarificationWriterDirectives
                         ? referenceClarificationWriterDirectives
                         : shouldApplyDeepReadDirectives
@@ -10886,7 +11055,14 @@ const isResonanceStructureFollowup =
                   ''
               ).trim();
 
+              const isReferenceCheckForFinal =
+                String((resolvedAskForWriter as any)?.askType ?? '').trim() === 'reference_check' ||
+                String((ctxPackForWriter as any)?.resolvedAskType ?? '').trim() === 'reference_check' ||
+                String((opts as any)?.ctxPack?.resolvedAskType ?? '').trim() === 'reference_check' ||
+                String((opts as any)?.userContext?.ctxPack?.resolvedAskType ?? '').trim() === 'reference_check';
+
               const isPlainMeaningQuestionForFinal =
+                !isReferenceCheckForFinal &&
                 /(どういう意味|どういう事|どういうこと|とは|という意味|何を指す|何のこと|.+ってなんですか|.+って何ですか|.+はなんですか|.+は何ですか|.+とはなんですか|.+とは何ですか|それが.+ですか|それは.+ですか|未来という意味|意味ですか)/u.test(
                   plainMeaningQuestionTextForFinal
                 );

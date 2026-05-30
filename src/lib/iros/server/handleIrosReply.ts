@@ -9263,16 +9263,52 @@ try {
           .join('\n')
       : memoryStateNoteText;
 
-    exAny.longTermMemoryNoteText = longTermMemoryNoteText;
-    exAny.memoryStateNoteText = normalizedMemoryStateNoteText;
-    exAny.memoryStateSnapshot = normalizedMemoryStateSnapshot;
+    exAny.ctxPack = exAny.ctxPack && typeof exAny.ctxPack === 'object' ? exAny.ctxPack : {};
+
+    const isNewQuotedReferenceSourceForMemoryGate =
+      exAny.newQuotedReferenceSource === true ||
+      exAny.ctxPack.newQuotedReferenceSource === true ||
+      (out.metaForSave as any)?.extra?.newQuotedReferenceSource === true ||
+      (out.metaForSave as any)?.extra?.ctxPack?.newQuotedReferenceSource === true ||
+      (ctxPackPrev as any)?.newQuotedReferenceSource === true;
+
+    console.log('[IROS/REFERENCE_SOURCE_MEMORY_GATE_DIAG]', {
+      isNewQuotedReferenceSourceForMemoryGate,
+      exAny_newQuotedReferenceSource: exAny.newQuotedReferenceSource === true,
+      exAny_ctxPack_newQuotedReferenceSource: exAny.ctxPack.newQuotedReferenceSource === true,
+      ctxPackPrev_newQuotedReferenceSource: (ctxPackPrev as any)?.newQuotedReferenceSource === true,
+      outExtra_newQuotedReferenceSource: (out.metaForSave as any)?.extra?.newQuotedReferenceSource === true,
+      outExtraCtxPack_newQuotedReferenceSource:
+        (out.metaForSave as any)?.extra?.ctxPack?.newQuotedReferenceSource === true,
+      exAnyKeys: Object.keys(exAny ?? {}).slice(0, 80),
+      exAnyCtxPackKeys: Object.keys(exAny.ctxPack ?? {}).slice(0, 80),
+      ctxPackPrevKeys: Object.keys((ctxPackPrev as any) ?? {}).slice(0, 80),
+      outExtraCtxPackKeys: Object.keys(((out.metaForSave as any)?.extra?.ctxPack ?? {}) as any).slice(0, 80),
+      longTermMemoryNoteTextLen:
+        typeof longTermMemoryNoteText === 'string' ? longTermMemoryNoteText.length : 0,
+    });
+
+    const effectiveLongTermMemoryNoteText = isNewQuotedReferenceSourceForMemoryGate
+      ? null
+      : longTermMemoryNoteText;
+
+    const effectiveMemoryStateNoteText = isNewQuotedReferenceSourceForMemoryGate
+      ? null
+      : normalizedMemoryStateNoteText;
+
+    const effectiveMemoryStateSnapshot = isNewQuotedReferenceSourceForMemoryGate
+      ? null
+      : normalizedMemoryStateSnapshot;
+
+    exAny.longTermMemoryNoteText = effectiveLongTermMemoryNoteText;
+    exAny.memoryStateNoteText = effectiveMemoryStateNoteText;
+    exAny.memoryStateSnapshot = effectiveMemoryStateSnapshot;
     exAny.situationSummary = normalizedMemorySituationSummary;
     exAny.situationTopic = normalizedMemorySituationTopic;
 
-    exAny.ctxPack = exAny.ctxPack && typeof exAny.ctxPack === 'object' ? exAny.ctxPack : {};
-    exAny.ctxPack.longTermMemoryNoteText = longTermMemoryNoteText;
-    exAny.ctxPack.memoryStateNoteText = normalizedMemoryStateNoteText;
-    exAny.ctxPack.memoryStateSnapshot = normalizedMemoryStateSnapshot;
+    exAny.ctxPack.longTermMemoryNoteText = effectiveLongTermMemoryNoteText;
+    exAny.ctxPack.memoryStateNoteText = effectiveMemoryStateNoteText;
+    exAny.ctxPack.memoryStateSnapshot = effectiveMemoryStateSnapshot;
     exAny.ctxPack.situationSummary = normalizedMemorySituationSummary;
     exAny.ctxPack.situationTopic = normalizedMemorySituationTopic;
 
@@ -9467,28 +9503,34 @@ try {
       exprMeta: exprMetaCanon,
 
       pastStateNoteText:
-        [
-          relationshipNoteText,
-          typeof (out.metaForSave as any)?.extra?.pastStateNoteText === 'string'
-            ? (out.metaForSave as any).extra.pastStateNoteText
-            : null,
-        ]
-          .filter(Boolean)
-          .join('\n'),
+        isNewQuotedReferenceSourceForMemoryGate
+          ? ''
+          : [
+              relationshipNoteText,
+              typeof (out.metaForSave as any)?.extra?.pastStateNoteText === 'string'
+                ? (out.metaForSave as any).extra.pastStateNoteText
+                : null,
+            ]
+              .filter(Boolean)
+              .join('\n'),
 
       pastStateTriggerKind:
-        typeof (out.metaForSave as any)?.extra?.pastStateTriggerKind === 'string'
-          ? (out.metaForSave as any).extra.pastStateTriggerKind
-          : null,
+        isNewQuotedReferenceSourceForMemoryGate
+          ? null
+          : typeof (out.metaForSave as any)?.extra?.pastStateTriggerKind === 'string'
+            ? (out.metaForSave as any).extra.pastStateTriggerKind
+            : null,
 
       pastStateKeyword:
-        typeof (out.metaForSave as any)?.extra?.pastStateKeyword === 'string'
-          ? (out.metaForSave as any).extra.pastStateKeyword
-          : null,
+        isNewQuotedReferenceSourceForMemoryGate
+          ? null
+          : typeof (out.metaForSave as any)?.extra?.pastStateKeyword === 'string'
+            ? (out.metaForSave as any).extra.pastStateKeyword
+            : null,
 
-      longTermMemoryNoteText,
-      memoryStateSnapshot,
-      memoryStateNoteText,
+      longTermMemoryNoteText: effectiveLongTermMemoryNoteText,
+      memoryStateSnapshot: effectiveMemoryStateSnapshot,
+      memoryStateNoteText: effectiveMemoryStateNoteText,
 
       selfAcceptance: selfAcceptanceForRephrase,
       self_acceptance: selfAcceptanceForRephrase,
@@ -9526,9 +9568,9 @@ try {
         historyDigestV1: historyDigestV1Internal,
 
         exprMeta: exprMetaCanon,
-        longTermMemoryNoteText,
-        memoryStateNoteText,
-        memoryStateSnapshot,
+        longTermMemoryNoteText: effectiveLongTermMemoryNoteText,
+        memoryStateNoteText: effectiveMemoryStateNoteText,
+        memoryStateSnapshot: effectiveMemoryStateSnapshot,
       },
     };
       })();
