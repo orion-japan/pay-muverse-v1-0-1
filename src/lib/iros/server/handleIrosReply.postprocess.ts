@@ -1218,38 +1218,48 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
       ),
     });
 
-    metaForSave.extra.pastStateNoteText =
-      recall?.pastStateNoteText ??
-      relationshipRecallFallback ??
-      null;
+    const memoryAllowPastStateMerge =
+      (metaForSave as any)?.extra?.memoryAllowPastStateMerge !== false &&
+      (metaForSave as any)?.extra?.ctxPack?.memoryAllowPastStateMerge !== false;
 
-    metaForSave.extra.pastStateTriggerKind =
-      recall?.pastStateNoteText
-        ? (recall?.triggerKind ?? null)
-        : relationshipRecallFallback
-          ? 'relationship_memory'
-          : null;
+    const memoryAllowLongTermSave =
+      (metaForSave as any)?.extra?.memoryAllowLongTermSave !== false &&
+      (metaForSave as any)?.extra?.ctxPack?.memoryAllowLongTermSave !== false;
+
+    metaForSave.extra.pastStateNoteText = memoryAllowPastStateMerge
+      ? (recall?.pastStateNoteText ?? relationshipRecallFallback ?? null)
+      : null;
+
+    metaForSave.extra.pastStateTriggerKind = memoryAllowPastStateMerge
+      ? (recall?.pastStateNoteText
+          ? (recall?.triggerKind ?? null)
+          : relationshipRecallFallback
+            ? 'relationship_memory'
+            : null)
+      : null;
 
     metaForSave.extra.pastStateKeyword = recall?.keyword ?? null;
     try {
-      const durableCandidates = extractDurableMemoriesV1({
-        userText,
-        assistantText:
-          typeof (metaForSave as any)?.assistantText === 'string'
-            ? (metaForSave as any).assistantText
-            : null,
-        conversationId,
-        traceId:
-          typeof (metaForSave as any)?.extra?.traceId === 'string'
-            ? (metaForSave as any).extra.traceId
-            : null,
-      });
-
-      if (durableCandidates.length > 0) {
-        await saveDurableMemoriesV1({
-          userCode,
-          candidates: durableCandidates,
+      if (memoryAllowLongTermSave) {
+        const durableCandidates = extractDurableMemoriesV1({
+          userText,
+          assistantText:
+            typeof (metaForSave as any)?.assistantText === 'string'
+              ? (metaForSave as any).assistantText
+              : null,
+          conversationId,
+          traceId:
+            typeof (metaForSave as any)?.extra?.traceId === 'string'
+              ? (metaForSave as any).extra.traceId
+              : null,
         });
+
+        if (durableCandidates.length > 0) {
+          await saveDurableMemoriesV1({
+            userCode,
+            candidates: durableCandidates,
+          });
+        }
       }
     } catch (e) {
       console.warn('[IROS/PostProcess] longTermMemory save failed (non-fatal)', e);
