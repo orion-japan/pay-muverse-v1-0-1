@@ -520,6 +520,40 @@ export async function buildTurnContext(
     extractDiagnosisFollowupTargetLabel(followupSourceText);
 
 
+  if (memoryDecision.memoryIntent === 'reference_check') {
+    (baseMetaForTurn as any).extra = (baseMetaForTurn as any).extra ?? {};
+    (baseMetaForTurn as any).extra.ctxPack =
+      (baseMetaForTurn as any).extra.ctxPack ?? {};
+
+    (baseMetaForTurn as any).extra.memoryDecision = memoryDecision;
+    (baseMetaForTurn as any).extra.memoryGuardDecision = memoryGuardDecision;
+    (baseMetaForTurn as any).extra.memoryGuardReasons = memoryGuardDecision.guardReasons;
+    (baseMetaForTurn as any).extra.memoryAllowWriterSeed = memoryGuardDecision.allowWriterSeed;
+    (baseMetaForTurn as any).extra.memoryAllowLongTermSave = memoryGuardDecision.allowLongTermSave;
+    (baseMetaForTurn as any).extra.memoryAllowPastStateMerge = memoryGuardDecision.allowPastStateMerge;
+    (baseMetaForTurn as any).extra.memoryAllowDiagnosisSave = memoryGuardDecision.allowDiagnosisSave;
+    (baseMetaForTurn as any).extra.memoryAllowRelationshipSave = memoryGuardDecision.allowRelationshipSave;
+    (baseMetaForTurn as any).extra.memoryIntent = memoryDecision.memoryIntent;
+    (baseMetaForTurn as any).extra.memorySpace = memoryDecision.memorySpace;
+    (baseMetaForTurn as any).extra.memoryTargetLabel = memoryDecision.targetLabel;
+    (baseMetaForTurn as any).extra.memoryTargetKey = memoryDecision.targetKey;
+    (baseMetaForTurn as any).extra.memoryRecallMode = memoryDecision.recallMode;
+
+    (baseMetaForTurn as any).extra.ctxPack.memoryDecision = memoryDecision;
+    (baseMetaForTurn as any).extra.ctxPack.memoryGuardDecision = memoryGuardDecision;
+    (baseMetaForTurn as any).extra.ctxPack.memoryGuardReasons = memoryGuardDecision.guardReasons;
+    (baseMetaForTurn as any).extra.ctxPack.memoryAllowWriterSeed = memoryGuardDecision.allowWriterSeed;
+    (baseMetaForTurn as any).extra.ctxPack.memoryAllowLongTermSave = memoryGuardDecision.allowLongTermSave;
+    (baseMetaForTurn as any).extra.ctxPack.memoryAllowPastStateMerge = memoryGuardDecision.allowPastStateMerge;
+    (baseMetaForTurn as any).extra.ctxPack.memoryAllowDiagnosisSave = memoryGuardDecision.allowDiagnosisSave;
+    (baseMetaForTurn as any).extra.ctxPack.memoryAllowRelationshipSave = memoryGuardDecision.allowRelationshipSave;
+    (baseMetaForTurn as any).extra.ctxPack.memoryIntent = memoryDecision.memoryIntent;
+    (baseMetaForTurn as any).extra.ctxPack.memorySpace = memoryDecision.memorySpace;
+    (baseMetaForTurn as any).extra.ctxPack.memoryTargetLabel = memoryDecision.targetLabel;
+    (baseMetaForTurn as any).extra.ctxPack.memoryTargetKey = memoryDecision.targetKey;
+    (baseMetaForTurn as any).extra.ctxPack.memoryRecallMode = memoryDecision.recallMode;
+  }
+
   if (memoryDecision.memoryIntent === 'relationship_recall') {
     (baseMetaForTurn as any).extra = (baseMetaForTurn as any).extra ?? {};
     (baseMetaForTurn as any).extra.ctxPack =
