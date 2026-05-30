@@ -8,6 +8,7 @@ import type { IrosUserProfileRow } from './loadUserProfile';
 import { loadBaseMetaFromMemoryState } from './handleIrosReply.state';
 import { loadLatestIrDiagnosisSnapshot } from '@/lib/iros/memoryRecall';
 import { routeIrosMemory } from '@/lib/iros/memory/memoryRouter';
+import { resolveWorkingReference } from '@/lib/iros/memory/workingReferenceResolver';
 
 // ✅ FramePlan（器＋スロット）(Layer C/D)
 import { buildFramePlan, type InputKind, type IrosStateLite } from '@/lib/iros/language/frameSlots';
@@ -497,13 +498,45 @@ export async function buildTurnContext(
 
   // 🔥 診断 followup 判定
   const followupSourceText = detailSourceText.trim();
-  const memoryDecision = routeIrosMemory({ userText: followupSourceText });
+
+  const workingReferenceForMemoryRouter = resolveWorkingReference({
+    currentQuestion: followupSourceText,
+    historyForTurn: (args as any)?.history,
+    orchCtxPack: (baseMetaForTurn as any)?.extra?.ctxPack,
+    orchExtra: (baseMetaForTurn as any)?.extra,
+    extraLocal: (baseMetaForTurn as any)?.extra,
+  });
+
+  const memoryDecision = routeIrosMemory({
+    userText: followupSourceText,
+    workingReference: workingReferenceForMemoryRouter,
+  });
   const diagnosisFollowupTargetLabel =
     (memoryDecision.memoryIntent === 'diagnosis_recall'
       ? memoryDecision.targetLabel
       : null) ||
     extractDiagnosisFollowupTargetLabel(followupSourceText);
 
+
+  if (memoryDecision.memoryIntent === 'relationship_recall') {
+    (baseMetaForTurn as any).extra = (baseMetaForTurn as any).extra ?? {};
+    (baseMetaForTurn as any).extra.ctxPack =
+      (baseMetaForTurn as any).extra.ctxPack ?? {};
+
+    (baseMetaForTurn as any).extra.memoryDecision = memoryDecision;
+    (baseMetaForTurn as any).extra.memoryIntent = memoryDecision.memoryIntent;
+    (baseMetaForTurn as any).extra.memorySpace = memoryDecision.memorySpace;
+    (baseMetaForTurn as any).extra.memoryTargetLabel = memoryDecision.targetLabel;
+    (baseMetaForTurn as any).extra.memoryTargetKey = memoryDecision.targetKey;
+    (baseMetaForTurn as any).extra.memoryRecallMode = memoryDecision.recallMode;
+
+    (baseMetaForTurn as any).extra.ctxPack.memoryDecision = memoryDecision;
+    (baseMetaForTurn as any).extra.ctxPack.memoryIntent = memoryDecision.memoryIntent;
+    (baseMetaForTurn as any).extra.ctxPack.memorySpace = memoryDecision.memorySpace;
+    (baseMetaForTurn as any).extra.ctxPack.memoryTargetLabel = memoryDecision.targetLabel;
+    (baseMetaForTurn as any).extra.ctxPack.memoryTargetKey = memoryDecision.targetKey;
+    (baseMetaForTurn as any).extra.ctxPack.memoryRecallMode = memoryDecision.recallMode;
+  }
   const isFollowupRequest =
     /具体的に|具体化|わかりやすく|分かりやすく|つまり|どういうこと|それって|どうすれば|何をすれば|何から|どこから|どう扱えば|どう受け取れば|どう見れば|続き|続きを|診断の続き|言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|説明して|解説して|補足して|もう少し|もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|さっきの診断|前の診断|この診断|今の診断/.test(
       followupSourceText
