@@ -75,14 +75,17 @@ function normalizeETurn(v: unknown): 'e1' | 'e2' | 'e3' | 'e4' | 'e5' | null {
   return null;
 }
 
-/** 左側メッセージ用：depthStage は全文字表示（例: R3 / I2 / T1） */
+/** 表示用：S1/S2/S3 は S、R1/R2/R3 は R のように帯域だけに丸める */
 function normalizeDepthStage(depth?: string | null): string | null {
   const s = normStr(depth)?.toUpperCase() ?? '';
-  if (/^[SFRCIT][1-3]$/.test(s)) return s;
+  if (/^[SFRCIT]$/.test(s)) return s;
+  if (/^[SFRCIT][1-3]$/.test(s)) return s.charAt(0);
   return null;
 }
+
 function depthHead(depth?: string | null): string | null {
-  const s = typeof depth === 'string' ? depth.trim().toUpperCase() : '';
+  const s = normStr(depth)?.toUpperCase() ?? '';
+  if (/^[SFRCIT]$/.test(s)) return s;
   if (/^[SFRCIT][1-3]$/.test(s)) return s.charAt(0);
   return null;
 }

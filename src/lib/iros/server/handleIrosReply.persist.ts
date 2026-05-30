@@ -1294,6 +1294,100 @@ for (const k of Object.keys(newDepthScores)) {
 (qcBase as any).depth_dominant = dominantDepth;
 (qcBase as any).depth_updated_at = nowIso();
 
+// ✅ Depth Personality Model
+// - depth_counts: 人物側の深度累積
+// - depth_recent: 直近の深度履歴
+// - person_depth_pattern: 人物側の深度傾向
+// - last_turn_depth: 今回の深度
+// - depth_delta: 人物深度 → 今回深度
+// - response_depth_strategy: Writer用の返答戦略
+const depthBandsForPersonality = ['S', 'R', 'C', 'I', 'T'] as const;
+
+const prevDepthCountsRaw =
+  (prevQc as any)?.depth_counts && typeof (prevQc as any).depth_counts === 'object'
+    ? (prevQc as any).depth_counts
+    : {};
+
+const depthCountsForPersonality: Record<string, number> = {
+  S: 0,
+  R: 0,
+  C: 0,
+  I: 0,
+  T: 0,
+};
+
+for (const band of depthBandsForPersonality) {
+  const n = Number((prevDepthCountsRaw as any)?.[band] ?? 0);
+  depthCountsForPersonality[band] = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+if (depthNow) {
+  depthCountsForPersonality[depthNow] = (depthCountsForPersonality[depthNow] ?? 0) + 1;
+}
+
+const prevDepthRecentRaw = Array.isArray((prevQc as any)?.depth_recent)
+  ? (prevQc as any).depth_recent
+  : [];
+
+const turnDepthForPersonality =
+  typeof depthNowRaw === 'string' && depthNowRaw.trim()
+    ? depthNowRaw.trim().toUpperCase()
+    : depthNow;
+
+const depthRecentForPersonality = [
+  ...prevDepthRecentRaw
+    .map((v: unknown) => String(v ?? '').trim().toUpperCase())
+    .filter((v: string) => /^[SRCIT][0-9]?$/.test(v)),
+  ...(turnDepthForPersonality ? [turnDepthForPersonality] : []),
+].slice(-12);
+
+let personDepthPatternForPersist: string | null = null;
+let personDepthPatternCount = -1;
+
+for (const band of depthBandsForPersonality) {
+  const count = depthCountsForPersonality[band] ?? 0;
+  if (count > personDepthPatternCount) {
+    personDepthPatternCount = count;
+    personDepthPatternForPersist = band;
+  }
+}
+
+const turnDepthBandForPersonality =
+  typeof turnDepthForPersonality === 'string' && turnDepthForPersonality.trim()
+    ? turnDepthForPersonality.trim().toUpperCase().slice(0, 1)
+    : null;
+
+const depthDeltaForPersist =
+  personDepthPatternForPersist && turnDepthBandForPersonality
+    ? `${personDepthPatternForPersist}->${turnDepthBandForPersonality}`
+    : null;
+
+const responseDepthStrategyForPersist =
+  personDepthPatternForPersist && turnDepthBandForPersonality
+    ? `${personDepthPatternForPersist}_PERSON_${turnDepthBandForPersonality}_STATE`
+    : null;
+
+(qcBase as any).depth_counts = depthCountsForPersonality;
+(qcBase as any).depth_recent = depthRecentForPersonality;
+(qcBase as any).person_depth_pattern = personDepthPatternForPersist;
+(qcBase as any).last_turn_depth = turnDepthForPersonality;
+(qcBase as any).depth_delta = depthDeltaForPersist;
+(qcBase as any).response_depth_strategy = responseDepthStrategyForPersist;
+
+// ✅ synth分岐で upsertPayload.q_counts が別オブジェクトになっても落とさない
+(upsertPayload as any).q_counts = {
+  ...((upsertPayload as any)?.q_counts ?? {}),
+  depth_scores: newDepthScores,
+  depth_dominant: dominantDepth,
+  depth_updated_at: (qcBase as any).depth_updated_at,
+  depth_counts: depthCountsForPersonality,
+  depth_recent: depthRecentForPersonality,
+  person_depth_pattern: personDepthPatternForPersist,
+  last_turn_depth: turnDepthForPersonality,
+  depth_delta: depthDeltaForPersist,
+  response_depth_strategy: responseDepthStrategyForPersist,
+};
+
 // ------------------------------------------------------------
 // ✅ final anchor flags（B）
 // - あるときだけ載せる（undefinedは触らない）
@@ -1362,6 +1456,8 @@ if (qCountsPicked != null || shouldWriteQCountsBecausePhase) {
 
   // ✅ 最後にmergeして確定（q_scores などを保持）
   upsertPayload.q_counts = { ...(upsertPayload as any)?.q_counts, ...(qc as any) };
+
+
 }
 
     // ✅ anchor_event / anchor_write（DB列がある環境だけで使う。無い場合は retry で落とす）

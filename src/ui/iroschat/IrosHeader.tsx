@@ -49,15 +49,38 @@ export default function IrosHeader({
       ? (qCodeRaw.toUpperCase() as 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5')
       : undefined;
 
-      const depth =
-      currentMeta?.observedStage ??
-      currentMeta?.depth ??
-      currentMeta?.depthStage ??
-      currentMeta?.depth_stage ??
-      currentMeta?.extra?.ctxPack?.observedStage ??
-      currentMeta?.extra?.ctxPack?.depthStage ??
-      currentMeta?.unified?.depth?.current ??
-      null;
+  const normalizeDepthBand = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null;
+    const band = value.trim().toUpperCase().slice(0, 1);
+    return /^[SRCITF]$/.test(band) ? band : null;
+  };
+
+  const personDepthPatternRaw =
+    currentMeta?.personDepthPattern ??
+    currentMeta?.person_depth_pattern ??
+    currentMeta?.qCounts?.person_depth_pattern ??
+    currentMeta?.q_counts?.person_depth_pattern ??
+    currentMeta?.extra?.personDepthPattern ??
+    currentMeta?.extra?.person_depth_pattern ??
+    currentMeta?.extra?.ctxPack?.personDepthPattern ??
+    currentMeta?.extra?.ctxPack?.person_depth_pattern ??
+    currentMeta?.extra?.memoryStateSnapshot?.personDepthPattern ??
+    currentMeta?.extra?.memoryStateSnapshot?.person_depth_pattern ??
+    currentMeta?.extra?.memoryStateSnapshot?.qCounts?.person_depth_pattern ??
+    null;
+
+  const depthRaw =
+    personDepthPatternRaw ??
+    currentMeta?.observedStage ??
+    currentMeta?.depth ??
+    currentMeta?.depthStage ??
+    currentMeta?.depth_stage ??
+    currentMeta?.extra?.ctxPack?.observedStage ??
+    currentMeta?.extra?.ctxPack?.depthStage ??
+    currentMeta?.unified?.depth?.current ??
+    null;
+
+  const depth = normalizeDepthBand(depthRaw);
 
   const mode = currentMeta?.mode ?? null;
 

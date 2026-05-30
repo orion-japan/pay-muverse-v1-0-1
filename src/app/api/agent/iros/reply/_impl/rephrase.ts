@@ -746,6 +746,69 @@ const intentBandForCtx =
     );
   })();
   // 3点セット（会話を散らさない）
+  const isDiagnosisFollowupForCtx =
+    (extraMerged as any)?.diagnosisFollowup === true ||
+    (extraMerged as any)?.ctxPack?.diagnosisFollowup === true ||
+    String((extraMerged as any)?.ctxPack?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+    (meta as any)?.extra?.diagnosisFollowup === true ||
+    (meta as any)?.extra?.ctxPack?.diagnosisFollowup === true ||
+    String((meta as any)?.extra?.ctxPack?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+    Boolean((extraMerged as any)?.ctxPack?.lastIrDiagnosis) ||
+    Boolean((extraMerged as any)?.extra?.ctxPack?.lastIrDiagnosis) ||
+    Boolean((meta as any)?.extra?.ctxPack?.lastIrDiagnosis) ||
+    Boolean((meta as any)?.ctxPack?.lastIrDiagnosis);
+
+  const lastIrDiagnosisForCtx =
+    (extraMerged as any)?.ctxPack?.lastIrDiagnosis ??
+    (extraMerged as any)?.extra?.ctxPack?.lastIrDiagnosis ??
+    (meta as any)?.extra?.ctxPack?.lastIrDiagnosis ??
+    (meta as any)?.ctxPack?.lastIrDiagnosis ??
+    null;
+
+  const diagnosisFollowupSeedForCtx: string | null = (() => {
+    if (!isDiagnosisFollowupForCtx) return null;
+
+    const pick = (...cands: any[]) => {
+      for (const v of cands) {
+        if (v === undefined || v === null) continue;
+        const s = String(v).trim();
+        if (!s) continue;
+        return s;
+      }
+      return null;
+    };
+
+    const d: any = lastIrDiagnosisForCtx;
+
+    return pick(
+      d?.summary,
+      d?.diagnosisText,
+      d?.diagnosis_text,
+      d?.text,
+      d?.assistantText,
+      d?.observation,
+      d?.state
+    );
+  })();
+
+  console.log('[IROS/_impl/rephrase.ts][DIAG_FOLLOWUP_SEED_FOR_CTX]', {
+    traceId,
+    conversationId,
+    userCode,
+    isDiagnosisFollowupForCtx,
+    hasLastIrDiagnosisForCtx: Boolean(lastIrDiagnosisForCtx),
+    lastIrDiagnosisKeys:
+      lastIrDiagnosisForCtx && typeof lastIrDiagnosisForCtx === "object"
+        ? Object.keys(lastIrDiagnosisForCtx)
+        : [],
+    diagnosisFollowupSeedLen: String(diagnosisFollowupSeedForCtx ?? "").length,
+    diagnosisFollowupSeedHead: String(diagnosisFollowupSeedForCtx ?? "").slice(0, 180),
+    extraCtxHasLast: Boolean((extraMerged as any)?.ctxPack?.lastIrDiagnosis),
+    extraExtraCtxHasLast: Boolean((extraMerged as any)?.extra?.ctxPack?.lastIrDiagnosis),
+    metaExtraCtxHasLast: Boolean((meta as any)?.extra?.ctxPack?.lastIrDiagnosis),
+    metaCtxHasLast: Boolean((meta as any)?.ctxPack?.lastIrDiagnosis),
+    competingTopicDigestHead: String((extraMerged as any)?.topicDigest ?? (extraMerged as any)?.ctxPack?.topicDigest ?? (meta as any)?.extra?.ctxPack?.topicDigest ?? "").slice(0, 180),
+  });
   const topicDigestForCtx: string | null = (() => {
     const pick = (...cands: any[]) => {
       for (const v of cands) {
@@ -759,6 +822,7 @@ const intentBandForCtx =
 
     // 1) まずは upstream にある “正本” を最優先で拾う
     const upstream = pick(
+      diagnosisFollowupSeedForCtx,
       (extraMerged as any)?.topicDigest,
       (extraMerged as any)?.extra?.topicDigest,
 
@@ -1104,6 +1168,148 @@ const intentBandForCtx =
   // flowDigest は既存 util を使う（upstream の flow があれば触らない）
   if (ctxPack.flowDigest == null) ctxPack.flowDigest = buildFlowDigest();
 
+  const pickResolvedAskText = (...cands: any[]): string | null => {
+    for (const v of cands) {
+      if (v === undefined || v === null) continue;
+      const st = String(v).trim();
+      if (!st) continue;
+      return st;
+    }
+    return null;
+  };
+
+  const sourceAssistantTextForResolvedAsk: string | null = (() => {
+    const hist: any[] = Array.isArray(normalizedHistory) ? normalizedHistory : [];
+    for (let i = hist.length - 1; i >= 0; i--) {
+      const t = hist[i];
+      if (t?.role !== 'assistant') continue;
+      const st = String(t?.content ?? t?.text ?? '').trim();
+      if (st) return st.slice(0, 1200);
+    }
+    return null;
+  })();
+
+  const historyDigestV1ForResolvedAsk =
+    (ctxPack as any)?.historyDigestV1 ??
+    (meta as any)?.extra?.historyDigestV1 ??
+    (meta as any)?.extra?.ctxPack?.historyDigestV1 ??
+    (extraMerged as any)?.historyDigestV1 ??
+    (extraMerged as any)?.ctxPack?.historyDigestV1 ??
+    null;
+
+  const currentQuestionForResolvedAsk = String(userText ?? '').trim();
+
+  const isDeicticReferenceQuestion = (q: string): boolean => {
+    const x = String(q ?? '').trim();
+    if (!x) return false;
+
+    return (
+      /(これ|それ)/.test(x) &&
+      (
+        /これに沿って/.test(x) ||
+        /それに沿って/.test(x) ||
+        /これとは/.test(x) ||
+        /それとは/.test(x) ||
+        /これは何/.test(x) ||
+        /それって何/.test(x) ||
+        /今のAIは.*これに沿って/.test(x) ||
+        /沿ってますか/.test(x) ||
+        /沿っていますか/.test(x) ||
+        /これ.*ですか/.test(x) ||
+        /それ.*ですか/.test(x)
+      )
+    );
+  };
+
+  const resolveReferenceTarget = (): string | null => {
+    return pickResolvedAskText(
+      sourceAssistantTextForResolvedAsk,
+      (historyDigestV1ForResolvedAsk as any)?.topic?.situationTopic,
+      (historyDigestV1ForResolvedAsk as any)?.topic?.situationSummary,
+      (historyDigestV1ForResolvedAsk as any)?.situationTopic,
+      (historyDigestV1ForResolvedAsk as any)?.situationSummary,
+      (ctxPack as any)?.topicDigest,
+      topicDigestForCtx,
+      conversationLineForCtx
+    );
+  };
+
+  const resolveMainSubjectFromQuestion = (q: string): string | null => {
+    const x = String(q ?? '').trim();
+    if (!x) return null;
+
+    const m =
+      x.match(/^(.+?)は、?これに沿って/) ||
+      x.match(/^(.+?)は、?それに沿って/) ||
+      x.match(/^(.+?)は.*沿って(?:ます|います)か/) ||
+      x.match(/^(.+?)って何/) ||
+      x.match(/^(.+?)とは/);
+
+    const subject = String(m?.[1] ?? '').trim();
+    if (subject) return subject;
+
+    return null;
+  };
+
+  const upstreamResolvedAskForCtx =
+    (ctxPack as any)?.resolvedAsk ??
+    (extraMerged as any)?.resolvedAsk ??
+    (extraMerged as any)?.ctxPack?.resolvedAsk ??
+    (meta as any)?.extra?.resolvedAsk ??
+    (meta as any)?.extra?.ctxPack?.resolvedAsk ??
+    null;
+
+  const resolvedAskForCtx = (() => {
+    if (
+      upstreamResolvedAskForCtx &&
+      typeof upstreamResolvedAskForCtx === 'object' &&
+      String((upstreamResolvedAskForCtx as any)?.askType ?? '').trim() === 'reference_check'
+    ) {
+      return upstreamResolvedAskForCtx as any;
+    }
+
+    if (!isDeicticReferenceQuestion(currentQuestionForResolvedAsk)) return null;
+
+    const referenceTarget = resolveReferenceTarget();
+    if (!referenceTarget) return null;
+
+    const mainSubject =
+      resolveMainSubjectFromQuestion(currentQuestionForResolvedAsk) ??
+      pickResolvedAskText((ctxPack as any)?.situationTopic) ??
+      null;
+
+    const askFrame =
+      mainSubject
+        ? `${referenceTarget.slice(0, 120)}に照らして${mainSubject}を判定する`
+        : `${referenceTarget.slice(0, 120)}に照らして判定する`;
+
+    return {
+      askType: 'reference_check',
+      currentQuestion: currentQuestionForResolvedAsk,
+      referenceTarget,
+      mainSubject,
+      sourceUserText: currentQuestionForResolvedAsk,
+      sourceAssistantText: sourceAssistantTextForResolvedAsk,
+      readingMode: 'deictic_reference',
+      askFrame,
+    };
+  })();
+
+  if (resolvedAskForCtx) {
+    (ctxPack as any).resolvedAsk = resolvedAskForCtx;
+
+    (ctxPack as any).conversationAnchor = {
+      ...((ctxPack as any).conversationAnchor && typeof (ctxPack as any).conversationAnchor === 'object'
+        ? (ctxPack as any).conversationAnchor
+        : {}),
+      mainSubject: resolvedAskForCtx.mainSubject,
+      meaningCore: resolvedAskForCtx.askFrame,
+      referenceTarget: resolvedAskForCtx.referenceTarget,
+      currentQuestion: resolvedAskForCtx.currentQuestion,
+      source: 'resolvedAsk',
+    };
+  }
+
   const userContext: any = {
     conversation_id: String(conversationId),
 
@@ -1171,6 +1377,24 @@ const intentBandForCtx =
 
     historyMessages: normalizedHistory.length ? normalizedHistory : undefined,
   };
+  if (resolvedAskForCtx) {
+    (userContext as any).resolvedAsk = resolvedAskForCtx;
+
+    if ((userContext as any).ctxPack && typeof (userContext as any).ctxPack === 'object') {
+      (userContext as any).ctxPack.resolvedAsk = resolvedAskForCtx;
+      (userContext as any).ctxPack.conversationAnchor = (ctxPack as any).conversationAnchor ?? null;
+    }
+
+    console.log('[IROS/_impl/rephrase.ts][RESOLVED_ASK_FOR_WRITER]', {
+      hasResolvedAskForWriter: true,
+      askType: resolvedAskForCtx.askType,
+      currentQuestion: resolvedAskForCtx.currentQuestion,
+      referenceTargetHead: String(resolvedAskForCtx.referenceTarget ?? '').slice(0, 120),
+      mainSubject: resolvedAskForCtx.mainSubject,
+      meaningCore: resolvedAskForCtx.askFrame,
+    });
+  }
+
   // =========================================================
   // 診断 FINAL(IR) は LLM rephrase を呼ばない（崩れ防止）
   // ただしブロック化は assistant 側テキストのみから行う
@@ -1233,12 +1457,82 @@ const qCodeForLLM =
   (typeof (meta as any)?.unified?.q?.current === 'string' && TRIM_S((meta as any).unified.q.current)) ||
   null;
 
+const memoryStateForDepthPersonality =
+  memoryStateForCtx ??
+  (extraMerged as any)?.memoryStateForCtx ??
+  (meta as any)?.extra?.memoryStateForCtx ??
+  null;
+
 const depthForLLM =
   (typeof (meta as any)?.depth_stage === 'string' && TRIM_S((meta as any).depth_stage)) ||
   (typeof (meta as any)?.depthStage === 'string' && TRIM_S((meta as any).depthStage)) ||
   (typeof (meta as any)?.depth === 'string' && TRIM_S((meta as any).depth)) ||
   (typeof (meta as any)?.unified?.depth?.stage === 'string' && TRIM_S((meta as any).unified.depth.stage)) ||
   null;
+
+const personDepthPatternForLLM =
+  (typeof (meta as any)?.personDepthPattern === 'string' && TRIM_S((meta as any).personDepthPattern)) ||
+  (typeof (meta as any)?.person_depth_pattern === 'string' && TRIM_S((meta as any).person_depth_pattern)) ||
+  (typeof (meta as any)?.extra?.personDepthPattern === 'string' && TRIM_S((meta as any).extra.personDepthPattern)) ||
+  (typeof (meta as any)?.extra?.person_depth_pattern === 'string' && TRIM_S((meta as any).extra.person_depth_pattern)) ||
+  (typeof (meta as any)?.extra?.ctxPack?.personDepthPattern === 'string' && TRIM_S((meta as any).extra.ctxPack.personDepthPattern)) ||
+  (typeof (meta as any)?.extra?.ctxPack?.person_depth_pattern === 'string' && TRIM_S((meta as any).extra.ctxPack.person_depth_pattern)) ||
+  (typeof (meta as any)?.extra?.memoryStateSnapshot?.personDepthPattern === 'string' && TRIM_S((meta as any).extra.memoryStateSnapshot.personDepthPattern)) ||
+  (typeof (meta as any)?.extra?.ctxPack?.memoryStateSnapshot?.personDepthPattern === 'string' && TRIM_S((meta as any).extra.ctxPack.memoryStateSnapshot.personDepthPattern)) ||
+  (typeof (userContext as any)?.ctxPack?.memoryStateSnapshot?.personDepthPattern === 'string' && TRIM_S((userContext as any).ctxPack.memoryStateSnapshot.personDepthPattern)) ||
+  (typeof (userContext as any)?.personDepthPattern === 'string' && TRIM_S((userContext as any).personDepthPattern)) ||
+  (typeof (userContext as any)?.ctxPack?.personDepthPattern === 'string' && TRIM_S((userContext as any).ctxPack.personDepthPattern)) ||
+  (typeof (userContext as any)?.ctxPack?.person_depth_pattern === 'string' && TRIM_S((userContext as any).ctxPack.person_depth_pattern)) ||
+  (typeof (memoryStateForCtx as any)?.personDepthPattern === 'string' && TRIM_S((memoryStateForCtx as any).personDepthPattern)) ||
+  (typeof (memoryStateForCtx as any)?.person_depth_pattern === 'string' && TRIM_S((memoryStateForCtx as any).person_depth_pattern)) ||
+  (typeof (memoryStateForCtx as any)?.qCounts?.person_depth_pattern === 'string' && TRIM_S((memoryStateForCtx as any).qCounts.person_depth_pattern)) ||
+  (typeof (memoryStateForDepthPersonality as any)?.personDepthPattern === 'string' && TRIM_S((memoryStateForDepthPersonality as any).personDepthPattern)) ||
+  (typeof (memoryStateForDepthPersonality as any)?.person_depth_pattern === 'string' && TRIM_S((memoryStateForDepthPersonality as any).person_depth_pattern)) ||
+  (typeof (memoryStateForDepthPersonality as any)?.qCounts?.person_depth_pattern === 'string' && TRIM_S((memoryStateForDepthPersonality as any).qCounts.person_depth_pattern)) ||
+  null;
+
+const depthDeltaForLLM =
+  (typeof (meta as any)?.depthDelta === 'string' && TRIM_S((meta as any).depthDelta)) ||
+  (typeof (meta as any)?.depth_delta === 'string' && TRIM_S((meta as any).depth_delta)) ||
+  (typeof (meta as any)?.extra?.depthDelta === 'string' && TRIM_S((meta as any).extra.depthDelta)) ||
+  (typeof (meta as any)?.extra?.depth_delta === 'string' && TRIM_S((meta as any).extra.depth_delta)) ||
+  (typeof (meta as any)?.extra?.ctxPack?.depthDelta === 'string' && TRIM_S((meta as any).extra.ctxPack.depthDelta)) ||
+  (typeof (meta as any)?.extra?.ctxPack?.depth_delta === 'string' && TRIM_S((meta as any).extra.ctxPack.depth_delta)) ||
+  (typeof (meta as any)?.extra?.memoryStateSnapshot?.depthDelta === 'string' && TRIM_S((meta as any).extra.memoryStateSnapshot.depthDelta)) ||
+  (typeof (meta as any)?.extra?.ctxPack?.memoryStateSnapshot?.depthDelta === 'string' && TRIM_S((meta as any).extra.ctxPack.memoryStateSnapshot.depthDelta)) ||
+  (typeof (userContext as any)?.ctxPack?.memoryStateSnapshot?.depthDelta === 'string' && TRIM_S((userContext as any).ctxPack.memoryStateSnapshot.depthDelta)) ||
+  (typeof (userContext as any)?.depthDelta === 'string' && TRIM_S((userContext as any).depthDelta)) ||
+  (typeof (userContext as any)?.ctxPack?.depthDelta === 'string' && TRIM_S((userContext as any).ctxPack.depthDelta)) ||
+  (typeof (userContext as any)?.ctxPack?.depth_delta === 'string' && TRIM_S((userContext as any).ctxPack.depth_delta)) ||
+  (typeof (memoryStateForCtx as any)?.depthDelta === 'string' && TRIM_S((memoryStateForCtx as any).depthDelta)) ||
+  (typeof (memoryStateForCtx as any)?.depth_delta === 'string' && TRIM_S((memoryStateForCtx as any).depth_delta)) ||
+  (typeof (memoryStateForCtx as any)?.qCounts?.depth_delta === 'string' && TRIM_S((memoryStateForCtx as any).qCounts.depth_delta)) ||
+  (typeof (memoryStateForDepthPersonality as any)?.depthDelta === 'string' && TRIM_S((memoryStateForDepthPersonality as any).depthDelta)) ||
+  (typeof (memoryStateForDepthPersonality as any)?.depth_delta === 'string' && TRIM_S((memoryStateForDepthPersonality as any).depth_delta)) ||
+  (typeof (memoryStateForDepthPersonality as any)?.qCounts?.depth_delta === 'string' && TRIM_S((memoryStateForDepthPersonality as any).qCounts.depth_delta)) ||
+  null;
+
+const responseDepthStrategyForLLM =
+  (typeof (meta as any)?.responseDepthStrategy === 'string' && TRIM_S((meta as any).responseDepthStrategy)) ||
+  (typeof (meta as any)?.response_depth_strategy === 'string' && TRIM_S((meta as any).response_depth_strategy)) ||
+  (typeof (meta as any)?.extra?.responseDepthStrategy === 'string' && TRIM_S((meta as any).extra.responseDepthStrategy)) ||
+  (typeof (meta as any)?.extra?.response_depth_strategy === 'string' && TRIM_S((meta as any).extra.response_depth_strategy)) ||
+  (typeof (meta as any)?.extra?.ctxPack?.responseDepthStrategy === 'string' && TRIM_S((meta as any).extra.ctxPack.responseDepthStrategy)) ||
+  (typeof (meta as any)?.extra?.ctxPack?.response_depth_strategy === 'string' && TRIM_S((meta as any).extra.ctxPack.response_depth_strategy)) ||
+  (typeof (meta as any)?.extra?.memoryStateSnapshot?.responseDepthStrategy === 'string' && TRIM_S((meta as any).extra.memoryStateSnapshot.responseDepthStrategy)) ||
+  (typeof (meta as any)?.extra?.ctxPack?.memoryStateSnapshot?.responseDepthStrategy === 'string' && TRIM_S((meta as any).extra.ctxPack.memoryStateSnapshot.responseDepthStrategy)) ||
+  (typeof (userContext as any)?.ctxPack?.memoryStateSnapshot?.responseDepthStrategy === 'string' && TRIM_S((userContext as any).ctxPack.memoryStateSnapshot.responseDepthStrategy)) ||
+  (typeof (userContext as any)?.responseDepthStrategy === 'string' && TRIM_S((userContext as any).responseDepthStrategy)) ||
+  (typeof (userContext as any)?.ctxPack?.responseDepthStrategy === 'string' && TRIM_S((userContext as any).ctxPack.responseDepthStrategy)) ||
+  (typeof (userContext as any)?.ctxPack?.response_depth_strategy === 'string' && TRIM_S((userContext as any).ctxPack.response_depth_strategy)) ||
+  (typeof (memoryStateForCtx as any)?.responseDepthStrategy === 'string' && TRIM_S((memoryStateForCtx as any).responseDepthStrategy)) ||
+  (typeof (memoryStateForCtx as any)?.response_depth_strategy === 'string' && TRIM_S((memoryStateForCtx as any).response_depth_strategy)) ||
+  (typeof (memoryStateForCtx as any)?.qCounts?.response_depth_strategy === 'string' && TRIM_S((memoryStateForCtx as any).qCounts.response_depth_strategy)) ||
+  (typeof (memoryStateForDepthPersonality as any)?.responseDepthStrategy === 'string' && TRIM_S((memoryStateForDepthPersonality as any).responseDepthStrategy)) ||
+  (typeof (memoryStateForDepthPersonality as any)?.response_depth_strategy === 'string' && TRIM_S((memoryStateForDepthPersonality as any).response_depth_strategy)) ||
+  (typeof (memoryStateForDepthPersonality as any)?.qCounts?.response_depth_strategy === 'string' && TRIM_S((memoryStateForDepthPersonality as any).qCounts.response_depth_strategy)) ||
+  null;
+
 
   // inputKind
   // - 明示スタンプ（meta / framePlan / userContext）をまず拾う
@@ -1923,6 +2217,9 @@ try {
         null,
       qCode: qCodeForLLM,
       depthStage: depthForLLM,
+      personDepthPattern: personDepthPatternForLLM,
+      depthDelta: depthDeltaForLLM,
+      responseDepthStrategy: responseDepthStrategyForLLM,
       inputKind: inputKindStamped || '',
 
       // ✅ upstream snapshot 用の会話列を明示配線
@@ -1992,9 +2289,26 @@ try {
 
       extra: {
         ...(((extraMerged as any) && typeof extraMerged === 'object') ? extraMerged : {}),
+        ctxPack: {
+          ...(((extraMerged as any)?.ctxPack && typeof (extraMerged as any).ctxPack === 'object')
+            ? (extraMerged as any).ctxPack
+            : {}),
+          personDepthPattern: personDepthPatternForLLM,
+          person_depth_pattern: personDepthPatternForLLM,
+          depthDelta: depthDeltaForLLM,
+          depth_delta: depthDeltaForLLM,
+          responseDepthStrategy: responseDepthStrategyForLLM,
+          response_depth_strategy: responseDepthStrategyForLLM,
+        },
         selfAcceptance: selfAcceptanceForCtx,
         self_acceptance: selfAcceptanceForCtx,
         sa: selfAcceptanceForCtx,
+        personDepthPattern: personDepthPatternForLLM,
+        person_depth_pattern: personDepthPatternForLLM,
+        depthDelta: depthDeltaForLLM,
+        depth_delta: depthDeltaForLLM,
+        responseDepthStrategy: responseDepthStrategyForLLM,
+        response_depth_strategy: responseDepthStrategyForLLM,
         question:
           (extraMerged as any)?.question ??
           (meta as any)?.extra?.question ??
@@ -2067,6 +2381,40 @@ try {
 
   const resExtra =
     (res as any)?.meta?.extra ?? (res as any)?.metaForSave?.extra ?? (res as any)?.extra ?? null;
+
+  const depthPersonalityMeta = {
+    personDepthPattern: personDepthPatternForLLM,
+    person_depth_pattern: personDepthPatternForLLM,
+    depthDelta: depthDeltaForLLM,
+    depth_delta: depthDeltaForLLM,
+    responseDepthStrategy: responseDepthStrategyForLLM,
+    response_depth_strategy: responseDepthStrategyForLLM,
+  };
+
+  Object.assign(extraMerged as any, depthPersonalityMeta);
+
+  (extraMerged as any).ctxPack =
+    (extraMerged as any).ctxPack && typeof (extraMerged as any).ctxPack === 'object'
+      ? (extraMerged as any).ctxPack
+      : {};
+
+  Object.assign((extraMerged as any).ctxPack, depthPersonalityMeta);
+
+  meta.extra = {
+    ...(meta.extra ?? {}),
+    ...depthPersonalityMeta,
+    ctxPack: {
+      ...(((meta.extra as any)?.ctxPack && typeof (meta.extra as any).ctxPack === 'object')
+        ? (meta.extra as any).ctxPack
+        : {}),
+      ...depthPersonalityMeta,
+    },
+  };
+
+  meta.extra = {
+    ...(meta.extra ?? {}),
+    ...depthPersonalityMeta,
+  };
 
   const resHead = TRIM((resExtra as any)?.rephraseHead ?? '');
   if (resHead) {

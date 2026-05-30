@@ -8953,11 +8953,20 @@ try {
         ? await loadIrosMemoryState(supabase as any, _userCode)
         : null;
 
+
     const memoryStateSnapshot = loadedMemoryState
       ? {
           intentAnchor: loadedMemoryState.intentAnchor ?? null,
           qPrimary: loadedMemoryState.qPrimary ?? null,
           depthStage: loadedMemoryState.depthStage ?? null,
+
+          // Depth personality model
+          personDepthPattern: (loadedMemoryState.qCounts as any)?.person_depth_pattern ?? null,
+          lastTurnDepth: (loadedMemoryState.qCounts as any)?.last_turn_depth ?? null,
+          depthDelta: (loadedMemoryState.qCounts as any)?.depth_delta ?? null,
+          responseDepthStrategy: (loadedMemoryState.qCounts as any)?.response_depth_strategy ?? null,
+          depthCounts: (loadedMemoryState.qCounts as any)?.depth_counts ?? null,
+          depthRecent: (loadedMemoryState.qCounts as any)?.depth_recent ?? null,
           phase: loadedMemoryState.phase ?? null,
           selfAcceptance: loadedMemoryState.selfAcceptance ?? null,
           intentLayer: loadedMemoryState.intentLayer ?? null,
@@ -10254,6 +10263,7 @@ const itTriggeredForPersist: boolean | undefined =
   typeof itTriggeredForPersistRaw === 'boolean' ? itTriggeredForPersistRaw : undefined;
 
 // ✅ 任意：q_counts も “あるときだけ” 渡す（persist側で最終mergeされる）
+
 const qCountsForPersist: unknown | undefined =
   (metaForSave as any)?.q_counts ??
   (out as any)?.metaForSave?.q_counts ??

@@ -688,27 +688,55 @@ const payload: any = {
       .reverse()
       .find((m) => (m as any)?.role === 'assistant') ?? null;
 
-  const lastMeta =
-    (lastAssistantMsg as any)?.meta ??
-    (lastAssistantMsg
-      ? {
-          qCode:
-            (lastAssistantMsg as any)?.qCode ??
-            (lastAssistantMsg as any)?.q_code ??
-            (lastAssistantMsg as any)?.q ??
-            null,
-          depth:
-            (lastAssistantMsg as any)?.depth ??
-            (lastAssistantMsg as any)?.depthStage ??
-            (lastAssistantMsg as any)?.depth_stage ??
-            null,
-          depthStage:
-            (lastAssistantMsg as any)?.depthStage ??
-            (lastAssistantMsg as any)?.depth_stage ??
-            (lastAssistantMsg as any)?.depth ??
-            null,
-        }
-      : null);
+  const lastMeta = lastAssistantMsg
+    ? {
+        ...(((lastAssistantMsg as any)?.meta && typeof (lastAssistantMsg as any).meta === 'object')
+          ? (lastAssistantMsg as any).meta
+          : {}),
+
+        qCode:
+          (lastAssistantMsg as any)?.meta?.qCode ??
+          (lastAssistantMsg as any)?.meta?.q_code ??
+          (lastAssistantMsg as any)?.meta?.q ??
+          (lastAssistantMsg as any)?.qCode ??
+          (lastAssistantMsg as any)?.q_code ??
+          (lastAssistantMsg as any)?.q ??
+          null,
+
+        depth:
+          (lastAssistantMsg as any)?.meta?.personDepthPattern ??
+          (lastAssistantMsg as any)?.meta?.person_depth_pattern ??
+          (lastAssistantMsg as any)?.meta?.qCounts?.person_depth_pattern ??
+          (lastAssistantMsg as any)?.meta?.q_counts?.person_depth_pattern ??
+          (lastAssistantMsg as any)?.personDepthPattern ??
+          (lastAssistantMsg as any)?.person_depth_pattern ??
+          (lastAssistantMsg as any)?.depth ??
+          (lastAssistantMsg as any)?.depthStage ??
+          (lastAssistantMsg as any)?.depth_stage ??
+          (lastAssistantMsg as any)?.meta?.depth ??
+          (lastAssistantMsg as any)?.meta?.depthStage ??
+          (lastAssistantMsg as any)?.meta?.depth_stage ??
+          null,
+
+        depthStage:
+          (lastAssistantMsg as any)?.depthStage ??
+          (lastAssistantMsg as any)?.depth_stage ??
+          (lastAssistantMsg as any)?.depth ??
+          (lastAssistantMsg as any)?.meta?.depthStage ??
+          (lastAssistantMsg as any)?.meta?.depth_stage ??
+          (lastAssistantMsg as any)?.meta?.depth ??
+          null,
+
+        personDepthPattern:
+          (lastAssistantMsg as any)?.meta?.personDepthPattern ??
+          (lastAssistantMsg as any)?.meta?.person_depth_pattern ??
+          (lastAssistantMsg as any)?.meta?.qCounts?.person_depth_pattern ??
+          (lastAssistantMsg as any)?.meta?.q_counts?.person_depth_pattern ??
+          (lastAssistantMsg as any)?.personDepthPattern ??
+          (lastAssistantMsg as any)?.person_depth_pattern ??
+          null,
+      }
+    : null;
 
   return (
     <IrosChatContext.Provider

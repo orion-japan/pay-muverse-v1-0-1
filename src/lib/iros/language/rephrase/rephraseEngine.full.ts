@@ -248,6 +248,11 @@ function buildInternalPackText(args: {
   phase?: string | null;
   qCode?: string | null;
 
+  // ✅ Depth Personality Model
+  personDepthPattern?: string | null;
+  depthDelta?: string | null;
+  responseDepthStrategy?: string | null;
+
   // ✅ flow
   flowDigest?: string | null;
   flowTape?: string | null;
@@ -645,6 +650,21 @@ const obsCard = (() => {
     String(cp?.qCode ?? '').trim() ||
     '(null)';
 
+  const personDepthPattern =
+    String((args as any)?.personDepthPattern ?? '').trim() ||
+    String(cp?.personDepthPattern ?? '').trim() ||
+    String(cp?.person_depth_pattern ?? '').trim() ||
+    '';
+  const depthDelta =
+    String((args as any)?.depthDelta ?? '').trim() ||
+    String(cp?.depthDelta ?? '').trim() ||
+    String(cp?.depth_delta ?? '').trim() ||
+    '';
+  const responseDepthStrategy =
+    String((args as any)?.responseDepthStrategy ?? '').trim() ||
+    String(cp?.responseDepthStrategy ?? '').trim() ||
+    String(cp?.response_depth_strategy ?? '').trim() ||
+    '';
   const depthBandForStatePack =
     typeof depthStage === 'string' && depthStage.trim()
       ? depthStage.trim().toUpperCase().charAt(0)
@@ -653,7 +673,19 @@ const obsCard = (() => {
   const allowHighMetaInStatePack =
     depthBandForStatePack !== 'S' && depthBandForStatePack !== 'F';
 
-  parts.push('', `STATE: depthStage=${depthStage} phase=${phase} qCode=${qCode}`);
+  parts.push(
+    '',
+    [
+      `STATE: depthStage=${depthStage}`,
+      `phase=${phase}`,
+      `qCode=${qCode}`,
+      personDepthPattern ? `personDepthPattern=${personDepthPattern}` : null,
+      depthDelta ? `depthDelta=${depthDelta}` : null,
+      responseDepthStrategy ? `responseDepthStrategy=${responseDepthStrategy}` : null,
+    ]
+      .filter(Boolean)
+      .join(' '),
+  );
 
   // META（さらに短く）※STATEはここに入れない
   if (mergedMetaTextForInternalPack && String(mergedMetaTextForInternalPack).trim()) {
@@ -3838,6 +3870,9 @@ const shiftKindForLane =
       depthStage: pickedDepthStage,
       phase: pickedPhase,
       qCode: pickedQCode,
+      personDepthPattern: (opts as any)?.personDepthPattern ?? null,
+      depthDelta: (opts as any)?.depthDelta ?? null,
+      responseDepthStrategy: (opts as any)?.responseDepthStrategy ?? null,
       e_turn: pickedETurn,
       polarity: pickedPolarity,
       sa: pickedSa,
@@ -14994,9 +15029,3 @@ return await runRetryPass({
     slotsForGuard,
   });
 }
-
-
-
-
-
-
