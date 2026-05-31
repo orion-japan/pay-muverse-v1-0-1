@@ -1,4 +1,4 @@
-// file: src/lib/iros/server/handleIrosReply.ts
+﻿// file: src/lib/iros/server/handleIrosReply.ts
 // iros — handleIrosReply (V2 / single-writer friendly)
 //
 // ✅ 方針（ここを徹底）
@@ -10382,7 +10382,7 @@ const anchorEntryDecisionForPersist =
   undefined;
 
 const t3 = nowNs();
-await persistMemoryStateIfAny({
+const memoryStatePersistResult: any = await persistMemoryStateIfAny({
   supabase,
   userCode,
   userText: text,
@@ -10392,6 +10392,58 @@ await persistMemoryStateIfAny({
   anchorEntry_decision: anchorEntryDecisionForPersist,
 } as any);
 t.persist_ms.memory_state_ms = msSince(t3);
+
+if (
+  memoryStatePersistResult?.ok === true &&
+  memoryStatePersistResult?.depth_trend &&
+  metaForSaveFinal &&
+  typeof metaForSaveFinal === 'object'
+) {
+  const mfsAny: any = metaForSaveFinal as any;
+  const depthTrend = memoryStatePersistResult.depth_trend;
+
+  const prevExtra =
+    mfsAny.extra && typeof mfsAny.extra === 'object'
+      ? mfsAny.extra
+      : {};
+
+  const prevSnapshot =
+    prevExtra.memoryStateSnapshot && typeof prevExtra.memoryStateSnapshot === 'object'
+      ? prevExtra.memoryStateSnapshot
+      : {};
+
+  const prevCtxPack =
+    prevExtra.ctxPack && typeof prevExtra.ctxPack === 'object'
+      ? prevExtra.ctxPack
+      : {};
+
+  const prevCtxSnapshot =
+    prevCtxPack.memoryStateSnapshot && typeof prevCtxPack.memoryStateSnapshot === 'object'
+      ? prevCtxPack.memoryStateSnapshot
+      : {};
+
+  const nextMemoryStateSnapshot = {
+    ...prevSnapshot,
+    depth_trend: depthTrend,
+    depthTrend,
+  };
+
+  mfsAny.depth_trend = depthTrend;
+  mfsAny.depthTrend = depthTrend;
+
+  mfsAny.extra = {
+    ...prevExtra,
+    memoryStateSnapshot: nextMemoryStateSnapshot,
+    ctxPack: {
+      ...prevCtxPack,
+      memoryStateSnapshot: {
+        ...prevCtxSnapshot,
+        depth_trend: depthTrend,
+        depthTrend,
+      },
+    },
+  };
+}
 
 const t4 = nowNs();
 await persistUnifiedAnalysisIfAny({
@@ -10694,3 +10746,4 @@ return {
     };
   }
 }
+

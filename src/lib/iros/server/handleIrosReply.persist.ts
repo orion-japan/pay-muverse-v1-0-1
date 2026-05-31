@@ -1,4 +1,4 @@
-// file: src/lib/iros/server/handleIrosReply.persist.ts
+﻿// file: src/lib/iros/server/handleIrosReply.persist.ts
 // iros - Persist layer (single-writer + memory_state)
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -6,6 +6,7 @@ import { decideT3Upgrade } from '@/lib/iros/phase/phase10_t3Upgrade';
 // ✅ アンカー汚染判定は「共通の唯一」を使う（重複定義しない）
 import { isMetaAnchorText } from '@/lib/iros/intentAnchor';
 import { computeAnchorEntry } from '@/lib/iros/server/computeAnchorEntry';
+import { computeMeaningfulDepthTrend } from '@/lib/iros/depth/computeMeaningfulDepthTrend';
 
 /* =========================
  * Types
@@ -954,7 +955,7 @@ const upsertPayload: Record<string, any> = {
 if (depthInput != null) upsertPayload.depth_stage = depthInput;
 
 // ============================================================
-// Depth trend（S/R/C/I/T）EWMA更新（0.7 / 0.3）→ 正規化 → dominantBand
+// Depth trend（S/F/R/C/I/T）EWMA更新（0.7 / 0.3）→ 正規化 → dominantBand
 // 保存先：iros_memory_state.depth_trend（jsonb / UI用）
 // ============================================================
 
@@ -963,17 +964,18 @@ if (typeof depthInput === 'string' && depthInput.trim()) {
   const depthStageNow = depthInput.trim().toUpperCase();
 
   const bandNow =
-    /^[SRCIT][123]$/.test(depthStageNow) ? (depthStageNow[0] as 'S' | 'R' | 'C' | 'I' | 'T') : null;
+    /^[SFRCIT][123]$/.test(depthStageNow) ? (depthStageNow[0] as 'S' | 'F' | 'R' | 'C' | 'I' | 'T') : null;
 
   // 既存 depth_trend を取得（なければ初期化）
   const prevTrendRaw = (previous as any)?.depth_trend ?? null;
   const prevBandScoresRaw = prevTrendRaw?.band_scores ?? null;
 
-  const keys: Array<'S' | 'R' | 'C' | 'I' | 'T'> = ['S', 'R', 'C', 'I', 'T'];
+  const keys: Array<'S' | 'F' | 'R' | 'C' | 'I' | 'T'> = ['S', 'F', 'R', 'C', 'I', 'T'];
 
   // prevBandScores を 0..1 に正規化（過去に 0..100 が入ってた互換も吸収）
-  const prevBandScores: Record<'S' | 'R' | 'C' | 'I' | 'T', number> = {
+  const prevBandScores: Record<'S' | 'F' | 'R' | 'C' | 'I' | 'T', number> = {
     S: 0,
+    F: 0,
     R: 0,
     C: 0,
     I: 0,
@@ -1001,9 +1003,22 @@ if (typeof depthInput === 'string' && depthInput.trim()) {
     }
   }
 
-  // EWMA更新（bandNow が取れない時は “前回を保持”）
-  const newBandScores: Record<'S' | 'R' | 'C' | 'I' | 'T', number> = {
+  const meaningfulDepthTransition = computeMeaningfulDepthTrend({
+    previousDepthStage: (previous as any)?.depth_stage ?? null,
+    depthStageNow,
+    userText,
+    meta: metaForSave,
+    previousDepthTrend: prevTrendRaw,
+  });
+
+  // EWMA更新（意味ある移行だけを強く反映。ignore は前回保持）
+  const shouldAddBandScore =
+    bandNow != null &&
+    meaningfulDepthTransition.kind !== 'ignore';
+
+  const newBandScores: Record<'S' | 'F' | 'R' | 'C' | 'I' | 'T', number> = {
     S: 0,
+    F: 0,
     R: 0,
     C: 0,
     I: 0,
@@ -1012,8 +1027,8 @@ if (typeof depthInput === 'string' && depthInput.trim()) {
 
   for (const k of keys) {
     const prev = prevBandScores[k] ?? 0;
-    const base = 0.7 * prev;
-    const add = bandNow === k ? 0.3 : 0;
+    const base = shouldAddBandScore ? 0.7 * prev : prev;
+    const add = shouldAddBandScore && bandNow === k ? 0.3 : 0;
     newBandScores[k] = base + add;
   }
 
@@ -1024,7 +1039,7 @@ if (typeof depthInput === 'string' && depthInput.trim()) {
   }
 
   // dominantBand 決定
-  let dominantBand: 'S' | 'R' | 'C' | 'I' | 'T' | null = null;
+  let dominantBand: 'S' | 'F' | 'R' | 'C' | 'I' | 'T' | null = null;
   let maxScore = -1;
   for (const k of keys) {
     const v = typeof newBandScores[k] === 'number' ? newBandScores[k] : 0;
@@ -1034,6 +1049,63 @@ if (typeof depthInput === 'string' && depthInput.trim()) {
     }
   }
 
+  const readTrendCount = (key: string): number => {
+    const value = (prevTrendRaw as any)?.[key];
+    return typeof value === 'number' && Number.isFinite(value)
+      ? Math.max(0, Math.floor(value))
+      : 0;
+  };
+
+  const previousPromoteCount = readTrendCount('promote_count');
+  const previousSupportCount = readTrendCount('support_count');
+  const previousDropWatchCount = readTrendCount('drop_watch_count');
+  const previousDegradeCount = readTrendCount('degrade_count');
+
+  const nextPromoteCount =
+    meaningfulDepthTransition.kind === 'promote'
+      ? previousPromoteCount + 1
+      : previousPromoteCount;
+
+  const nextSupportCount =
+    meaningfulDepthTransition.kind === 'support'
+      ? previousSupportCount + 1
+      : previousSupportCount;
+
+  const nextDropWatchCount =
+    meaningfulDepthTransition.kind === 'watch'
+      ? previousDropWatchCount + 1
+      : meaningfulDepthTransition.kind === 'promote' || meaningfulDepthTransition.kind === 'support'
+        ? 0
+        : previousDropWatchCount;
+
+  const nextDegradeCount =
+    meaningfulDepthTransition.kind === 'degrade'
+      ? previousDegradeCount + 1
+      : previousDegradeCount;
+
+  const trendUpdatedAt = nowIso();
+
+  const previousLongDepthStageCandidate =
+    typeof (prevTrendRaw as any)?.long_depth_stage_candidate === 'string'
+      ? (prevTrendRaw as any).long_depth_stage_candidate
+      : null;
+
+  const nextLongDepthStageCandidate =
+    meaningfulDepthTransition.kind === 'promote' || meaningfulDepthTransition.kind === 'support'
+      ? depthStageNow
+      : previousLongDepthStageCandidate;
+
+  const trendStatus =
+    meaningfulDepthTransition.kind === 'promote'
+      ? 'promote_candidate'
+      : meaningfulDepthTransition.kind === 'support'
+        ? 'supported'
+        : meaningfulDepthTransition.kind === 'watch'
+          ? 'drop_watch'
+          : meaningfulDepthTransition.kind === 'degrade'
+            ? 'degrade_candidate'
+            : ((prevTrendRaw as any)?.trend_status ?? 'kept');
+
   // depth_trend に保存（jsonb）
   upsertPayload.depth_trend = {
     ...(prevTrendRaw && typeof prevTrendRaw === 'object' ? prevTrendRaw : {}),
@@ -1041,8 +1113,20 @@ if (typeof depthInput === 'string' && depthInput.trim()) {
     dominant_band: dominantBand,
     depth_stage_now: depthStageNow,
     band_now: bandNow,
+    active_depth_band: bandNow,
+    long_depth_stage_candidate: nextLongDepthStageCandidate,
+    trend_status: trendStatus,
     ewma: { prev: 0.7, now: 0.3 },
-    updated_at: nowIso(),
+    meaningful_transition: meaningfulDepthTransition,
+    promote_count: nextPromoteCount,
+    support_count: nextSupportCount,
+    drop_watch_count: nextDropWatchCount,
+    degrade_count: nextDegradeCount,
+    meaningful_updated_at:
+      meaningfulDepthTransition.kind !== 'ignore'
+        ? trendUpdatedAt
+        : ((prevTrendRaw as any)?.meaningful_updated_at ?? null),
+    updated_at: trendUpdatedAt,
   };
 }
 // ============================================================
@@ -1218,16 +1302,16 @@ const qCountsPicked = qCounts ?? core?.q_counts ?? null;
 }
 
 // ============================================================
-// 暫定深度 EWMA（S/R/C/I/T）更新（0.7 / 0.3）→ 正規化 → dominant決定
+// 暫定深度 EWMA（S/F/R/C/I/T）更新（0.7 / 0.3）→ 正規化 → dominant決定
 // 保存先：q_counts.depth_scores（UI用） + q_counts.depth_dominant
 // ============================================================
 
-// depthNow を安全に正規化（S/R/C/I/T 以外は無視）
+// depthNow を安全に正規化（S/F/R/C/I/T 以外は無視）
 const depthNowRaw = depthInput ?? null;
 
 // 例: "R3" -> "R"
 const depthNow =
-  typeof depthNowRaw === 'string' && /^[SRCIT]/i.test(depthNowRaw.trim())
+  typeof depthNowRaw === 'string' && /^[SFRCIT]/i.test(depthNowRaw.trim())
     ? depthNowRaw.trim().toUpperCase().slice(0, 1)
     : null;
 
@@ -1240,9 +1324,9 @@ const prevDepthScoresRaw = (prevQc as any)?.depth_scores ?? {
 };
 
 // prevDepthScores を 0..1 に正規化（互換: 0..100 の可能性も吸収）
-const prevDepthScores: Record<string, number> = { S: 0, R: 0, C: 0, I: 0, T: 0 };
+const prevDepthScores: Record<string, number> = { S: 0, F: 0, R: 0, C: 0, I: 0, T: 0 };
 {
-  const keys = ['S', 'R', 'C', 'I', 'T'];
+  const keys = ['S', 'F', 'R', 'C', 'I', 'T'];
   const rawVals = keys.map((k) =>
     typeof (prevDepthScoresRaw as any)?.[k] === 'number' ? (prevDepthScoresRaw as any)[k] : 0,
   );
@@ -1260,7 +1344,7 @@ const prevDepthScores: Record<string, number> = { S: 0, R: 0, C: 0, I: 0, T: 0 }
   }
 }
 
-const newDepthScores: Record<string, number> = { S: 0, R: 0, C: 0, I: 0, T: 0 };
+const newDepthScores: Record<string, number> = { S: 0, F: 0, R: 0, C: 0, I: 0, T: 0 };
 
 // EWMA更新（depthNow が無い時は “前回を保持”）
 for (const k of Object.keys(newDepthScores)) {
@@ -1301,7 +1385,7 @@ for (const k of Object.keys(newDepthScores)) {
 // - last_turn_depth: 今回の深度
 // - depth_delta: 人物深度 → 今回深度
 // - response_depth_strategy: Writer用の返答戦略
-const depthBandsForPersonality = ['S', 'R', 'C', 'I', 'T'] as const;
+const depthBandsForPersonality = ['S', 'F', 'R', 'C', 'I', 'T'] as const;
 
 const prevDepthCountsRaw =
   (prevQc as any)?.depth_counts && typeof (prevQc as any).depth_counts === 'object'
@@ -1337,7 +1421,7 @@ const turnDepthForPersonality =
 const depthRecentForPersonality = [
   ...prevDepthRecentRaw
     .map((v: unknown) => String(v ?? '').trim().toUpperCase())
-    .filter((v: string) => /^[SRCIT][0-9]?$/.test(v)),
+    .filter((v: string) => /^[SFRCIT][0-9]?$/.test(v)),
   ...(turnDepthForPersonality ? [turnDepthForPersonality] : []),
 ].slice(-12);
 
@@ -1659,6 +1743,12 @@ if (isIrDiagnosisTurn) {
 
     if (error) {
       console.error('[IROS/STATE] persistMemoryStateIfAny failed', { userCode, error });
+      return {
+        ok: false,
+        error,
+        depth_trend: null,
+        upsertPayload: null,
+      };
     } else {
       console.log('[IROS/STATE] persistMemoryStateIfAny ok', {
         userCode,
@@ -1677,9 +1767,21 @@ if (isIrDiagnosisTurn) {
         intent_anchor:
           'intent_anchor' in upsertPayload ? upsertPayload.intent_anchor : '(no-touch)',
       });
+
+      return {
+        ok: true,
+        depth_trend: (upsertPayload as any)?.depth_trend ?? null,
+        upsertPayload,
+      };
     }
   } catch (e) {
     console.error('[IROS/STATE] persistMemoryStateIfAny exception', { userCode, error: e });
+    return {
+      ok: false,
+      error: e,
+      depth_trend: null,
+      upsertPayload: null,
+    };
   }
 }
 
@@ -1698,3 +1800,11 @@ export async function persistUnifiedAnalysisIfAny(_args: {
 }) {
   // TODO: buildUnifiedAnalysis / saveUnifiedAnalysisInline / applyAnalysisToLastUserMessage を移植する
 }
+
+
+
+
+
+
+
+

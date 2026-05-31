@@ -1,4 +1,4 @@
-// src/app/api/agent/iros/reply/route.ts
+﻿// src/app/api/agent/iros/reply/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +18,7 @@ import { resolveModeHintFromText, resolveRememberScope } from './_mode';
 import { attachNextStepMeta, extractNextStepChoiceFromText, findNextStepOptionById } from '@/lib/iros/nextStepOptions';
 import { ensureIrosConversationUuid } from '@/lib/iros/server/ensureIrosConversationUuid';
 import { persistAssistantMessageToIrosMessages } from '@/lib/iros/server/persistAssistantMessageToIrosMessages';
+import { saveIrDiagnosisResult } from '@/lib/iros/memory/saveIrDiagnosisResult';
 import { runNormalBase } from '@/lib/iros/conversation/normalBase';
 import { decideExpressionLane } from '@/lib/iros/expression/decideExpressionLane';
 import { normalizeIrosStyleFinal } from '@/lib/iros/language/normalizeIrosStyleFinal';
@@ -1400,8 +1401,44 @@ let pastStateTriggerKind =
   reqMetaRaw?.extra?.pastStateTriggerKind ??
   null;
 
+const shouldClearPastStateNoteForDiagnosisFollowup =
+  (
+    (result as any)?.metaForSave?.extra?.diagnosisFollowup === true ||
+    metaForSave?.extra?.diagnosisFollowup === true ||
+    Boolean((result as any)?.metaForSave?.extra?.diagnosisFollowupTargetLabel) ||
+    Boolean((result as any)?.metaForSave?.extra?.ctxPack?.diagnosisFollowupTargetLabel) ||
+    Boolean(metaForSave?.extra?.diagnosisFollowupTargetLabel) ||
+    Boolean(metaForSave?.extra?.ctxPack?.diagnosisFollowupTargetLabel) ||
+    Boolean((result as any)?.metaForSave?.extra?.lastIrDiagnosis) ||
+    Boolean((result as any)?.metaForSave?.extra?.ctxPack?.lastIrDiagnosis) ||
+    Boolean(metaForSave?.extra?.lastIrDiagnosis) ||
+    Boolean(metaForSave?.extra?.ctxPack?.lastIrDiagnosis)
+  ) &&
+  (result as any)?.metaForSave?.extra?.isIrDiagnosisTurn !== true &&
+  metaForSave?.extra?.isIrDiagnosisTurn !== true;
+
+if (shouldClearPastStateNoteForDiagnosisFollowup) {
+  pastStateNoteText = null;
+  pastStateTriggerKind = null;
+
+  console.log('[IROS][route] cleared pastStateNoteText for diagnosis followup', {
+    targetLabel:
+      (result as any)?.metaForSave?.extra?.targetLabel ??
+      metaForSave?.extra?.targetLabel ??
+      (result as any)?.metaForSave?.extra?.ctxPack?.targetLabel ??
+      metaForSave?.extra?.ctxPack?.targetLabel ??
+      null,
+    hasLastIrDiagnosis: Boolean(
+      (result as any)?.metaForSave?.extra?.lastIrDiagnosis ??
+      (result as any)?.metaForSave?.extra?.ctxPack?.lastIrDiagnosis ??
+      metaForSave?.extra?.lastIrDiagnosis ??
+      metaForSave?.extra?.ctxPack?.lastIrDiagnosis
+    ),
+  });
+}
+
 // 👉 ここが今回の本質
-if (!pastStateNoteText && recallCandidates.length > 0) {
+if (!shouldClearPastStateNoteForDiagnosisFollowup && !pastStateNoteText && recallCandidates.length > 0) {
   const topRecall = recallCandidates[0]?.text?.trim();
   if (topRecall) {
     pastStateNoteText = topRecall.slice(0, 800);
@@ -1415,10 +1452,11 @@ extraSoT = {
   memoryStateForCtx,
   memoryStateNoteText: memoryStateForCtx?.noteText ?? null,
 
-  longTermMemoryNoteText:
-    forcedLongTermMemory ??
-    memoryStateForCtx?.longTermNoteText ??
-    null,
+  longTermMemoryNoteText: shouldClearPastStateNoteForDiagnosisFollowup
+    ? null
+    : forcedLongTermMemory ??
+      memoryStateForCtx?.longTermNoteText ??
+      null,
 
   // ✅ relationship / recall 系は writer が pastStateNoteText で読む
   pastStateNoteText,
@@ -1436,9 +1474,21 @@ extraSoT = {
   const enableRenderEngine = extraSoT?.renderEngine === true || extraSoT?.renderEngineGate === true;
   const isIT = upperMode === 'IT' || Boolean((meta as any)?.extra?.renderReplyForcedIT);
   // ✅ ir診断は render / rephrase に入れない
+  const isDiagnosisFollowupForDiagnosisPersist = Boolean(
+    (result as any)?.metaForSave?.extra?.diagnosisFollowup === true ||
+    (result as any)?.metaForSave?.extra?.ctxPack?.diagnosisFollowup === true ||
+    (result as any)?.metaForSave?.extra?.followupKind === 'deepen' ||
+    (result as any)?.metaForSave?.extra?.ctxPack?.followupKind === 'deepen' ||
+    (result as any)?.metaForSave?.extra?.diagnosisFollowupTargetLabel ||
+    (result as any)?.metaForSave?.extra?.ctxPack?.diagnosisFollowupTargetLabel
+  );
+
   const isIrDiagnosis =
-    (result as any)?.metaForSave?.extra?.isIrDiagnosisTurn === true ||
-    (result as any)?.metaForSave?.extra?.presentationKind === 'diagnosis';
+    !isDiagnosisFollowupForDiagnosisPersist &&
+    (
+      (result as any)?.metaForSave?.extra?.isIrDiagnosisTurn === true ||
+      (result as any)?.metaForSave?.extra?.presentationKind === 'diagnosis'
+    );
 
     if (isIrDiagnosis) {
       const finalText = String(
@@ -1541,6 +1591,76 @@ try {
   if (!persistRes || (persistRes as any).ok !== true || (persistRes as any).inserted !== true) {
     console.error('[IROS][DIAGNOSIS_PERSIST_NOT_INSERTED]', persistRes);
   } else {
+    const irMetaForDiagnosisResult =
+      baseDiagExtra?.irMeta ??
+      baseDiagCtxPack?.irMeta ??
+      null;
+
+    const savedDiagnosisResult = await saveIrDiagnosisResult(supabase, {
+      ownerUserCode: userCode,
+      conversationId,
+      messageId: (persistRes as any)?.messageId ?? null,
+      targetLabel:
+        irMetaForDiagnosisResult?.targetLabel ??
+        baseDiagExtra?.targetLabel ??
+        baseDiagCtxPack?.targetLabel ??
+        null,
+      drawSeed:
+        irMetaForDiagnosisResult?.drawSeed ??
+        baseDiagExtra?.drawSeed ??
+        null,
+      drawSource:
+        irMetaForDiagnosisResult?.drawSource ??
+        baseDiagExtra?.drawSource ??
+        null,
+      drawPickKey:
+        irMetaForDiagnosisResult?.drawPickKey ??
+        baseDiagExtra?.drawPickKey ??
+        null,
+      drawPickJson:
+        irMetaForDiagnosisResult?.drawPickJson ??
+        irMetaForDiagnosisResult?.drawPick ??
+        baseDiagExtra?.drawPickJson ??
+        null,
+      qPrimary:
+        irMetaForDiagnosisResult?.qPrimary ??
+        irMetaForDiagnosisResult?.q_primary ??
+        baseDiagExtra?.qPrimary ??
+        baseDiagExtra?.q_code ??
+        null,
+      depthStage:
+        irMetaForDiagnosisResult?.depthStage ??
+        irMetaForDiagnosisResult?.depth_stage ??
+        baseDiagExtra?.depthStage ??
+        baseDiagExtra?.depth_stage ??
+        null,
+      phase:
+        irMetaForDiagnosisResult?.phase ??
+        baseDiagExtra?.phase ??
+        null,
+      intentAnchorKey:
+        irMetaForDiagnosisResult?.intentAnchorKey ??
+        irMetaForDiagnosisResult?.intent_anchor_key ??
+        baseDiagExtra?.intentAnchorKey ??
+        baseDiagExtra?.intent_anchor_key ??
+        null,
+      itxStep:
+        baseDiagExtra?.itxStep ??
+        baseDiagExtra?.itx_step ??
+        irMetaForDiagnosisResult?.itxStep ??
+        irMetaForDiagnosisResult?.itx_step ??
+        null,
+      diagnosisText: finalText,
+      diagnosisJson: {
+        irMeta: irMetaForDiagnosisResult,
+        baseDiagExtra,
+        baseDiagCtxPack,
+        persistMeta,
+      },
+    });
+
+    console.log('[IROS][IR_DIAGNOSIS_RESULT_PERSIST]', savedDiagnosisResult);
+
     const { error: activeAtError } = await supabase
       .from('users')
       .update({
@@ -1559,6 +1679,8 @@ try {
 return NextResponse.json({
   ok: true,
   text: finalText,
+  assistant: finalText,
+  meta: metaForSave ?? meta ?? null,
 });
     }
   const applied = await applyRenderEngineIfEnabled({
@@ -2401,3 +2523,4 @@ if (!skipTraining) {
     );
   }
 }
+

@@ -1,4 +1,4 @@
-// src/ui/iroschat/IrosHeader.tsx
+﻿// src/ui/iroschat/IrosHeader.tsx
 'use client';
 
 import React from 'react';
@@ -69,7 +69,26 @@ export default function IrosHeader({
     currentMeta?.extra?.memoryStateSnapshot?.qCounts?.person_depth_pattern ??
     null;
 
+  const depthTrendRaw =
+    currentMeta?.depth_trend ??
+    currentMeta?.depthTrend ??
+    currentMeta?.extra?.depth_trend ??
+    currentMeta?.extra?.depthTrend ??
+    currentMeta?.extra?.memoryStateSnapshot?.depth_trend ??
+    currentMeta?.extra?.memoryStateSnapshot?.depthTrend ??
+    currentMeta?.extra?.ctxPack?.memoryStateSnapshot?.depth_trend ??
+    currentMeta?.extra?.ctxPack?.memoryStateSnapshot?.depthTrend ??
+    null;
+
+  const longDepthRaw =
+    depthTrendRaw?.long_depth_stage_candidate ??
+    depthTrendRaw?.longDepthStageCandidate ??
+    depthTrendRaw?.active_depth_band ??
+    depthTrendRaw?.activeDepthBand ??
+    null;
+
   const depthRaw =
+    longDepthRaw ??
     personDepthPatternRaw ??
     currentMeta?.observedStage ??
     currentMeta?.depth ??
@@ -264,3 +283,4 @@ export default function IrosHeader({
     </header>
   );
 }
+
