@@ -12108,7 +12108,7 @@ const finalWriterDirectivesMsg =
 
           next = next
             .replace(/(CONTEXT:\n)[^\n]*/u, `$1${seedDraftForWriter}`)
-            .replace(/(FOCUS:\n)[^\n]*/u, `$1${seedDraftForWriter}`)
+            // FOCUS は seed 側の圧縮正本なので、ユーザー発話で上書きしない
             .replace(/(OBS=)[^\n]*/u, '$1まず質問への定義・軸を短く返す。emotion_inner / emotion_need が存在しても、OBSの先頭を感情の言い換えだけで開始しない')
             .replace(/(NEXT=)[^\n]*/u, '$1必要以上に構造化せず、会話として少しだけ返す')
             .replace(/(OBS_LINE=)[^\n]*/u, '$1最初の一文は、感情の受け文ではなく、問いに対する分かりやすい定義または見取り図から開始する')

@@ -3611,12 +3611,35 @@ function normForRecall(v: any): string {
 
       const flowSeedFocus =
         previousReplyRephraseSeed ??
-        (String(
-          (orchExtra as any)?.situationTopic ??
-            (orchCtxPack as any)?.situationTopic ??
-            text ??
-            '',
-        ).trim() || null);
+        (() => {
+          const meaningFocus = String(
+            (orchExtra as any)?.meaningSkeleton?.focus ??
+              (orchCtxPack as any)?.meaningSkeleton?.focus ??
+              '',
+          ).trim();
+
+          if (meaningFocus) return meaningFocus;
+
+          const focusSource = String(text ?? '');
+          const hasTcfConcreteIntent =
+            /(構造|設計|実装|seed|シード|回路|接続|直結|意味に入|意味を作る|内面の説明ではなく|使える形|動く形)/u.test(
+              focusSource,
+            );
+
+          if (hasTcfConcreteIntent) {
+            return '内面解釈で止めず、構造・設計・実装へ接続する';
+          }
+
+          return (
+            String(
+              (orchExtra as any)?.situationTopic ??
+                (orchCtxPack as any)?.situationTopic ??
+                text ??
+                '',
+            ).trim() || null
+          );
+        })();
+
 
       const flowSeedObsLine =
         previousReplyRephraseSeed

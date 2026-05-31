@@ -1632,7 +1632,13 @@ export async function buildTurnContext(
 
     const inputKindForPriorOffer = String((baseMetaForTurn as any)?.inputKind ?? '').trim();
 
+    const userIsStructureDesignRequestForPriorOffer =
+      /(今の話|この話|構造|設計|実装|seed|シード|回路|接続|直結|意味に入|意味を作る|内面の説明ではなく|使える形|動く形|TCF|SRI)/u.test(
+        currentTextForPriorOffer,
+      );
+
     if (
+      !userIsStructureDesignRequestForPriorOffer &&
       assistantOfferedCompose &&
       (
         (inputKindForPriorOffer === 'task' && userAcceptsPriorOffer) ||

@@ -716,7 +716,11 @@ export function buildFlowSeedV1(input: FlowSeedV21Input): FlowSeedV21 {
     transferSeedText: transferSeed.ok ? transferSeed.seedText : null,
     humanContextOrchestrationText: humanContextOrchestration.seedText,
 
-    focus: compression.focus,
+    focus:
+      transferSeed.fromReplyFocus ??
+      transferSeed.humanStateReplyFocus ??
+      transferSeed.toReplyFocus ??
+      compression.focus,
     tone: compression.tone,
     pressure: normalizedPressure,
 

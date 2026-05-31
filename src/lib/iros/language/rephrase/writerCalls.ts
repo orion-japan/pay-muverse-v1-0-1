@@ -2971,17 +2971,32 @@ return {
                 if (hasTConcretize) return true;
 
                 // ✅ writerCalls には T_CONCRETIZE 本体が届かない経路があるため、
-                // T3/future_design かつ具体化語がある場合だけ TCF/C として扱う。
+                // T3/T か、ユーザーが SRI/TCF を明示し、
+                // かつ構造・設計・実装・seed接続の意図がある場合は TCF/C として扱う。
+                const tcfBridgeSource = `${userTextForSpin}\n${raw.slice(0, 2000)}`;
+
+                const hasTcfLoopSignal =
+                  (tLayerNow === 'T3' || tLayerNow === 'T') ||
+                  /\bTCF\b|\bSRI\b|SRI.*TCF|TCF.*SRI/u.test(tcfBridgeSource);
+
+                const isTcfBridgeQuestionType =
+                  questionTypeNow === 'future_design' ||
+                  questionTypeNow === 'structure' ||
+                  questionTypeNow === 'meaning' ||
+                  questionTypeNow === '';
+
                 const hasConcreteIntent =
-                  /(具体|決めたい|決める|演出|会場|見せ方|入口|主役|写真映え|現実|形に|組み立て|日程|場所|関わる人|企画|イベント)/.test(
-                    `${userTextForSpin}\n${raw.slice(0, 2000)}`,
+                  /(具体|決めたい|決める|演出|会場|見せ方|入口|主役|写真映え|現実|形に|組み立て|日程|場所|関わる人|企画|イベント|構造|設計|実装|seed|シード|回路|接続|直結|意味に入|意味を作る|Writer|FlowSeed|MeaningSkeleton)/u.test(
+                    tcfBridgeSource,
                   );
 
-                return (
-                  (tLayerNow === 'T3' || tLayerNow === 'T') &&
-                  questionTypeNow === 'future_design' &&
-                  hasConcreteIntent
-                );
+                const tcfBridgeResult =
+                  hasTcfLoopSignal &&
+                  isTcfBridgeQuestionType &&
+                  hasConcreteIntent;
+
+
+                return tcfBridgeResult;
               })();
 
               const flowSeedV1 = buildFlowSeedV1({
@@ -3211,7 +3226,29 @@ return {
                   return [rawHistory, futureHintLine].filter(Boolean).join('\n');
                 })(),
 
-                meaningSkeleton: (args as any).meaningSkeleton ?? null,
+                meaningSkeleton: tConcretizeSpinBridgeForWriter
+                  ? {
+                      ...(((args as any).meaningSkeleton ?? {}) as any),
+                      transitionMeaning:
+                        cleanMeaningLine(
+                          ((args as any).meaningSkeleton as any)?.transitionMeaning,
+                        ) ||
+                        '意味を深める段階から、構造・設計・実装へ移る流れ。',
+                      structuralMeaning:
+                        cleanMeaningLine(
+                          ((args as any).meaningSkeleton as any)?.structuralMeaning,
+                        ) ||
+                        '刺さった核心を、形にするための回路が開いている。',
+                      focus:
+                        cleanMeaningLine(((args as any).meaningSkeleton as any)?.focus) ||
+                        '内面解釈ではなく、具体化・設計・次の形へ接続する。',
+                      oneLineConstraint:
+                        cleanMeaningLine(
+                          ((args as any).meaningSkeleton as any)?.oneLineConstraint,
+                        ) ||
+                        'Sの説明へ戻さず、C/Fへ接続する。意味を確認するだけで止めず、形にする方向を返す。',
+                    }
+                  : (args as any).meaningSkeleton ?? null,
                 flow180: (args as any).flow180 ?? null,
                 writerDirectives: (args as any).writerDirectives ?? null,
 
@@ -4048,12 +4085,69 @@ const diagnosisFollowupBlock = (() => {
 
       return String(content ?? '')
         .replace(/(CONTEXT:\n)[^\n]*/u, `$1${seed}`)
-        .replace(/(FOCUS:\n)[^\n]*/u, `$1${seed}`)
+        // FOCUS は実SEED側の意味方向なので、seedInstructionCore / userText で再上書きしない
         .replace(/(OBS=)[^\n]*/u, `$1${obsCoreForPack}`)
         .replace(/(NEXT=)[^\n]*/u, '$1必要以上に構造化せず、会話として少しだけ返す')
         .replace(/(OBS_LINE=)[^\n]*/u, `$1${obsLineForPack}`)
         .replace(/(NEXT_LINE=)[^\n]*/u, '$1丸写しではなく、感じ取った強さだけを短く返す。');
     };
+
+    const referenceJudgementContractBlock = (() => {
+      const referenceJudgeSeed = String(
+        ((args as any)?.referenceJudgeSeed) ??
+          ((args as any)?.extra?.referenceJudgeSeed) ??
+          ((ctxPack as any)?.referenceJudgeSeed) ??
+          ((extra as any)?.referenceJudgeSeed) ??
+          ((args as any)?.userContext?.referenceJudgeSeed) ??
+          ((args as any)?.userContext?.ctxPack?.referenceJudgeSeed) ??
+          ((args as any)?.userContext?.meta?.extra?.referenceJudgeSeed) ??
+          ''
+      ).trim();
+
+      if (!referenceJudgeSeed) return '';
+      if (!/(?:^|\n)REFERENCE_JUDGEMENT:/u.test(referenceJudgeSeed)) return '';
+      if (!/(?:^|\n)askType=reference_check/u.test(referenceJudgeSeed)) return '';
+
+      const relation = String(
+        referenceJudgeSeed.match(/(?:^|\n)relation=([^\n]+)/u)?.[1] ?? ''
+      ).trim();
+
+      const writerFirstLine = String(
+        referenceJudgeSeed.match(/(?:^|\n)writerFirstLine=([^\n]+)/u)?.[1] ?? ''
+      ).trim();
+
+      const judgementSummary = String(
+        referenceJudgeSeed.match(/(?:^|\n)judgementSummary=([^\n]+)/u)?.[1] ?? ''
+      ).trim();
+
+      return [
+        'REFERENCE_JUDGEMENT_CONTRACT (DO NOT OUTPUT):',
+        'priority=highest',
+        'when=REFERENCE_JUDGEMENT exists and askType=reference_check',
+        writerFirstLine ? 'must_start_with=' + writerFirstLine : '',
+        judgementSummary ? 'must_use=' + judgementSummary : '',
+        'must_not_contradict=writerFirstLine と矛盾する本文を書かない',
+        'must_not_switch=判定後に一般論・可能性論へ戻って結論を反転させない',
+        relation ? 'relation=' + relation : '',
+        relation === 'not_identical'
+          ? 'rule_not_identical=本文全体を「一致しない／沿っていない」方向に固定する'
+          : '',
+        relation === 'not_identical'
+          ? 'rule_not_identical_forbid=「はい」「沿っている」「沿っている可能性は高い」「その理解で大丈夫」「正しい」「合っています」と書かない'
+          : '',
+        relation === 'not_identical'
+          ? 'rule_not_identical_explain=referenceTarget の条件と mainSubject の違いを説明する'
+          : '',
+        relation === 'not_identical'
+          ? 'rule_not_identical_caution=断定しすぎずに書いてよいが、判定方向は not aligned のまま保つ'
+          : '',
+        'style=見出しなしの自然文。判断を先に出し、必要なら理由を短く続ける',
+        '',
+        referenceJudgeSeed,
+      ]
+        .filter(Boolean)
+        .join('\n');
+    })();
 
     const userIntentBridgeBlock = (() => {
       const userTextRaw = String(
@@ -4261,6 +4355,7 @@ const diagnosisFollowupBlock = (() => {
       [
         mirrorFlowSeedText,
         rewritePackWithSeedInstructionCore(String(internalPackForWriterSource ?? '')),
+        referenceJudgementContractBlock,
       ]
         .filter(Boolean)
         .join('\n\n'),
