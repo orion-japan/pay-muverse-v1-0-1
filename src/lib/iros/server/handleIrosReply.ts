@@ -4340,21 +4340,27 @@ function normForRecall(v: any): string {
     out.metaForSave = out.metaForSave ?? {};
     out.metaForSave.timing = t;
 
-// ✅ extra を “最後に” 再注入（undefined / null は上書きしない）
-// - postprocess が確定した値（uiCue/ctxPack 等）を潰さない
+// extra merge: preserve postprocess values
+// ctxPack relationship is suppressed for document/business tasks
 out.metaForSave.extra = out.metaForSave.extra ?? {};
+
+const shouldSuppressRelationshipCtxPackForDocumentTaskAtExtraMerge =
+  /(?:規約|規定|条件|案内|要項|保証書|募集要項|応募条件|利用条件|配送規定|返金規定|キャンセル規定|予約規約|保証対象|返品|送料|送料無料|お客様|顧客|ご案内|説明文)/u.test(
+    String(text ?? ''),
+  ) &&
+  /(?:お客様に送る|お客様へ送る|説明文を作って|どう説明|ご案内|返金規定|配送規定|保証書|募集要項|規約|規定|条件)/u.test(
+    String(text ?? ''),
+  );
+
 if (extra && typeof extra === 'object') {
   const prev = out.metaForSave.extra ?? {};
-  const next: any = { ...prev };
+  const next = { ...prev };
 
-  for (const [k, v] of Object.entries(extra as any)) {
-    // ✅ null/undefined は無視（既存を守る）
+  for (const [k, v] of Object.entries(extra)) {
     if (v === undefined || v === null) continue;
 
-    // ✅ postprocess が作る確定値は絶対に上書きしない
     if (k === 'uiCue') continue;
 
-    // ✅ ctxPack だけは shallow merge ではなく deep merge する
     if (k === 'ctxPack' && v && typeof v === 'object') {
       const prevCtx =
         next.ctxPack && typeof next.ctxPack === 'object'
@@ -4362,16 +4368,18 @@ if (extra && typeof extra === 'object') {
           : {};
 
       next.ctxPack = {
-        ...(v as any),
+        ...(v),
         ...prevCtx,
-        relationship:
-          prevCtx.relationship ??
-          (v as any).relationship ??
-          null,
-        relationshipMemory:
-          prevCtx.relationshipMemory ??
-          (v as any).relationshipMemory ??
-          null,
+        relationship: shouldSuppressRelationshipCtxPackForDocumentTaskAtExtraMerge
+          ? null
+          : prevCtx.relationship ??
+            v.relationship ??
+            null,
+        relationshipMemory: shouldSuppressRelationshipCtxPackForDocumentTaskAtExtraMerge
+          ? null
+          : prevCtx.relationshipMemory ??
+            v.relationshipMemory ??
+            null,
       };
       continue;
     }
@@ -5657,18 +5665,40 @@ try {
     (extra2 as any)?.ctxPack?.emotionalTemperature ?? null;
 
   // ===== ① 関係対象の解決 =====
+
+  const relationshipLayerCurrentText = [
+    userText,
+    typeof topicDigest === 'string' ? topicDigest : '',
+  ]
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const shouldSuppressRelationshipHistoryForDocumentTask =
+    /(?:規約|規定|条件|案内|要項|保証書|募集要項|応募条件|利用条件|配送規定|返金規定|キャンセル規定|予約規約|保証対象|返品|送料|送料無料|お客様|顧客|ご案内|説明文)/u.test(
+      relationshipLayerCurrentText,
+    ) &&
+    /(?:お客様に送る|お客様へ送る|説明文を作って|どう説明|ご案内|返金規定|配送規定|保証書|募集要項|規約|規定|条件)/u.test(
+      relationshipLayerCurrentText,
+    );
+
+  const relationshipHistoryTextForLayer = shouldSuppressRelationshipHistoryForDocumentTask
+    ? null
+    : relationshipHistoryText;
   const resolvedBase = resolveRelation({
     userText,
     topicDigest,
-    historyText: relationshipHistoryText || null,
+    historyText: relationshipHistoryTextForLayer || null,
     candidates: null,  // memory recall 候補は次段
-    lastRelationId: (extra2 as any)?.ctxPack?.relationId ?? null,
+    lastRelationId: shouldSuppressRelationshipHistoryForDocumentTask
+      ? null
+      : (extra2 as any)?.ctxPack?.relationId ?? null,
     selfId: userCode ?? 'self',
   });
 
   const genericRelationshipText = [
     userText,
-    relationshipHistoryText,
+    relationshipHistoryTextForLayer,
     typeof topicDigest === 'string' ? topicDigest : '',
   ]
     .join(' ')
@@ -5774,7 +5804,7 @@ try {
       userCode,
       userText,
       topicDigest,
-      relationshipHistoryText,
+      relationshipHistoryTextForLayer,
       genericRelationshipText,
       resolvedBaseRelationId: resolvedBase?.relationId ?? null,
       pendingRelationshipDisplayName,
@@ -5858,7 +5888,7 @@ try {
   const context = buildRelationshipContext({
     userText,
     topicDigest,
-    historyText: relationshipHistoryText || null,
+    historyText: relationshipHistoryTextForLayer || null,
     recalledMemory,
   });
 

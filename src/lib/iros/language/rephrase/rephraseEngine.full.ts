@@ -10408,10 +10408,29 @@ const isResonanceStructureFollowup =
                     }
                   : null;
 
+              const isBusinessDocumentComposeRequestForPattern =
+                /(?:規約|規定|条件|案内|要項|保証書|募集要項|応募条件|利用条件|配送規定|返金規定|キャンセル規定|予約規約|保証対象|返品|送料|送料無料|お客様|顧客|ご案内|説明文)/u.test(
+                  userTextForTranscendPattern,
+                ) &&
+                /(?:お客様に送る|お客様へ送る|説明文を作って|どう説明|ご案内|返金規定|配送規定|保証書|募集要項|規約|規定|条件)/u.test(
+                  userTextForTranscendPattern,
+                );
+
+              const isRomanceComposeRequestForPattern =
+                /(?:彼|彼氏|彼女|好きな人|相手|元彼|元カノ|恋愛|LINE|ライン|返信|返事|連絡|送る文|送信文|どう返せば|なんて送れば)/u.test(
+                  userTextForTranscendPattern,
+                );
+
+              const composeRequestKindForPattern = isBusinessDocumentComposeRequestForPattern
+                ? 'business_document_compose_message'
+                : isRomanceComposeRequestForPattern
+                  ? 'romance_compose_message'
+                  : 'general_compose_message';
+
               const composeRequestWriterDirectives = isComposeRequestForPattern
                 ? {
                     pattern_key: 'NORMAL_RESONANCE_V1',
-                    pattern_mode: 'compose_message',
+                    pattern_mode: composeRequestKindForPattern,
                     bodyStyle: {
                       preferBlockSplit: true,
                       minBlocks: 1,
@@ -10431,7 +10450,22 @@ const isResonanceStructureFollowup =
                       'COMPOSE_MESSAGE_LIGHT: 返答は、答え・例文・一言だけにする',
                       'COMPOSE_MESSAGE_LIGHT: 状態説明、理由説明、診断語、抽象まとめを足さない',
                       'COMPOSE_MESSAGE_LIGHT: 「これは〜ための文です」「いま必要なのは」「必要なら」「ちょうどいい」を使わない',
-                      'COMPOSE_MESSAGE_LIGHT: 最後は「送るなら一度だけで大丈夫です。」のように短く閉じる',
+                      ...(isBusinessDocumentComposeRequestForPattern
+                        ? [
+                            'COMPOSE_MESSAGE_BUSINESS: お客様向け・規約文・返金/配送/保証の説明文では「送るなら一度だけで大丈夫です」を出さない',
+                            'COMPOSE_MESSAGE_BUSINESS: 業務文面だけを出す。恋愛・連絡温度・一度だけ送る等の助言を足さない',
+                            'COMPOSE_MESSAGE_BUSINESS: 締めが必要な場合は「ご確認をお願いいたします。」のような業務文にする。不要なら締めを足さない',
+                            'COMPOSE_MESSAGE_BUSINESS: 絵文字、共鳴記号、装飾記号、単独の句点だけの行を出さない',
+                            'COMPOSE_MESSAGE_BUSINESS: 「承知しました」「以下のようにお送りできます」などの前置きは不要。お客様に送る本文だけを書く',
+                            'COMPOSE_MESSAGE_BUSINESS: 文面はそのまま送れる業務文にする。助言・補足・感情表現を足さない',
+                          ]
+                        : isRomanceComposeRequestForPattern
+                          ? [
+                              'COMPOSE_MESSAGE_ROMANCE: 最後は「送るなら一度だけで大丈夫です。」のように短く閉じてもよい',
+                            ]
+                          : [
+                              'COMPOSE_MESSAGE_GENERAL: 用途に合わない恋愛向けの締めを入れない',
+                            ]),
                     ],
                   }
                 : null;
