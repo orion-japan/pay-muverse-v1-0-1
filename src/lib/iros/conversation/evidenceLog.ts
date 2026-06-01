@@ -39,6 +39,16 @@ export type ConvEvidenceInput = {
     stuck?: boolean;
     detail?: boolean;
     topicHint?: string | null;
+    explicitUserSignal?: {
+      hasExplicitCorrection?: boolean;
+      hasRejection?: boolean;
+      hasDirectionOverride?: boolean;
+      saysAlreadyMentioned?: boolean;
+      forbidsDeepInference?: boolean;
+      surfaceOnly?: boolean;
+      priority?: 'hard' | 'soft' | 'none';
+      reason?: string;
+    } | null;
   } | null;
 
   // ctx（Unit B）
@@ -225,6 +235,9 @@ export function computeConvEvidence(input: ConvEvidenceInput): ConvEvidence {
     detail: {
       branch: input.branch ?? null,
       topicHint: input.signals?.topicHint ?? null,
+      explicitReason: input.signals?.explicitUserSignal?.reason ?? null,
+      explicitPriority: input.signals?.explicitUserSignal?.priority ?? null,
+      explicitCorrection: input.signals?.explicitUserSignal?.hasExplicitCorrection ?? null,
       q: input.meta?.qCode ?? null,
       depth: input.meta?.depthStage ?? null,
       phase: input.meta?.phase ?? null,

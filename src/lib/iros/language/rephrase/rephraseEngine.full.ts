@@ -11310,6 +11310,36 @@ const isResonanceStructureFollowup =
                   })
                 : baseWriteConstraintsForFinal;
 
+              const explicitUserSignalForWriter =
+                (ctxPackForWriter as any)?.explicitUserSignal &&
+                typeof (ctxPackForWriter as any).explicitUserSignal === 'object'
+                  ? (ctxPackForWriter as any).explicitUserSignal
+                  : null;
+
+              const explicitUserSignalConstraintsForFinal =
+                explicitUserSignalForWriter?.forbidsDeepInference === true ||
+                explicitUserSignalForWriter?.surfaceOnly === true
+                  ? [
+                      'EXPLICIT_USER_SIGNAL: ユーザーが深読み禁止・推測禁止・表面優先を明示している。このターンでは奥の意味・合図・核心・感覚へ広げない',
+                      'EXPLICIT_USER_SIGNAL: 「〜という合図」「〜として見えます」「奥で〜」「核心は〜」「感じます」で解釈を足さない',
+                      'EXPLICIT_USER_SIGNAL: ユーザーの発話をそのまま受け、短く、必要な範囲だけ返す',
+                      'EXPLICIT_USER_SIGNAL: 共鳴語り・詩的比喩・余韻の追加を控える',
+                    ]
+                  : explicitUserSignalForWriter?.hasRejection === true
+                    ? [
+                        'EXPLICIT_USER_SIGNAL: ユーザーが「そこじゃない」「違う」系の否定を明示している。直前の方向を続けず、まずズレを認めて短く修正する',
+                        'EXPLICIT_USER_SIGNAL: 否定された方向を深めない。説明を増やさず、ユーザーの指定方向に戻す',
+                      ]
+                    : explicitUserSignalForWriter?.hasDirectionOverride === true
+                      ? [
+                          'EXPLICIT_USER_SIGNAL: ユーザーが方向の上書きを明示している。rejectedDirectionを続けず、preferredDirectionを優先する',
+                        ]
+                      : explicitUserSignalForWriter?.saysAlreadyMentioned === true
+                        ? [
+                            'EXPLICIT_USER_SIGNAL: ユーザーは既に言った・既に聞いたことを示している。再説明ではなく、既出前提で進める',
+                          ]
+                        : [];
+
               const storyModeForFinal =
                 String((ctxPackForWriter as any)?.storyMode ?? '').trim() ||
                 String((opts as any)?.ctxPack?.storyMode ?? '').trim() ||
@@ -11418,6 +11448,7 @@ const isResonanceStructureFollowup =
                   : {}),
                 writeConstraints: [
                   ...relaxedWriteConstraintsForFinal,
+                  ...explicitUserSignalConstraintsForFinal,
                   ...deepReadSuppressionConstraintsForFinal,
                   ...storyModeConstraintsForFinal,
                   ...(isPreviousReplyRephraseForFinal

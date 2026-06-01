@@ -1,4 +1,4 @@
-﻿// file: src/lib/iros/server/handleIrosReply.ts
+// file: src/lib/iros/server/handleIrosReply.ts
 // iros — handleIrosReply (V2 / single-writer friendly)
 //
 // ✅ 方針（ここを徹底）
@@ -47,6 +47,7 @@ import { runGenericRecallGate } from '@/lib/iros/server/gates/genericRecallGate'
 import { writeIT } from '@/lib/iros/language/itWriter';
 import { resolveRememberBundle } from '@/lib/iros/remember/resolveRememberBundle';
 import { logConvEvidence } from '@/lib/iros/conversation/evidenceLog';
+import { computeConvSignals } from '@/lib/iros/conversation/signals';
 import { buildHistoryDigestV1 } from '@/lib/iros/history/historyDigestV1';
 import { summarizeTopicLineV1 } from '@/lib/iros/memory/topicSummarizer';
 import {
@@ -2000,6 +2001,11 @@ if (!wantsMicroNow) {
         if (cp.exprMeta) keep.exprMeta = cp.exprMeta;
         if (cp.traceId) keep.traceId = cp.traceId;
 
+        // --- ユーザー明示シグナル（軽量なので残す）---
+        if (cp.explicitUserSignal && typeof cp.explicitUserSignal === 'object') {
+          keep.explicitUserSignal = cp.explicitUserSignal;
+        }
+
         // --- ir診断の持ち越し ---
         if (cp.irMeta && typeof cp.irMeta === 'object') keep.irMeta = cp.irMeta;
         if (cp.detailMode === true) keep.detailMode = true;
@@ -2122,6 +2128,11 @@ if (!wantsMicroNow) {
       if (cp.goalKind) keep.goalKind = cp.goalKind;
       if (cp.exprMeta) keep.exprMeta = cp.exprMeta;
       if (cp.traceId) keep.traceId = cp.traceId;
+
+      // --- ユーザー明示シグナル（軽量なので残す）---
+      if (cp.explicitUserSignal && typeof cp.explicitUserSignal === 'object') {
+        keep.explicitUserSignal = cp.explicitUserSignal;
+      }
 
       // --- ir診断の持ち越し ---
       if (cp.irMeta && typeof cp.irMeta === 'object') keep.irMeta = cp.irMeta;
@@ -2523,6 +2534,15 @@ function normForRecall(v: any): string {
           ...ctxPackFromCtxExtra,
           ...ctxPackFromPrevExtra,
         },
+      };
+
+      const convSignalsForTurn = computeConvSignals(currentUserTextForMemoryGate);
+
+      (extraLocal as any).convSignals = convSignalsForTurn;
+      (extraLocal as any).ctxPack = {
+        ...(((extraLocal as any).ctxPack ?? {}) as any),
+        convSignals: convSignalsForTurn,
+        explicitUserSignal: convSignalsForTurn.explicitUserSignal,
       };
     }
 
@@ -3812,6 +3832,7 @@ function normForRecall(v: any): string {
               expiresAfterTurn: true,
             }
           : null,
+
 
 
         historyLine: (() => {

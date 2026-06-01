@@ -6,11 +6,25 @@
 // - 相談（迷い/不安）も対象にする
 // - 判定は軽く、誤判定しても致命傷にならない（branch側で吸収）
 
+export type ExplicitUserSignal = {
+  hasExplicitCorrection: boolean;
+  hasRejection: boolean;
+  hasDirectionOverride: boolean;
+  saysAlreadyMentioned: boolean;
+  forbidsDeepInference: boolean;
+  surfaceOnly: boolean;
+  preferredDirection: string | null;
+  rejectedDirection: string | null;
+  priority: 'hard' | 'soft' | 'none';
+  reason: string;
+};
+
 export type ConvSignals = {
   repair: boolean;
   stuck: boolean;
   detail: boolean;
   topicHint: string | null;
+  explicitUserSignal: ExplicitUserSignal;
 };
 
 function norm(s: unknown): string {
@@ -224,6 +238,138 @@ function detectTopicHint(t: string): string | null {
   return null;
 }
 
+function detectExplicitUserSignal(t: string): ExplicitUserSignal {
+  const empty: ExplicitUserSignal = {
+    hasExplicitCorrection: false,
+    hasRejection: false,
+    hasDirectionOverride: false,
+    saysAlreadyMentioned: false,
+    forbidsDeepInference: false,
+    surfaceOnly: false,
+    preferredDirection: null,
+    rejectedDirection: null,
+    priority: 'none',
+    reason: 'no_explicit_signal',
+  };
+
+  if (!t) return empty;
+
+  const hasRejection =
+    includesAny(t, [
+      '違う',
+      'ちがう',
+      'そうじゃない',
+      'それじゃない',
+      'それじゃなくて',
+      'それではなく',
+      'そこじゃない',
+      'そこではない',
+      'そこじゃなくて',
+      'ズレてる',
+      'ずれてる',
+      '合ってない',
+      'しっくりこない',
+    ]);
+
+  const saysAlreadyMentioned =
+    includesAny(t, [
+      'もう言',
+      '言った',
+      'さっき言った',
+      '前に言った',
+      '話した',
+      'さっき話した',
+      '前に話した',
+      '聞いた',
+      'さっき聞いた',
+      '前に聞いた',
+      '同じこと',
+    ]);
+
+  const forbidsDeepInference =
+    includesAny(t, [
+      '深読みしない',
+      '深読みしないで',
+      '深読みしすぎ',
+      '深読みじゃない',
+      '推測しない',
+      '推測しないで',
+      '決めつけない',
+      '決めつけないで',
+      '見当で進めない',
+      '憶測しない',
+      '憶測しないで',
+    ]);
+
+  const surfaceOnly =
+    forbidsDeepInference ||
+    includesAny(t, [
+      'そのまま',
+      'そのまま答えて',
+      '表面だけ',
+      '言ってることだけ',
+      '書いてあることだけ',
+      'コードで確認',
+      'SQLで確認',
+    ]);
+
+  const hasDirectionOverride =
+    includesAny(t, [
+      'じゃなくて',
+      'ではなく',
+      'じゃなく',
+      'よりも',
+      'こっち',
+      'この方向',
+      'そっちじゃない',
+      'この話',
+    ]);
+
+  let rejectedDirection: string | null = null;
+  let preferredDirection: string | null = null;
+
+  const overrideMatch =
+    t.match(/(.+?)(?:じゃなくて|ではなく|じゃなく)(.+)/u) ??
+    t.match(/(.+?)(?:よりも)(.+)/u);
+
+  if (overrideMatch) {
+    rejectedDirection = overrideMatch[1]?.trim() || null;
+    preferredDirection = overrideMatch[2]?.trim() || null;
+  }
+
+  const hasExplicitCorrection =
+    hasRejection ||
+    saysAlreadyMentioned ||
+    forbidsDeepInference ||
+    hasDirectionOverride;
+
+  if (!hasExplicitCorrection) return empty;
+
+  const priority: ExplicitUserSignal['priority'] =
+    hasRejection || forbidsDeepInference || hasDirectionOverride ? 'hard' : 'soft';
+
+  const reasons = [
+    hasRejection ? 'rejection' : null,
+    saysAlreadyMentioned ? 'already_mentioned' : null,
+    forbidsDeepInference ? 'forbid_deep_inference' : null,
+    hasDirectionOverride ? 'direction_override' : null,
+    surfaceOnly ? 'surface_only' : null,
+  ].filter(Boolean);
+
+  return {
+    hasExplicitCorrection,
+    hasRejection,
+    hasDirectionOverride,
+    saysAlreadyMentioned,
+    forbidsDeepInference,
+    surfaceOnly,
+    preferredDirection,
+    rejectedDirection,
+    priority,
+    reason: reasons.join('|') || 'explicit_signal',
+  };
+}
+
 export function computeConvSignals(userText: string): ConvSignals {
   const t = norm(userText);
 
@@ -232,6 +378,7 @@ export function computeConvSignals(userText: string): ConvSignals {
   const stuck = detectStuck(t);
 
   const topicHint = detectTopicHint(t);
+  const explicitUserSignal = detectExplicitUserSignal(t);
 
-  return { repair, stuck, detail, topicHint };
+  return { repair, stuck, detail, topicHint, explicitUserSignal };
 }
