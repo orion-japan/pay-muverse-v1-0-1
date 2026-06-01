@@ -270,6 +270,23 @@ export function checkWriterGuardsMinimal(args: {
       );
 
       if (metaLines.length >= 2 && lines.length >= 6) {
+        // PUBLIC_IROS_ARCHITECTURE_EXPLANATION_ALLOW
+        // Guardは残す。ただし、IROSの公開用アーキテクチャ説明では、
+        // Input / Memory / MirrorFlow Seed / Writer / Guard / Render / Persist
+        // などの抽象レイヤー名は本文として許可する。
+        // 生の内部Packや DO NOT OUTPUT 系の漏洩は、従来どおり reject する。
+        const hasStrictInternalLeak =
+          /(DO NOT OUTPUT|INTERNAL PACK|STATE_CUES|WRITER_DIRECTIVES|PATTERN_OUTPUT_CONTRACT|HISTORY_LITE|USER_UNDERSTANDING_STATE|PAST_STATE_NOTE|traceId|conversationId|userCode|raw_values|CALL_WRITER_ARGS|FINAL_MESSAGES_FOR_WRITER)/i.test(text);
+
+        const looksLikePublicIrosArchitectureExplanation =
+          /(IROS|iros|Mu|ミュー)/u.test(text) &&
+          /(アーキテクチャ|内部構造|実装レイヤー|構造|仕組み)/u.test(text) &&
+          /(Input|Memory|Context|MirrorFlow|Seed|Writer|Guard|Render|Persist|Layer|レイヤー)/i.test(text);
+
+        if (!hasStrictInternalLeak && looksLikePublicIrosArchitectureExplanation) {
+          return { ok: true };
+        }
+
         return {
           ok: false,
           reason: 'WG:OUTPUT_ONLY_META',

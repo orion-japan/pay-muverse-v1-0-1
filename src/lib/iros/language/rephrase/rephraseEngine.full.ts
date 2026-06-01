@@ -6549,6 +6549,17 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
     // ここでは display 用 block の正本には採用しない。
     const normalizedText = String(text ?? '').trim();
 
+    // PUBLIC_IROS_ARCHITECTURE_SKIP_PATTERN_MATERIALIZE
+    // IROSの公開用アーキテクチャ説明は、WriterがMarkdown見出しと段落で整えた本文を正本にする。
+    // NORMAL_DETAIL_V1 の OBS/SHIFT/NEXT/SAFE へ再分解すると、
+    // 「Inputここは...」のように見出しと本文が潰れるため、pattern materialize を通さない。
+    // 内部漏洩ガードは guards.ts 側で維持する。
+    const shouldSkipPatternMaterializeForPublicIrosArchitecture =
+      /(IROS|iros|Mu|ミュー)/u.test(normalizedText) &&
+      /(アーキテクチャ|内部構造|実装レイヤー|構造|仕組み)/u.test(normalizedText) &&
+      /(Input|Memory|Context|MirrorFlow|Seed|Writer|Guard|Render|Persist|Layer|レイヤー)/i.test(normalizedText) &&
+      !/(DO NOT OUTPUT|INTERNAL PACK|STATE_CUES|WRITER_DIRECTIVES|PATTERN_OUTPUT_CONTRACT|HISTORY_LITE|USER_UNDERSTANDING_STATE|PAST_STATE_NOTE|traceId|conversationId|userCode|raw_values|CALL_WRITER_ARGS|FINAL_MESSAGES_FOR_WRITER)/i.test(normalizedText);
+
     const normalizedParagraphsForCompressed = normalizedText
       .split(/\n{2,}/)
       .map((x) => String(x ?? '').trim())
@@ -6975,6 +6986,7 @@ let materializeUnitIndexFinal = 0;
 const slotBlocksText: string[] = [];
 
 if (
+  !shouldSkipPatternMaterializeForPublicIrosArchitecture &&
   (patternKey === 'IR_DETAIL_V1' ||
     patternKey === 'NORMAL_DETAIL_V1' ||
     patternKey === 'NORMAL_RESONANCE_V1' ||
