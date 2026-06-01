@@ -2204,6 +2204,10 @@ try {
           ? Object.keys(meta.extra.ctxPack)
           : [],
     });
+    // V3 CURRENT ROUTE HANDOFF.
+    // This is the active handoff from reply/_impl/rephrase.ts into the V3 writer route.
+    // Follow rephraseEngine.full.ts / rephraseSlotsFinal for the current writer path.
+    // Do not debug from FlowSeedV21 / V21 unless that route is explicitly reactivated.
     const res = await rephraseSlotsFinal(extracted, {
       model,
       conversationId,

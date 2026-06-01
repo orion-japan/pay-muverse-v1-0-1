@@ -2151,6 +2151,10 @@ function shouldRejectWarnToSeedFactory(args: {
 // ---------------------------------------------
 // FINAL用：slotを保ったまま “会話本文” を作る
 // ---------------------------------------------
+// V3 CURRENT WRITER ROUTE.
+// This function is the active V3 rephrase / writer path.
+// Do not treat FlowSeedV21 / V21 as the active route when debugging or extending IROS.
+// If older seedEngine / FlowSeedV21 code appears in search results, treat it as legacy unless explicitly reactivated.
 export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: RephraseOptions): Promise<RephraseResult> {
   // ✅ opts のトップレベル（conversationId/userCode/traceId）を debug に確実に反映
   const debug = ensureDebugFinal({
