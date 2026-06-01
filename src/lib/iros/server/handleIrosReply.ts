@@ -1,4 +1,4 @@
-// file: src/lib/iros/server/handleIrosReply.ts
+﻿// file: src/lib/iros/server/handleIrosReply.ts
 // iros — handleIrosReply (V2 / single-writer friendly)
 //
 // ✅ 方針（ここを徹底）
@@ -110,6 +110,7 @@ import {
   loadRelationshipMemoriesForTurn,
   buildRelationshipMemoryNoteText,
 } from '@/lib/iros/memory/relationshipMemoryRecall';
+import { buildSriContext } from '@/lib/iros/conversation/sriContext';
 /* =========================
    Types
 ========================= */
@@ -2006,6 +2007,11 @@ if (!wantsMicroNow) {
           keep.explicitUserSignal = cp.explicitUserSignal;
         }
 
+        // --- SRI_CONTEXT（TCF Rotation用の軽量整理パック）---
+        if (cp.sriContext && typeof cp.sriContext === 'object') {
+          keep.sriContext = cp.sriContext;
+        }
+
         // --- ir診断の持ち越し ---
         if (cp.irMeta && typeof cp.irMeta === 'object') keep.irMeta = cp.irMeta;
         if (cp.detailMode === true) keep.detailMode = true;
@@ -2132,6 +2138,11 @@ if (!wantsMicroNow) {
       // --- ユーザー明示シグナル（軽量なので残す）---
       if (cp.explicitUserSignal && typeof cp.explicitUserSignal === 'object') {
         keep.explicitUserSignal = cp.explicitUserSignal;
+      }
+
+      // --- SRI_CONTEXT（TCF Rotation用の軽量整理パック）---
+      if (cp.sriContext && typeof cp.sriContext === 'object') {
+        keep.sriContext = cp.sriContext;
       }
 
       // --- ir診断の持ち越し ---
@@ -9649,6 +9660,66 @@ try {
     };
       })();
 
+  try {
+    const ucAny: any = userContextValue as any;
+    const ctxPackForSri =
+      ucAny?.ctxPack && typeof ucAny.ctxPack === 'object'
+        ? ucAny.ctxPack
+        : {};
+
+    const sriContext = buildSriContext({
+      ctxPack: ctxPackForSri,
+      extra: (out.metaForSave as any)?.extra ?? null,
+      meta: out.metaForSave ?? null,
+    });
+
+    ucAny.ctxPack = {
+      ...ctxPackForSri,
+      sriContext,
+    };
+
+    out.metaForSave = out.metaForSave ?? {};
+    (out.metaForSave as any).extra =
+      (out.metaForSave as any).extra && typeof (out.metaForSave as any).extra === 'object'
+        ? (out.metaForSave as any).extra
+        : {};
+
+    (out.metaForSave as any).extra.ctxPack =
+      (out.metaForSave as any).extra.ctxPack &&
+      typeof (out.metaForSave as any).extra.ctxPack === 'object'
+        ? (out.metaForSave as any).extra.ctxPack
+        : {};
+
+    (out.metaForSave as any).extra.ctxPack.sriContext = sriContext;
+
+    console.log('[IROS/SRI_CONTEXT][BUILD]', {
+      hasSriContext: true,
+      selfState: sriContext.selfState,
+      relationContext: {
+        targetLabel: sriContext.relationContext.targetLabel,
+        relationId: sriContext.relationContext.relationId,
+        referenceTarget: sriContext.relationContext.referenceTarget,
+        hasResolvedAsk: sriContext.relationContext.resolvedAsk != null,
+        relationshipMemoryNoteLen:
+          typeof sriContext.relationContext.relationshipMemoryNote === 'string'
+            ? sriContext.relationContext.relationshipMemoryNote.length
+            : 0,
+        relationshipDomain: sriContext.relationContext.relationshipDomain,
+      },
+      intentionContext: {
+        hasIntentAnchor: sriContext.intentionContext.intentAnchor != null,
+        itxStep: sriContext.intentionContext.itxStep,
+        anchorEvent: sriContext.intentionContext.anchorEvent,
+        goalKind: sriContext.intentionContext.goalKind,
+        shiftKind: sriContext.intentionContext.shiftKind,
+        hasExplicitUserSignal: sriContext.intentionContext.explicitUserSignal != null,
+        hasWillRotation: sriContext.intentionContext.willRotation != null,
+      },
+    });
+  } catch (e) {
+    console.warn('[IROS/SRI_CONTEXT][BUILD] failed', e);
+  }
+
   const selfAcceptanceForRephraseSlots = (() => {
     const uc: any = userContextValue as any;
     const candidates = [
@@ -10490,6 +10561,22 @@ t.finished_at = nowIso();
 t.total_ms = msSince(t0);
 
 try {
+  const finalExtraForSri: any =
+    (out as any)?.metaForSave?.extra && typeof (out as any).metaForSave.extra === 'object'
+      ? (out as any).metaForSave.extra
+      : ((out as any).metaForSave.extra = {});
+
+  finalExtraForSri.ctxPack =
+    finalExtraForSri.ctxPack && typeof finalExtraForSri.ctxPack === 'object'
+      ? finalExtraForSri.ctxPack
+      : {};
+
+  finalExtraForSri.ctxPack.sriContext = buildSriContext({
+    ctxPack: finalExtraForSri.ctxPack,
+    extra: finalExtraForSri,
+    meta: (out as any).metaForSave ?? null,
+  });
+
   console.log('[IROS/Reply][FINAL_META_CTXPACK_WILLROTATION]', {
     conversationId,
     userCode,
@@ -10501,6 +10588,44 @@ try {
       (out as any)?.metaForSave?.extra?.ctxPack &&
       typeof (out as any).metaForSave.extra.ctxPack === 'object'
         ? Object.keys((out as any).metaForSave.extra.ctxPack)
+        : null,
+
+    metaForSave_extra_ctxPack_hasSriContext:
+      Boolean((out as any)?.metaForSave?.extra?.ctxPack?.sriContext),
+
+    metaForSave_extra_ctxPack_sriContext_selfState:
+      (out as any)?.metaForSave?.extra?.ctxPack?.sriContext?.selfState ?? null,
+
+    metaForSave_extra_ctxPack_sriContext_relationContext:
+      (out as any)?.metaForSave?.extra?.ctxPack?.sriContext?.relationContext
+        ? {
+            targetLabel:
+              (out as any).metaForSave.extra.ctxPack.sriContext.relationContext.targetLabel ?? null,
+            relationId:
+              (out as any).metaForSave.extra.ctxPack.sriContext.relationContext.relationId ?? null,
+            referenceTarget:
+              (out as any).metaForSave.extra.ctxPack.sriContext.relationContext.referenceTarget ?? null,
+            hasResolvedAsk:
+              (out as any).metaForSave.extra.ctxPack.sriContext.relationContext.resolvedAsk != null,
+          }
+        : null,
+
+    metaForSave_extra_ctxPack_sriContext_intentionContext:
+      (out as any)?.metaForSave?.extra?.ctxPack?.sriContext?.intentionContext
+        ? {
+            itxStep:
+              (out as any).metaForSave.extra.ctxPack.sriContext.intentionContext.itxStep ?? null,
+            anchorEvent:
+              (out as any).metaForSave.extra.ctxPack.sriContext.intentionContext.anchorEvent ?? null,
+            goalKind:
+              (out as any).metaForSave.extra.ctxPack.sriContext.intentionContext.goalKind ?? null,
+            shiftKind:
+              (out as any).metaForSave.extra.ctxPack.sriContext.intentionContext.shiftKind ?? null,
+            hasExplicitUserSignal:
+              (out as any).metaForSave.extra.ctxPack.sriContext.intentionContext.explicitUserSignal != null,
+            hasWillRotation:
+              (out as any).metaForSave.extra.ctxPack.sriContext.intentionContext.willRotation != null,
+          }
         : null,
 
     metaForSave_rotationState:
@@ -10767,4 +10892,9 @@ return {
     };
   }
 }
+
+
+
+
+
 
