@@ -3013,6 +3013,65 @@ function normForRecall(v: any): string {
               ? { ...((baseMetaMergedForTurn as any).extra.ctxPack) }
               : {};
 
+          try {
+            const preOrchSriContext = buildSriContext({
+              ctxPack: orchCtxPackInput,
+              extra:
+                (baseMetaMergedForTurn as any)?.extra &&
+                typeof (baseMetaMergedForTurn as any).extra === 'object'
+                  ? (baseMetaMergedForTurn as any).extra
+                  : extraLocal ?? null,
+              meta: baseMetaMergedForTurn ?? null,
+            });
+
+            orchCtxPackInput.sriContext = preOrchSriContext;
+
+            (baseMetaMergedForTurn as any).extra =
+              (baseMetaMergedForTurn as any).extra &&
+              typeof (baseMetaMergedForTurn as any).extra === 'object'
+                ? (baseMetaMergedForTurn as any).extra
+                : {};
+
+            (baseMetaMergedForTurn as any).extra.ctxPack =
+              (baseMetaMergedForTurn as any).extra.ctxPack &&
+              typeof (baseMetaMergedForTurn as any).extra.ctxPack === 'object'
+                ? (baseMetaMergedForTurn as any).extra.ctxPack
+                : {};
+
+            (baseMetaMergedForTurn as any).extra.ctxPack.sriContext = preOrchSriContext;
+
+            (baseMetaMergedForTurn as any).ctxPack =
+              (baseMetaMergedForTurn as any).ctxPack &&
+              typeof (baseMetaMergedForTurn as any).ctxPack === 'object'
+                ? (baseMetaMergedForTurn as any).ctxPack
+                : {};
+
+            (baseMetaMergedForTurn as any).ctxPack.sriContext = preOrchSriContext;
+
+            console.log('[IROS/SRI_CONTEXT][PRE_ORCH]', {
+              hasSriContext: true,
+              selfState: preOrchSriContext.selfState,
+              relationContext: {
+                targetLabel: preOrchSriContext.relationContext.targetLabel,
+                relationId: preOrchSriContext.relationContext.relationId,
+                referenceTarget: preOrchSriContext.relationContext.referenceTarget,
+                hasResolvedAsk: preOrchSriContext.relationContext.resolvedAsk != null,
+              },
+              intentionContext: {
+                itxStep: preOrchSriContext.intentionContext.itxStep,
+                anchorEvent: preOrchSriContext.intentionContext.anchorEvent,
+                goalKind: preOrchSriContext.intentionContext.goalKind,
+                shiftKind: preOrchSriContext.intentionContext.shiftKind,
+                hasExplicitUserSignal:
+                  preOrchSriContext.intentionContext.explicitUserSignal != null,
+                hasWillRotation:
+                  preOrchSriContext.intentionContext.willRotation != null,
+              },
+            });
+          } catch (e) {
+            console.warn('[IROS/SRI_CONTEXT][PRE_ORCH] failed', e);
+          }
+
           const to = nowNs();
 
           const orch = await (runOrchestratorTurn as any)({
@@ -10892,6 +10951,7 @@ return {
     };
   }
 }
+
 
 
 

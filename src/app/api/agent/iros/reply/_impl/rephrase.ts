@@ -1,4 +1,4 @@
-// src/app/api/agent/iros/reply/_impl/rephrase.ts
+﻿// src/app/api/agent/iros/reply/_impl/rephrase.ts
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { pickSpeechAct } from '../_helpers';
@@ -1639,7 +1639,8 @@ try {
 
     const isStructureMapNow =
     shiftTextForGuard.includes('"meaning_kind":"structure"') ||
-    /(構造から|構造で|構造に|構造へ)/.test(userText) ||
+    /(構造から|構造で|構造に|構造へ|構造の続き|構造続き|この構造|さっきの構造|前の構造)/.test(userText) ||
+    /(配線|実装|仕様|修正|ログ|コード|ctxPack|sriContext|SRI_CONTEXT|TCF|willRotation|orchestrator|PRE_ORCH)/i.test(userText) ||
     /(置き換える|置換|写像|翻訳|言い換える)/.test(userText) ||
     /(外因|内因|因果|因果配置|事実層|物語層|意味層)/.test(userText);
 
@@ -2571,3 +2572,4 @@ try {
 
   attachBlocksFromTextOrSkip(fallbackText, 'REPHRASE_EXCEPTION_FALLBACK');
 }}
+

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+﻿/* eslint-disable @typescript-eslint/no-explicit-any */
 
 // src/lib/iros/language/rephraseEngine.ts
 // iros — Rephrase/Generate Engine (slot-preserving)
@@ -11408,6 +11408,10 @@ const isResonanceStructureFollowup =
                 String((writerDirectivesBaseForFinal as any)?.pattern_key ?? '') === 'REFERENCE_CHECK_V1' ||
                 String((writerDirectivesBaseForFinal as any)?.pattern_mode ?? '') === 'reference_check';
 
+              const isStructureDevelopmentTurnForFinal =
+                /(構造の続き|構造続き|この構造|さっきの構造|前の構造)/.test(String(userText ?? '')) ||
+                /(配線|実装|仕様|修正|ログ|コード|ctxPack|sriContext|SRI_CONTEXT|TCF|willRotation|orchestrator|PRE_ORCH)/i.test(String(userText ?? ''));
+
               const writerDirectivesForFinal = {
                 ...writerDirectivesBaseForFinal,
                 ...(openEdgeClosingLineForFinal
@@ -11451,6 +11455,15 @@ const isResonanceStructureFollowup =
                   ...explicitUserSignalConstraintsForFinal,
                   ...deepReadSuppressionConstraintsForFinal,
                   ...storyModeConstraintsForFinal,
+                  ...(isStructureDevelopmentTurnForFinal
+                    ? [
+                        'STRUCTURE_DEVELOPMENT_TURN: このターンは開発・構造・配線確認の続きとして扱う',
+                        'STRUCTURE_DEVELOPMENT_TURN: 恋愛相談、LINE返信、相手の気持ち、追いLINE、返事待ちの文脈へ補完しない',
+                        'STRUCTURE_DEVELOPMENT_TURN: ユーザーが求めている次の実装手順・確認手順だけを返す',
+                        'STRUCTURE_DEVELOPMENT_TURN: コード作業中は、抽象的な一文化ではなく、次に確認するファイル・ログ・条件・コマンドの方向を返す',
+                        'STRUCTURE_DEVELOPMENT_TURN: 人間関係の助言文・送信用文面・感情整理に変換しない',
+                      ]
+                    : []),
                   ...(isPreviousReplyRephraseForFinal
                     ? [
                         'PREVIOUS_REPLY_REPHRASE: 現在のユーザー文そのものに答えない',
@@ -15398,3 +15411,5 @@ return await runRetryPass({
     slotsForGuard,
   });
 }
+
+
