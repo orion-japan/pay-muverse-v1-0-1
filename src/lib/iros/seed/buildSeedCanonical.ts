@@ -1,4 +1,4 @@
-// src/lib/iros/seed/buildSeedCanonical.ts
+﻿// src/lib/iros/seed/buildSeedCanonical.ts
 
 export type SeedTone = 'soft' | 'normal' | 'assertive';
 export type SeedDepth = 'shallow' | 'normal' | 'deep';
@@ -56,10 +56,21 @@ export type ResolvedReference = {
   expiresAfterTurn?: boolean | null;
 };
 
+export type ReferenceCheckRule = {
+  firstDecision?: 'required' | string;
+  answerMode?: 'yes_no_partial' | string;
+  doNotDefaultToAffirmation?: boolean | null;
+  separateStructureFromIdentity?: boolean | null;
+  doNotAnswerByMood?: boolean | null;
+  doNotConvertCheckToEmpathy?: boolean | null;
+  ifReferenceContainsReligionOrPracticeOrBody?: 'state_not_identical_first' | string | null;
+};
+
 
 export type SeedCanonicalInput = {
   conversationAnchor?: ConversationAnchor | null;
   resolvedReference?: ResolvedReference | null;
+  referenceCheckRule?: ReferenceCheckRule | null;
   meaningSkeleton?: MeaningSkeletonV2 | null;
   flow180?: Flow180Like | null;
 
@@ -150,6 +161,7 @@ export type SeedCanonical = {
 
   conversationAnchor?: ConversationAnchor | null;
   resolvedReference?: ResolvedReference | null;
+  referenceCheckRule?: ReferenceCheckRule | null;
 
   meta: {
     goalKind: string | null;
@@ -417,7 +429,35 @@ function buildSeedText(seed: Omit<SeedCanonical, 'text'>): string {
     .filter((v): v is string => Boolean(v))
     .join('\n');
 
-    const surfacePlanText = [
+    const referenceCheckRuleText = [
+    clean(seed.referenceCheckRule?.firstDecision)
+      ? `first_decision=${clean(seed.referenceCheckRule?.firstDecision)}`
+      : null,
+    clean(seed.referenceCheckRule?.answerMode)
+      ? `answer_mode=${clean(seed.referenceCheckRule?.answerMode)}`
+      : null,
+    seed.referenceCheckRule?.doNotDefaultToAffirmation === true
+      ? 'do_not_default_to_affirmation=true'
+      : null,
+    seed.referenceCheckRule?.separateStructureFromIdentity === true
+      ? 'separate_structure_from_identity=true'
+      : null,
+    seed.referenceCheckRule?.doNotAnswerByMood === true
+      ? 'do_not_answer_by_mood=true'
+      : null,
+    seed.referenceCheckRule?.doNotConvertCheckToEmpathy === true
+      ? 'do_not_convert_check_to_empathy=true'
+      : null,
+    clean(seed.referenceCheckRule?.ifReferenceContainsReligionOrPracticeOrBody)
+      ? `if_reference_contains_religion_or_practice_or_body=${clean(
+          seed.referenceCheckRule?.ifReferenceContainsReligionOrPracticeOrBody,
+        )}`
+      : null,
+  ]
+    .filter((v): v is string => Boolean(v))
+    .join('\n');
+
+  const surfacePlanText = [
       clean(seed.surfacePlan.obsCore) ? `OBS=${clean(seed.surfacePlan.obsCore)}` : null,
       clean(seed.surfacePlan.shiftCore) ? `SHIFT=${clean(seed.surfacePlan.shiftCore)}` : null,
       clean(seed.surfacePlan.nextCore) ? `NEXT=${clean(seed.surfacePlan.nextCore)}` : null,
@@ -446,6 +486,7 @@ function buildSeedText(seed: Omit<SeedCanonical, 'text'>): string {
       line('CONTEXT', clean(seed.context.userCore) ?? clean(seed.focus)),
       line('DIFFERENCE', differenceText),
       line('RESOLVED_REFERENCE', resolvedReferenceText),
+      line('REFERENCE_CHECK_RULE', referenceCheckRuleText),
       line('ANCHOR', conversationAnchorText),
       line('TRANSFER_SEED', clean(seed.transferSeedText)),
       line('HUMAN_CONTEXT_ORCHESTRATION', clean(seed.humanContextOrchestrationText)),
@@ -594,6 +635,7 @@ export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
 
     conversationAnchor: input.conversationAnchor ?? null,
     resolvedReference: input.resolvedReference ?? null,
+    referenceCheckRule: input.referenceCheckRule ?? null,
 
     meta: {
       goalKind,
@@ -678,3 +720,4 @@ export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
     text: buildSeedText(seedWithoutText),
   };
 }
+

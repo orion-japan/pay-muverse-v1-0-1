@@ -954,6 +954,47 @@ const mirrorFlowV1ForSeed: any =
       return lines.join('\n').trim();
     })();
 
+    const referenceCheckRuleSeedText = (() => {
+      const memoryDecision: any =
+        firstNonNull(
+          (args as any)?.memoryDecision,
+          (ctxPack as any)?.memoryDecision,
+          (extra as any)?.memoryDecision,
+          (extra as any)?.ctxPack?.memoryDecision,
+          (args as any)?.userContext?.ctxPack?.memoryDecision,
+          (args as any)?.userContext?.meta?.extra?.memoryDecision,
+          (args as any)?.userContext?.meta?.extra?.ctxPack?.memoryDecision,
+          null,
+        ) ?? null;
+
+      const memoryIntent = String(
+        pick(
+          memoryDecision?.memoryIntent,
+          (args as any)?.memoryIntent,
+          (ctxPack as any)?.memoryIntent,
+          (extra as any)?.memoryIntent,
+          (extra as any)?.ctxPack?.memoryIntent,
+          (args as any)?.userContext?.ctxPack?.memoryIntent,
+          (args as any)?.userContext?.meta?.extra?.memoryIntent,
+          (args as any)?.userContext?.meta?.extra?.ctxPack?.memoryIntent,
+          '',
+        ) ?? '',
+      ).trim();
+
+      if (memoryIntent !== 'reference_check') return '';
+
+      return [
+        'REFERENCE_CHECK_RULE:',
+        'first_decision=required',
+        'answer_mode=yes_no_partial',
+        'do_not_default_to_affirmation=true',
+        'separate_structure_from_identity=true',
+        'do_not_answer_by_mood=true',
+        'do_not_convert_check_to_empathy=true',
+        'if_reference_contains_religion_or_practice_or_body=state_not_identical_first',
+      ].join('\n');
+    })();
+
     const seedTextRawBase = String(
       pick(
         // 正本
@@ -969,9 +1010,16 @@ const mirrorFlowV1ForSeed: any =
     ).trim();
 
     const seedTextRaw = (() => {
-      if (!mirrorFlowSeedText) return seedTextRawBase;
-      if (/MIRROR_FLOW_SEED_V1\b/.test(seedTextRawBase)) return seedTextRawBase;
-      return [mirrorFlowSeedText, seedTextRawBase].filter(Boolean).join('\n\n').trim();
+      const hasMirrorFlowAlready = /MIRROR_FLOW_SEED_V1\b/.test(seedTextRawBase);
+      const hasReferenceCheckRuleAlready = /REFERENCE_CHECK_RULE\b/.test(seedTextRawBase);
+
+      const parts = [
+        hasMirrorFlowAlready ? '' : mirrorFlowSeedText,
+        hasReferenceCheckRuleAlready ? '' : referenceCheckRuleSeedText,
+        seedTextRawBase,
+      ].filter(Boolean);
+
+      return parts.join('\n\n').trim();
     })();
     console.log(
       '[IROS/writerCalls][SEED_TEXT_RAW_DIAG]',
@@ -4354,6 +4402,7 @@ const diagnosisFollowupBlock = (() => {
     let base = [
       [
         mirrorFlowSeedText,
+        referenceCheckRuleSeedText,
         rewritePackWithSeedInstructionCore(String(internalPackForWriterSource ?? '')),
         referenceJudgementContractBlock,
       ]

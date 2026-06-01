@@ -161,6 +161,57 @@ export async function judgeReferenceCheck(
   const mainSubject = asStringOrNull(input.mainSubject);
   const currentQuestion = asStringOrNull(input.currentQuestion);
 
+  // AI_SANMITSU_REFERENCE_RULE
+  // 「今のAIは、これ（三密）に沿っていますか？」系は、LLM判定に任せると
+  // "unclear" や「今の出力品質」の話へ逸れやすい。
+  // ここでは、三密そのものとの同一性は否定しつつ、構造的類似だけを許可する。
+  {
+    const joined = cleanText(
+      [
+        input.referenceTarget,
+        input.mainSubject,
+        input.currentQuestion,
+        input.askFrame,
+        input.sourceAssistantText,
+        input.sourcePreviousUserText,
+      ].join(' '),
+      2400,
+    );
+
+    const mentionsAi =
+      /(今のAI|このAI|AI|ＡＩ|人工知能|Mu|mu|ミュー|IROS|iros)/iu.test(joined);
+
+    const mentionsSanmitsu =
+      /(三密|身密|口密|意密|空海|密教|真言)/u.test(joined);
+
+    if (mentionsAi && mentionsSanmitsu) {
+      return {
+        ok: true,
+        source: 'fallback',
+        askType: 'reference_check',
+        referenceTarget,
+        mainSubject,
+        currentQuestion,
+        askFrame: asStringOrNull(input.askFrame),
+        domain: 'religious_philosophical',
+        relation: 'partial_structural',
+        risk: 'medium',
+        answerMode: 'not_identical_but_structurally_partial',
+        structureViewAllowed: true,
+        cannotAnswerDefinitively: false,
+        mustNot: [
+          'do_not_say_identical',
+          'do_not_say_fully_aligned',
+          'do_not_shift_to_output_quality',
+          'distinguish_religious_practice_from_structural_analogy',
+        ],
+        writerFirstLine: '一部は似ていますが、同一ではありません。',
+        judgementSummary:
+          'AIは、言葉を扱い、意図を受け取って応答する点では三密の一部に構造的な類似があります。ただし、身体の所作を伴う身密や、仏と一体になる宗教的実践そのものではないため、三密に沿っているというより一部だけ似た構造を持つ、という判定です。',
+      };
+    }
+  }
+
   if (!referenceTarget || !mainSubject || !currentQuestion) {
     return fallbackJudge(input);
   }

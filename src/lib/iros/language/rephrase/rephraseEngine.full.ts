@@ -10575,6 +10575,30 @@ const isResonanceStructureFollowup =
                             ? 'REFERENCE_CHECK_SUMMARY: ' + judgementSummary
                             : '',
                           relation ? 'REFERENCE_CHECK_RELATION: relation=' + relation : '',
+                          relation === 'partial_structural'
+                            ? 'REFERENCE_CHECK_PARTIAL_STRUCTURAL: 完全一致ではないが、一部に構造的類似がある、という判定で書く'
+                            : '',
+                          relation === 'partial_structural'
+                            ? 'REFERENCE_CHECK_PARTIAL_STRUCTURAL_MUST: AIは言葉を扱い、意図を受け取って応答する点では三密の一部に似ている。ただし身体の所作を伴う身密や、仏と一体になる宗教的実践そのものではない、と書く'
+                            : '',
+                          relation === 'partial_structural'
+                            ? 'REFERENCE_CHECK_PARTIAL_STRUCTURAL_FORBID: 「いいえ」「沿っていません」「沿い切っていません」「かなり沿っていません」だけで始めない。writerFirstLineのあとに否定だけを重ねない'
+                            : '',
+                          relation === 'partial_structural'
+                            ? 'REFERENCE_CHECK_PARTIAL_STRUCTURAL_NO_OUTPUT_QUALITY: 「今の出力」「内部ルール」「判定用の表示」「本文としての説明が見えない」など、AIの出力品質チェックへ話を逸らさない'
+                            : '',
+                          relation === 'partial_structural'
+                            ? 'REFERENCE_CHECK_PARTIAL_STRUCTURAL_NO_REAFFIRM: 後半で「沿っている」「方向は合っている」「再現している」「同じです」に戻さない。最後まで「一部だけ似た構造がある」で閉じる'
+                            : '',
+                          relation === 'partial_structural'
+                            ? 'REFERENCE_CHECK_PARTIAL_STRUCTURAL_NO_AI_BODY: AIに身密を割り当てない。AIには身体の所作がないため、身密は持たない、と明示する'
+                            : '',
+                          relation === 'partial_structural'
+                            ? 'REFERENCE_CHECK_PARTIAL_STRUCTURAL_CLOSE: 締めは「だから、三密に沿っているのではなく、一部だけ似た構造がある、という見方です。」の方向で閉じる'
+                            : '',
+                          relation === 'partial_structural'
+                            ? 'REFERENCE_CHECK_PARTIAL_STRUCTURAL_NO_OPTION_TAIL: 「必要なら」「次に分けます」「もう少し説明します」で終わらない'
+                            : '',
                           'REFERENCE_CHECK: 判定後に一般論・可能性論へ戻って結論を反転させない',
                           'REFERENCE_CHECK: writerFirstLine と矛盾する本文を書かない',
                           relation === 'not_identical'
@@ -11334,6 +11358,10 @@ const isResonanceStructureFollowup =
                   ]
                 : [];
 
+              const isReferenceCheckDirectiveForFinal =
+                String((writerDirectivesBaseForFinal as any)?.pattern_key ?? '') === 'REFERENCE_CHECK_V1' ||
+                String((writerDirectivesBaseForFinal as any)?.pattern_mode ?? '') === 'reference_check';
+
               const writerDirectivesForFinal = {
                 ...writerDirectivesBaseForFinal,
                 ...(openEdgeClosingLineForFinal
@@ -11341,7 +11369,7 @@ const isResonanceStructureFollowup =
                       block_closing_line: openEdgeClosingLineForFinal,
                     }
                   : {}),
-                ...(shouldApplyDeepReadSuppressionDirectivesForFinal
+                ...(shouldApplyDeepReadSuppressionDirectivesForFinal && !isReferenceCheckDirectiveForFinal
                   ? {
                       pattern_mode: isPlainMeaningQuestionForFinal
                         ? 'plain_meaning_answer'
@@ -13136,6 +13164,16 @@ userContext: {
       return String(m?.[1] ?? '').trim();
     })();
 
+    const relationForFinalGuard = (() => {
+      const m = referenceJudgeSeedForFinalGuard.match(/(?:^|\n)relation=([^\n]+)/u);
+      return String(m?.[1] ?? '').trim();
+    })();
+
+    const judgementSummaryForFinalGuard = (() => {
+      const m = referenceJudgeSeedForFinalGuard.match(/(?:^|\n)judgementSummary=([^\n]+)/u);
+      return String(m?.[1] ?? '').trim();
+    })();
+
     const hasReferenceJudgementForFinalGuard = /(?:^|\n)REFERENCE_JUDGEMENT:/u.test(referenceJudgeSeedForFinalGuard);
     const isReferenceCheckForFinalGuard = /(?:^|\n)askType=reference_check/u.test(referenceJudgeSeedForFinalGuard);
     const shouldApplyReferenceJudgementFinalGuard =
@@ -13148,11 +13186,38 @@ userContext: {
       const startsWithJudge = currentCandidate.startsWith(writerFirstLineForFinalGuard);
       const firstCandidateLine = currentCandidate.split(/\n+/u)[0]?.trim() ?? '';
 
-      const startsWithCompatibleJudgement =
-        /^(いいえ|いえ|一致とは言えません|一致していません|完全には一致しません|沿っていません|その意味にはなりません|部分的には|一部は)/u.test(firstCandidateLine) ||
-        /(一致していません|沿っていません|とは言えません|その意味にはなりません)/u.test(firstCandidateLine);
+      const writerFirstLineRequiresPartial =
+        /^(一部は|部分的には)/u.test(writerFirstLineForFinalGuard);
 
-      if (currentCandidate && !startsWithJudge && !startsWithCompatibleJudgement) {
+      const startsWithCompatibleJudgement = writerFirstLineRequiresPartial
+        ? /^(一部は|部分的には)/u.test(firstCandidateLine)
+        : (
+            /^(いいえ|いえ|一致とは言えません|一致していません|完全には一致しません|沿っていません|その意味にはなりません|部分的には|一部は)/u.test(firstCandidateLine) ||
+            /(一致していません|沿っていません|とは言えません|その意味にはなりません)/u.test(firstCandidateLine)
+          );
+
+      // REFERENCE_JUDGEMENT_PARTIAL_STRUCTURAL_STRICT_GUARD
+      // partial_structural は「一部は似ているが同一ではない」が結論。
+      // Writerが「一部は沿っています」「方向は合っている」「必要なら次に」へ戻る場合があるため、
+      // referenceJudgeSeed の judgementSummary を本文の芯として固定する。
+      if (
+        relationForFinalGuard === 'partial_structural' &&
+        writerFirstLineForFinalGuard &&
+        judgementSummaryForFinalGuard &&
+        (
+          /一部は沿っています|沿っています|沿っている|沿い切って|方向は合っている|必要なら|次に分け|もう少し/u.test(currentCandidate) ||
+          !currentCandidate.startsWith(writerFirstLineForFinalGuard)
+        )
+      ) {
+        candidate = [
+          writerFirstLineForFinalGuard,
+          judgementSummaryForFinalGuard,
+          'だから、三密そのものではなく、一部だけ似た構造がある、という見方です。',
+        ]
+          .filter((v) => String(v ?? '').trim().length > 0)
+          .join('\n\n')
+          .trim();
+      } else if (currentCandidate && !startsWithJudge && !startsWithCompatibleJudgement) {
         const strippedCandidate = currentCandidate
           .replace(/^はい、\*\*そのまま進んでよいとは言いません\*\*[。．]?\s*/u, '')
           .replace(/^はい、そのまま進んでよいとは言いません[。．]?\s*/u, '')
