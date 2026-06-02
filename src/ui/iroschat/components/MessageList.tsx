@@ -846,11 +846,15 @@ const shouldShowDiagnosisNotice =
                         <div
                           style={{
                             display: 'flex',
-                            flexWrap: 'wrap',
-                            gap: 8,
+                            flexWrap: 'nowrap',
+                            gap: 6,
                             marginTop: 12,
                             paddingTop: 10,
                             borderTop: '1px solid rgba(148, 163, 184, 0.22)',
+                            overflowX: 'auto',
+                            maxWidth: '100%',
+                            WebkitOverflowScrolling: 'touch',
+                            scrollbarWidth: 'none',
                           }}
                         >
                           <button
@@ -867,9 +871,11 @@ const shouldShowDiagnosisNotice =
                                   ? 'rgba(99, 102, 241, 0.14)'
                                   : 'rgba(255, 255, 255, 0.72)',
                               borderRadius: 999,
-                              padding: '6px 10px',
-                              fontSize: 12,
+                              padding: '5px 7px',
+                              fontSize: 11,
                               lineHeight: 1.2,
+                              whiteSpace: 'nowrap',
+                              flex: '0 0 auto',
                               color: '#374151',
                               cursor:
                                 selectedFeedbackLabel != null && selectedFeedbackLabel !== 'deep_hit'
@@ -898,9 +904,11 @@ const shouldShowDiagnosisNotice =
                                   ? 'rgba(99, 102, 241, 0.14)'
                                   : 'rgba(255, 255, 255, 0.72)',
                               borderRadius: 999,
-                              padding: '6px 10px',
-                              fontSize: 12,
+                              padding: '5px 7px',
+                              fontSize: 11,
                               lineHeight: 1.2,
+                              whiteSpace: 'nowrap',
+                              flex: '0 0 auto',
                               color: '#374151',
                               cursor:
                                 selectedFeedbackLabel != null && selectedFeedbackLabel !== 'good'
@@ -929,9 +937,11 @@ const shouldShowDiagnosisNotice =
                                   ? 'rgba(148, 163, 184, 0.16)'
                                   : 'rgba(255, 255, 255, 0.58)',
                               borderRadius: 999,
-                              padding: '6px 10px',
-                              fontSize: 12,
+                              padding: '5px 7px',
+                              fontSize: 11,
                               lineHeight: 1.2,
+                              whiteSpace: 'nowrap',
+                              flex: '0 0 auto',
                               color: '#4b5563',
                               cursor:
                                 selectedFeedbackLabel != null && selectedFeedbackLabel !== 'mismatch'
@@ -968,6 +978,7 @@ const shouldShowDiagnosisNotice =
       </div>
     );
   }
+
 
 
 
