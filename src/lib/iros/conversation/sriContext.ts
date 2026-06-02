@@ -93,16 +93,24 @@ export function buildSriContext(input: {
         memoryStateSnapshot.qPrimary,
         memoryStateSnapshot.qCode,
         memoryStateSnapshot.q_code,
+        meta.qCode,
+        meta.q_code,
+        meta.qPrimary,
+        meta.q_primary,
       ),
       depthStage: firstString(
         ctxPack.depthStage,
         ctxPack.depth_stage,
         memoryStateSnapshot.depthStage,
         memoryStateSnapshot.depth_stage,
+        meta.depthStage,
+        meta.depth_stage,
+        meta.depth,
       ),
       phase: firstString(
         ctxPack.phase,
         memoryStateSnapshot.phase,
+        meta.phase,
       ),
       eTurn: firstString(
         ctxPack.eTurn,
@@ -202,3 +210,4 @@ export function buildSriContext(input: {
     },
   };
 }
+
