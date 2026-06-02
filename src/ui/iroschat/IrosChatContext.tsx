@@ -1,4 +1,4 @@
-// src/ui/iroschat/IrosChatContext.tsx
+﻿// src/ui/iroschat/IrosChatContext.tsx
 'use client';
 
 import React, {
@@ -398,7 +398,7 @@ const sendMessage = useCallback(
       setMessages((m) => [
         ...m,
         {
-          id: crypto.randomUUID(),
+          id: r?.assistantMessageId != null ? String(r.assistantMessageId) : crypto.randomUUID(),
           role: 'assistant',
           text: assistant,
           content: assistant,
@@ -523,7 +523,7 @@ const payload: any = {
         setMessages((m) => [
           ...m,
           {
-            id: crypto.randomUUID(),
+            id: r?.assistantMessageId != null ? String(r.assistantMessageId) : crypto.randomUUID(),
             role: 'assistant',
             text: assistant,
             content: assistant,
@@ -776,3 +776,5 @@ const payload: any = {
     </IrosChatContext.Provider>
   );
 };
+
+

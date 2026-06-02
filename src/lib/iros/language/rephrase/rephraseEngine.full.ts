@@ -11412,8 +11412,21 @@ const isResonanceStructureFollowup =
                 /(構造の続き|構造続き|この構造|さっきの構造|前の構造)/.test(String(userText ?? '')) ||
                 /(配線|実装|仕様|修正|ログ|コード|ctxPack|sriContext|SRI_CONTEXT|TCF|willRotation|orchestrator|PRE_ORCH)/i.test(String(userText ?? ''));
 
+              const feedbackSummaryGuidanceForFinal = String(
+                (opts as any)?.extra?.feedbackSummaryGuidance ??
+                  (opts as any)?.ctxPack?.feedbackSummaryGuidance ??
+                  (opts as any)?.extra?.feedbackSummary?.guidance ??
+                  (opts as any)?.ctxPack?.feedbackSummary?.guidance ??
+                  ''
+              ).trim();
+
               const writerDirectivesForFinal = {
                 ...writerDirectivesBaseForFinal,
+                ...(feedbackSummaryGuidanceForFinal
+                  ? {
+                      feedbackSummaryGuidance: feedbackSummaryGuidanceForFinal,
+                    }
+                  : {}),
                 ...(openEdgeClosingLineForFinal
                   ? {
                       block_closing_line: openEdgeClosingLineForFinal,
@@ -11452,6 +11465,11 @@ const isResonanceStructureFollowup =
                   : {}),
                 writeConstraints: [
                   ...relaxedWriteConstraintsForFinal,
+                  ...(feedbackSummaryGuidanceForFinal
+                    ? [
+                        `FEEDBACK_SUMMARY_GUIDANCE: ${feedbackSummaryGuidanceForFinal}`,
+                      ]
+                    : []),
                   ...explicitUserSignalConstraintsForFinal,
                   ...deepReadSuppressionConstraintsForFinal,
                   ...storyModeConstraintsForFinal,
@@ -15411,5 +15429,6 @@ return await runRetryPass({
     slotsForGuard,
   });
 }
+
 
 

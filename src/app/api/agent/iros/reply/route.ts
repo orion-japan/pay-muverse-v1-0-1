@@ -10,6 +10,7 @@ import { authorizeChat, captureChat, makeIrosRef } from '@/lib/credits/auto';
 
 import { loadIrosUserProfile } from '@/lib/iros/server/loadUserProfile';
 import { saveIrosTrainingSample } from '@/lib/iros/server/saveTrainingSample';
+import { loadFeedbackSummary } from '@/lib/iros/server/loadFeedbackSummary';
 import { handleIrosReply, type HandleIrosReplyOutput } from '@/lib/iros/server/handleIrosReply';
 
 import type { RememberScopeKind } from '@/lib/iros/remember/resolveRememberBundle';
@@ -710,8 +711,43 @@ let extraSoT: Record<string, any> = {
     // - assistant message はこのrouteが single-writer（1回だけ）
 
     // -------------------------------------------------------
+    // 11.8) feedback summary（best-effort）
+    // -------------------------------------------------------
+
+    try {
+      const feedbackSummary = await loadFeedbackSummary(supabase as any, userCode);
+
+
+      if (feedbackSummary) {
+        extraSoT = {
+          ...(extraSoT ?? {}),
+          feedbackSummary,
+        };
+
+        console.info('[IROS/feedbackSummary][inject]', {
+          traceId,
+          conversationId,
+          userCode,
+          total: feedbackSummary.total,
+          deepHitCount: feedbackSummary.deepHitCount,
+          goodCount: feedbackSummary.goodCount,
+          mismatchCount: feedbackSummary.mismatchCount,
+          lastLabels: feedbackSummary.lastLabels,
+        });
+      }
+    } catch (e: any) {
+      console.warn('[IROS/feedbackSummary][inject_failed]', {
+        traceId,
+        conversationId,
+        userCode,
+        error: String(e?.message ?? e),
+      });
+    }
+
+    // -------------------------------------------------------
     // 12) handle
     // -------------------------------------------------------
+
     const irosResult: HandleIrosReplyOutput = await handleIrosReply({
       conversationId,
       text: userTextClean,
@@ -2494,6 +2530,7 @@ if (!skipTraining) {
         {
           ok: true,
           text: String((result as any)?.content ?? ''),
+          assistantMessageId: saved?.messageId ?? null,
           meta: metaForSave ?? null,
         },
         { status: 200, headers },
@@ -2523,4 +2560,10 @@ if (!skipTraining) {
     );
   }
 }
+
+
+
+
+
+
 

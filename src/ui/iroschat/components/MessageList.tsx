@@ -1,9 +1,9 @@
-'use client';
+﻿'use client';
 
 import React from 'react';
 import { useIrosChat } from '../IrosChatContext';
 import styles from '../index.module.css';
-import { useAuth } from '@/context/AuthContext';
+import { authedFetch, useAuth } from '@/context/AuthContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import '../IrosChat.css';
 
@@ -519,6 +519,61 @@ export default function MessageList() {
     return FALLBACK_USER;
   };
 
+  const [feedbackByMessageId, setFeedbackByMessageId] = React.useState<
+    Record<string, 'deep_hit' | 'good' | 'mismatch' | undefined>
+  >({});
+
+  const handleFeedbackClick = React.useCallback(
+    (msg: IrosMessage, feedbackLabel: 'deep_hit' | 'good' | 'mismatch') => {
+      const messageId = String(msg.id ?? '').trim();
+      if (!messageId) return;
+
+      setFeedbackByMessageId((prev) => {
+        const current = prev[messageId];
+
+        // 同じボタンをもう一度押したら解除する
+        const nextLabel = current === feedbackLabel ? undefined : feedbackLabel;
+
+        console.log('[IROS UI][feedback click]', {
+          messageId,
+          role: msg.role,
+          feedbackLabel: nextLabel ?? null,
+          previousFeedbackLabel: current ?? null,
+          userCode: userCode ?? null,
+          textHead: toSafeString(msg.text).slice(0, 80),
+        });
+
+        void authedFetch('/api/agent/iros/feedback', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            messageId,
+            feedbackLabel: nextLabel ?? null,
+          }),
+        })
+          .then(async (res) => {
+            const json = await res.json().catch(() => null);
+            console.log('[IROS UI][feedback saved]', {
+              ok: res.ok,
+              status: res.status,
+              json,
+            });
+          })
+          .catch((e) => {
+            console.warn('[IROS UI][feedback save failed]', e);
+          });
+
+        return {
+          ...prev,
+          [messageId]: nextLabel,
+        };
+      });
+    },
+    [userCode],
+  );
+
   return (
     <div
       ref={listRef}
@@ -583,6 +638,8 @@ const shouldShowDiagnosisNotice =
           null;
 
         const isSilence = !isUser && uiMode === 'SILENCE';
+
+        const selectedFeedbackLabel = !isUser ? feedbackByMessageId[String(m.id)] ?? null : null;
 
         console.log('[IROS UI][MessageList]', {
           id: m.id,
@@ -785,6 +842,112 @@ const shouldShowDiagnosisNotice =
                     <>
                       <ChatMarkdown text={safeText} />
 
+                      {!isUser && (
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: 8,
+                            marginTop: 12,
+                            paddingTop: 10,
+                            borderTop: '1px solid rgba(148, 163, 184, 0.22)',
+                          }}
+                        >
+                          <button
+                            type="button"
+                            disabled={selectedFeedbackLabel != null && selectedFeedbackLabel !== 'deep_hit'}
+                            onClick={() => handleFeedbackClick(m, 'deep_hit')}
+                            style={{
+                              border:
+                                selectedFeedbackLabel === 'deep_hit'
+                                  ? '1px solid rgba(99, 102, 241, 0.75)'
+                                  : '1px solid rgba(99, 102, 241, 0.28)',
+                              background:
+                                selectedFeedbackLabel === 'deep_hit'
+                                  ? 'rgba(99, 102, 241, 0.14)'
+                                  : 'rgba(255, 255, 255, 0.72)',
+                              borderRadius: 999,
+                              padding: '6px 10px',
+                              fontSize: 12,
+                              lineHeight: 1.2,
+                              color: '#374151',
+                              cursor:
+                                selectedFeedbackLabel != null && selectedFeedbackLabel !== 'deep_hit'
+                                  ? 'not-allowed'
+                                  : 'pointer',
+                              opacity:
+                                selectedFeedbackLabel != null && selectedFeedbackLabel !== 'deep_hit'
+                                  ? 0.42
+                                  : 1,
+                            }}
+                          >
+                            🌀 なんでわかるの？
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={selectedFeedbackLabel != null && selectedFeedbackLabel !== 'good'}
+                            onClick={() => handleFeedbackClick(m, 'good')}
+                            style={{
+                              border:
+                                selectedFeedbackLabel === 'good'
+                                  ? '1px solid rgba(99, 102, 241, 0.75)'
+                                  : '1px solid rgba(99, 102, 241, 0.24)',
+                              background:
+                                selectedFeedbackLabel === 'good'
+                                  ? 'rgba(99, 102, 241, 0.14)'
+                                  : 'rgba(255, 255, 255, 0.72)',
+                              borderRadius: 999,
+                              padding: '6px 10px',
+                              fontSize: 12,
+                              lineHeight: 1.2,
+                              color: '#374151',
+                              cursor:
+                                selectedFeedbackLabel != null && selectedFeedbackLabel !== 'good'
+                                  ? 'not-allowed'
+                                  : 'pointer',
+                              opacity:
+                                selectedFeedbackLabel != null && selectedFeedbackLabel !== 'good'
+                                  ? 0.42
+                                  : 1,
+                            }}
+                          >
+                            👍 イイね
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={selectedFeedbackLabel != null && selectedFeedbackLabel !== 'mismatch'}
+                            onClick={() => handleFeedbackClick(m, 'mismatch')}
+                            style={{
+                              border:
+                                selectedFeedbackLabel === 'mismatch'
+                                  ? '1px solid rgba(148, 163, 184, 0.75)'
+                                  : '1px solid rgba(148, 163, 184, 0.28)',
+                              background:
+                                selectedFeedbackLabel === 'mismatch'
+                                  ? 'rgba(148, 163, 184, 0.16)'
+                                  : 'rgba(255, 255, 255, 0.58)',
+                              borderRadius: 999,
+                              padding: '6px 10px',
+                              fontSize: 12,
+                              lineHeight: 1.2,
+                              color: '#4b5563',
+                              cursor:
+                                selectedFeedbackLabel != null && selectedFeedbackLabel !== 'mismatch'
+                                  ? 'not-allowed'
+                                  : 'pointer',
+                              opacity:
+                                selectedFeedbackLabel != null && selectedFeedbackLabel !== 'mismatch'
+                                  ? 0.42
+                                  : 1,
+                            }}
+                          >
+                            ↺ ちょっと違う
+                          </button>
+                        </div>
+                      )}
+
                       {shouldShowDiagnosisNotice && (
                         <div className="diagnosisFooter">
                           ※「診断内容を詳しく」と入力すると深められます。<br />
@@ -805,3 +968,7 @@ const shouldShowDiagnosisNotice =
       </div>
     );
   }
+
+
+
+

@@ -9851,6 +9851,64 @@ try {
     }
   }
 
+
+  // ✅ feedback summary bridge（評価回収 → Writer参照）
+  // - route.ts から渡された extra.feedbackSummary を、
+  //   rephraseSlotsFinal の extra / ctxPack 両方へ渡す。
+  // - DB評価を直接学習させるのではなく、このターンのWriter指示として参照する。
+  try {
+    const feedbackSummary =
+      (extraLocal as any)?.feedbackSummary &&
+      typeof (extraLocal as any).feedbackSummary === 'object'
+        ? (extraLocal as any).feedbackSummary
+        : null;
+
+    if (feedbackSummary) {
+      out.metaForSave = out.metaForSave ?? {};
+      (out.metaForSave as any).extra =
+        (out.metaForSave as any).extra &&
+        typeof (out.metaForSave as any).extra === 'object'
+          ? (out.metaForSave as any).extra
+          : {};
+
+      const exForFeedback: any = (out.metaForSave as any).extra;
+
+      exForFeedback.feedbackSummary = feedbackSummary;
+      exForFeedback.feedbackSummaryGuidance =
+        typeof feedbackSummary.guidance === 'string'
+          ? feedbackSummary.guidance
+          : null;
+
+      exForFeedback.ctxPack =
+        exForFeedback.ctxPack && typeof exForFeedback.ctxPack === 'object'
+          ? exForFeedback.ctxPack
+          : {};
+
+      exForFeedback.ctxPack.feedbackSummary = feedbackSummary;
+      exForFeedback.ctxPack.feedbackSummaryGuidance =
+        typeof feedbackSummary.guidance === 'string'
+          ? feedbackSummary.guidance
+          : null;
+
+      console.log('[IROS/feedbackSummary][WRITER_BRIDGE]', {
+        traceId: traceIdCanon,
+        conversationId: _conversationId ?? null,
+        userCode: _userCode ?? null,
+        total: feedbackSummary.total ?? null,
+        deepHitCount: feedbackSummary.deepHitCount ?? null,
+        goodCount: feedbackSummary.goodCount ?? null,
+        mismatchCount: feedbackSummary.mismatchCount ?? null,
+        guidanceHead: String(feedbackSummary.guidance ?? '').slice(0, 120),
+      });
+    }
+  } catch (e) {
+    console.warn('[IROS/feedbackSummary][WRITER_BRIDGE_FAILED]', {
+      traceId: traceIdCanon,
+      conversationId: _conversationId ?? null,
+      userCode: _userCode ?? null,
+      error: String((e as any)?.message ?? e),
+    });
+  }
   const rr = await rephraseSlotsFinal(
     extracted,
     {
@@ -10951,6 +11009,7 @@ return {
     };
   }
 }
+
 
 
 
