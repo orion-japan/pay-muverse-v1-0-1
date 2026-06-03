@@ -89,6 +89,12 @@ export type SeedCanonicalInput = {
   transferSeedText?: string | null;
 
   /**
+   * TCF Rotation が作る収束・回転SEED。
+   * Writerには判定だけを渡し、本文生成はさせない。
+   */
+  tcfRotationSeedText?: string | null;
+
+  /**
    * HumanContextOrchestrator が作る司令塔SEED。
    * 3軸 / Qコード / questionType / futureRandom の扱いを Writer に渡す。
    */
@@ -145,6 +151,7 @@ export type SeedCanonical = {
   };
 
   transferSeedText: string | null;
+  tcfRotationSeedText: string | null;
   humanContextOrchestrationText: string | null;
 
   state: {
@@ -489,6 +496,7 @@ function buildSeedText(seed: Omit<SeedCanonical, 'text'>): string {
       line('REFERENCE_CHECK_RULE', referenceCheckRuleText),
       line('ANCHOR', conversationAnchorText),
       line('TRANSFER_SEED', clean(seed.transferSeedText)),
+      line('TCF_ROTATION_SEED', clean(seed.tcfRotationSeedText)),
       line('HUMAN_CONTEXT_ORCHESTRATION', clean(seed.humanContextOrchestrationText)),
       line('FOCUS', clean(seed.focus)),
       line('TONE', clean(seed.tone)),
@@ -619,6 +627,7 @@ export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
     },
 
     transferSeedText: clean(input.transferSeedText),
+    tcfRotationSeedText: clean(input.tcfRotationSeedText),
     humanContextOrchestrationText: clean(input.humanContextOrchestrationText),
 
     state: {
@@ -720,4 +729,5 @@ export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
     text: buildSeedText(seedWithoutText),
   };
 }
+
 
