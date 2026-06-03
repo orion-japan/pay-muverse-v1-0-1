@@ -8,7 +8,7 @@ export function normalizeDiagnosisTargetKey(value: unknown): string | null {
     .replace(/[\s　]+/g, '')
     .replace(/^(ir診断|診断|ir|IR)/iu, '')
     .replace(
-      /(の診断結果|の診断内容|の診断|の結果|の件|との関係性|との関係|について|に関して|を深めて|を見て|をみて)$/u,
+      /(の診断結果|の診断内容|の診断|の結果|の件|との関係性|との関係|について|に関して|の状態|を深めて|を見て|をみて)$/u,
       '',
     )
     .replace(

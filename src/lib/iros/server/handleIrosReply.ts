@@ -114,6 +114,7 @@ import {
   loadRelationshipMemoriesForTurn,
   buildRelationshipMemoryNoteText,
 } from '@/lib/iros/memory/relationshipMemoryRecall';
+import { buildMemorySeed } from '@/lib/iros/memory/memorySeedBuilder';
 import { buildSriContext } from '@/lib/iros/conversation/sriContext';
 /* =========================
    Types
@@ -1210,12 +1211,15 @@ const rawInputTextForDiagnosisCheck = String(
     ''
 ).trim();
 
+const irDiagnosisTriggerPattern =
+  /(?:ir\s*診断|ir診断|irで見て|ir\s*お願いします)/iu;
+
 const isIrDiagnosisInput =
   String(mode ?? '').trim().toLowerCase() === 'diagnosis' ||
   String((extra as any)?.mode ?? '').trim().toLowerCase() === 'diagnosis' ||
   String((extra as any)?.presentationKind ?? '').trim().toLowerCase() === 'diagnosis' ||
   (extra as any)?.isIrDiagnosisTurn === true ||
-  /(?:^|[\s　])(?:ir\s*診断|ir診断|irで見て|ir\s*お願いします)/i.test(rawInputTextForDiagnosisCheck);
+  irDiagnosisTriggerPattern.test(rawInputTextForDiagnosisCheck);
 
 if (isIrDiagnosisInput) {
   const rawIrText = String(
@@ -1234,13 +1238,23 @@ if (isIrDiagnosisInput) {
       .filter(Boolean);
 
     const irLine =
-      lines.find((line) =>
-        /(?:^|[\s　])(?:ir\s*診断|ir診断|irで見て|ir\s*お願いします)/i.test(line),
-      ) ?? source;
+      lines.find((line) => irDiagnosisTriggerPattern.test(line)) ?? source;
 
-    return irLine
-      .replace(/(?:^|[\s　])(?:ir\s*診断|ir診断|irで見て|ir\s*お願いします)[\s:：　-]*/iu, '')
-      .trim();
+    const cleanTargetPart = (value: unknown): string => {
+      return String(value ?? '')
+        .replace(/^[\s　:：\-]+/u, '')
+        .replace(/[\s　:：\-]+$/u, '')
+        .replace(/^(してください|して|お願いします|お願い|下さい|ください)/u, '')
+        .replace(/(してください|して|お願いします|お願い|下さい|ください)$/u, '')
+        .replace(/(を|について|に関して|のこと)$/u, '')
+        .trim();
+    };
+
+    const parts = irLine.split(irDiagnosisTriggerPattern);
+    const beforeTrigger = cleanTargetPart(parts[0] ?? '');
+    const afterTrigger = cleanTargetPart(parts.slice(1).join('') ?? '');
+
+    return beforeTrigger || afterTrigger;
   })();
 
     const targetLabel = cleanedTargetLabel || '自分';
@@ -6209,6 +6223,111 @@ try {
             : 0.5,
     });
 
+    const relationshipTextForMemorySeed = [
+      effectiveRelationshipDisplayName ? `name=${effectiveRelationshipDisplayName}` : '',
+      effectiveRelationshipRelationIdForMemory
+        ? `relationId=${effectiveRelationshipRelationIdForMemory}`
+        : '',
+      topicDigest ? `unresolved=${String(topicDigest)}` : '',
+      analysis?.attachment_hint ? `reaction=${analysis.attachment_hint}` : '',
+    ]
+      .filter(Boolean)
+      .join(' / ');
+
+    const relCtxPackForMemorySeed: any =
+      extra2.ctxPack && typeof extra2.ctxPack === 'object'
+        ? extra2.ctxPack
+        : {};
+
+    const hasExistingMemorySeedText =
+      typeof relCtxPackForMemorySeed.memorySeedText === 'string' &&
+      String(relCtxPackForMemorySeed.memorySeedText).trim().length > 0;
+
+    const shouldBuildRelationshipMemorySeed =
+      !!relationshipTextForMemorySeed &&
+      !hasExistingMemorySeedText &&
+      (memoryIntentForRelationshipRecall === 'relationship_recall' ||
+        !!effectiveRelationshipRelationIdForMemory ||
+        !!effectiveRelationshipDisplayName);
+
+    if (shouldBuildRelationshipMemorySeed) {
+      const relationshipMemorySeedResult = buildMemorySeed({
+        memoryDecision:
+          (relCtxPackForMemorySeed.memoryDecision as any) ?? {
+            memoryIntent: 'relationship_recall',
+            memorySpace: 'relationship',
+            targetLabel:
+              memoryTargetLabelForRelationshipRecall ||
+              effectiveRelationshipDisplayName ||
+              null,
+            targetKey: memoryTargetKeyForRelationshipRecall || null,
+            projectKey: null,
+            relationId: effectiveRelationshipRelationIdForMemory || null,
+            recallMode:
+              memoryIntentForRelationshipRecall === 'relationship_recall'
+                ? 'deep_recognition'
+                : 'contextual',
+            workingReference: null,
+            confidence:
+              resolved?.mode === 'between_others'
+                ? 0.75
+                : resolved?.mode === 'self_other'
+                  ? 0.8
+                  : 0.5,
+            reason: 'relationship_layer_after_upsert_memory_seed',
+          },
+        memoryGuardDecision:
+          (relCtxPackForMemorySeed.memoryGuardDecision as any) ?? {
+            allowWriterSeed: true,
+            allowLongTermSave: false,
+            allowPastStateMerge: false,
+            allowDiagnosisSave: false,
+            allowRelationshipSave: true,
+            guardReasons: [],
+          },
+        sourceText: userText,
+        relationshipText: relationshipTextForMemorySeed,
+      });
+
+      (extra2.ctxPack as any).memorySeedResult = relationshipMemorySeedResult;
+      (extra2.ctxPack as any).memorySeedText = relationshipMemorySeedResult.seedText;
+      (extra2.ctxPack as any).memorySeedKind = relationshipMemorySeedResult.seedKind;
+      (extra2.ctxPack as any).memorySeedBlocked = relationshipMemorySeedResult.blocked;
+      (extra2.ctxPack as any).memorySeedReasons = relationshipMemorySeedResult.reasons;
+      (extra2.ctxPack as any).relationshipMemoryNote = relationshipTextForMemorySeed;
+
+      (out as any).metaForSave = (out as any).metaForSave ?? {};
+      (out as any).metaForSave.extra = (out as any).metaForSave.extra ?? {};
+      (out as any).metaForSave.extra.ctxPack =
+        (out as any).metaForSave.extra.ctxPack &&
+        typeof (out as any).metaForSave.extra.ctxPack === 'object'
+          ? (out as any).metaForSave.extra.ctxPack
+          : {};
+
+      (out as any).metaForSave.extra.memorySeedResult = relationshipMemorySeedResult;
+      (out as any).metaForSave.extra.memorySeedText = relationshipMemorySeedResult.seedText;
+      (out as any).metaForSave.extra.memorySeedKind = relationshipMemorySeedResult.seedKind;
+      (out as any).metaForSave.extra.memorySeedBlocked = relationshipMemorySeedResult.blocked;
+      (out as any).metaForSave.extra.memorySeedReasons = relationshipMemorySeedResult.reasons;
+
+      (out as any).metaForSave.extra.ctxPack.memorySeedResult = relationshipMemorySeedResult;
+      (out as any).metaForSave.extra.ctxPack.memorySeedText = relationshipMemorySeedResult.seedText;
+      (out as any).metaForSave.extra.ctxPack.memorySeedKind = relationshipMemorySeedResult.seedKind;
+      (out as any).metaForSave.extra.ctxPack.memorySeedBlocked = relationshipMemorySeedResult.blocked;
+      (out as any).metaForSave.extra.ctxPack.memorySeedReasons = relationshipMemorySeedResult.reasons;
+      (out as any).metaForSave.extra.ctxPack.relationshipMemoryNote = relationshipTextForMemorySeed;
+
+      console.log('[IROS/REL_MEMORY_SEED][BUILT]', {
+        hasSeed: relationshipMemorySeedResult.hasSeed,
+        seedKind: relationshipMemorySeedResult.seedKind,
+        blocked: relationshipMemorySeedResult.blocked,
+        seedTextLen:
+          typeof relationshipMemorySeedResult.seedText === 'string'
+            ? relationshipMemorySeedResult.seedText.length
+            : 0,
+      });
+    }
+
     // Relationship Layer はこの位置で ctxPack を更新するため、
     // metaForSave 側にも明示同期して次ターンへ pending / relationId / displayName を残す。
     (out as any).metaForSave = (out as any).metaForSave ?? {};
@@ -11098,3 +11217,4 @@ return {
     };
   }
 }
+
