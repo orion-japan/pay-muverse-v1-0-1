@@ -6929,16 +6929,16 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
         : preSelectedPatternKey === 'story_undigested' ||
             preSelectedPatternKey === 'story_remake'
           ? preSelectedPatternKey
-          : effectiveHasPriorDiagnosisForPattern && selectedByFunction === 'IR_DETAIL_V1'
-            ? 'IR_DETAIL_V1'
-            : preSelectedPatternKey === 'previous_reply_rephrase' ||
-                preSelectedPatternKey === 'IR_DETAIL_V1' ||
-                preSelectedPatternKey === 'NORMAL_DETAIL_V1' ||
-                preSelectedPatternKey === 'NORMAL_RESONANCE_V1' ||
-                preSelectedPatternKey === 'NORMAL_PRACTICAL_RESONANCE_V1' ||
-                preSelectedPatternKey === 'DECLARATION_RESONANCE_V1' ||
-                preSelectedPatternKey === 'PARTNER_SIDE_RESONANCE_V1'
-              ? preSelectedPatternKey
+          : preSelectedPatternKey === 'previous_reply_rephrase' ||
+              preSelectedPatternKey === 'IR_DETAIL_V1' ||
+              preSelectedPatternKey === 'NORMAL_DETAIL_V1' ||
+              preSelectedPatternKey === 'NORMAL_RESONANCE_V1' ||
+              preSelectedPatternKey === 'NORMAL_PRACTICAL_RESONANCE_V1' ||
+              preSelectedPatternKey === 'DECLARATION_RESONANCE_V1' ||
+              preSelectedPatternKey === 'PARTNER_SIDE_RESONANCE_V1'
+            ? preSelectedPatternKey
+            : effectiveHasPriorDiagnosisForPattern && selectedByFunction === 'IR_DETAIL_V1'
+              ? 'IR_DETAIL_V1'
               : selectedByFunction ||
                 preSelectedPatternKey ||
                 'NORMAL_RESONANCE_V1'
@@ -9520,8 +9520,6 @@ const writerPatternIsDiagnosisFollowupPhrase =
 
 const writerPatternHasPriorDiagnosis =
   writerPatternPresentationKind === 'diagnosis' ||
-  writerPatternHasIrMeta ||
-  writerPatternHasLastIrDiagnosis ||
   (!!writerPatternTargetLabel && writerPatternIsDiagnosisFollowupPhrase);
 
 const writerPatternFollowupKindForConsult = String(
@@ -9618,22 +9616,33 @@ const storyPatternKeyForPattern =
       ? 'story_undigested'
       : '';
 
+const carryPatternKeyForWriter = (() => {
+  const carried = String(
+    (debug as any)?.patternKey ??
+      (ctxPackForWriter && typeof ctxPackForWriter === 'object'
+        ? (ctxPackForWriter as any).patternKey
+        : null) ??
+      (opts as any)?.meta?.extra?.ctxPack?.patternKey ??
+      (opts as any)?.meta?.extra?.patternKey ??
+      (opts as any)?.ctxPack?.patternKey ??
+      (opts as any)?.userContext?.ctxPack?.patternKey ??
+      ''
+  ).trim();
+
+  if (carried === 'IR_DETAIL_V1' && !writerPatternEffectiveHasPriorDiagnosis) {
+    return '';
+  }
+
+  return carried;
+})();
+
 const selectedPatternKey = String(
   storyPatternKeyForPattern ||
     (writerPatternIsConsultAnswerLike
       ? 'NORMAL_COMPRESSED_V1'
       : writerPatternEffectiveHasPriorDiagnosis && writerPatternEarlySelected === 'IR_DETAIL_V1'
         ? 'IR_DETAIL_V1'
-        : (debug as any)?.patternKey ??
-          (ctxPackForWriter && typeof ctxPackForWriter === 'object'
-            ? (ctxPackForWriter as any).patternKey
-            : null) ??
-          (opts as any)?.meta?.extra?.ctxPack?.patternKey ??
-          (opts as any)?.meta?.extra?.patternKey ??
-          (opts as any)?.ctxPack?.patternKey ??
-          (opts as any)?.userContext?.ctxPack?.patternKey ??
-          writerPatternEarlySelected ??
-          '')
+        : (carryPatternKeyForWriter || writerPatternEarlySelected || ''))
 ).trim();
 
 const questionTypeForPattern = (() => {
@@ -12699,7 +12708,14 @@ const finalWriterDirectivesMsg =
           } as const;
         })();
 
-        const inserts = [diagnosisSourceMsg, storySourceMsg, storyMetaSeedMsg, previousEventSourceMsg, finalWriterDirectivesMsg, finalPatternContractMsg].filter(Boolean) as Array<{
+        const inserts = [
+          isDiagnosisFollowupForWriter ? diagnosisSourceMsg : null,
+          storySourceMsg,
+          storyMetaSeedMsg,
+          previousEventSourceMsg,
+          finalWriterDirectivesMsg,
+          finalPatternContractMsg,
+        ].filter(Boolean) as Array<{
           role: 'assistant';
           content: string;
         }>;
