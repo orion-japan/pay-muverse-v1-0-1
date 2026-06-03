@@ -12706,8 +12706,93 @@ const finalWriterDirectivesMsg =
           } as const;
         })();
 
+        const diagnosisSeedControlMsg = (() => {
+          if (!isDiagnosisFollowupForWriter) return null;
+
+          const d: any =
+            (ctxPackForWriter as any)?.lastIrDiagnosis ??
+            (opts as any)?.userContext?.ctxPack?.lastIrDiagnosis ??
+            (opts as any)?.ctxPack?.lastIrDiagnosis ??
+            null;
+
+          if (!d || typeof d !== 'object') return null;
+
+          const pick = (...cands: any[]) => {
+            for (const v of cands) {
+              if (v === undefined || v === null) continue;
+              const s = String(v).replace(/\s+/g, ' ').trim();
+              if (s) return s;
+            }
+            return '';
+          };
+
+          const targetLabel = pick(d?.targetLabel, d?.target, (ctxPackForWriter as any)?.targetLabel);
+          const targetKey = pick(d?.targetKey);
+          const diagnosisResultId = pick(d?.diagnosisResultId);
+          const qPrimary = pick(d?.qPrimary);
+          const depthStage = pick(d?.depthStage);
+          const phase = pick(d?.phase);
+          const createdAt = pick(d?.createdAt);
+
+          const diagnosisText = pick(
+            d?.summary,
+            d?.diagnosisText,
+            d?.diagnosis_text,
+            d?.text,
+            d?.assistantText,
+            d?.observation,
+            d?.state
+          );
+
+          const content = [
+            'DIAGNOSIS_SEED_CONTROL (DO NOT OUTPUT):',
+            'このSeedは保存済みir診断結果の正本である。',
+            'WriterはこのSeedを診断フォローの根拠として使う。',
+            '本文に DIAGNOSIS_SEED_CONTROL や内部キー名を出さない。',
+            '',
+            targetLabel ? `targetLabel=${targetLabel}` : null,
+            targetKey ? `targetKey=${targetKey}` : null,
+            diagnosisResultId ? `diagnosisResultId=${diagnosisResultId}` : null,
+            qPrimary ? `qPrimary=${qPrimary}` : null,
+            depthStage ? `depthStage=${depthStage}` : null,
+            phase ? `phase=${phase}` : null,
+            createdAt ? `createdAt=${createdAt}` : null,
+            'source=iros_ir_diagnosis_results',
+            'boundary=外部事実や相手の本心の断定ではなく、保存済みir診断結果の続きとして扱う',
+            'writerTask=この保存済み診断結果を正本として、ユーザーの続きの要求に答える',
+            diagnosisText ? `diagnosisText=${diagnosisText}` : null,
+          ]
+            .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+            .join('\n');
+
+          console.log(
+            '[IROS/DIAGNOSIS_SEED_CONTROL]',
+            JSON.stringify({
+              traceId: debug.traceId ?? null,
+              conversationId: debug.conversationId ?? null,
+              userCode: debug.userCode ?? null,
+              hasSeed: true,
+              targetLabel: targetLabel || null,
+              targetKey: targetKey || null,
+              diagnosisResultId: diagnosisResultId || null,
+              qPrimary: qPrimary || null,
+              depthStage: depthStage || null,
+              phase: phase || null,
+              createdAt: createdAt || null,
+              diagnosisTextLen: diagnosisText.length,
+              diagnosisTextHead: diagnosisText.slice(0, 160),
+            })
+          );
+
+          return {
+            role: 'assistant',
+            content,
+          } as const;
+        })();
+
         const inserts = [
           isDiagnosisFollowupForWriter ? diagnosisSourceMsg : null,
+          diagnosisSeedControlMsg,
           storySourceMsg,
           storyMetaSeedMsg,
           previousEventSourceMsg,
