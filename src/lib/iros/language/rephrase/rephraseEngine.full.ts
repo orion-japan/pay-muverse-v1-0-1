@@ -11491,6 +11491,8 @@ const isResonanceStructureFollowup =
                         tcfSurfacePlanFromSeed === 'refocus'
                           ? 'TCF_REFOCUS_V1、TCF_ROTATION_SEED、WRITER_PATTERN、内部seed名、内部判定名は本文に出さない。ユーザーに見える言葉では、SRI回転とTCF回転の役割差として返す。'
                           : 'TCF_ROTATION_SEED、WRITER_PATTERN、内部seed名、内部判定名は本文に出さない。ユーザーに見える言葉では、構造・接続・実装手順として返す。',
+                      block_tcf_knowledge_boundary:
+                        '分かること、文脈から読める仮説、まだ固定されていないことを混ぜない。断定できない場合は、分からないで止めず、「ここまでは分かる／ここからは未定義／今はこう扱うのが安全」と分けて返す。',
                     }
                   : {}),
                 ...(shouldApplyDeepReadSuppressionDirectivesForFinal && !isReferenceCheckDirectiveForFinal
@@ -11541,12 +11543,18 @@ const isResonanceStructureFollowup =
                           'TCF_REFOCUS: SRI回転はS/R/Iの状態・関係・意図を読む回転、TCF回転はTで確定した方向をCで構造化しFで返答形成へ回す流れとして説明する',
                           'TCF_REFOCUS: 抽象的な「中と外」だけで終わらせず、何を見る回転か・何を返す回転かの違いを明確にする',
                           'TCF_REFOCUS: TCF_REFOCUS_V1、TCF_ROTATION_SEED、WRITER_PATTERN、内部seed名、内部判定名は本文に出さない',
+                          'TCF_KNOWLEDGE_BOUNDARY: 分かること、仮説として読めること、まだ未定義のことを分ける',
+                          'TCF_KNOWLEDGE_BOUNDARY: 確定していない定義を、分かったふりで断定しない',
+                          'TCF_KNOWLEDGE_BOUNDARY: ただし「わかりません」だけで止めず、今扱える安全な見方を出す',
                           'TCF_REFOCUS: 恋愛相談・感情整理・送信用文面へ補完しない',
                         ]
                       : [
                           'TCF_CONVERGENCE: このターンはTCFの収束を実装へ接続する返答として扱う',
                           'TCF_CONVERGENCE: 抽象説明で終わらせず、定義 → 入力 → 判定 → 出力 → 保存先の順で、実装に落とせる単位へ整理する',
                           'TCF_CONVERGENCE: TCF_ROTATION_SEED、WRITER_PATTERN、内部seed名、内部判定名は本文に出さない',
+                          'TCF_KNOWLEDGE_BOUNDARY: 分かること、仮説として読めること、まだ未定義のことを分ける',
+                          'TCF_KNOWLEDGE_BOUNDARY: 確定していない定義を、分かったふりで断定しない',
+                          'TCF_KNOWLEDGE_BOUNDARY: ただし「わかりません」だけで止めず、今扱える安全な見方を出す',
                           'TCF_CONVERGENCE: 「必要なら」「できます」で逃げず、次に接続する実装単位をその場で出す',
                           'TCF_CONVERGENCE: 恋愛相談・感情整理・送信用文面へ補完しない',
                         ]
@@ -15507,6 +15515,7 @@ return await runRetryPass({
     slotsForGuard,
   });
 }
+
 
 
 
