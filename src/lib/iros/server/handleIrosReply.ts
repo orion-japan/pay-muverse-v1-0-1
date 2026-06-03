@@ -4448,23 +4448,50 @@ function normForRecall(v: any): string {
         if (typeof diagnosisCtx?.topicHint === 'string' && diagnosisCtx.topicHint.trim()) {
           ex.ctxPack.topicHint = diagnosisCtx.topicHint.trim();
         }
-        const diagnosisSeedBodyForOut = [
-          String((diagnosisCtx as any)?.irMeta?.observationResult ?? '').trim(),
-          String((diagnosisCtx as any)?.lastIrDiagnosis?.observation ?? '').trim(),
-          String((diagnosisCtx as any)?.irMeta?.awarenessText ?? '').trim(),
-          String((diagnosisCtx as any)?.lastIrDiagnosis?.state ?? '').trim(),
+        const lastDiagnosisForSeed =
+          diagnosisCtx?.lastIrDiagnosis && typeof diagnosisCtx.lastIrDiagnosis === 'object'
+            ? diagnosisCtx.lastIrDiagnosis
+            : null;
+
+        const irMetaForSeed =
+          diagnosisCtx?.irMeta && typeof diagnosisCtx.irMeta === 'object'
+            ? diagnosisCtx.irMeta
+            : null;
+
+        const diagnosisTextForSeed = [
+          String(lastDiagnosisForSeed?.summary ?? '').trim(),
+          String(lastDiagnosisForSeed?.observation ?? '').trim(),
+          String(lastDiagnosisForSeed?.state ?? '').trim(),
+          String(irMetaForSeed?.summaryText ?? '').trim(),
+          String(irMetaForSeed?.observationResult ?? '').trim(),
+          String(irMetaForSeed?.awarenessText ?? '').trim(),
           String(diagnosisCtx?.topicHint ?? '').trim(),
         ].find((v) => v.length > 0) ?? '';
 
         const diagnosisTargetForSeed =
           resolvedDiagnosisTargetForOut ||
+          String(lastDiagnosisForSeed?.target ?? '').trim() ||
+          String(irMetaForSeed?.targetLabel ?? '').trim() ||
           String(diagnosisCtx?.targetLabel ?? '').trim() ||
           String(diagnosisCtx?.diagnosisFollowupTargetLabel ?? '').trim() ||
           '対象者';
 
-        const diagnosisStrongSeedForOut = diagnosisSeedBodyForOut
-          ? `直前のir診断結果として、${diagnosisTargetForSeed}の状態を答える。外部の診断書や本人だけが持つ事実ではなく、保存済みのir診断結果を扱う。` + '\n' + diagnosisSeedBodyForOut
-          : `直前のir診断結果として、${diagnosisTargetForSeed}の状態を答える。外部の診断書や本人だけが持つ事実ではなく、保存済みのir診断結果を扱う。`;
+        const diagnosisSeedLinesForOut = [
+          'DIAGNOSIS_SEED (DO NOT OUTPUT)',
+          'targetLabel=' + diagnosisTargetForSeed,
+          'targetKey=' + (String(lastDiagnosisForSeed?.targetKey ?? '').trim() || 'null'),
+          'diagnosisResultId=' + (String(lastDiagnosisForSeed?.diagnosisResultId ?? '').trim() || 'null'),
+          'qPrimary=' + (String(lastDiagnosisForSeed?.qPrimary ?? '').trim() || 'null'),
+          'depthStage=' + (String(lastDiagnosisForSeed?.depthStage ?? '').trim() || 'null'),
+          'phase=' + (String(lastDiagnosisForSeed?.phase ?? '').trim() || 'null'),
+          'createdAt=' + (String(lastDiagnosisForSeed?.createdAt ?? '').trim() || 'null'),
+          'source=iros_ir_diagnosis_results',
+          'boundary=外部の診断書や本人だけが持つ事実ではなく、保存済みのir診断結果を扱う',
+          'writerTask=この保存済み診断結果を正本として、ユーザーの続きの要求に答える',
+          diagnosisTextForSeed ? 'diagnosisText=' + diagnosisTextForSeed : 'diagnosisText=null',
+        ];
+
+        const diagnosisStrongSeedForOut = diagnosisSeedLinesForOut.join('\n');
 
         ex.slotPlanSeed = diagnosisStrongSeedForOut;
         ex.llmRewriteSeed = diagnosisStrongSeedForOut;
@@ -11071,18 +11098,3 @@ return {
     };
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
