@@ -648,3 +648,246 @@ export function decideTcfConvergence(
   return 'none';
 }
 
+
+export type BuildTcfRotationDecisionInput = TcfTEvidenceInput &
+  ResolveTcfCDirectionInput & {
+    previousFocus?: string | null;
+    currentFocus?: string | null;
+    nextFocus?: string | null;
+    userReaction?: TcfUserReaction | null;
+    tEvidence?: TcfTEvidence | null;
+    cDirection?: TcfCDirection | null;
+    convergence?: TcfConvergenceState | null;
+  };
+
+function resolveTcfWriterPatternKey(args: {
+  cDirection: TcfCDirection;
+  convergence: TcfConvergenceState;
+}): string | null {
+  if (args.cDirection === 'writer_correction' || args.convergence === 'diverged') {
+    return 'WRITER_CORRECTION_V1';
+  }
+
+  if (
+    args.convergence === 'partial' ||
+    args.convergence === 'unresolved' ||
+    args.convergence === 'recycle'
+  ) {
+    return 'TCF_REFOCUS_V1';
+  }
+
+  if (args.convergence === 'converged') {
+    return 'TCF_CONVERGENCE_V1';
+  }
+
+  if (args.cDirection === 'implementation') {
+    return 'TCF_IMPLEMENTATION_V1';
+  }
+
+  if (args.cDirection === 'memory_seed') {
+    return 'SEED_DESIGN_V1';
+  }
+
+  if (args.cDirection === 'structure_design') {
+    return 'STRUCTURE_DESIGN_V1';
+  }
+
+  return null;
+}
+
+function resolveTcfSurfacePlanKind(args: {
+  cDirection: TcfCDirection;
+  convergence: TcfConvergenceState;
+}): string | null {
+  if (args.cDirection === 'writer_correction' || args.convergence === 'diverged') {
+    return 'writer_correction';
+  }
+
+  if (
+    args.convergence === 'partial' ||
+    args.convergence === 'unresolved' ||
+    args.convergence === 'recycle'
+  ) {
+    return 'refocus';
+  }
+
+  if (args.convergence === 'converged') {
+    return 'convergence';
+  }
+
+  if (args.cDirection === 'implementation') {
+    return 'implementation';
+  }
+
+  if (
+    args.cDirection === 'structure_design' ||
+    args.cDirection === 'concretize' ||
+    args.cDirection === 'memory_seed'
+  ) {
+    return 'structure_design';
+  }
+
+  return null;
+}
+
+function shouldPersistTcfFocus(args: {
+  convergence: TcfConvergenceState;
+  tEvidence: TcfTEvidence;
+}): boolean {
+  if (args.convergence === 'diverged' || args.convergence === 'unresolved') {
+    return false;
+  }
+
+  if (
+    args.convergence === 'converged' ||
+    args.convergence === 'partial' ||
+    args.convergence === 'focused'
+  ) {
+    return true;
+  }
+
+  return args.tEvidence.hasT === true;
+}
+
+function shouldRebuildTcfFocus(convergence: TcfConvergenceState): boolean {
+  return (
+    convergence === 'partial' ||
+    convergence === 'unresolved' ||
+    convergence === 'diverged' ||
+    convergence === 'recycle'
+  );
+}
+
+function buildTcfRotationReason(args: {
+  tEvidence: TcfTEvidence;
+  cDirection: TcfCDirection;
+  userReaction: TcfUserReaction;
+  convergence: TcfConvergenceState;
+}): string {
+  return [
+    `t=${args.tEvidence.hasT ? args.tEvidence.reason ?? 'HAS_T' : 'NO_T'}`,
+    `c=${args.cDirection}`,
+    `reaction=${args.userReaction}`,
+    `convergence=${args.convergence}`,
+  ].join(' / ');
+}
+
+export function buildTcfRotationDecision(
+  input: BuildTcfRotationDecisionInput,
+): TcfRotationDecision {
+  const meta = asRecord(input.meta) ?? {};
+  const extra = asRecord(input.extra) ?? asRecord(meta.extra) ?? {};
+  const ctxPack =
+    asRecord(input.ctxPack) ??
+    asRecord(extra.ctxPack) ??
+    asRecord(meta.ctxPack) ??
+    {};
+
+  const focusResolution =
+    asRecord(input.focusResolution) ??
+    asRecord(ctxPack.focusResolution) ??
+    asRecord(extra.focusResolution) ??
+    asRecord(meta.focusResolution) ??
+    {};
+
+  const transferSeed =
+    input.transferSeed ??
+    ctxPack.transferSeed ??
+    extra.transferSeed ??
+    meta.transferSeed ??
+    null;
+
+  const previousFocus = firstString(
+    input.previousFocus,
+    ctxPack.previousFocus,
+    extra.previousFocus,
+    meta.previousFocus,
+  );
+
+  const currentFocus = firstString(
+    input.currentFocus,
+    ctxPack.currentFocus,
+    extra.currentFocus,
+    meta.currentFocus,
+    focusResolution.focus,
+    textFromUnknown(transferSeed),
+  );
+
+  const tEvidence =
+    input.tEvidence ??
+    readTcfTEvidence({
+      meta,
+      extra,
+      ctxPack,
+      sriContext: input.sriContext,
+      memoryState: input.memoryState,
+      anchorEntry: input.anchorEntry,
+    });
+
+  const cDirection =
+    input.cDirection ??
+    resolveTcfCDirection({
+      userText: input.userText,
+      currentFocus,
+      transferSeed,
+      memoryIntent: input.memoryIntent,
+      goalKind: input.goalKind,
+      writerPatternKey: input.writerPatternKey,
+      focusResolution,
+      meta,
+      extra,
+      ctxPack,
+      sriContext: input.sriContext,
+    });
+
+  const userReaction =
+    input.userReaction ??
+    detectTcfUserReaction(input.userText);
+
+  const convergence =
+    input.convergence ??
+    decideTcfConvergence({
+      previousFocus,
+      currentFocus,
+      userReaction,
+      tEvidence,
+      cDirection,
+    });
+
+  const shouldPersistFocus = shouldPersistTcfFocus({ convergence, tEvidence });
+  const shouldRebuildFocus = shouldRebuildTcfFocus(convergence);
+  const shouldPromoteDepth =
+    convergence === 'converged' || (tEvidence.hasT && cDirection !== 'none');
+  const shouldRouteToC =
+    cDirection !== 'none' &&
+    convergence !== 'diverged' &&
+    convergence !== 'unresolved';
+
+  const writerPatternKey = resolveTcfWriterPatternKey({ cDirection, convergence });
+  const surfacePlanKind = resolveTcfSurfacePlanKind({ cDirection, convergence });
+
+  const shouldUseTcfPattern = Boolean(writerPatternKey || surfacePlanKind);
+
+  return {
+    previousFocus,
+    currentFocus,
+    nextFocus: firstString(input.nextFocus, currentFocus, previousFocus),
+    tEvidence,
+    cDirection,
+    userReaction,
+    convergence,
+    shouldPersistFocus,
+    shouldRebuildFocus,
+    shouldPromoteDepth,
+    shouldRouteToC,
+    shouldUseTcfPattern,
+    writerPatternKey,
+    surfacePlanKind,
+    reason: buildTcfRotationReason({
+      tEvidence,
+      cDirection,
+      userReaction,
+      convergence,
+    }),
+  };
+}
