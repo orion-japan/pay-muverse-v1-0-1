@@ -12,6 +12,7 @@ export type TcfConvergenceState =
   | 'focused'
   | 'partial'
   | 'converged'
+  | 'unresolved'
   | 'diverged'
   | 'recycle';
 
@@ -564,3 +565,86 @@ export function detectTcfUserReaction(userText: string | null | undefined): TcfU
 
   return 'unknown';
 }
+
+export type DecideTcfConvergenceInput = {
+  previousFocus?: string | null;
+  currentFocus?: string | null;
+  userReaction?: TcfUserReaction | null;
+  tEvidence?: TcfTEvidence | null;
+  cDirection?: TcfCDirection | null;
+};
+
+function normalizeTcfFocusText(value: unknown): string | null {
+  const text = firstString(value);
+  if (!text) return null;
+
+  return text
+    .replace(/\s+/g, '')
+    .replace(/[。．.、,]/g, '')
+    .toLowerCase();
+}
+
+function hasDifferentTcfFocus(previousFocus: string | null, currentFocus: string | null): boolean {
+  const previous = normalizeTcfFocusText(previousFocus);
+  const current = normalizeTcfFocusText(currentFocus);
+
+  if (!previous || !current) return false;
+
+  return previous !== current;
+}
+
+export function decideTcfConvergence(
+  input: DecideTcfConvergenceInput,
+): TcfConvergenceState {
+  const previousFocus = firstString(input.previousFocus);
+  const currentFocus = firstString(input.currentFocus);
+  const userReaction = input.userReaction ?? 'unknown';
+  const tEvidence = input.tEvidence ?? null;
+  const cDirection = input.cDirection ?? 'none';
+
+  const hasFocus = Boolean(currentFocus || previousFocus);
+  const hasT = tEvidence?.hasT === true;
+  const hasCDirection = cDirection !== 'none';
+
+  if (cDirection === 'writer_correction' || userReaction === 'reject') {
+    return 'diverged';
+  }
+
+  if (
+    hasDifferentTcfFocus(previousFocus, currentFocus) &&
+    (userReaction === 'refine' || userReaction === 'action' || userReaction === 'accept')
+  ) {
+    return 'recycle';
+  }
+
+  if (userReaction === 'refine') {
+    return 'partial';
+  }
+
+  if (userReaction === 'confused') {
+    return 'unresolved';
+  }
+
+  if (userReaction === 'ask_more') {
+    return hasFocus ? 'partial' : 'unresolved';
+  }
+
+  if (userReaction === 'accept') {
+    return hasFocus || hasT || hasCDirection ? 'converged' : 'focused';
+  }
+
+  if (userReaction === 'action') {
+    return hasT || hasCDirection || hasFocus ? 'converged' : 'focused';
+  }
+
+  if (hasT && hasCDirection && hasFocus) {
+    return 'focused';
+  }
+
+  if (hasFocus) {
+    return 'focused';
+  }
+
+  return 'none';
+}
+
