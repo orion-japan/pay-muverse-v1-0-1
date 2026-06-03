@@ -4246,6 +4246,8 @@ function normForRecall(v: any): string {
         hasResolvedReferenceInFlowSeed: flowSeed.includes('RESOLVED_REFERENCE:'),
         hasReferenceCheckInFlowSeed: flowSeed.includes('askType=reference_check'),
         hasExpiresAfterTurnInFlowSeed: flowSeed.includes('expiresAfterTurn=true'),
+        hasTcfRotationSeed: flowSeed.includes('TCF_ROTATION_SEED'),
+        hasTcfRotationDecision: flowSeed.includes('TCF_ROTATION_DECISION'),
         flowSeedHead: flowSeed.slice(0, 900),
       });
     /* ---------------------------
@@ -11069,6 +11071,8 @@ return {
     };
   }
 }
+
+
 
 
 
