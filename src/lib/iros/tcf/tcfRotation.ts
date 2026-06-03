@@ -443,3 +443,124 @@ export function resolveTcfCDirection(input: ResolveTcfCDirectionInput): TcfCDire
 
   return 'none';
 }
+
+export function detectTcfUserReaction(userText: string | null | undefined): TcfUserReaction {
+  const text = String(userText ?? '').trim().toLowerCase();
+
+  if (!text) return 'unknown';
+
+  if (
+    hasTcfMatch(text, [
+      /違う/u,
+      /そうじゃない/u,
+      /ズレ/u,
+      /外れ/u,
+      /戻ってる/u,
+      /それは違う/u,
+      /そこじゃない/u,
+      /もう言ってる/u,
+      /深読みしない/u,
+    ])
+  ) {
+    return 'reject';
+  }
+
+  if (
+    hasTcfMatch(text, [
+      /どういうこと/u,
+      /よく分から/u,
+      /よくわから/u,
+      /わからない/u,
+      /分からない/u,
+      /まだ見えない/u,
+      /どこから/u,
+      /混乱/u,
+      /不明/u,
+    ])
+  ) {
+    return 'confused';
+  }
+
+  if (
+    hasTcfMatch(text, [
+      /だいたい/u,
+      /大体/u,
+      /近い/u,
+      /方向は合/u,
+      /方向性は合/u,
+      /もう少し/u,
+      /でも/u,
+      /ただ/u,
+      /少し違/u,
+      /調整/u,
+      /修正/u,
+      /言い換/u,
+    ])
+  ) {
+    return 'refine';
+  }
+
+  if (
+    hasTcfMatch(text, [
+      /詳しく/u,
+      /もう少し説明/u,
+      /教えて/u,
+      /どうすれば/u,
+      /どうやって/u,
+      /どれ/u,
+      /何を/u,
+      /なにを/u,
+      /どこ/u,
+      /ありますか/u,
+      /できますか/u,
+      /\?$/,
+      /？$/,
+    ])
+  ) {
+    return 'ask_more';
+  }
+
+  if (
+    hasTcfMatch(text, [
+      /やります/u,
+      /進めます/u,
+      /進めましょう/u,
+      /やろう/u,
+      /作って/u,
+      /入れて/u,
+      /追加/u,
+      /実装/u,
+      /保存して/u,
+      /コミット/u,
+      /push/u,
+      /プッシュ/u,
+      /お願いします/u,
+      /お願い/u,
+    ])
+  ) {
+    return 'action';
+  }
+
+  if (
+    hasTcfMatch(text, [
+      /それでいい/u,
+      /これでいい/u,
+      /それです/u,
+      /そういうこと/u,
+      /合ってる/u,
+      /合っています/u,
+      /ok/u,
+      /ＯＫ/u,
+      /了解/u,
+      /承知/u,
+      /いいです/u,
+      /大丈夫/u,
+      /ありがとう/u,
+      /ありがとうございます/u,
+    ])
+  ) {
+    return 'accept';
+  }
+
+  return 'unknown';
+}
