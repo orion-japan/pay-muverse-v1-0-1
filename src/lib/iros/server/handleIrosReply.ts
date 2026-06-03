@@ -24,6 +24,10 @@ import { runOrchestratorTurn } from './handleIrosReply.orchestrator';
 import { postProcessReply } from './handleIrosReply.postprocess';
 import { buildFlowSeedV1, formatFlowSeedV1 } from '@/lib/iros/seed/seedEngine';
 import {
+  buildTcfRotationDecision,
+  formatTcfRotationSeed,
+} from '@/lib/iros/tcf/tcfRotation';
+import {
   judgeReferenceCheck,
   formatReferenceJudgeSeed,
 } from '@/lib/iros/judge/referenceJudge';
@@ -3821,6 +3825,61 @@ function normForRecall(v: any): string {
           sourceAssistantTextHead: String(resolvedAskForSeedAnchor.sourceAssistantText ?? '').slice(0, 160),
         });
       }
+      const tcfRotationDecision = buildTcfRotationDecision({
+        userText: String(text ?? ''),
+        previousFocus:
+          String(
+            (orchCtxPack as any)?.previousFocus ??
+              (orchCtxPack as any)?.previous_focus ??
+              (orchExtra as any)?.previousFocus ??
+              (orchExtra as any)?.previous_focus ??
+              '',
+          ).trim() || null,
+        currentFocus: flowSeedFocus,
+        nextFocus: flowSeedNextLine,
+        meta: orchMeta,
+        extra: orchExtra,
+        ctxPack: orchCtxPack,
+        sriContext:
+          (orchCtxPack as any)?.sriContext ??
+          (orchExtra as any)?.sriContext ??
+          null,
+        focusResolution:
+          (orchCtxPack as any)?.focusResolution ??
+          (orchExtra as any)?.focusResolution ??
+          null,
+        memoryState:
+          (orchCtxPack as any)?.memoryState ??
+          (orchExtra as any)?.memoryState ??
+          null,
+        anchorEntry:
+          (orchCtxPack as any)?.anchorEntry ??
+          (orchExtra as any)?.anchorEntry ??
+          null,
+        memoryIntent:
+          String(
+            (orchCtxPack as any)?.memoryIntent ??
+              (orchExtra as any)?.memoryIntent ??
+              '',
+          ).trim() || null,
+        goalKind:
+          String(
+            (orchCtxPack as any)?.goalKind ??
+              (orchExtra as any)?.goalKind ??
+              '',
+          ).trim() || null,
+        writerPatternKey:
+          String(
+            (orchCtxPack as any)?.patternKey ??
+              (orchCtxPack as any)?.pattern_key ??
+              (orchExtra as any)?.patternKey ??
+              (orchExtra as any)?.pattern_key ??
+              '',
+          ).trim() || null,
+      });
+
+      const tcfRotationSeedText = formatTcfRotationSeed(tcfRotationDecision);
+
       const flowSeedObj = buildFlowSeedV1({
         flow: {
           current:
@@ -3884,6 +3943,7 @@ function normForRecall(v: any): string {
         },
 
         userCore: flowSeedUserCore,
+        tcfRotationSeedText,
         conversationAnchor: conversationAnchorForSeed,
         resolvedReference: resolvedAskForSeedAnchor
           ? {
@@ -11009,6 +11069,11 @@ return {
     };
   }
 }
+
+
+
+
+
 
 
 
