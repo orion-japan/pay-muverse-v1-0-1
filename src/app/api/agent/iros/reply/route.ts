@@ -1632,6 +1632,18 @@ try {
       baseDiagCtxPack?.irMeta ??
       null;
 
+    const nowFlowDepthStageForDiagnosisResult = (() => {
+      const flow =
+        typeof (irMetaForDiagnosisResult as any)?.nowFlow === 'string'
+          ? String((irMetaForDiagnosisResult as any).nowFlow)
+          : typeof (irMetaForDiagnosisResult as any)?.flowA === 'string'
+            ? String((irMetaForDiagnosisResult as any).flowA)
+            : '';
+
+      const match = flow.match(/^[^-]+-([A-Z][0-9]+)-/);
+      return match?.[1] ?? null;
+    })();
+
     const savedDiagnosisResult = await saveIrDiagnosisResult(supabase, {
       ownerUserCode: userCode,
       conversationId,
@@ -1669,6 +1681,7 @@ try {
         irMetaForDiagnosisResult?.depth_stage ??
         baseDiagExtra?.depthStage ??
         baseDiagExtra?.depth_stage ??
+        nowFlowDepthStageForDiagnosisResult ??
         null,
       phase:
         irMetaForDiagnosisResult?.phase ??
@@ -2560,10 +2573,3 @@ if (!skipTraining) {
     );
   }
 }
-
-
-
-
-
-
-
