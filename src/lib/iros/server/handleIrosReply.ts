@@ -5842,6 +5842,45 @@ const restoreCtxPackFromHistory = (historyForTurn: any[]): any | null => {
               Number.isFinite(Number((ctx as any).returnStreak))
             ? Number((ctx as any).returnStreak)
             : null,
+
+        // MEMORY_SEED_RESTORE_FROM_HISTORY_FOR_WRITER
+        // 保存済み ctxPack から、次ターンの Relationship Memory / Memory Seed 正本を復元する
+        relationship:
+          (ctx as any).relationship && typeof (ctx as any).relationship === 'object'
+            ? (ctx as any).relationship
+            : null,
+        relationshipMemory:
+          (ctx as any).relationshipMemory && typeof (ctx as any).relationshipMemory === 'object'
+            ? (ctx as any).relationshipMemory
+            : null,
+        relationId:
+          typeof (ctx as any).relationId === 'string' && String((ctx as any).relationId).trim()
+            ? String((ctx as any).relationId).trim()
+            : null,
+        relationshipDisplayName:
+          typeof (ctx as any).relationshipDisplayName === 'string' &&
+          String((ctx as any).relationshipDisplayName).trim()
+            ? String((ctx as any).relationshipDisplayName).trim()
+            : null,
+        relationshipMemoryNote:
+          typeof (ctx as any).relationshipMemoryNote === 'string' &&
+          String((ctx as any).relationshipMemoryNote).trim()
+            ? String((ctx as any).relationshipMemoryNote).trim()
+            : null,
+        memorySeedText:
+          typeof (ctx as any).memorySeedText === 'string' &&
+          String((ctx as any).memorySeedText).trim()
+            ? String((ctx as any).memorySeedText).trim()
+            : null,
+        memorySeedResult:
+          (ctx as any).memorySeedResult && typeof (ctx as any).memorySeedResult === 'object'
+            ? (ctx as any).memorySeedResult
+            : null,
+        memorySeedKind:
+          typeof (ctx as any).memorySeedKind === 'string' &&
+          String((ctx as any).memorySeedKind).trim()
+            ? String((ctx as any).memorySeedKind).trim()
+            : null,
     };
 
     if (
@@ -5855,6 +5894,14 @@ const restoreCtxPackFromHistory = (historyForTurn: any[]): any | null => {
       restored.historyDigestV1 ||
       restored.flow ||
       restored.returnStreak != null ||
+        restored.relationship ||
+        restored.relationshipMemory ||
+        restored.relationId ||
+        restored.relationshipDisplayName ||
+        restored.relationshipMemoryNote ||
+        restored.memorySeedText ||
+        restored.memorySeedResult ||
+        restored.memorySeedKind ||
       restoredDepthHistoryLite.length > 0
     ) {
       return restored;
@@ -11358,5 +11405,6 @@ return {
     };
   }
 }
+
 
 

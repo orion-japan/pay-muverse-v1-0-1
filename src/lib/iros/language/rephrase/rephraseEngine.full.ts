@@ -8852,6 +8852,33 @@ raw = await (async () => {
         };
       }
 
+      // RELATIONSHIP_MEMORY_CONTEXT_PRIORITY
+      // 保存済み Relationship Memory がある場合は unknown_person より優先する
+      const relationshipMemoryForContext = (ctxPackForWriter as any)?.relationshipMemory;
+      const relationshipMemoryDisplayNameForContext =
+        relationshipMemoryForContext && typeof relationshipMemoryForContext === 'object'
+          ? String(
+              relationshipMemoryForContext.displayName ??
+                relationshipMemoryForContext.display_name ??
+                '',
+            ).trim()
+          : '';
+
+      const relationshipMemoryRoleForContext =
+        relationshipMemoryForContext && typeof relationshipMemoryForContext === 'object'
+          ? String(relationshipMemoryForContext.role ?? '').trim()
+          : '';
+
+      if (relationshipMemoryDisplayNameForContext) {
+        return {
+          domain: 'known_person',
+          relation: safeHead(relationshipMemoryDisplayNameForContext, 80),
+          certainty: 'memory',
+          instruction:
+            `保存済みRelationship Memoryを優先し、「${safeHead(relationshipMemoryDisplayNameForContext, 80)}」との関係文脈として扱う。関係種別は${relationshipMemoryRoleForContext ? `role=${safeHead(relationshipMemoryRoleForContext, 40)}` : '未確定'}として、恋愛・仕事・家族へ勝手に寄せず、保存済みの関係メモリと直近の発話を根拠に読む。`,
+        };
+      }
+
       if (relationshipMemoryTargetForWriter) {
         return {
           domain: 'neutral_person',
@@ -15814,6 +15841,7 @@ return await runRetryPass({
     slotsForGuard,
   });
 }
+
 
 
 
