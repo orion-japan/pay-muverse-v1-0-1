@@ -266,3 +266,180 @@ export function readTcfTEvidence(input: TcfTEvidenceInput): TcfTEvidence {
     }),
   };
 }
+
+export type ResolveTcfCDirectionInput = {
+  userText?: string | null;
+  currentFocus?: string | null;
+  transferSeed?: any | null;
+  memoryIntent?: string | null;
+  goalKind?: string | null;
+  writerPatternKey?: string | null;
+  focusResolution?: any | null;
+  meta?: any | null;
+  extra?: any | null;
+  ctxPack?: any | null;
+  sriContext?: any | null;
+};
+
+function textFromUnknown(value: unknown): string | null {
+  if (typeof value === 'string') return firstString(value);
+
+  const record = asRecord(value);
+  if (!record) return null;
+
+  return firstString(
+    record.seedText,
+    record.text,
+    record.focus,
+    record.replyFocus,
+    record.fromReplyFocus,
+    record.toReplyFocus,
+    record.humanStateReplyFocus,
+    record.CURRENT_REPLY_FOCUS,
+    record.SECOND_REPLY_FOCUS,
+    record.HUMAN_STATE_REPLY_FOCUS,
+    record.REPLY_FOCUS,
+  );
+}
+
+function joinForTcfMatch(...values: unknown[]): string {
+  const parts: string[] = [];
+
+  for (const value of values) {
+    const text = textFromUnknown(value);
+    if (text) parts.push(text);
+  }
+
+  return parts.join('\n').toLowerCase();
+}
+
+function hasTcfMatch(text: string, patterns: RegExp[]): boolean {
+  return patterns.some((pattern) => pattern.test(text));
+}
+
+export function resolveTcfCDirection(input: ResolveTcfCDirectionInput): TcfCDirection {
+  const meta = asRecord(input.meta) ?? {};
+  const extra = asRecord(input.extra) ?? asRecord(meta.extra) ?? {};
+  const ctxPack =
+    asRecord(input.ctxPack) ??
+    asRecord(extra.ctxPack) ??
+    asRecord(meta.ctxPack) ??
+    {};
+
+  const sriContext =
+    asRecord(input.sriContext) ??
+    asRecord(ctxPack.sriContext) ??
+    asRecord(extra.sriContext) ??
+    asRecord(meta.sriContext) ??
+    {};
+
+  const intentionContext =
+    asRecord(sriContext.intentionContext) ??
+    asRecord(sriContext.intentContext) ??
+    {};
+
+  const focusResolution =
+    asRecord(input.focusResolution) ??
+    asRecord(ctxPack.focusResolution) ??
+    asRecord(extra.focusResolution) ??
+    asRecord(meta.focusResolution) ??
+    {};
+
+  const transferSeed =
+    input.transferSeed ??
+    ctxPack.transferSeed ??
+    extra.transferSeed ??
+    meta.transferSeed ??
+    null;
+
+  const memoryIntent = firstString(
+    input.memoryIntent,
+    ctxPack.memoryIntent,
+    extra.memoryIntent,
+    meta.memoryIntent,
+    intentionContext.memoryIntent,
+  )?.toLowerCase() ?? null;
+
+  const goalKind = firstString(
+    input.goalKind,
+    ctxPack.goalKind,
+    extra.goalKind,
+    meta.goalKind,
+    intentionContext.goalKind,
+  )?.toLowerCase() ?? null;
+
+  const writerPatternKey = firstString(
+    input.writerPatternKey,
+    ctxPack.writerPatternKey,
+    extra.writerPatternKey,
+    meta.writerPatternKey,
+  )?.toLowerCase() ?? null;
+
+  const text = joinForTcfMatch(
+    input.userText,
+    input.currentFocus,
+    transferSeed,
+    focusResolution.focus,
+    focusResolution.domain,
+    focusResolution.outputShape,
+    goalKind,
+    memoryIntent,
+    writerPatternKey,
+  );
+
+  if (
+    hasTcfMatch(text, [/違う/u, /そうじゃない/u, /ズレ/u, /戻ってる/u, /もう一回/u, /言い方/u, /硬い/u])
+  ) {
+    return 'writer_correction';
+  }
+
+  if (
+    hasTcfMatch(text, [/実装/u, /コード/u, /関数/u, /db/u, /sql/u, /保存/u, /取得/u, /型/u, /ファイル/u, /import/u])
+  ) {
+    return 'implementation';
+  }
+
+  if (
+    memoryIntent === 'diagnosis_recall' ||
+    hasTcfMatch(text, [/診断/u, /深め/u, /状態/u, /ir/u, /カード/u])
+  ) {
+    return 'diagnosis_deepen';
+  }
+
+  if (
+    memoryIntent === 'relationship_recall' ||
+    hasTcfMatch(text, [/関係/u, /距離感/u, /連絡/u, /相手/u, /境界線/u, /どう返す/u, /離れる/u, /近づく/u])
+  ) {
+    return 'relation_boundary';
+  }
+
+  if (
+    memoryIntent === 'working_rule_recall' ||
+    memoryIntent === 'project_context_recall' ||
+    memoryIntent === 'past_context_recall' ||
+    hasTcfMatch(text, [/覚えて/u, /前の話/u, /記憶/u, /呼び出し/u, /memory/u, /pre-seed/u])
+  ) {
+    return 'memory_seed';
+  }
+
+  if (
+    goalKind === 'decide' ||
+    hasTcfMatch(text, [/やる/u, /進め/u, /次/u, /手順/u, /どう動く/u, /何から/u, /お願いします/u])
+  ) {
+    return 'action_plan';
+  }
+
+  if (
+    hasTcfMatch(text, [/構造/u, /設計/u, /仕様/u, /仕組み/u, /全体像/u, /回路/u, /接続/u, /整理/u, /tcf/u, /sri/u, /focus/u])
+  ) {
+    return 'structure_design';
+  }
+
+  if (
+    hasTcfMatch(text, [/具体/u, /形に/u, /落とす/u, /判断基準/u, /扱い方/u])
+  ) {
+    return 'concretize';
+  }
+
+  return 'none';
+}
