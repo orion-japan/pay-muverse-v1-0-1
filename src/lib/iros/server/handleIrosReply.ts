@@ -5902,11 +5902,39 @@ try {
   const relationshipHistoryTextForLayer = shouldSuppressRelationshipHistoryForDocumentTask
     ? null
     : relationshipHistoryText;
+  const relationshipCandidateRowsForResolve =
+    shouldSuppressRelationshipHistoryForDocumentTask
+      ? []
+      : await loadRelationshipMemoriesForTurn({
+          userCode,
+          limit: 20,
+        });
+
+  const relationshipCandidatesForResolve = Array.isArray(relationshipCandidateRowsForResolve)
+    ? relationshipCandidateRowsForResolve
+        .map((row: any) => {
+          const rawRelationId = String(row?.relation_id ?? '').trim();
+          const selfPrefix = `${userCode ?? 'self'}__`;
+          const relationIdForResolve =
+            rawRelationId && rawRelationId.startsWith(selfPrefix)
+              ? rawRelationId.slice(selfPrefix.length)
+              : rawRelationId;
+
+          return {
+            relationId: relationIdForResolve,
+            displayName: row?.display_name ?? null,
+            aliases: Array.isArray(row?.aliases) ? row.aliases : null,
+            role: row?.role ?? null,
+          };
+        })
+        .filter((row: any) => row.relationId)
+    : [];
+
   const resolvedBase = resolveRelation({
     userText,
     topicDigest,
     historyText: relationshipHistoryTextForLayer || null,
-    candidates: null,  // memory recall 候補は次段
+    candidates: relationshipCandidatesForResolve,
     lastRelationId: shouldSuppressRelationshipHistoryForDocumentTask
       ? null
       : (extra2 as any)?.ctxPack?.relationId ?? null,
