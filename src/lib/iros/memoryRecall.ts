@@ -617,6 +617,42 @@ export async function loadLatestIrDiagnosisSnapshot(
       }
     }
 
+    const { data, error } = await supabase
+      .from('iros_memory_state')
+      .select('last_ir_diagnosis_target, last_ir_diagnosis_observation, last_ir_diagnosis_state, last_ir_diagnosis_summary, last_ir_diagnosis_at')
+      .eq('user_code', userCode)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[IROS][loadLatestIrDiagnosisSnapshot] memory_state query error', error);
+    } else if (data) {
+      const memoryStateTarget = data.last_ir_diagnosis_target ?? null;
+      const memoryStateTargetForMatch = normalizeIrDiagnosisTargetForMatch(memoryStateTarget);
+
+      const targetMatches =
+        !requestedTarget ||
+        (memoryStateTargetForMatch !== null && memoryStateTargetForMatch === requestedTarget);
+
+      const snapshot: IrDiagnosisSnapshot = {
+        target: data.last_ir_diagnosis_target ?? null,
+        targetKey: normalizeDiagnosisTargetKey(data.last_ir_diagnosis_target),
+        observation: data.last_ir_diagnosis_observation ?? null,
+        state: data.last_ir_diagnosis_state ?? null,
+        summary: data.last_ir_diagnosis_summary ?? null,
+        createdAt: data.last_ir_diagnosis_at ?? null,
+      };
+
+      const hasDiagnosisSnapshot =
+        snapshot.target !== null ||
+        snapshot.observation !== null ||
+        snapshot.state !== null ||
+        snapshot.summary !== null;
+
+      if (hasDiagnosisSnapshot && targetMatches) return snapshot;
+    }
+
     if (requestedTarget) {
       const { data: messageRows, error: messageError } = await supabase
         .from('iros_messages')
@@ -648,44 +684,7 @@ export async function loadLatestIrDiagnosisSnapshot(
       }
     }
 
-    const { data, error } = await supabase
-      .from('iros_memory_state')
-      .select(`
-        last_ir_diagnosis_target,
-        last_ir_diagnosis_observation,
-        last_ir_diagnosis_state,
-        last_ir_diagnosis_summary,
-        last_ir_diagnosis_at
-      `)
-      .eq('user_code', userCode)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      console.warn('[IROS][loadLatestIrDiagnosisSnapshot] query error', error);
-      return null;
-    }
-
-    if (!data) return null;
-
-    const snapshot = {
-      target: data.last_ir_diagnosis_target ?? null,
-      observation: data.last_ir_diagnosis_observation ?? null,
-      state: data.last_ir_diagnosis_state ?? null,
-      summary: data.last_ir_diagnosis_summary ?? null,
-      createdAt: data.last_ir_diagnosis_at ?? null,
-    };
-
-    const hasDiagnosisSnapshot =
-      snapshot.target !== null ||
-      snapshot.observation !== null ||
-      snapshot.state !== null ||
-      snapshot.summary !== null;
-
-    if (!hasDiagnosisSnapshot) return null;
-
-    return snapshot;
+    return null;
   } catch (e) {
     console.warn('[IROS][loadLatestIrDiagnosisSnapshot] failed', e);
     return null;
