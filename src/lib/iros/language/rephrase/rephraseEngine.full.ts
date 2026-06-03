@@ -12790,9 +12790,121 @@ const finalWriterDirectivesMsg =
           } as const;
         })();
 
+        const relationSeedControlMsg = (() => {
+          const r: any =
+            (ctxPackForWriter as any)?.relationshipMemory ??
+            (opts as any)?.userContext?.ctxPack?.relationshipMemory ??
+            (opts as any)?.ctxPack?.relationshipMemory ??
+            null;
+
+          if (!r || typeof r !== 'object') return null;
+
+          const pick = (...cands: any[]) => {
+            for (const v of cands) {
+              if (v === undefined || v === null) continue;
+              const s = String(v).replace(/\s+/g, ' ').trim();
+              if (s) return s;
+            }
+            return '';
+          };
+
+          const pickList = (...cands: any[]) => {
+            for (const v of cands) {
+              if (Array.isArray(v)) {
+                const items = v
+                  .map((x: any) => {
+                    if (x && typeof x === 'object') {
+                      const key = pick(x?.key);
+                      const value = pick(x?.value, x?.note);
+                      return [key, value].filter(Boolean).join(': ');
+                    }
+                    return pick(x);
+                  })
+                  .filter(Boolean);
+                if (items.length > 0) return items.join(' / ');
+              }
+
+              const s = pick(v);
+              if (s) return s;
+            }
+            return '';
+          };
+
+          const relationId = pick(r?.relationId, r?.relation_id);
+          const displayName = pick(r?.displayName, r?.display_name);
+          const role = pick(r?.role);
+          const confidence = pick(r?.confidence);
+          const facts = pickList(r?.facts);
+          const patterns = pickList(r?.patterns);
+          const safeOpeners = pickList(r?.safeOpeners, r?.safe_openers);
+          const pressureTriggers = pickList(r?.pressureTriggers, r?.pressure_triggers);
+          const userReactionPattern = pickList(r?.userReactionPattern, r?.user_reaction_pattern);
+          const unresolvedTopics = pickList(r?.unresolvedTopics, r?.unresolved_topics);
+
+          const hasAny =
+            relationId ||
+            displayName ||
+            role ||
+            facts ||
+            patterns ||
+            safeOpeners ||
+            pressureTriggers ||
+            userReactionPattern ||
+            unresolvedTopics;
+
+          if (!hasAny) return null;
+
+          const content = [
+            'RELATION_SEED_CONTROL (DO NOT OUTPUT):',
+            'このSeedは保存済みRelationship Memoryの正本である。',
+            'WriterはこのSeedを関係文脈の根拠として使う。',
+            '本文に RELATION_SEED_CONTROL や内部キー名を出さない。',
+            '',
+            relationId ? `relationId=${relationId}` : null,
+            displayName ? `displayName=${displayName}` : null,
+            role ? `role=${role}` : null,
+            confidence ? `confidence=${confidence}` : null,
+            'source=iros_relationship_memory',
+            'boundary=保存済みの関係文脈だけを扱う。相手の本音・愛情・未練・脈あり脈なしは断定しない。',
+            'writerTask=保存済みの関係文脈を補助線として、いまの相談に答える。',
+            facts ? `facts=${facts}` : null,
+            patterns ? `patterns=${patterns}` : null,
+            safeOpeners ? `safeOpeners=${safeOpeners}` : null,
+            pressureTriggers ? `pressureTriggers=${pressureTriggers}` : null,
+            userReactionPattern ? `userReactionPattern=${userReactionPattern}` : null,
+            unresolvedTopics ? `unresolvedTopics=${unresolvedTopics}` : null,
+          ]
+            .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+            .join('\n');
+
+          console.log(
+            '[IROS/RELATION_SEED_CONTROL]',
+            JSON.stringify({
+              traceId: debug.traceId ?? null,
+              conversationId: debug.conversationId ?? null,
+              userCode: debug.userCode ?? null,
+              hasSeed: true,
+              relationId: relationId || null,
+              displayName: displayName || null,
+              role: role || null,
+              confidence: confidence || null,
+              factsLen: facts.length,
+              patternsLen: patterns.length,
+              unresolvedTopicsLen: unresolvedTopics.length,
+              userReactionPatternLen: userReactionPattern.length,
+            })
+          );
+
+          return {
+            role: 'assistant',
+            content,
+          } as const;
+        })();
+
         const inserts = [
           isDiagnosisFollowupForWriter ? diagnosisSourceMsg : null,
           diagnosisSeedControlMsg,
+          relationSeedControlMsg,
           storySourceMsg,
           storyMetaSeedMsg,
           previousEventSourceMsg,
