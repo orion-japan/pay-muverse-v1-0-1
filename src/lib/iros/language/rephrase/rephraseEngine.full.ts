@@ -6780,7 +6780,7 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
         patternUserContextMetaExtraCtxPack?.presentationKind ??
         patternUserContextCtxPack?.presentationKind ??
         patternOptsCtxPack?.presentationKind ??
-        (patternIrMeta || patternLastIrDiagnosis ? 'diagnosis' : '')
+        ''
     )
       .trim()
       .toLowerCase();
@@ -6822,8 +6822,6 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
       !isCreativeContinuationForPattern &&
       (
         patternPresentationKind === 'diagnosis' ||
-        !!patternIrMeta ||
-        !!patternLastIrDiagnosis ||
         (!!patternTargetLabel && isDiagnosisFollowupPhrase)
       );
 
