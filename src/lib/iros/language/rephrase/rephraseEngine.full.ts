@@ -9744,6 +9744,37 @@ const laneKeyForPattern = String(
     ''
 ).trim();
 
+const flowSeedForTcfPattern = String(
+  (ctxPackForWriter && typeof ctxPackForWriter === 'object'
+    ? (ctxPackForWriter as any).flowSeed
+    : null) ??
+    (opts as any)?.userContext?.flowSeed ??
+    (opts as any)?.userContext?.ctxPack?.flowSeed ??
+    (opts as any)?.userContext?.meta?.extra?.flowSeed ??
+    (opts as any)?.userContext?.meta?.extra?.ctxPack?.flowSeed ??
+    ''
+).trim();
+
+const readTcfSeedFieldForPattern = (key: string): string | null => {
+  if (!flowSeedForTcfPattern) return null;
+
+  const m = flowSeedForTcfPattern.match(
+    new RegExp(`(?:^|\\n)${key}=([^\\n]+)`),
+  );
+
+  return m?.[1]?.trim() || null;
+};
+
+const hasTcfRotationSeedForPattern =
+  flowSeedForTcfPattern.includes('TCF_ROTATION_SEED') ||
+  flowSeedForTcfPattern.includes('TCF_ROTATION_DECISION');
+
+const tcfWriterPatternFromSeed =
+  readTcfSeedFieldForPattern('WRITER_PATTERN');
+
+const tcfSurfacePlanFromSeed =
+  readTcfSeedFieldForPattern('SURFACE_PLAN');
+
 const shouldForceDecidePattern =
   goalKindForPattern === 'decide' || laneKeyForPattern === 'T_CONCRETIZE';
 
@@ -9795,6 +9826,9 @@ console.log(
     laneKeyForPattern,
     shouldForceDecidePattern,
     writerPatternKey,
+    hasTcfRotationSeedForPattern,
+    tcfWriterPatternFromSeed,
+    tcfSurfacePlanFromSeed,
     metaExtraPatternKey: String((opts as any)?.meta?.extra?.patternKey ?? '').trim() || null,
     metaExtraCtxPackPatternKey:
       String((opts as any)?.meta?.extra?.ctxPack?.patternKey ?? '').trim() || null,
@@ -15429,6 +15463,7 @@ return await runRetryPass({
     slotsForGuard,
   });
 }
+
 
 
 
