@@ -1,4 +1,4 @@
-// =============================================
+﻿// =============================================
 // file: src/lib/iros/seed/seedEngine.ts
 // SEED ENGINE v3 resonance rewrite
 // - flowEngine = 状態（点）
@@ -95,6 +95,7 @@ export type FlowSeedV21Input = {
   historyLine?: string | null;
   memoryLine?: string | null;
   goalKind?: string | null;
+  tcfRotationSeedText?: string | null;
 
   meaningSkeleton?: MeaningSkeletonV2 | null;
   flow180?: Flow180Like | null;
@@ -714,6 +715,7 @@ export function buildFlowSeedV1(input: FlowSeedV21Input): FlowSeedV21 {
     },
 
     transferSeedText: transferSeed.ok ? transferSeed.seedText : null,
+    tcfRotationSeedText: pickString(input.tcfRotationSeedText),
     humanContextOrchestrationText: humanContextOrchestration.seedText,
 
     focus:
@@ -800,3 +802,4 @@ export function formatFlowSeedV1(seed: FlowSeedV21): string {
 
   return lines.join('\n').trim();
 }
+
