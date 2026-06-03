@@ -392,6 +392,125 @@ if (ex.ctxPack && typeof ex.ctxPack === 'object') {
       const qCode = cp.qCode;
       if (typeof qCode === 'string' && qCode) nextCp.qCode = qCode;
 
+      // PERSIST_SHRINK_KEEP_RELATION_MEMORY
+      // ctxPack軽量化後も、次ターン復元に必要な Relationship Memory / Memory Seed 正本だけは残す
+      if (cp.relationshipMemory && typeof cp.relationshipMemory === 'object') {
+        const rm: any = cp.relationshipMemory;
+        const nextRm: any = {};
+
+        if (typeof rm.relationId === 'string' && rm.relationId.trim()) {
+          nextRm.relationId = rm.relationId.trim().slice(0, 160);
+        }
+
+        if (typeof rm.displayName === 'string' && rm.displayName.trim()) {
+          nextRm.displayName = rm.displayName.trim().slice(0, 80);
+        }
+
+        if (typeof rm.role === 'string' && rm.role.trim()) {
+          nextRm.role = rm.role.trim().slice(0, 40);
+        }
+
+        if (typeof rm.confidence === 'number' && Number.isFinite(rm.confidence)) {
+          nextRm.confidence = rm.confidence;
+        }
+
+        if (Array.isArray(rm.facts)) {
+          nextRm.facts = rm.facts
+            .map((v: any) => String(v ?? '').trim())
+            .filter(Boolean)
+            .slice(0, 4)
+            .map((v: string) => v.slice(0, 180));
+        }
+
+        if (Array.isArray(rm.patterns)) {
+          nextRm.patterns = rm.patterns
+            .map((v: any) => String(v ?? '').trim())
+            .filter(Boolean)
+            .slice(0, 4)
+            .map((v: string) => v.slice(0, 180));
+        }
+
+        if (Array.isArray(rm.userReactionPattern)) {
+          nextRm.userReactionPattern = rm.userReactionPattern
+            .map((v: any) => String(v ?? '').trim())
+            .filter(Boolean)
+            .slice(0, 3)
+            .map((v: string) => v.slice(0, 160));
+        }
+
+        if (Array.isArray(rm.unresolvedTopics)) {
+          nextRm.unresolvedTopics = rm.unresolvedTopics
+            .map((v: any) => String(v ?? '').trim())
+            .filter(Boolean)
+            .slice(0, 4)
+            .map((v: string) => v.slice(0, 160));
+        }
+
+        if (Object.keys(nextRm).length > 0) {
+          nextCp.relationshipMemory = nextRm;
+        }
+      }
+
+      if (typeof cp.relationId === 'string' && cp.relationId.trim()) {
+        nextCp.relationId = cp.relationId.trim().slice(0, 160);
+      }
+
+      if (typeof cp.relationshipDisplayName === 'string' && cp.relationshipDisplayName.trim()) {
+        nextCp.relationshipDisplayName = cp.relationshipDisplayName.trim().slice(0, 80);
+      }
+
+      if (typeof cp.relationshipMemoryNote === 'string' && cp.relationshipMemoryNote.trim()) {
+        nextCp.relationshipMemoryNote = cp.relationshipMemoryNote.trim().slice(0, 360);
+      }
+
+      if (typeof cp.memorySeedText === 'string' && cp.memorySeedText.trim()) {
+        nextCp.memorySeedText = cp.memorySeedText.trim().slice(0, 800);
+      }
+
+      if (typeof cp.memorySeedKind === 'string' && cp.memorySeedKind.trim()) {
+        nextCp.memorySeedKind = cp.memorySeedKind.trim().slice(0, 80);
+      }
+
+      if (typeof cp.memorySeedBlocked === 'boolean') {
+        nextCp.memorySeedBlocked = cp.memorySeedBlocked;
+      }
+
+      if (Array.isArray(cp.memorySeedReasons)) {
+        nextCp.memorySeedReasons = cp.memorySeedReasons
+          .map((v: any) => String(v ?? '').trim())
+          .filter(Boolean)
+          .slice(0, 6)
+          .map((v: string) => v.slice(0, 120));
+      }
+
+      if (cp.memorySeedResult && typeof cp.memorySeedResult === 'object') {
+        const msr: any = cp.memorySeedResult;
+        const nextMsr: any = {};
+
+        if (typeof msr.hasSeed === 'boolean') nextMsr.hasSeed = msr.hasSeed;
+        if (typeof msr.blocked === 'boolean') nextMsr.blocked = msr.blocked;
+
+        if (typeof msr.seedKind === 'string' && msr.seedKind.trim()) {
+          nextMsr.seedKind = msr.seedKind.trim().slice(0, 80);
+        }
+
+        if (typeof msr.seedText === 'string' && msr.seedText.trim()) {
+          nextMsr.seedText = msr.seedText.trim().slice(0, 800);
+        }
+
+        if (Array.isArray(msr.reasons)) {
+          nextMsr.reasons = msr.reasons
+            .map((v: any) => String(v ?? '').trim())
+            .filter(Boolean)
+            .slice(0, 6)
+            .map((v: string) => v.slice(0, 120));
+        }
+
+        if (Object.keys(nextMsr).length > 0) {
+          nextCp.memorySeedResult = nextMsr;
+        }
+      }
+
       // --- ir診断の持ち越し ---
       if (cp.irMeta && typeof cp.irMeta === 'object') {
         nextCp.irMeta = cp.irMeta;

@@ -5283,10 +5283,10 @@ const systemPromptForWriter = [
                 }
               : {
                   preferBlockSplit: true,
-                  minBlocks: 4,
-                  maxSentencesPerBlock: 6,
-                  minSentences: 18,
-                  maxSentences: 26,
+                  minBlocks: 3,
+                  maxSentencesPerBlock: 4,
+                  minSentences: 8,
+                  maxSentences: 14,
                 },
 
           writeConstraints: isCompareStructureBomb
@@ -5350,12 +5350,12 @@ const systemPromptForWriter = [
                   'closing_line は、今の状態のまとめでやわらかく閉じる',
                 ]
               : [
-                'normal_detail / diagnosis_detail では、概念説明・構造説明・象徴読解の場合、4段落固定よりもMarkdown見出しによる意味の見通しを優先する',
-                '構成は、導入 → 構造展開 → ズレの表面化 → ズレの意味付け → IROS的な再配置 → 象徴的な着地を基本にする',
+                'normal_detail では、資料風の見出し展開よりも、自然文で深く分かる説明を優先する',
+                '構成は、導入 → 核の説明 → ズレの見え方 → 着地を基本にし、必要以上に大きな章立てへ広げない',
                 '「詳しく」「階層」「構造」「層」「段階」が含まれる問いでは、対象物に固有の層・段階・部位・中心軸がある場合、それを省略せず展開する',
                 '対象物が五重塔なら、第一層〜第五層と中心軸までを自然に展開する。山岳修行なら、欲求・浄化・覚悟・奉仕・一体化など、問いに即した段階を展開する',
-                'Markdown見出しは原則として2〜6個使う。見出しは独立行で出す',
-                '見出し例は固定しない。対象や問いに合わせて日常語で自然に作る。例：「## 好き嫌いより先に動いているもの」「## 関係が重くなるところ」「## 届き方を整える」「## いま見ている芯」',
+                'Markdown見出しは原則使わない。使う場合も2個までにし、資料タイトルのような見出しを避ける',
+                '「今ここを揃える」「焦点を移す」「一枚に戻す」などの型見出しは使わない。見出しを使う場合も短い日常語にする',
                 '対象物に層・部位・段階・中心軸などの固有構造がある場合は、その構造に沿って意味を展開する',
                 '説明だけで終わらず、表の理解と奥の意図、ユーザー側の見え方と相手側に届く見え方、行為の外形と内側の意味の間に起きるズレを表面化する',
                 'そのズレが相手側ではどんな受け取りになるか、どこで受け取り違いが起きるか、どう再配置すれば届くかまで書く',
@@ -5364,7 +5364,7 @@ const systemPromptForWriter = [
                 '番号リストは使わない。1. / 2. / 3. の形式は禁止する',
                 '小見出しは太字の独立行で出す。例：「**第一層：地の意図**」「**第二層：水の意図**」「**第三層：火の意図**」「**中心軸**」',
                 '区切り線 --- は、見出し同士の切り替わりが分かりやすくなる場合に使ってよい',
-                '大きく見せたい箇所では、Markdown見出し・太字・大文字見出しを使ってよい。ただし過剰に装飾しない',
+                '装飾は控える。太字は必要な箇所だけにし、絵文字や大きな見出しで印象を作らない',
                 '1段落目は3〜4文で書く',
                 '1段落目は current_state → misrecognition_negation → structural_reframe の順を守る',
                 '1段落目の前半で違いの発生や現在地を置き、後半で今回の核を仮置きしてよい',
@@ -5379,7 +5379,7 @@ const systemPromptForWriter = [
                 '4段落目には必ず closing_line に相当する短い本文を最後の1文として書く',
                 '4段落目を見出しだけで終わらせない。3段落で終えることを禁止する',
                 '4段落目を次の提案や案内にしない',
-                'NORMAL_DETAIL_V1 では、説明を4段落に分ける前に、比較説明に必要な素材を15ユニット前後まで十分に出す',
+                'NORMAL_DETAIL_V1 では、素材を増やしすぎず、読んで自然に入る量で要点を深める',
                 '比較説明では、違いの発生、A側の核、B側の核、ぶつかる点、相互の誤解、相互理解の鍵、最後の着地が読めるだけの材料を先に出す',
                 '一つの文に複数責務を詰め込みすぎない',
                 '特徴説明と理解点を同じ責務に混在させない',
@@ -6884,6 +6884,21 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
 
     const selectedByFunction = selectSlotPattern(patternSelectInput);
 
+    const isNaturalDeepenFollowupForMaterialize =
+      // STALE_NORMAL_DETAIL_PRESELECT_GUARD
+      // 「もう少し深めてください」系で、保存済み NORMAL_DETAIL_V1 が勝つのを防ぐ
+      /^(?:もう少し|もうちょっと|さらに|もっと)?\s*(?:深めて|深く見て|掘って|掘り下げて|詳しく見て)(?:ください|ほしい|お願いします)?[。.!！?？\s]*$/u.test(
+        String(patternFollowupText ?? '').trim(),
+      );
+
+    const effectivePreSelectedPatternKey =
+      preSelectedPatternKey === 'NORMAL_DETAIL_V1' &&
+      selectedByFunction === 'NORMAL_RESONANCE_V1' &&
+      isNaturalDeepenFollowupForMaterialize
+        ? ''
+        : preSelectedPatternKey;
+
+
     console.log(
       '[IROS/rephraseEngine][PATTERN_SELECT_SOURCE]',
       JSON.stringify({
@@ -6924,21 +6939,21 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
         // ✅ storyMode は診断フォローより優先する。
         // story_remake / story_undigested を IR_DETAIL_V1 に戻すと、
         // 「いま見えていること」等の診断テンプレが再付与されるため。
-        : preSelectedPatternKey === 'story_undigested' ||
-            preSelectedPatternKey === 'story_remake'
-          ? preSelectedPatternKey
-          : preSelectedPatternKey === 'previous_reply_rephrase' ||
-              preSelectedPatternKey === 'IR_DETAIL_V1' ||
-              preSelectedPatternKey === 'NORMAL_DETAIL_V1' ||
-              preSelectedPatternKey === 'NORMAL_RESONANCE_V1' ||
-              preSelectedPatternKey === 'NORMAL_PRACTICAL_RESONANCE_V1' ||
-              preSelectedPatternKey === 'DECLARATION_RESONANCE_V1' ||
-              preSelectedPatternKey === 'PARTNER_SIDE_RESONANCE_V1'
-            ? preSelectedPatternKey
+        : effectivePreSelectedPatternKey === 'story_undigested' ||
+            effectivePreSelectedPatternKey === 'story_remake'
+          ? effectivePreSelectedPatternKey
+          : effectivePreSelectedPatternKey === 'previous_reply_rephrase' ||
+              effectivePreSelectedPatternKey === 'IR_DETAIL_V1' ||
+              effectivePreSelectedPatternKey === 'NORMAL_DETAIL_V1' ||
+              effectivePreSelectedPatternKey === 'NORMAL_RESONANCE_V1' ||
+              effectivePreSelectedPatternKey === 'NORMAL_PRACTICAL_RESONANCE_V1' ||
+              effectivePreSelectedPatternKey === 'DECLARATION_RESONANCE_V1' ||
+              effectivePreSelectedPatternKey === 'PARTNER_SIDE_RESONANCE_V1'
+            ? effectivePreSelectedPatternKey
             : effectiveHasPriorDiagnosisForPattern && selectedByFunction === 'IR_DETAIL_V1'
               ? 'IR_DETAIL_V1'
               : selectedByFunction ||
-                preSelectedPatternKey ||
+                effectivePreSelectedPatternKey ||
                 'NORMAL_RESONANCE_V1'
     ) as any;
 
@@ -9808,6 +9823,56 @@ const shouldForceStructureDetailPattern =
     selectedPatternKey === 'NORMAL_RESONANCE_V1'
   );
 
+const relationshipDetailGuardTextForPattern = [
+  userTextForTranscendPattern,
+  String((ctxPackForWriter as any)?.relationshipDisplayName ?? ''),
+  String((ctxPackForWriter as any)?.relationshipMemory?.displayName ?? ''),
+  String((ctxPackForWriter as any)?.relationshipMemoryNote ?? ''),
+  String((opts as any)?.ctxPack?.relationshipDisplayName ?? ''),
+  String((opts as any)?.ctxPack?.relationshipMemory?.displayName ?? ''),
+  String((opts as any)?.meta?.extra?.ctxPack?.relationshipDisplayName ?? ''),
+  String((opts as any)?.meta?.extra?.ctxPack?.relationshipMemory?.displayName ?? ''),
+  String((opts as any)?.userContext?.ctxPack?.relationshipDisplayName ?? ''),
+  String((opts as any)?.userContext?.ctxPack?.relationshipMemory?.displayName ?? ''),
+  String((opts as any)?.userContext?.meta?.extra?.ctxPack?.relationshipDisplayName ?? ''),
+  String((opts as any)?.userContext?.meta?.extra?.ctxPack?.relationshipMemory?.displayName ?? ''),
+]
+  .join(' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const hasRelationshipMemoryForPattern =
+  Boolean((ctxPackForWriter as any)?.relationshipMemory) ||
+  Boolean((opts as any)?.ctxPack?.relationshipMemory) ||
+  Boolean((opts as any)?.meta?.extra?.ctxPack?.relationshipMemory) ||
+  Boolean((opts as any)?.userContext?.ctxPack?.relationshipMemory) ||
+  Boolean((opts as any)?.userContext?.meta?.extra?.ctxPack?.relationshipMemory);
+
+const isRelationshipConsultForTcfPattern =
+  // RELATIONSHIP_DETAIL_GUARD_FOR_TCF
+  // 人物・関係相談の「深めて」を、説明資料型の NORMAL_DETAIL_V1 に流さない。
+  hasRelationshipMemoryForPattern ||
+  /(?:さん|くん|ちゃん|彼|彼女|好きな人|恋愛|返事|返信|連絡|会う|会える|会えない|気持ち|本音|距離感)/u.test(
+    relationshipDetailGuardTextForPattern,
+  );
+
+const isNaturalDeepenFollowupForTcfPattern =
+  // TCF_NATURAL_DEEPEN_FOLLOWUP_GUARD
+  // 「もう少し深めてください」のような短い継続依頼は、説明資料型にしない。
+  /^(?:もう少し|もうちょっと|さらに|もっと)?\s*(?:深めて|深く見て|掘って|掘り下げて|詳しく見て)(?:ください|ほしい|お願いします)?[。.!！?？\s]*$/u.test(
+    userTextForTranscendPattern,
+  );
+
+const hasExplicitStructureDetailRequestForTcfPattern =
+  /(?:構造|仕組み|仕様|階層|層|段階|違い|比較|説明|解説|整理|分解|定義|ロジック|実装|コード|SQL|PDF|資料)/u.test(
+    userTextForTranscendPattern,
+  );
+
+const shouldKeepTcfDetailPattern =
+  !isRelationshipConsultForTcfPattern &&
+  (!isNaturalDeepenFollowupForTcfPattern || hasExplicitStructureDetailRequestForTcfPattern);
+
+
 const tcfWriterPatternMappedForWriter =
   hasTcfRotationSeedForPattern &&
   (
@@ -9816,7 +9881,9 @@ const tcfWriterPatternMappedForWriter =
     (tcfWriterPatternFromSeed === 'TCF_REFOCUS_V1' &&
       tcfSurfacePlanFromSeed === 'refocus')
   )
-    ? 'NORMAL_DETAIL_V1'
+    ? shouldKeepTcfDetailPattern
+      ? 'NORMAL_DETAIL_V1'
+      : 'NORMAL_RESONANCE_V1'
     : null;
 
 const writerPatternKey = (
@@ -14070,19 +14137,40 @@ userContext: {
         consultHeadingStripUserText
       );
 
-    if (!hasConsultAnswerContract) return String(src ?? '');
+    const legacyTemplateHeadingRe =
+      /^\s*(?:#{1,6}\s*)?(?:🌀|🔍|↔️|🎯|🌸|🪷|🧩|✅|🌱)?\s*(今ここを揃える|いま見ているもの|二つの見方|焦点を一つだけ移す|焦点を移す|いったん受け止める|一枚に戻す|ここで一つ選ぶ|いま分けて見たいこと|ここから整理する順番|いまのまとめ)\s*$/u;
 
-    const headingRe =
-      /^\\s*(?:🔍|🎯|✅)?\\s*(いま見えていること|いま分けて見たいこと|ここから整理する順番|いまのまとめ)\\s*$/u;
+    const hasLegacyTemplateHeading = String(src ?? '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .split('\n')
+      .some((line) => legacyTemplateHeadingRe.test(String(line ?? '').trim()));
 
-    return String(src ?? '')
-      .replace(/\\r\\n/g, '\\n')
-      .replace(/\\r/g, '\\n')
-      .split('\\n')
-      .filter((line) => !headingRe.test(String(line ?? '').trim()))
-      .join('\\n')
-      .replace(/\\n{3,}/g, '\\n\\n')
+    if (!hasConsultAnswerContract && !hasLegacyTemplateHeading) return String(src ?? '');
+
+    const headingRe = legacyTemplateHeadingRe;
+
+    const legacyTemplateHeadingPrefixRe =
+      /^\s*(?:#{1,6}\s*)?(?:🌀|🔍|↔️|🎯|🌸|🪷|🧩|✅|🌱)?\s*(今ここを揃える|いま見ているもの|二つの見方|焦点を一つだけ移す|焦点を移す|いったん受け止める|一枚に戻す|ここで一つ選ぶ|いま分けて見たいこと|ここから整理する順番|いまのまとめ)(?:\s+|$)/u;
+
+    const strippedLegacyHeadings = String(src ?? '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .split('\n')
+      .map((line) => {
+        const rawLine = String(line ?? '').trim();
+        if (!rawLine) return '';
+
+        const withoutHeading = rawLine.replace(legacyTemplateHeadingPrefixRe, '').trim();
+        return withoutHeading;
+      })
+      .filter((line) => String(line ?? '').trim())
+      .join('\n')
+      .replace(/\*\*/g, '')
+      .replace(/\n{3,}/g, '\n\n')
       .trim();
+
+    return strippedLegacyHeadings;
   };
 
   const candidateBeforeConsultHeadingStrip = String(candidate ?? '');
@@ -15726,6 +15814,7 @@ return await runRetryPass({
     slotsForGuard,
   });
 }
+
 
 
 

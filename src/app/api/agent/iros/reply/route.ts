@@ -2377,6 +2377,58 @@ const persistAssistantAllowed =
   } else {
     try {
       // ✅ persist は “最後まで待つ”（外側 withTimeout で切らない）
+      // ROUTE_FINAL_MEMORY_CTXPACK_MERGE_BEFORE_PERSIST
+      // handleIrosReply側の result.metaForSave.extra.ctxPack を、保存直前の route metaForSave に合流する
+      {
+        const resultMetaForSave: any =
+          (result as any)?.metaForSave && typeof (result as any).metaForSave === 'object'
+            ? (result as any).metaForSave
+            : null;
+
+        const resultCtxPack: any =
+          resultMetaForSave?.extra?.ctxPack &&
+          typeof resultMetaForSave.extra.ctxPack === 'object'
+            ? resultMetaForSave.extra.ctxPack
+            : null;
+
+        const mfsForPersist: any =
+          metaForSave && typeof metaForSave === 'object'
+            ? metaForSave
+            : (metaForSave = {});
+
+        mfsForPersist.extra =
+          mfsForPersist.extra && typeof mfsForPersist.extra === 'object'
+            ? mfsForPersist.extra
+            : {};
+
+        mfsForPersist.extra.ctxPack =
+          mfsForPersist.extra.ctxPack && typeof mfsForPersist.extra.ctxPack === 'object'
+            ? mfsForPersist.extra.ctxPack
+            : {};
+
+        if (resultCtxPack) {
+          mfsForPersist.extra.ctxPack = {
+            ...mfsForPersist.extra.ctxPack,
+            ...resultCtxPack,
+          };
+        }
+
+        console.log('[IROS/ROUTE_FINAL_MEMORY_CTXPACK_MERGE_BEFORE_PERSIST]', {
+          conversationId,
+          userCode,
+          hasResultCtxPack: Boolean(resultCtxPack),
+          hasRelationshipMemory: Boolean(mfsForPersist.extra.ctxPack.relationshipMemory),
+          hasRelationshipMemoryNote:
+            typeof mfsForPersist.extra.ctxPack.relationshipMemoryNote === 'string',
+          hasMemorySeedText:
+            typeof mfsForPersist.extra.ctxPack.memorySeedText === 'string',
+          hasMemorySeedResult: Boolean(mfsForPersist.extra.ctxPack.memorySeedResult),
+          relationId: mfsForPersist.extra.ctxPack.relationId ?? null,
+          relationshipDisplayName:
+            mfsForPersist.extra.ctxPack.relationshipDisplayName ?? null,
+        });
+      }
+
       const r = await persistAssistantMessageToIrosMessages({
         supabase,
         conversationId,

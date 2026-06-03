@@ -2951,6 +2951,34 @@ function normForRecall(v: any): string {
             ) {
               preOrchCtxPack.returnStreak = histCtx.returnStreak;
             }
+            // MEMORY_SEED_RESTORE_FROM_HISTCTX
+            // 保存済み ctxPack から、次ターンの Writer seed 正本に必要な Memory 系を復元する
+            if (!isCategoryOnlyConsultation && histCtx && typeof histCtx === 'object') {
+              if (!preOrchCtxPack.relationshipMemory && histCtx.relationshipMemory) {
+                preOrchCtxPack.relationshipMemory = histCtx.relationshipMemory;
+              }
+
+              if (!preOrchCtxPack.relationshipMemoryNote && typeof histCtx.relationshipMemoryNote === 'string') {
+                preOrchCtxPack.relationshipMemoryNote = histCtx.relationshipMemoryNote;
+              }
+
+              if (!preOrchCtxPack.memorySeedText && typeof histCtx.memorySeedText === 'string') {
+                preOrchCtxPack.memorySeedText = histCtx.memorySeedText;
+              }
+
+              if (!preOrchCtxPack.memorySeedResult && histCtx.memorySeedResult && typeof histCtx.memorySeedResult === 'object') {
+                preOrchCtxPack.memorySeedResult = histCtx.memorySeedResult;
+              }
+
+              if (!preOrchCtxPack.memorySeedKind && typeof histCtx.memorySeedKind === 'string') {
+                preOrchCtxPack.memorySeedKind = histCtx.memorySeedKind;
+              }
+
+              if (!preOrchCtxPack.lastIrDiagnosis && histCtx.lastIrDiagnosis && typeof histCtx.lastIrDiagnosis === 'object') {
+                preOrchCtxPack.lastIrDiagnosis = histCtx.lastIrDiagnosis;
+              }
+            }
+
 
             if (
               !isCategoryOnlyConsultation &&
@@ -10992,6 +11020,91 @@ try {
   });
 } catch {}
 
+try {
+  // FINAL_MEMORY_SEED_CTXPACK_RESYNC
+  // ensureMetaFilled / canonical 後に、Relationship Memory / Memory Seed 系を最終 metaForSave へ戻す。
+  const finalExtraForMemory: any =
+    (out as any)?.metaForSave?.extra && typeof (out as any).metaForSave.extra === 'object'
+      ? (out as any).metaForSave.extra
+      : ((out as any).metaForSave.extra = {});
+
+  finalExtraForMemory.ctxPack =
+    finalExtraForMemory.ctxPack && typeof finalExtraForMemory.ctxPack === 'object'
+      ? finalExtraForMemory.ctxPack
+      : {};
+
+  const finalCtxPackForMemory: any = finalExtraForMemory.ctxPack;
+
+  const sourceCtxPackForMemory: any =
+    (extraLocal as any)?.ctxPack && typeof (extraLocal as any).ctxPack === 'object'
+      ? (extraLocal as any).ctxPack
+      : (extra as any)?.ctxPack && typeof (extra as any).ctxPack === 'object'
+        ? (extra as any).ctxPack
+        : null;
+
+  if (sourceCtxPackForMemory) {
+    if (sourceCtxPackForMemory.relationship != null) {
+      finalCtxPackForMemory.relationship = sourceCtxPackForMemory.relationship;
+    }
+
+    if (sourceCtxPackForMemory.relationshipMemory != null) {
+      finalCtxPackForMemory.relationshipMemory = sourceCtxPackForMemory.relationshipMemory;
+    }
+
+    if (sourceCtxPackForMemory.relationId != null) {
+      finalCtxPackForMemory.relationId = sourceCtxPackForMemory.relationId;
+    }
+
+    if (sourceCtxPackForMemory.relationshipDisplayName != null) {
+      finalCtxPackForMemory.relationshipDisplayName = sourceCtxPackForMemory.relationshipDisplayName;
+    }
+
+    if (sourceCtxPackForMemory.relationshipMemoryNote != null) {
+      finalCtxPackForMemory.relationshipMemoryNote = sourceCtxPackForMemory.relationshipMemoryNote;
+    }
+
+    if (sourceCtxPackForMemory.memorySeedResult != null) {
+      finalCtxPackForMemory.memorySeedResult = sourceCtxPackForMemory.memorySeedResult;
+    }
+
+    if (sourceCtxPackForMemory.memorySeedText != null) {
+      finalCtxPackForMemory.memorySeedText = sourceCtxPackForMemory.memorySeedText;
+    }
+
+    if (sourceCtxPackForMemory.memorySeedKind != null) {
+      finalCtxPackForMemory.memorySeedKind = sourceCtxPackForMemory.memorySeedKind;
+    }
+
+    if (sourceCtxPackForMemory.memorySeedBlocked != null) {
+      finalCtxPackForMemory.memorySeedBlocked = sourceCtxPackForMemory.memorySeedBlocked;
+    }
+
+    if (sourceCtxPackForMemory.memorySeedReasons != null) {
+      finalCtxPackForMemory.memorySeedReasons = sourceCtxPackForMemory.memorySeedReasons;
+    }
+
+    if (sourceCtxPackForMemory.lastIrDiagnosis != null) {
+      finalCtxPackForMemory.lastIrDiagnosis = sourceCtxPackForMemory.lastIrDiagnosis;
+    }
+  }
+
+  console.log('[IROS/FINAL_MEMORY_SEED_CTXPACK_RESYNC]', {
+    conversationId,
+    userCode,
+    hasRelationshipMemory: Boolean(finalCtxPackForMemory.relationshipMemory),
+    hasRelationshipMemoryNote: typeof finalCtxPackForMemory.relationshipMemoryNote === 'string',
+    hasMemorySeedText: typeof finalCtxPackForMemory.memorySeedText === 'string',
+    hasMemorySeedResult: Boolean(finalCtxPackForMemory.memorySeedResult),
+    hasLastIrDiagnosis: Boolean(finalCtxPackForMemory.lastIrDiagnosis),
+    relationId: finalCtxPackForMemory.relationId ?? null,
+    relationshipDisplayName: finalCtxPackForMemory.relationshipDisplayName ?? null,
+  });
+} catch (e) {
+  console.log('[IROS/FINAL_MEMORY_SEED_CTXPACK_RESYNC][ERR]', {
+    err: String(e ?? ''),
+  });
+}
+
 // ✅ 最後に single-writer stamp を確定（念押し）
 out.metaForSave = stampSingleWriter(out.metaForSave);
 
@@ -11245,4 +11358,5 @@ return {
     };
   }
 }
+
 
