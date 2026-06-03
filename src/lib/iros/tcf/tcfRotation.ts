@@ -891,3 +891,55 @@ export function buildTcfRotationDecision(
     }),
   };
 }
+
+function compactTcfSeedValue(value: unknown): string | null {
+  const text = firstString(value);
+  if (!text) return null;
+
+  return text
+    .replace(/\r\n/g, '\n')
+    .replace(/\n+/g, ' / ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tcfSeedLine(key: string, value: unknown): string | null {
+  const text = compactTcfSeedValue(value);
+  return text ? `${key}=${text}` : null;
+}
+
+export function formatTcfRotationSeed(
+  decision: TcfRotationDecision | null | undefined,
+): string | null {
+  if (!decision) return null;
+
+  const lines = [
+    'TCF_ROTATION_DECISION (DO NOT OUTPUT):',
+
+    tcfSeedLine('PREVIOUS_FOCUS', decision.previousFocus),
+    tcfSeedLine('CURRENT_FOCUS', decision.currentFocus),
+    tcfSeedLine('NEXT_FOCUS', decision.nextFocus),
+
+    tcfSeedLine('T_HAS', decision.tEvidence.hasT ? 'true' : 'false'),
+    tcfSeedLine('T_STEP', decision.tEvidence.itxStep),
+    tcfSeedLine('T_ANCHOR_EVENT', decision.tEvidence.anchorEvent),
+    tcfSeedLine('T_COMMITTED_ANCHOR', decision.tEvidence.hasCommittedAnchor ? 'true' : 'false'),
+    tcfSeedLine('T_REASON', decision.tEvidence.reason),
+
+    tcfSeedLine('C_DIRECTION', decision.cDirection),
+    tcfSeedLine('USER_REACTION', decision.userReaction),
+    tcfSeedLine('CONVERGENCE', decision.convergence),
+
+    tcfSeedLine('PERSIST_FOCUS', decision.shouldPersistFocus ? 'true' : 'false'),
+    tcfSeedLine('REBUILD_FOCUS', decision.shouldRebuildFocus ? 'true' : 'false'),
+    tcfSeedLine('PROMOTE_DEPTH', decision.shouldPromoteDepth ? 'true' : 'false'),
+    tcfSeedLine('ROUTE_TO_C', decision.shouldRouteToC ? 'true' : 'false'),
+    tcfSeedLine('USE_TCF_PATTERN', decision.shouldUseTcfPattern ? 'true' : 'false'),
+
+    tcfSeedLine('WRITER_PATTERN', decision.writerPatternKey),
+    tcfSeedLine('SURFACE_PLAN', decision.surfacePlanKind),
+    tcfSeedLine('REASON', decision.reason),
+  ].filter((line): line is string => Boolean(line));
+
+  return lines.join('\n').trim();
+}
