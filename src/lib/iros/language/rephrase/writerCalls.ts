@@ -995,6 +995,19 @@ const mirrorFlowV1ForSeed: any =
       ].join('\n');
     })();
 
+    const memorySeedTextForWriter = String(
+      firstNonNull(
+        (ctxPack as any)?.memorySeedText,
+        (extra as any)?.memorySeedText,
+        (extra as any)?.ctxPack?.memorySeedText,
+        (args as any)?.memorySeedText,
+        (args as any)?.userContext?.ctxPack?.memorySeedText,
+        (args as any)?.userContext?.meta?.extra?.memorySeedText,
+        (args as any)?.userContext?.meta?.extra?.ctxPack?.memorySeedText,
+        null,
+      ) ?? '',
+    ).trim();
+
     const seedTextRawBase = String(
       pick(
         // 正本
@@ -1012,10 +1025,12 @@ const mirrorFlowV1ForSeed: any =
     const seedTextRaw = (() => {
       const hasMirrorFlowAlready = /MIRROR_FLOW_SEED_V1\b/.test(seedTextRawBase);
       const hasReferenceCheckRuleAlready = /REFERENCE_CHECK_RULE\b/.test(seedTextRawBase);
+      const hasMemorySeedAlready = /MEMORY_SEED\b/.test(seedTextRawBase);
 
       const parts = [
         hasMirrorFlowAlready ? '' : mirrorFlowSeedText,
         hasReferenceCheckRuleAlready ? '' : referenceCheckRuleSeedText,
+        hasMemorySeedAlready ? '' : memorySeedTextForWriter,
         seedTextRawBase,
       ].filter(Boolean);
 
@@ -1026,10 +1041,14 @@ const mirrorFlowV1ForSeed: any =
       JSON.stringify({
         hasMirrorFlowSeedText: !!mirrorFlowSeedText,
         mirrorFlowSeedTextHead: String(mirrorFlowSeedText ?? '').slice(0, 200),
+        memorySeedTextForWriterLen: String(memorySeedTextForWriter ?? '').length,
+        memorySeedTextForWriterHead: String(memorySeedTextForWriter ?? '').slice(0, 200),
         seedTextRawBaseHead: String(seedTextRawBase ?? '').slice(0, 200),
-        seedTextRawHead: String(seedTextRaw ?? '').slice(0, 260),
+        seedTextRawHead: String(seedTextRaw ?? '').slice(0, 360),
         seedTextRawHasMirrorFlowSeed: /MIRROR_FLOW_SEED_V1\b/.test(String(seedTextRaw ?? '')),
         seedTextRawBaseHasMirrorFlowSeed: /MIRROR_FLOW_SEED_V1\b/.test(String(seedTextRawBase ?? '')),
+        seedTextRawHasMemorySeed: /MEMORY_SEED\b/.test(String(seedTextRaw ?? '')),
+        seedTextRawBaseHasMemorySeed: /MEMORY_SEED\b/.test(String(seedTextRawBase ?? '')),
       })
     );
   const flowDelta2 = String(pick(flow?.delta, (flow as any)?.flowDelta) ?? '').trim();

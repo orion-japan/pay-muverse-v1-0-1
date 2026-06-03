@@ -10,6 +10,7 @@ import { loadLatestIrDiagnosisSnapshot } from '@/lib/iros/memoryRecall';
 import { routeIrosMemory } from '@/lib/iros/memory/memoryRouter';
 import { resolveWorkingReference } from '@/lib/iros/memory/workingReferenceResolver';
 import { guardIrosMemoryDecision } from '@/lib/iros/memory/memoryGuard';
+import { buildMemorySeed } from '@/lib/iros/memory/memorySeedBuilder';
 
 // ✅ FramePlan（器＋スロット）(Layer C/D)
 import { buildFramePlan, type InputKind, type IrosStateLite } from '@/lib/iros/language/frameSlots';
@@ -826,6 +827,24 @@ export async function buildTurnContext(
       (baseMetaForTurn as any).extra.ctxPack.replyGoal = {
         kind: resolvedFollowupKind === 'action' ? 'action' : 'clarify',
       };
+      const memorySeedResult = buildMemorySeed({
+        memoryDecision,
+        memoryGuardDecision,
+        sourceText: followupSourceText,
+        diagnosisText: diagnosisTopicHint,
+      });
+
+      (baseMetaForTurn as any).extra.memorySeedResult = memorySeedResult;
+      (baseMetaForTurn as any).extra.memorySeedText = memorySeedResult.seedText;
+      (baseMetaForTurn as any).extra.memorySeedKind = memorySeedResult.seedKind;
+      (baseMetaForTurn as any).extra.memorySeedBlocked = memorySeedResult.blocked;
+      (baseMetaForTurn as any).extra.memorySeedReasons = memorySeedResult.reasons;
+
+      (baseMetaForTurn as any).extra.ctxPack.memorySeedResult = memorySeedResult;
+      (baseMetaForTurn as any).extra.ctxPack.memorySeedText = memorySeedResult.seedText;
+      (baseMetaForTurn as any).extra.ctxPack.memorySeedKind = memorySeedResult.seedKind;
+      (baseMetaForTurn as any).extra.ctxPack.memorySeedBlocked = memorySeedResult.blocked;
+      (baseMetaForTurn as any).extra.ctxPack.memorySeedReasons = memorySeedResult.reasons;
     }
 
       (baseMetaForTurn as any).presentationKind = 'diagnosis';
