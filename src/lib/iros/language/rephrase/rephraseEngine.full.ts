@@ -9803,8 +9803,12 @@ const shouldForceStructureDetailPattern =
 
 const tcfWriterPatternMappedForWriter =
   hasTcfRotationSeedForPattern &&
-  tcfWriterPatternFromSeed === 'TCF_CONVERGENCE_V1' &&
-  tcfSurfacePlanFromSeed === 'convergence'
+  (
+    (tcfWriterPatternFromSeed === 'TCF_CONVERGENCE_V1' &&
+      tcfSurfacePlanFromSeed === 'convergence') ||
+    (tcfWriterPatternFromSeed === 'TCF_REFOCUS_V1' &&
+      tcfSurfacePlanFromSeed === 'refocus')
+  )
     ? 'NORMAL_DETAIL_V1'
     : null;
 
@@ -11480,9 +11484,13 @@ const isResonanceStructureFollowup =
                   ? {
                       tcf_surface_plan: String(tcfSurfacePlanFromSeed ?? ''),
                       block_tcf_connection:
-                        'TCFの構造を抽象説明で止めず、実装へ接続できる単位に落とす。定義、入力、判定、出力、保存先の順に、必要な範囲だけ自然文で示す。',
+                        tcfSurfacePlanFromSeed === 'refocus'
+                          ? 'TCFの焦点を戻すターンとして扱う。SRI回転とTCF回転の違いを、内面状態・関係・意図を読む回転と、確定した方向を構造化して返答へ渡す回転の違いとして短く示す。'
+                          : 'TCFの構造を抽象説明で止めず、実装へ接続できる単位に落とす。定義、入力、判定、出力、保存先の順に、必要な範囲だけ自然文で示す。',
                       block_tcf_boundary:
-                        'TCF_ROTATION_SEED、WRITER_PATTERN、内部seed名、内部判定名は本文に出さない。ユーザーに見える言葉では、構造・接続・実装手順として返す。',
+                        tcfSurfacePlanFromSeed === 'refocus'
+                          ? 'TCF_REFOCUS_V1、TCF_ROTATION_SEED、WRITER_PATTERN、内部seed名、内部判定名は本文に出さない。ユーザーに見える言葉では、SRI回転とTCF回転の役割差として返す。'
+                          : 'TCF_ROTATION_SEED、WRITER_PATTERN、内部seed名、内部判定名は本文に出さない。ユーザーに見える言葉では、構造・接続・実装手順として返す。',
                     }
                   : {}),
                 ...(shouldApplyDeepReadSuppressionDirectivesForFinal && !isReferenceCheckDirectiveForFinal
@@ -11527,13 +11535,21 @@ const isResonanceStructureFollowup =
                   ...deepReadSuppressionConstraintsForFinal,
                   ...storyModeConstraintsForFinal,
                   ...(tcfWriterPatternMappedForWriter === 'NORMAL_DETAIL_V1'
-                    ? [
-                        'TCF_CONVERGENCE: このターンはTCFの収束を実装へ接続する返答として扱う',
-                        'TCF_CONVERGENCE: 抽象説明で終わらせず、定義 → 入力 → 判定 → 出力 → 保存先の順で、実装に落とせる単位へ整理する',
-                        'TCF_CONVERGENCE: TCF_ROTATION_SEED、WRITER_PATTERN、内部seed名、内部判定名は本文に出さない',
-                        'TCF_CONVERGENCE: 「必要なら」「できます」で逃げず、次に接続する実装単位をその場で出す',
-                        'TCF_CONVERGENCE: 恋愛相談・感情整理・送信用文面へ補完しない',
-                      ]
+                    ? tcfSurfacePlanFromSeed === 'refocus'
+                      ? [
+                          'TCF_REFOCUS: このターンはTCFの焦点を戻し、SRI回転とTCF回転の役割差を短く整理する返答として扱う',
+                          'TCF_REFOCUS: SRI回転はS/R/Iの状態・関係・意図を読む回転、TCF回転はTで確定した方向をCで構造化しFで返答形成へ回す流れとして説明する',
+                          'TCF_REFOCUS: 抽象的な「中と外」だけで終わらせず、何を見る回転か・何を返す回転かの違いを明確にする',
+                          'TCF_REFOCUS: TCF_REFOCUS_V1、TCF_ROTATION_SEED、WRITER_PATTERN、内部seed名、内部判定名は本文に出さない',
+                          'TCF_REFOCUS: 恋愛相談・感情整理・送信用文面へ補完しない',
+                        ]
+                      : [
+                          'TCF_CONVERGENCE: このターンはTCFの収束を実装へ接続する返答として扱う',
+                          'TCF_CONVERGENCE: 抽象説明で終わらせず、定義 → 入力 → 判定 → 出力 → 保存先の順で、実装に落とせる単位へ整理する',
+                          'TCF_CONVERGENCE: TCF_ROTATION_SEED、WRITER_PATTERN、内部seed名、内部判定名は本文に出さない',
+                          'TCF_CONVERGENCE: 「必要なら」「できます」で逃げず、次に接続する実装単位をその場で出す',
+                          'TCF_CONVERGENCE: 恋愛相談・感情整理・送信用文面へ補完しない',
+                        ]
                     : []),
                   ...(isStructureDevelopmentTurnForFinal
                     ? [
@@ -15491,6 +15507,7 @@ return await runRetryPass({
     slotsForGuard,
   });
 }
+
 
 
 
