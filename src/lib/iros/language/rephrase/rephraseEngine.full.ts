@@ -9801,18 +9801,27 @@ const shouldForceStructureDetailPattern =
     selectedPatternKey === 'NORMAL_RESONANCE_V1'
   );
 
+const tcfWriterPatternMappedForWriter =
+  hasTcfRotationSeedForPattern &&
+  tcfWriterPatternFromSeed === 'TCF_CONVERGENCE_V1' &&
+  tcfSurfacePlanFromSeed === 'convergence'
+    ? 'NORMAL_DETAIL_V1'
+    : null;
+
 const writerPatternKey = (
   // ✅ directTask/使える文系は、深読み detail レーンに入れない。
   // 文面作成では、NORMAL_DETAIL_V1 の構造説明・深読み指示が強すぎるため。
   isComposeRequestForPattern && selectedPatternKey === 'NORMAL_RESONANCE_V1'
     ? selectedPatternKey
-    : shouldForceStructureDetailPattern
-      ? 'NORMAL_DETAIL_V1'
-      : shouldForceDecidePattern
-        ? selectedPatternKey === 'NORMAL_RESONANCE_V1'
-          ? 'NORMAL_DETAIL_V1'
+    : tcfWriterPatternMappedForWriter
+      ? tcfWriterPatternMappedForWriter
+      : shouldForceStructureDetailPattern
+        ? 'NORMAL_DETAIL_V1'
+        : shouldForceDecidePattern
+          ? selectedPatternKey === 'NORMAL_RESONANCE_V1'
+            ? 'NORMAL_DETAIL_V1'
+            : selectedPatternKey
           : selectedPatternKey
-        : selectedPatternKey
 ) as any;
 
 console.log(
@@ -9826,6 +9835,7 @@ console.log(
     laneKeyForPattern,
     shouldForceDecidePattern,
     writerPatternKey,
+    tcfWriterPatternMappedForWriter,
     hasTcfRotationSeedForPattern,
     tcfWriterPatternFromSeed,
     tcfSurfacePlanFromSeed,
@@ -15463,6 +15473,7 @@ return await runRetryPass({
     slotsForGuard,
   });
 }
+
 
 
 
