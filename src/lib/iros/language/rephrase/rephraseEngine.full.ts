@@ -11476,6 +11476,15 @@ const isResonanceStructureFollowup =
                       block_closing_line: openEdgeClosingLineForFinal,
                     }
                   : {}),
+                ...(tcfWriterPatternMappedForWriter === 'NORMAL_DETAIL_V1'
+                  ? {
+                      tcf_surface_plan: String(tcfSurfacePlanFromSeed ?? ''),
+                      block_tcf_connection:
+                        'TCFの構造を抽象説明で止めず、実装へ接続できる単位に落とす。定義、入力、判定、出力、保存先の順に、必要な範囲だけ自然文で示す。',
+                      block_tcf_boundary:
+                        'TCF_ROTATION_SEED、WRITER_PATTERN、内部seed名、内部判定名は本文に出さない。ユーザーに見える言葉では、構造・接続・実装手順として返す。',
+                    }
+                  : {}),
                 ...(shouldApplyDeepReadSuppressionDirectivesForFinal && !isReferenceCheckDirectiveForFinal
                   ? {
                       pattern_mode: isPlainMeaningQuestionForFinal
@@ -11517,6 +11526,15 @@ const isResonanceStructureFollowup =
                   ...explicitUserSignalConstraintsForFinal,
                   ...deepReadSuppressionConstraintsForFinal,
                   ...storyModeConstraintsForFinal,
+                  ...(tcfWriterPatternMappedForWriter === 'NORMAL_DETAIL_V1'
+                    ? [
+                        'TCF_CONVERGENCE: このターンはTCFの収束を実装へ接続する返答として扱う',
+                        'TCF_CONVERGENCE: 抽象説明で終わらせず、定義 → 入力 → 判定 → 出力 → 保存先の順で、実装に落とせる単位へ整理する',
+                        'TCF_CONVERGENCE: TCF_ROTATION_SEED、WRITER_PATTERN、内部seed名、内部判定名は本文に出さない',
+                        'TCF_CONVERGENCE: 「必要なら」「できます」で逃げず、次に接続する実装単位をその場で出す',
+                        'TCF_CONVERGENCE: 恋愛相談・感情整理・送信用文面へ補完しない',
+                      ]
+                    : []),
                   ...(isStructureDevelopmentTurnForFinal
                     ? [
                         'STRUCTURE_DEVELOPMENT_TURN: このターンは開発・構造・配線確認の続きとして扱う',
@@ -15473,6 +15491,7 @@ return await runRetryPass({
     slotsForGuard,
   });
 }
+
 
 
 
