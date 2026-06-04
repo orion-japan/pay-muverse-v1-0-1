@@ -188,6 +188,7 @@ export default function MyPage() {
           if (rcode) params.set('rcode', rcode);
           if (mcode) params.set('mcode', mcode);
           if (eve) params.set('eve', eve);
+          params.set('media_code', 'AP');
 
           const finalLink = `https://mu-verse.jp/?${params.toString()}`;
           if (mounted) setJoinLink(finalLink);
