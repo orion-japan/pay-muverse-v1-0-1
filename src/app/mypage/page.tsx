@@ -189,7 +189,7 @@ export default function MyPage() {
           if (mcode) params.set('mcode', mcode);
           if (eve) params.set('eve', eve);
 
-          const finalLink = `https://mu-verse.jp/register?${params.toString()}`;
+          const finalLink = `https://mu-verse.jp/?${params.toString()}`;
           if (mounted) setJoinLink(finalLink);
         } catch (e: any) {
           if (mounted) setLinkMsg(`URL生成エラー: ${e?.message || e}`);
