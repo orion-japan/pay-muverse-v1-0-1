@@ -23,6 +23,7 @@ import { buildTurnContext } from './handleIrosReply.context';
 import { runOrchestratorTurn } from './handleIrosReply.orchestrator';
 import { postProcessReply } from './handleIrosReply.postprocess';
 import { buildFlowSeedV1, formatFlowSeedV1 } from '@/lib/iros/seed/seedEngine';
+import { buildMemoryDelta, formatMemoryDeltaSeed } from '@/lib/iros/delta/memoryDelta';
 import {
   buildTcfRotationDecision,
   formatTcfRotationSeed,
@@ -10399,6 +10400,34 @@ try {
 
         const referenceCheckForRephraseCtx =
           resolvedAskTypeForRephraseCtx === 'reference_check';
+        // MEMORY_DELTA_REPHRASE_CTX_BRIDGE
+        // 前ターンの核心 / 現ターンの要求 / 次に見る方向を rephrase ctxPack に載せる
+        const memoryDeltaCurrentAskForRephraseCtx = String(text ?? '').replace(/\s+/g, ' ').trim();
+
+        const memoryDeltaForRephraseCtx = memoryDeltaCurrentAskForRephraseCtx
+          ? buildMemoryDelta({
+              previousCore:
+                (baseCtx as any)?.historyDigestV1?.continuity?.last_user_core ??
+                (baseCtx as any)?.historyDigestV1?.continuity?.lastUserCore ??
+                (baseCtx as any)?.historyDigestV1?.situationSummary ??
+                (baseCtx as any)?.situationSummary ??
+                (out.metaForSave as any)?.extra?.ctxPack?.situationSummary ??
+                null,
+              currentAsk: memoryDeltaCurrentAskForRephraseCtx,
+              nextFocus:
+                (baseCtx as any)?.focusResolution?.nextFocus ??
+                (baseCtx as any)?.nextFocus ??
+                (baseCtx as any)?.shiftHint ??
+                null,
+              stableHint:
+                (baseCtx as any)?.topicDigest ??
+                (out.metaForSave as any)?.extra?.topicDigest ??
+                null,
+            })
+          : null;
+
+        const memoryDeltaSeedForRephraseCtx = formatMemoryDeltaSeed(memoryDeltaForRephraseCtx);
+
 
         return {
           ...baseCtx,
@@ -10435,6 +10464,17 @@ try {
             ? {
                 continuityKind: 'reference_check',
                 resolvedAskType: 'reference_check',
+              }
+            : {}),
+
+          ...(memoryDeltaForRephraseCtx
+            ? {
+                memoryDelta: memoryDeltaForRephraseCtx,
+              }
+            : {}),
+          ...(memoryDeltaSeedForRephraseCtx
+            ? {
+                memoryDeltaSeed: memoryDeltaSeedForRephraseCtx,
               }
             : {}),
 
