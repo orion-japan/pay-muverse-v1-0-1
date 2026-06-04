@@ -1732,60 +1732,155 @@ return NextResponse.json({
   meta: metaForSave ?? meta ?? null,
 });
     }
-  const applied = await applyRenderEngineIfEnabled({
-    enableRenderEngine,
-    isIT,
-    conversationId,
-    userCode,
-    userText: userTextClean,
-    extraForHandle: extraSoT ?? null,
-    meta,
-    resultObj: result as any,
-    historyMessages: Array.isArray(chatHistory) ? chatHistory : null,
-  });
+  const isActiveContextClarification = Boolean(
+    (result as any)?.gate === 'active_context_clarification' ||
+      (result as any)?.result?.gate === 'active_context_clarification' ||
+      (result as any)?.gate === 'pre_seed_direct_reply' ||
+      (result as any)?.result?.gate === 'pre_seed_direct_reply' ||
+      (result as any)?.meta?.extra?.activeContextClarification === true ||
+      (result as any)?.metaForSave?.extra?.activeContextClarification === true ||
+      (metaForSave as any)?.extra?.activeContextClarification === true ||
+      (metaForSave as any)?.extra?.ctxPack?.activeContextClarification === true ||
+      (result as any)?.meta?.extra?.preSeedDirectReply === true ||
+      (result as any)?.metaForSave?.extra?.preSeedDirectReply === true ||
+      (metaForSave as any)?.extra?.preSeedDirectReply === true ||
+      (metaForSave as any)?.extra?.ctxPack?.preSeedDirectReply === true
+  );
 
-  meta = applied.meta;
-  extraSoT = applied.extraForHandle ?? extraSoT;
+  if (isActiveContextClarification) {
+    const finalActiveContextText = String(
+      (result as any)?.content ??
+        (result as any)?.assistantText ??
+        (result as any)?.result?.assistantText ??
+        assistantText ??
+        '',
+    ).trim();
 
-  // =========================================================
-  // ✅ FIX: render-v2 が付与した rephraseBlocks/head を metaForSave 側へ同期
-  // - UI本文(result.content)は既に正本化済みだが、
-  //   viewer/監査(/api/iros-logs)が metaForSave.meta を読む経路で rb=0 になり得るため
-  // - “存在するものだけ”を同期し、空は上書きしない
-  // =========================================================
-  try {
-    const mfs: any = metaForSave as any;
-    const mfsExtra: any = (mfs?.extra ?? {}) as any;
+    const stripRephraseCarry = (obj: any) => {
+      if (!obj || typeof obj !== 'object') return;
+      delete obj.rephraseBlocks;
+      delete obj.rephraseHead;
+      delete obj.rephrase;
+      delete obj.rephraseBlocksAttached;
+      delete obj.rephraseApplied;
+      delete obj.rephraseLLMApplied;
+      delete obj.rephraseAttachSkipped;
+      delete obj.rephraseAttachReason;
+      delete obj.rephraseReason;
+    };
 
-    const metaAny: any = meta as any;
-    const metaExtra: any = (metaAny?.extra ?? {}) as any;
+    if (finalActiveContextText) {
+      assistantText = finalActiveContextText;
 
-    const sotAny: any = (extraSoT ?? {}) as any;
+      if (result && typeof result === 'object') {
+        (result as any).content = finalActiveContextText;
+        (result as any).assistantText = finalActiveContextText;
+      }
 
-    const rbFromMeta =
-      Array.isArray(metaExtra?.rephraseBlocks) && metaExtra.rephraseBlocks.length > 0 ? metaExtra.rephraseBlocks : null;
+      extraSoT = {
+        ...(extraSoT ?? {}),
+        renderEngine: false,
+        renderEngineGate: false,
+        finalAssistantText: finalActiveContextText,
+        finalAssistantTextCandidate: finalActiveContextText,
+        rawTextFromModel: finalActiveContextText,
+        extractedTextFromModel: finalActiveContextText,
+        activeContextClarificationDirect: true,
+      };
 
-    const rbFromSoT =
-      Array.isArray(sotAny?.rephraseBlocks) && sotAny.rephraseBlocks.length > 0 ? sotAny.rephraseBlocks : null;
+      stripRephraseCarry(extraSoT);
 
-    const rbFinal = rbFromMeta ?? rbFromSoT ?? null;
+      if (meta && typeof meta === 'object') {
+        meta.extra = {
+          ...(meta.extra ?? {}),
+          renderEngine: false,
+          renderEngineGate: false,
+          finalAssistantText: finalActiveContextText,
+          finalAssistantTextCandidate: finalActiveContextText,
+          rawTextFromModel: finalActiveContextText,
+          extractedTextFromModel: finalActiveContextText,
+          activeContextClarificationDirect: true,
+        };
+        stripRephraseCarry(meta.extra);
+      }
 
-    const headFromMeta = String(metaExtra?.rephraseHead ?? '').trim();
-    const headFromSoT = String(sotAny?.rephraseHead ?? '').trim();
-    const headFinal = headFromMeta || headFromSoT || '';
+      if (metaForSave && typeof metaForSave === 'object') {
+        metaForSave.extra = {
+          ...(metaForSave.extra ?? {}),
+          renderEngine: false,
+          renderEngineGate: false,
+          finalAssistantText: finalActiveContextText,
+          finalAssistantTextCandidate: finalActiveContextText,
+          rawTextFromModel: finalActiveContextText,
+          extractedTextFromModel: finalActiveContextText,
+          activeContextClarificationDirect: true,
+        };
+        stripRephraseCarry(metaForSave.extra);
+      }
+    }
 
-    const nextExtra: any = { ...mfsExtra };
+    console.log('[IROS/ACTIVE_CONTEXT_CLARIFICATION][ROUTE_SKIP_RENDER]', {
+      conversationId,
+      userCode,
+      finalLen: finalActiveContextText.length,
+      finalHead: finalActiveContextText.slice(0, 80),
+    });
+  } else {
+    const applied = await applyRenderEngineIfEnabled({
+      enableRenderEngine,
+      isIT,
+      conversationId,
+      userCode,
+      userText: userTextClean,
+      extraForHandle: extraSoT ?? null,
+      meta,
+      resultObj: result as any,
+      historyMessages: Array.isArray(chatHistory) ? chatHistory : null,
+    });
 
-    if (rbFinal) nextExtra.rephraseBlocks = rbFinal;
-    if (headFinal) nextExtra.rephraseHead = headFinal;
+    meta = applied.meta;
+    extraSoT = applied.extraForHandle ?? extraSoT;
 
-    // traceId もあれば寄せる（API側が meta から拾う経路の揺れを減らす）
-    const traceIdFinal =
-      String(metaExtra?.traceId ?? metaExtra?.trace_id ?? sotAny?.traceId ?? sotAny?.trace_id ?? '').trim() || '';
-    if (traceIdFinal && !nextExtra.traceId && !nextExtra.trace_id) nextExtra.traceId = traceIdFinal;
+    // =========================================================
+    // ✅ FIX: render-v2 が付与した rephraseBlocks/head を metaForSave 側へ同期
+    // - UI本文(result.content)は既に正本化済みだが、
+    //   viewer/監査(/api/iros-logs)が metaForSave.meta を読む経路で rb=0 になり得るため
+    // - “存在するものだけ”を同期し、空は上書きしない
+    // =========================================================
+    try {
+      const mfs: any = metaForSave as any;
+      const mfsExtra: any = (mfs?.extra ?? {}) as any;
 
-    mfs.extra = nextExtra;
-  } catch {}
+      const metaAny: any = meta as any;
+      const metaExtra: any = (metaAny?.extra ?? {}) as any;
+
+      const sotAny: any = (extraSoT ?? {}) as any;
+
+      const rbFromMeta =
+        Array.isArray(metaExtra?.rephraseBlocks) && metaExtra.rephraseBlocks.length > 0 ? metaExtra.rephraseBlocks : null;
+
+      const rbFromSoT =
+        Array.isArray(sotAny?.rephraseBlocks) && sotAny.rephraseBlocks.length > 0 ? sotAny.rephraseBlocks : null;
+
+      const rbFinal = rbFromMeta ?? rbFromSoT ?? null;
+
+      const headFromMeta = String(metaExtra?.rephraseHead ?? '').trim();
+      const headFromSoT = String(sotAny?.rephraseHead ?? '').trim();
+      const headFinal = headFromMeta || headFromSoT || '';
+
+      const nextExtra: any = { ...mfsExtra };
+
+      if (rbFinal) nextExtra.rephraseBlocks = rbFinal;
+      if (headFinal) nextExtra.rephraseHead = headFinal;
+
+      // traceId もあれば寄せる（API側が meta から拾う経路の揺れを減らす）
+      const traceIdFinal =
+        String(metaExtra?.traceId ?? metaExtra?.trace_id ?? sotAny?.traceId ?? sotAny?.trace_id ?? '').trim() || '';
+      if (traceIdFinal && !nextExtra.traceId && !nextExtra.trace_id) nextExtra.traceId = traceIdFinal;
+
+      mfs.extra = nextExtra;
+    } catch {}
+  }
 }
       // sanitize header
       {

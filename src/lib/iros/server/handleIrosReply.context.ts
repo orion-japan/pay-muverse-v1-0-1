@@ -1,4 +1,4 @@
-// file: src/lib/iros/server/handleIrosReply.context.ts
+﻿// file: src/lib/iros/server/handleIrosReply.context.ts
 // iros - Turn context builder (minimal + frame plan)
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -11,6 +11,8 @@ import { routeIrosMemory } from '@/lib/iros/memory/memoryRouter';
 import { resolveWorkingReference } from '@/lib/iros/memory/workingReferenceResolver';
 import { guardIrosMemoryDecision } from '@/lib/iros/memory/memoryGuard';
 import { buildMemorySeed } from '@/lib/iros/memory/memorySeedBuilder';
+import { runPreSeedAssist } from '@/lib/iros/memory/preSeedAssist';
+import { buildDiagnosisActiveContextFrame } from '@/lib/iros/anchor/activeContextAnchor';
 
 // ✅ FramePlan（器＋スロット）(Layer C/D)
 import { buildFramePlan, type InputKind, type IrosStateLite } from '@/lib/iros/language/frameSlots';
@@ -744,6 +746,31 @@ export async function buildTurnContext(
       String((normalizedIrMeta as any)?.targetLabel ?? '').trim() ||
       null;
 
+    const activeContextFrameForDiagnosis = buildDiagnosisActiveContextFrame({
+      targetLabel: resolvedDiagnosisTargetLabel,
+      targetKey:
+        (baseMetaForTurn as any)?.extra?.memoryTargetKey ??
+        (baseMetaForTurn as any)?.extra?.ctxPack?.memoryTargetKey ??
+        null,
+      activeDiagnosisId:
+        (baseMetaForTurn as any)?.extra?.activeDiagnosisId ??
+        (baseMetaForTurn as any)?.extra?.ctxPack?.activeDiagnosisId ??
+        null,
+      lastIrDiagnosis: lastIrDiagnosisResolved,
+      irMeta: normalizedIrMeta,
+      followupRequest: followupSourceText,
+      lastAction: isDiagnosisFollowup
+        ? 'diagnosis_' + (diagnosisFollowupKind ?? 'followup')
+        : 'diagnosis_detail',
+    });
+
+    if (activeContextFrameForDiagnosis) {
+      (baseMetaForTurn as any).extra.activeContextFrame =
+        activeContextFrameForDiagnosis;
+      (baseMetaForTurn as any).extra.ctxPack.activeContextFrame =
+        activeContextFrameForDiagnosis;
+    }
+
     (baseMetaForTurn as any).targetLabel = resolvedDiagnosisTargetLabel;
     (baseMetaForTurn as any).presentationKind = 'diagnosis';
 
@@ -827,11 +854,54 @@ export async function buildTurnContext(
       (baseMetaForTurn as any).extra.ctxPack.replyGoal = {
         kind: resolvedFollowupKind === 'action' ? 'action' : 'clarify',
       };
+      const preSeedAssistResult = await runPreSeedAssist({
+        userText: followupSourceText,
+        ctxPack: (baseMetaForTurn as any).extra.ctxPack,
+        activeContextFrame: activeContextFrameForDiagnosis,
+        lastIrDiagnosis: lastIrDiagnosisResolved,
+        historyForWriter: Array.isArray((args as any).history)
+          ? ((args as any).history as any[])
+          : [],
+        traceId: args.traceId ?? null,
+        conversationId,
+        userCode,
+      });
+
+      (baseMetaForTurn as any).extra.preSeedAssistResult = preSeedAssistResult;
+      (baseMetaForTurn as any).extra.preSeedAssistKind = preSeedAssistResult.kind;
+      (baseMetaForTurn as any).extra.preSeedAssistConfidence = preSeedAssistResult.confidence;
+      (baseMetaForTurn as any).extra.preSeedAssistSeedText = preSeedAssistResult.seedText;
+      (baseMetaForTurn as any).extra.preSeedAssistDirectReply = preSeedAssistResult.directReply;
+      (baseMetaForTurn as any).extra.preSeedAssistShouldBypassWriter =
+        preSeedAssistResult.shouldBypassWriter;
+
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistResult = preSeedAssistResult;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistKind = preSeedAssistResult.kind;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistConfidence = preSeedAssistResult.confidence;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistSeedText = preSeedAssistResult.seedText;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistDirectReply =
+        preSeedAssistResult.directReply;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistShouldBypassWriter =
+        preSeedAssistResult.shouldBypassWriter;
+
+      if (preSeedAssistResult.seedText) {
+        (baseMetaForTurn as any).extra.memoryPreSeedText = preSeedAssistResult.seedText;
+        (baseMetaForTurn as any).extra.ctxPack.memoryPreSeedText = preSeedAssistResult.seedText;
+      }
+
+      if (preSeedAssistResult.directReply && preSeedAssistResult.shouldBypassWriter) {
+        (baseMetaForTurn as any).extra.directReplyCandidate =
+          preSeedAssistResult.directReply;
+        (baseMetaForTurn as any).extra.ctxPack.directReplyCandidate =
+          preSeedAssistResult.directReply;
+      }
+
       const memorySeedResult = buildMemorySeed({
         memoryDecision,
         memoryGuardDecision,
         sourceText: followupSourceText,
         diagnosisText: diagnosisTopicHint,
+        activeContextFrame: activeContextFrameForDiagnosis,
       });
 
       (baseMetaForTurn as any).extra.memorySeedResult = memorySeedResult;

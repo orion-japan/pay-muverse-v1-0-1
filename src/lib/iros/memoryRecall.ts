@@ -1,4 +1,4 @@
-// src/lib/iros/memoryRecall.ts
+﻿// src/lib/iros/memoryRecall.ts
 // Iros MemoryRecall モジュール
 //
 // 役割：
@@ -536,112 +536,78 @@ export async function loadLatestIrDiagnosisSnapshot(
   targetLabel?: string | null
 ): Promise<IrDiagnosisSnapshot | null> {
   const requestedTarget = normalizeIrDiagnosisTargetForMatch(targetLabel);
+  const requestedTargetKey = normalizeDiagnosisTargetKey(targetLabel);
 
   try {
-    const requestedTargetKey = normalizeDiagnosisTargetKey(targetLabel);
+    let diagnosisResultQuery = supabase
+      .from('iros_ir_diagnosis_results')
+      .select('id, target_label, target_key, q_primary, depth_stage, phase, diagnosis_text, diagnosis_json, created_at')
+      .eq('owner_user_code', userCode)
+      .order('created_at', { ascending: false })
+      .limit(1);
 
     if (requestedTargetKey) {
-      const { data: diagnosisResultRow, error: diagnosisResultError } = await supabase
-        .from('iros_ir_diagnosis_results')
-        .select('id, target_label, target_key, q_primary, depth_stage, phase, diagnosis_text, diagnosis_json, created_at')
-        .eq('owner_user_code', userCode)
-        .eq('target_key', requestedTargetKey)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (diagnosisResultError) {
-        console.warn('[IROS][loadLatestIrDiagnosisSnapshot] diagnosis_results query error', {
-          userCode,
-          targetLabel,
-          requestedTargetKey,
-          error: diagnosisResultError,
-        });
-      } else if (diagnosisResultRow) {
-        const diagnosisJson = (diagnosisResultRow as any)?.diagnosis_json ?? null;
-        const irMeta = diagnosisJson?.irMeta ?? diagnosisJson?.baseDiagExtra?.irMeta ?? null;
-
-        const snapshot: IrDiagnosisSnapshot = {
-          diagnosisResultId:
-            typeof (diagnosisResultRow as any)?.id === 'number'
-              ? (diagnosisResultRow as any).id
-              : null,
-          target:
-            (typeof (diagnosisResultRow as any)?.target_label === 'string'
-              ? (diagnosisResultRow as any).target_label
-              : null) ??
-            (typeof irMeta?.targetLabel === 'string' ? irMeta.targetLabel : null),
-          targetKey:
-            typeof (diagnosisResultRow as any)?.target_key === 'string'
-              ? (diagnosisResultRow as any).target_key
-              : null,
-          qPrimary:
-            typeof (diagnosisResultRow as any)?.q_primary === 'string'
-              ? (diagnosisResultRow as any).q_primary
-              : null,
-          depthStage:
-            typeof (diagnosisResultRow as any)?.depth_stage === 'string'
-              ? (diagnosisResultRow as any).depth_stage
-              : null,
-          phase:
-            typeof (diagnosisResultRow as any)?.phase === 'string'
-              ? (diagnosisResultRow as any).phase
-              : null,
-          observation:
-            typeof irMeta?.observationResult === 'string'
-              ? irMeta.observationResult
-              : null,
-          state:
-            typeof irMeta?.awarenessText === 'string'
-              ? irMeta.awarenessText
-              : null,
-          summary:
-            typeof (diagnosisResultRow as any)?.diagnosis_text === 'string'
-              ? (diagnosisResultRow as any).diagnosis_text
-              : typeof irMeta?.summaryText === 'string'
-                ? irMeta.summaryText
-                : null,
-          createdAt:
-            typeof (diagnosisResultRow as any)?.created_at === 'string'
-              ? (diagnosisResultRow as any).created_at
-              : null,
-        };
-
-        const hasDiagnosisSnapshot =
-          snapshot.target !== null ||
-          snapshot.observation !== null ||
-          snapshot.state !== null ||
-          snapshot.summary !== null;
-
-        if (hasDiagnosisSnapshot) return snapshot;
-      }
+      diagnosisResultQuery = diagnosisResultQuery.eq('target_key', requestedTargetKey);
     }
 
-    const { data, error } = await supabase
-      .from('iros_memory_state')
-      .select('last_ir_diagnosis_target, last_ir_diagnosis_observation, last_ir_diagnosis_state, last_ir_diagnosis_summary, last_ir_diagnosis_at')
-      .eq('user_code', userCode)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data: diagnosisResultRow, error: diagnosisResultError } =
+      await diagnosisResultQuery.maybeSingle();
 
-    if (error) {
-      console.warn('[IROS][loadLatestIrDiagnosisSnapshot] memory_state query error', error);
-    } else if (data) {
-      const memoryStateTarget = data.last_ir_diagnosis_target ?? null;
-      const memoryStateTargetForMatch = normalizeIrDiagnosisTargetForMatch(memoryStateTarget);
-
-      const targetMatches =
-        !requestedTarget ||
-        (memoryStateTargetForMatch !== null && memoryStateTargetForMatch === requestedTarget);
+    if (diagnosisResultError) {
+      console.warn('[IROS][loadLatestIrDiagnosisSnapshot] diagnosis_results query error', {
+        userCode,
+        targetLabel,
+        requestedTargetKey,
+        error: diagnosisResultError,
+      });
+    } else if (diagnosisResultRow) {
+      const diagnosisJson = (diagnosisResultRow as any)?.diagnosis_json ?? null;
+      const irMeta = diagnosisJson?.irMeta ?? diagnosisJson?.baseDiagExtra?.irMeta ?? null;
 
       const snapshot: IrDiagnosisSnapshot = {
-        target: data.last_ir_diagnosis_target ?? null,
-        targetKey: normalizeDiagnosisTargetKey(data.last_ir_diagnosis_target),
-        observation: data.last_ir_diagnosis_observation ?? null,
-        state: data.last_ir_diagnosis_state ?? null,
-        summary: data.last_ir_diagnosis_summary ?? null,
-        createdAt: data.last_ir_diagnosis_at ?? null,
+        diagnosisResultId:
+          typeof (diagnosisResultRow as any)?.id === 'number'
+            ? (diagnosisResultRow as any).id
+            : null,
+        target:
+          (typeof (diagnosisResultRow as any)?.target_label === 'string'
+            ? (diagnosisResultRow as any).target_label
+            : null) ??
+          (typeof irMeta?.targetLabel === 'string' ? irMeta.targetLabel : null),
+        targetKey:
+          typeof (diagnosisResultRow as any)?.target_key === 'string'
+            ? (diagnosisResultRow as any).target_key
+            : null,
+        qPrimary:
+          typeof (diagnosisResultRow as any)?.q_primary === 'string'
+            ? (diagnosisResultRow as any).q_primary
+            : null,
+        depthStage:
+          typeof (diagnosisResultRow as any)?.depth_stage === 'string'
+            ? (diagnosisResultRow as any).depth_stage
+            : null,
+        phase:
+          typeof (diagnosisResultRow as any)?.phase === 'string'
+            ? (diagnosisResultRow as any).phase
+            : null,
+        observation:
+          typeof irMeta?.observationResult === 'string'
+            ? irMeta.observationResult
+            : null,
+        state:
+          typeof irMeta?.awarenessText === 'string'
+            ? irMeta.awarenessText
+            : null,
+        summary:
+          typeof (diagnosisResultRow as any)?.diagnosis_text === 'string'
+            ? (diagnosisResultRow as any).diagnosis_text
+            : typeof irMeta?.summaryText === 'string'
+              ? irMeta.summaryText
+              : null,
+        createdAt:
+          typeof (diagnosisResultRow as any)?.created_at === 'string'
+            ? (diagnosisResultRow as any).created_at
+            : null,
       };
 
       const hasDiagnosisSnapshot =
@@ -650,7 +616,7 @@ export async function loadLatestIrDiagnosisSnapshot(
         snapshot.state !== null ||
         snapshot.summary !== null;
 
-      if (hasDiagnosisSnapshot && targetMatches) return snapshot;
+      if (hasDiagnosisSnapshot) return snapshot;
     }
 
     if (requestedTarget) {

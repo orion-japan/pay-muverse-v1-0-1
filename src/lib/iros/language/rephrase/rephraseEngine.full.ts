@@ -9913,20 +9913,30 @@ const tcfWriterPatternMappedForWriter =
       : 'NORMAL_RESONANCE_V1'
     : null;
 
+const isProtectedDiagnosisPatternForWriter =
+  selectedPatternKey === 'IR_DETAIL_V1' ||
+  (ctxPackForWriter as any)?.diagnosisFollowup === true ||
+  (opts as any)?.ctxPack?.diagnosisFollowup === true ||
+  (opts as any)?.userContext?.ctxPack?.diagnosisFollowup === true ||
+  String((ctxPackForWriter as any)?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+  String((opts as any)?.ctxPack?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+  String((opts as any)?.userContext?.ctxPack?.continuityKind ?? '').trim() === 'diagnosis_followup';
+
 const writerPatternKey = (
-  // ✅ directTask/使える文系は、深読み detail レーンに入れない。
-  // 文面作成では、NORMAL_DETAIL_V1 の構造説明・深読み指示が強すぎるため。
-  isComposeRequestForPattern && selectedPatternKey === 'NORMAL_RESONANCE_V1'
-    ? selectedPatternKey
-    : tcfWriterPatternMappedForWriter
-      ? tcfWriterPatternMappedForWriter
-      : shouldForceStructureDetailPattern
-        ? 'NORMAL_DETAIL_V1'
-        : shouldForceDecidePattern
-          ? selectedPatternKey === 'NORMAL_RESONANCE_V1'
-            ? 'NORMAL_DETAIL_V1'
+  // ✅ ir診断フォローアップはTCF/NORMALへ落とさず、必ず診断詳細レーンを守る。
+  isProtectedDiagnosisPatternForWriter
+    ? 'IR_DETAIL_V1'
+    : isComposeRequestForPattern && selectedPatternKey === 'NORMAL_RESONANCE_V1'
+      ? selectedPatternKey
+      : tcfWriterPatternMappedForWriter
+        ? tcfWriterPatternMappedForWriter
+        : shouldForceStructureDetailPattern
+          ? 'NORMAL_DETAIL_V1'
+          : shouldForceDecidePattern
+            ? selectedPatternKey === 'NORMAL_RESONANCE_V1'
+              ? 'NORMAL_DETAIL_V1'
+              : selectedPatternKey
             : selectedPatternKey
-          : selectedPatternKey
 ) as any;
 
 console.log(
@@ -12327,12 +12337,25 @@ const finalWriterDirectivesMsg =
       })();
 
       const messagesForWriterFinal = (() => {
+        const diagnosisFollowupRequestTextForWriter = String(
+          writerPatternFollowupText ??
+            (opts as any)?.userText ??
+            (opts as any)?.followupText ??
+            ''
+        ).trim();
+
+        const isDiagnosisDetailRequestForWriter =
+          /診断内容を詳しく|診断を詳しく|詳しく|詳細|深めて|深める|もう少し深めて|もっと深めて|もっと見て|もっと教えて/u.test(
+            diagnosisFollowupRequestTextForWriter
+          );
+
         const isDiagnosisFollowupForWriter = Boolean(
           (opts as any)?.userContext?.ctxPack?.diagnosisFollowup ??
           (opts as any)?.ctxPack?.diagnosisFollowup ??
           (ctxPackForWriter as any)?.diagnosisFollowup ??
           (opts as any)?.userContext?.ctxPack?.lastIrDiagnosis ??
           (ctxPackForWriter as any)?.lastIrDiagnosis ??
+          (diagnosisSourceMsg && isDiagnosisDetailRequestForWriter) ??
           false
         );
 
@@ -13055,6 +13078,55 @@ const finalWriterDirectivesMsg =
       })
     );
 
+    const activeContextSeedDirectReplyForWriter = (() => {
+      const userTextForActiveContextSeed = String(
+        writerPatternFollowupText ??
+          (opts as any)?.userText ??
+          (opts as any)?.followupText ??
+          ''
+      ).trim();
+
+      if (!/誰の診断|何の診断|どの診断|誰を深め|誰のこと|何を深め/u.test(userTextForActiveContextSeed)) {
+        return '';
+      }
+
+      const sources = [
+        String(seedDraft ?? ''),
+        String(seedDraftRaw ?? ''),
+        String(slotsTextRawAll ?? ''),
+        String((opts as any)?.meta?.extra?.memorySeedText ?? ''),
+        String((opts as any)?.meta?.extra?.ctxPack?.memorySeedText ?? ''),
+        String((opts as any)?.ctxPack?.memorySeedText ?? ''),
+        String((opts as any)?.userContext?.ctxPack?.memorySeedText ?? ''),
+        String((opts as any)?.userContext?.meta?.extra?.memorySeedText ?? ''),
+        String((opts as any)?.userContext?.meta?.extra?.ctxPack?.memorySeedText ?? ''),
+      ].filter((s) => s.trim().length > 0);
+
+      const source = sources.find((s) =>
+        s.includes('ACTIVE_CONTEXT_SEED_V1') &&
+        s.includes('kind=diagnosis_target') &&
+        s.includes('writerPolicy=do_not_rewrite_answer')
+      );
+
+      if (!source) return '';
+
+      const answer =
+        source.match(/(?:^|\n)answer=([^\n]+)/u)?.[1]?.replace(/\s+/g, ' ').trim() ?? '';
+
+      return answer;
+    })();
+
+    if (activeContextSeedDirectReplyForWriter) {
+      console.log('[IROS/rephraseEngine][ACTIVE_CONTEXT_SEED_DIRECT_RETURN]', {
+        traceId: debug?.traceId ?? null,
+        conversationId: debug?.conversationId ?? null,
+        userCode: debug?.userCode ?? null,
+        reply: activeContextSeedDirectReplyForWriter,
+      });
+
+      return activeContextSeedDirectReplyForWriter;
+    }
+
     return await callWriterLLM({
       model: opts.model ?? 'gpt-5',
       temperature: opts.temperature ?? 0.7,
@@ -13065,12 +13137,18 @@ const finalWriterDirectivesMsg =
             String(m?.content ?? '').includes('PREVIOUS_EVENT_SOURCE (DO NOT OUTPUT):')
           );
 
-        const messagesForWriterCall =
-          hasPreviousEventSourceForCall && Array.isArray(messagesForWriterFinal)
-            ? messagesForWriterFinal.map((m: any, i: number) => {
-                const isLast = i === messagesForWriterFinal.length - 1;
-                if (!isLast || String(m?.role ?? '') !== 'user') return m;
+        const hasDiagnosisSourceForCall =
+          Array.isArray(messagesForWriterFinal) &&
+          messagesForWriterFinal.some((m: any) =>
+            String(m?.content ?? '').includes('DIAGNOSIS_SOURCE (DO NOT OUTPUT):')
+          );
 
+        const messagesForWriterCall = Array.isArray(messagesForWriterFinal)
+          ? messagesForWriterFinal.map((m: any, i: number) => {
+              const isLast = i === messagesForWriterFinal.length - 1;
+              if (!isLast || String(m?.role ?? '') !== 'user') return m;
+
+              if (hasPreviousEventSourceForCall) {
                 // ✅ 前イベント操作ターンでは、最後の user 文を読解対象にしない。
                 // user 文は PREVIOUS_EVENT_SOURCE 内の user_instruction として扱い、
                 // 最終 user message は「SOURCE_TEXT を操作せよ」という実行命令に置き換える。
@@ -13096,8 +13174,34 @@ const finalWriterDirectivesMsg =
                     '出力が SOURCE_TEXT の要約になっている場合は失敗。リライト本文として、元の場面を展開して残す。',
                   ].join('\n'),
                 };
-              })
-            : messagesForWriterFinal;
+              }
+
+              if (hasDiagnosisSourceForCall) {
+                // ✅ 診断フォローアップでは、最後の user 文を読解対象にしない。
+                // user 文は DIAGNOSIS_SOURCE 内の followupRequest として扱い、
+                // 最終 user message は「診断正本を深める」実行命令に置き換える。
+                return {
+                  ...m,
+                  content: [
+                    'DIAGNOSIS_FOLLOWUP_EXECUTE:',
+                    'DIAGNOSIS_SOURCE の diagnosisText を正本として、followupRequest に従って深める。',
+                    '現在のユーザー文そのものを分析しない。',
+                    '「もう少し深めてください」「詳しく」「深めて」などの依頼文の意味を説明しない。',
+                    '必ず DIAGNOSIS_SOURCE の診断本文に含まれる「現状」「ポイント」「意識の向かう先」「メッセージ」の具体内容を根拠にする。',
+                    '診断本文にある具体語を拾い、抽象語だけでまとめない。',
+                    '「診断の芯」「表面の説明」「深めたいのは」「見えていること」など、診断本文から離れたメタ説明で始めない。',
+                    'target が自分の場合は、ユーザー自身の状態・反応・選び方の見立てとして書く。',
+                    '診断本文にない外部事実・人物・関係を足さない。',
+                    '相手の本心や事実を読んだように断定しない。',
+                    '出力は、診断内容を深めた本文だけにする。',
+                    '内部キー名・命令文・DIAGNOSIS_SOURCE・DIAGNOSIS_FOLLOWUP_EXECUTE を出力しない。'
+                  ].join('\n'),
+                };
+              }
+
+              return m;
+            })
+          : messagesForWriterFinal;
 
         console.log(
           '[IROS/rephraseEngine][FINAL_MESSAGES_FOR_WRITER]',
@@ -14063,7 +14167,7 @@ userContext: {
 
       if (buf) chunks.push(buf);
 
-  
+
     const lines: string[] = [];
 
       console.log(
@@ -15841,13 +15945,3 @@ return await runRetryPass({
     slotsForGuard,
   });
 }
-
-
-
-
-
-
-
-
-
-

@@ -117,6 +117,8 @@ import {
 } from '@/lib/iros/memory/relationshipMemoryRecall';
 import { buildMemorySeed } from '@/lib/iros/memory/memorySeedBuilder';
 import { buildSriContext } from '@/lib/iros/conversation/sriContext';
+import { buildActiveContextClarificationReply, buildDiagnosisActiveContextFrame } from '@/lib/iros/anchor/activeContextAnchor';
+import { runPreSeedAssist } from '@/lib/iros/memory/preSeedAssist';
 /* =========================
    Types
 ========================= */
@@ -2034,6 +2036,24 @@ if (!wantsMicroNow) {
         // --- ir診断の持ち越し ---
         if (cp.irMeta && typeof cp.irMeta === 'object') keep.irMeta = cp.irMeta;
         if (cp.detailMode === true) keep.detailMode = true;
+        if (cp.activeContextFrame && typeof cp.activeContextFrame === 'object') {
+          keep.activeContextFrame = cp.activeContextFrame;
+        }
+        if (cp.activeContextAnchor && typeof cp.activeContextAnchor === 'object') {
+          keep.activeContextAnchor = cp.activeContextAnchor;
+        }
+        if (cp.lastIrDiagnosis && typeof cp.lastIrDiagnosis === 'object') {
+          keep.lastIrDiagnosis = cp.lastIrDiagnosis;
+        }
+        if (typeof cp.diagnosisFollowupTargetLabel === 'string' && cp.diagnosisFollowupTargetLabel.trim()) {
+          keep.diagnosisFollowupTargetLabel = cp.diagnosisFollowupTargetLabel.trim();
+        }
+        if (typeof cp.continuityKind === 'string' && cp.continuityKind.trim()) {
+          keep.continuityKind = cp.continuityKind.trim();
+        }
+        if (typeof cp.followupKind === 'string' && cp.followupKind.trim()) {
+          keep.followupKind = cp.followupKind.trim();
+        }
 
         if (Object.keys(keep).length > 0) {
           (ex as any).ctxPack = keep;
@@ -2167,6 +2187,24 @@ if (!wantsMicroNow) {
       // --- ir診断の持ち越し ---
       if (cp.irMeta && typeof cp.irMeta === 'object') keep.irMeta = cp.irMeta;
       if (cp.detailMode === true) keep.detailMode = true;
+      if (cp.activeContextFrame && typeof cp.activeContextFrame === 'object') {
+        keep.activeContextFrame = cp.activeContextFrame;
+      }
+      if (cp.activeContextAnchor && typeof cp.activeContextAnchor === 'object') {
+        keep.activeContextAnchor = cp.activeContextAnchor;
+      }
+      if (cp.lastIrDiagnosis && typeof cp.lastIrDiagnosis === 'object') {
+        keep.lastIrDiagnosis = cp.lastIrDiagnosis;
+      }
+      if (typeof cp.diagnosisFollowupTargetLabel === 'string' && cp.diagnosisFollowupTargetLabel.trim()) {
+        keep.diagnosisFollowupTargetLabel = cp.diagnosisFollowupTargetLabel.trim();
+      }
+      if (typeof cp.continuityKind === 'string' && cp.continuityKind.trim()) {
+        keep.continuityKind = cp.continuityKind.trim();
+      }
+      if (typeof cp.followupKind === 'string' && cp.followupKind.trim()) {
+        keep.followupKind = cp.followupKind.trim();
+      }
 
       if (Object.keys(keep).length > 0) {
         (ex as any).ctxPack = keep;
@@ -2746,6 +2784,367 @@ function normForRecall(v: any): string {
           const histCtx = lastCtxPackFromHistory && typeof lastCtxPackFromHistory === 'object'
         ? lastCtxPackFromHistory
         : null;
+
+      const shouldRunPreSeedAssistForClarification =
+        /誰の診断|何の診断|どの診断|誰を深め|誰のこと|何を深め/u.test(String(text ?? '').trim()) ||
+        preOrchCtxPack?.activeContextClarification === true ||
+        histCtx?.activeContextClarification === true ||
+        (extraLocal as any)?.ctxPack?.activeContextClarification === true ||
+        (extraLocal as any)?.activeContextClarification === true;
+
+      if (shouldRunPreSeedAssistForClarification) {
+        const preSeedAssistForClarification = await runPreSeedAssist({
+          userText: String(text ?? '').trim(),
+          ctxPack: {
+            ...(histCtx && typeof histCtx === 'object' ? histCtx : {}),
+            ...(preOrchCtxPack && typeof preOrchCtxPack === 'object' ? preOrchCtxPack : {}),
+          },
+          activeContextFrame:
+            preOrchCtxPack?.activeContextFrame ??
+            histCtx?.activeContextFrame ??
+            (extraLocal as any)?.ctxPack?.activeContextFrame ??
+            (extraLocal as any)?.activeContextFrame ??
+            null,
+          lastIrDiagnosis:
+            preOrchCtxPack?.lastIrDiagnosis ??
+            histCtx?.lastIrDiagnosis ??
+            (extraLocal as any)?.ctxPack?.lastIrDiagnosis ??
+            null,
+          historyForWriter: Array.isArray(preOrchCtxPack?.historyForWriter)
+            ? preOrchCtxPack.historyForWriter
+            : Array.isArray(histCtx?.historyForWriter)
+              ? histCtx.historyForWriter
+              : [],
+          traceId: null,
+          conversationId,
+          userCode,
+        });
+
+        preOrchCtxPack.preSeedAssistResult = preSeedAssistForClarification;
+        preOrchCtxPack.preSeedAssistKind = preSeedAssistForClarification.kind;
+        preOrchCtxPack.preSeedAssistConfidence = preSeedAssistForClarification.confidence;
+        preOrchCtxPack.preSeedAssistDirectReply = preSeedAssistForClarification.directReply;
+        preOrchCtxPack.preSeedAssistShouldBypassWriter =
+          preSeedAssistForClarification.shouldBypassWriter;
+
+        (extraLocal as any).preSeedAssistResult = preSeedAssistForClarification;
+        (extraLocal as any).preSeedAssistKind = preSeedAssistForClarification.kind;
+        (extraLocal as any).preSeedAssistConfidence = preSeedAssistForClarification.confidence;
+        (extraLocal as any).preSeedAssistDirectReply = preSeedAssistForClarification.directReply;
+        (extraLocal as any).preSeedAssistShouldBypassWriter =
+          preSeedAssistForClarification.shouldBypassWriter;
+
+        (extraLocal as any).ctxPack =
+          (extraLocal as any).ctxPack && typeof (extraLocal as any).ctxPack === 'object'
+            ? (extraLocal as any).ctxPack
+            : {};
+        (extraLocal as any).ctxPack.preSeedAssistResult = preSeedAssistForClarification;
+        (extraLocal as any).ctxPack.preSeedAssistKind = preSeedAssistForClarification.kind;
+        (extraLocal as any).ctxPack.preSeedAssistConfidence = preSeedAssistForClarification.confidence;
+        (extraLocal as any).ctxPack.preSeedAssistDirectReply = preSeedAssistForClarification.directReply;
+        (extraLocal as any).ctxPack.preSeedAssistShouldBypassWriter =
+          preSeedAssistForClarification.shouldBypassWriter;
+
+        if (preSeedAssistForClarification.directReply && preSeedAssistForClarification.shouldBypassWriter) {
+          preOrchCtxPack.directReplyCandidate = preSeedAssistForClarification.directReply;
+          (extraLocal as any).directReplyCandidate = preSeedAssistForClarification.directReply;
+          (extraLocal as any).ctxPack.directReplyCandidate = preSeedAssistForClarification.directReply;
+        }
+      }
+
+      const preSeedDirectReplyCandidate =
+        [
+          preOrchCtxPack?.directReplyCandidate,
+          preOrchCtxPack?.preSeedAssistDirectReply,
+          preOrchCtxPack?.preSeedAssistResult?.directReply,
+          histCtx?.directReplyCandidate,
+          histCtx?.preSeedAssistDirectReply,
+          histCtx?.preSeedAssistResult?.directReply,
+          (extraLocal as any)?.ctxPack?.directReplyCandidate,
+          (extraLocal as any)?.ctxPack?.preSeedAssistDirectReply,
+          (extraLocal as any)?.ctxPack?.preSeedAssistResult?.directReply,
+          (extraLocal as any)?.directReplyCandidate,
+          (extraLocal as any)?.preSeedAssistDirectReply,
+          (extraLocal as any)?.preSeedAssistResult?.directReply,
+        ]
+          .map((v) => String(v ?? '').trim())
+          .find(Boolean) ?? '';
+
+      const shouldPreferActiveContextClarificationReply =
+        /誰の診断|何の診断|どの診断|誰を深め|誰のこと|何を深め/u.test(String(text ?? '').trim()) ||
+        preOrchCtxPack?.activeContextClarification === true ||
+        histCtx?.activeContextClarification === true ||
+        (extraLocal as any)?.ctxPack?.activeContextClarification === true ||
+        (extraLocal as any)?.activeContextClarification === true;
+
+      const preSeedShouldBypassWriter =
+        !shouldPreferActiveContextClarificationReply &&
+        Boolean(
+          preOrchCtxPack?.preSeedAssistShouldBypassWriter === true ||
+            preOrchCtxPack?.preSeedAssistResult?.shouldBypassWriter === true ||
+            histCtx?.preSeedAssistShouldBypassWriter === true ||
+            histCtx?.preSeedAssistResult?.shouldBypassWriter === true ||
+            (extraLocal as any)?.ctxPack?.preSeedAssistShouldBypassWriter === true ||
+            (extraLocal as any)?.ctxPack?.preSeedAssistResult?.shouldBypassWriter === true ||
+            (extraLocal as any)?.preSeedAssistShouldBypassWriter === true ||
+            (extraLocal as any)?.preSeedAssistResult?.shouldBypassWriter === true
+        );
+
+      console.log('[IROS/PRE_SEED_DIRECT_REPLY][CHECK]', {
+        userText: String(text ?? '').trim(),
+        candidate: preSeedDirectReplyCandidate,
+        shouldBypassWriter: preSeedShouldBypassWriter,
+        preSeedAssistKind:
+          preOrchCtxPack?.preSeedAssistKind ??
+          histCtx?.preSeedAssistKind ??
+          (extraLocal as any)?.ctxPack?.preSeedAssistKind ??
+          (extraLocal as any)?.preSeedAssistKind ??
+          null,
+        preSeedAssistConfidence:
+          preOrchCtxPack?.preSeedAssistConfidence ??
+          histCtx?.preSeedAssistConfidence ??
+          (extraLocal as any)?.ctxPack?.preSeedAssistConfidence ??
+          (extraLocal as any)?.preSeedAssistConfidence ??
+          null,
+        preSeedAssistDirectReplyHead: String(
+          preOrchCtxPack?.preSeedAssistDirectReply ??
+            histCtx?.preSeedAssistDirectReply ??
+            (extraLocal as any)?.ctxPack?.preSeedAssistDirectReply ??
+            (extraLocal as any)?.preSeedAssistDirectReply ??
+            ''
+        ).slice(0, 80),
+        preSeedAssistSeedHead: String(
+          preOrchCtxPack?.preSeedAssistSeedText ??
+            preOrchCtxPack?.preSeedAssistResult?.seedText ??
+            histCtx?.preSeedAssistSeedText ??
+            histCtx?.preSeedAssistResult?.seedText ??
+            (extraLocal as any)?.ctxPack?.preSeedAssistSeedText ??
+            (extraLocal as any)?.ctxPack?.preSeedAssistResult?.seedText ??
+            (extraLocal as any)?.preSeedAssistSeedText ??
+            (extraLocal as any)?.preSeedAssistResult?.seedText ??
+            ''
+        ).slice(0, 120),
+      });
+
+      if (preSeedDirectReplyCandidate && preSeedShouldBypassWriter) {
+        let metaForSavePreSeedDirect: any = {
+          ...(baseMetaMergedForTurn ?? {}),
+          style: style ?? (userProfile as any)?.style ?? 'friendly',
+          mode: 'light',
+          preSeedDirectReply: true,
+          nextStep: null,
+          next_step: null,
+        };
+
+        metaForSavePreSeedDirect = stampSingleWriter(
+          mergeExtra(metaForSavePreSeedDirect, extraLocal ?? null),
+        );
+
+        const ex =
+          metaForSavePreSeedDirect.extra && typeof metaForSavePreSeedDirect.extra === 'object'
+            ? metaForSavePreSeedDirect.extra
+            : (metaForSavePreSeedDirect.extra = {});
+
+        ex.preSeedDirectReply = true;
+        ex.directReplyCandidate = preSeedDirectReplyCandidate;
+        ex.ctxPack = ex.ctxPack && typeof ex.ctxPack === 'object' ? ex.ctxPack : {};
+        ex.ctxPack.preSeedDirectReply = true;
+        ex.ctxPack.directReplyCandidate = preSeedDirectReplyCandidate;
+
+        console.log('[IROS/PRE_SEED_DIRECT_REPLY][RETURN]', {
+          reply: preSeedDirectReplyCandidate,
+          shouldBypassWriter: preSeedShouldBypassWriter,
+          kind:
+            preOrchCtxPack?.preSeedAssistKind ??
+            histCtx?.preSeedAssistKind ??
+            (extraLocal as any)?.ctxPack?.preSeedAssistKind ??
+            (extraLocal as any)?.preSeedAssistKind ??
+            null,
+        });
+
+        return {
+          ok: true as const,
+          result: { gate: 'pre_seed_direct_reply' as const },
+          assistantText: preSeedDirectReplyCandidate,
+          metaForSave: metaForSavePreSeedDirect,
+          finalMode: 'light' as const,
+          slots: [
+            {
+              key: 'OBS',
+              role: 'assistant',
+              style: 'soft',
+              content: preSeedDirectReplyCandidate,
+            },
+          ],
+          meta: metaForSavePreSeedDirect,
+        };
+      }
+
+      const activeContextClarificationTargetFromHistory = (() => {
+        const pools = [
+          Array.isArray(historyForTurn) ? historyForTurn : [],
+          Array.isArray(preOrchCtxPack?.historyForWriter) ? preOrchCtxPack.historyForWriter : [],
+          Array.isArray(histCtx?.historyForWriter) ? histCtx.historyForWriter : [],
+          Array.isArray((extraLocal as any)?.ctxPack?.historyForWriter)
+            ? (extraLocal as any).ctxPack.historyForWriter
+            : [],
+        ];
+
+        const texts = pools
+          .flatMap((items: any[]) => [...items].reverse())
+          .map((m: any) =>
+            String(
+              m?.content ??
+                m?.text ??
+                m?.assistantText ??
+                m?.message ??
+                '',
+            ).trim(),
+          )
+          .filter(Boolean);
+
+        for (const s of texts) {
+          const m1 = s.match(/観測対象[:：]\s*([^\n\r]+)/u);
+          if (m1?.[1]) return m1[1].replace(/[。\s]+$/u, '').trim();
+
+          const m2 = s.match(/ir診断\s*[:：]?\s*([^\n\r]+)/iu);
+          if (m2?.[1]) return m2[1].replace(/[。\s]+$/u, '').trim();
+        }
+
+        return null;
+      })();
+
+      const activeContextFrameForClarificationFallback =
+        buildDiagnosisActiveContextFrame({
+          targetLabel:
+            activeContextClarificationTargetFromHistory ??
+            preOrchCtxPack?.targetLabel ??
+            preOrchCtxPack?.diagnosisFollowupTargetLabel ??
+            histCtx?.targetLabel ??
+            histCtx?.diagnosisFollowupTargetLabel ??
+            (extraLocal as any)?.ctxPack?.targetLabel ??
+            (extraLocal as any)?.ctxPack?.diagnosisFollowupTargetLabel ??
+            null,
+          targetKey:
+            preOrchCtxPack?.memoryTargetKey ??
+            histCtx?.memoryTargetKey ??
+            (extraLocal as any)?.ctxPack?.memoryTargetKey ??
+            null,
+          activeDiagnosisId:
+            preOrchCtxPack?.activeDiagnosisId ??
+            histCtx?.activeDiagnosisId ??
+            (extraLocal as any)?.ctxPack?.activeDiagnosisId ??
+            null,
+          lastIrDiagnosis:
+            preOrchCtxPack?.lastIrDiagnosis ??
+            histCtx?.lastIrDiagnosis ??
+            (extraLocal as any)?.ctxPack?.lastIrDiagnosis ??
+            null,
+          irMeta:
+            preOrchCtxPack?.irMeta ??
+            histCtx?.irMeta ??
+            (extraLocal as any)?.ctxPack?.irMeta ??
+            null,
+          sourceText:
+            preOrchCtxPack?.topicHint ??
+            histCtx?.topicHint ??
+            (extraLocal as any)?.ctxPack?.topicHint ??
+            null,
+          followupRequest: text,
+          lastAction: 'diagnosis_clarification',
+        });
+
+      const activeContextFrameForClarification =
+        preOrchCtxPack?.activeContextFrame ??
+        histCtx?.activeContextFrame ??
+        (extraLocal as any)?.ctxPack?.activeContextFrame ??
+        (extraLocal as any)?.activeContextFrame ??
+        activeContextFrameForClarificationFallback ??
+        null;
+
+      const activeContextAnchorForClarification =
+        preOrchCtxPack?.activeContextAnchor ??
+        histCtx?.activeContextAnchor ??
+        (extraLocal as any)?.ctxPack?.activeContextAnchor ??
+        (extraLocal as any)?.activeContextAnchor ??
+        null;
+
+      const activeContextClarificationReply = buildActiveContextClarificationReply({
+        frame: activeContextFrameForClarification,
+        anchor: activeContextAnchorForClarification,
+        userText: text,
+      });
+      console.log('[IROS/ACTIVE_CONTEXT_CLARIFICATION][CHECK]', {
+        userText: String(text ?? '').trim(),
+        hasFrame: Boolean(activeContextFrameForClarification),
+        hasAnchor: Boolean(activeContextAnchorForClarification),
+        reply: activeContextClarificationReply,
+        framePrimaryEntityId: (activeContextFrameForClarification as any)?.primaryEntityId ?? null,
+        frameEntityKinds: Array.isArray((activeContextFrameForClarification as any)?.entities)
+          ? (activeContextFrameForClarification as any).entities.map((e: any) => ({
+              id: e?.id ?? null,
+              kind: e?.kind ?? null,
+              label: e?.label ?? null,
+            }))
+          : [],
+        frameEdges: Array.isArray((activeContextFrameForClarification as any)?.edges)
+          ? (activeContextFrameForClarification as any).edges.map((e: any) => ({
+              kind: e?.kind ?? null,
+              from: e?.from ?? null,
+              to: e?.to ?? null,
+            }))
+          : [],
+      });
+
+
+      if (activeContextClarificationReply) {
+        let metaForSaveActiveContext: any = {
+          ...(baseMetaMergedForTurn ?? {}),
+          style: style ?? (userProfile as any)?.style ?? 'friendly',
+          mode: 'light',
+          activeContextClarification: true,
+          nextStep: null,
+          next_step: null,
+        };
+
+        metaForSaveActiveContext = stampSingleWriter(
+          mergeExtra(metaForSaveActiveContext, extraLocal ?? null),
+        );
+
+        const ex =
+          metaForSaveActiveContext.extra && typeof metaForSaveActiveContext.extra === 'object'
+            ? metaForSaveActiveContext.extra
+            : (metaForSaveActiveContext.extra = {});
+
+        ex.activeContextClarification = true;
+        ex.activeContextFrame = activeContextFrameForClarification;
+        ex.ctxPack = ex.ctxPack && typeof ex.ctxPack === 'object' ? ex.ctxPack : {};
+        ex.ctxPack.activeContextClarification = true;
+        ex.ctxPack.activeContextFrame = activeContextFrameForClarification;
+
+        console.log('[IROS/ACTIVE_CONTEXT_CLARIFICATION][RETURN]', {
+          reply: activeContextClarificationReply,
+          hasFrame: Boolean(activeContextFrameForClarification),
+          hasAnchor: Boolean(activeContextAnchorForClarification),
+        });
+
+        return {
+          ok: true as const,
+          result: { gate: 'active_context_clarification' as const },
+          assistantText: activeContextClarificationReply,
+          metaForSave: metaForSaveActiveContext,
+          finalMode: 'light' as const,
+          slots: [
+            {
+              key: 'OBS',
+              role: 'assistant',
+              style: 'soft',
+              content: activeContextClarificationReply,
+            },
+          ],
+          meta: metaForSaveActiveContext,
+        };
+      }
 
       if (snap && typeof snap === 'object') {
         preOrchCtxPack.viewShiftSnapshot = snap;
@@ -3430,6 +3829,35 @@ function normForRecall(v: any): string {
           String((extraLocal as any)?.ctxPack?.diagnosisFollowupTargetLabel ?? '').trim() ||
           null;
 
+        const activeContextFrameAfterOrch =
+          (orchCtxPack as any)?.activeContextFrame ??
+          (orchExtra as any)?.ctxPack?.activeContextFrame ??
+          (orchExtra as any)?.activeContextFrame ??
+          (extraLocal as any)?.ctxPack?.activeContextFrame ??
+          (extraLocal as any)?.activeContextFrame ??
+          buildDiagnosisActiveContextFrame({
+            targetLabel: resolvedDiagnosisTargetForWriter,
+            targetKey:
+              (orchCtxPack as any)?.memoryTargetKey ??
+              (orchExtra as any)?.ctxPack?.memoryTargetKey ??
+              (extraLocal as any)?.ctxPack?.memoryTargetKey ??
+              null,
+            activeDiagnosisId:
+              (orchCtxPack as any)?.activeDiagnosisId ??
+              (orchExtra as any)?.ctxPack?.activeDiagnosisId ??
+              (extraLocal as any)?.ctxPack?.activeDiagnosisId ??
+              null,
+            lastIrDiagnosis: diagnosisLastIrAfterOrch,
+            irMeta:
+              (orchCtxPack as any)?.irMeta ??
+              (orchExtra as any)?.ctxPack?.irMeta ??
+              (extraLocal as any)?.ctxPack?.irMeta ??
+              null,
+            sourceText: diagnosisTopicHintAfterOrch,
+            followupRequest: text,
+            lastAction: 'diagnosis_' + (normalizedFollowupKind ?? 'followup'),
+          });
+
         orchCtxPack.diagnosisFollowup = true;
         orchCtxPack.followupKind = normalizedFollowupKind;
         orchCtxPack.continuityKind = 'diagnosis_followup';
@@ -3478,6 +3906,22 @@ function normForRecall(v: any): string {
           (extraLocal as any)?.ctxPack && typeof (extraLocal as any).ctxPack === 'object'
             ? (extraLocal as any).ctxPack
             : {};
+
+        if (activeContextFrameAfterOrch) {
+          orchCtxPack.activeContextFrame = activeContextFrameAfterOrch;
+
+          if (orchExtra && typeof orchExtra === 'object') {
+            (orchExtra as any).activeContextFrame = activeContextFrameAfterOrch;
+            (orchExtra as any).ctxPack =
+              (orchExtra as any).ctxPack && typeof (orchExtra as any).ctxPack === 'object'
+                ? (orchExtra as any).ctxPack
+                : {};
+            (orchExtra as any).ctxPack.activeContextFrame = activeContextFrameAfterOrch;
+          }
+
+          (extraLocal as any).activeContextFrame = activeContextFrameAfterOrch;
+          (extraLocal as any).ctxPack.activeContextFrame = activeContextFrameAfterOrch;
+        }
 
         (extraLocal as any).diagnosisFollowup = true;
         (extraLocal as any).presentationKind = normalizedPresentationKind;
@@ -11445,6 +11889,3 @@ return {
     };
   }
 }
-
-
-

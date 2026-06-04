@@ -1,4 +1,4 @@
-export type WorkingReferenceAskType =
+﻿export type WorkingReferenceAskType =
   | 'reference_check'
   | 'reference_followup';
 
@@ -121,6 +121,24 @@ export function resolveWorkingReference(args: ResolveWorkingReferenceArgs): Work
 
   const isSituationalReferenceCheck = Boolean(situationalReferenceCheckMatch);
 
+  // WORKING_REFERENCE_FOLLOWUP_REQUEST
+  // 「もう少し深めてください」「前者」「後者」などは、文字そのものを読むのではなく、
+  // 直前assistant発話への followup として扱う。
+  const followupSourcePhrase =
+    /前者/u.test(currentQuestion)
+      ? '前者'
+      : /後者/u.test(currentQuestion)
+        ? '後者'
+        : /(ひとつ目|一つ目|1つ目)/u.test(currentQuestion)
+          ? 'ひとつ目'
+          : /(もうひとつ|もう一つ|二つ目|2つ目)/u.test(currentQuestion)
+            ? 'もうひとつ'
+            : /(もう少し|もうちょっと|さらに|もっと|深めて|深める|詳しく|掘り下げ)/u.test(currentQuestion)
+              ? 'followup_deepen'
+              : null;
+
+  const isReferenceFollowup = Boolean(followupSourcePhrase);
+
   const isDeictic =
     /(これ|それ)/u.test(currentQuestion) &&
     (
@@ -137,7 +155,7 @@ export function resolveWorkingReference(args: ResolveWorkingReferenceArgs): Work
       /それ.*ですか/u.test(currentQuestion)
     );
 
-  if (!isDeictic && !isSituationalReferenceCheck) return null;
+  if (!isDeictic && !isSituationalReferenceCheck && !isReferenceFollowup) return null;
 
   const historyCandidatesForReference = [
     Array.isArray(args.historyForTurn) ? args.historyForTurn : [],
@@ -172,18 +190,29 @@ export function resolveWorkingReference(args: ResolveWorkingReferenceArgs): Work
     null;
 
   const referenceTarget = cleanReferenceTarget(
-    pickText(
-      currentQuestion,
-      sourcePreviousUserText,
-      sourceAssistantText,
-      historyDigestV1?.topic?.situationTopic,
-      historyDigestV1?.topic?.situationSummary,
-      historyDigestV1?.situationTopic,
-      historyDigestV1?.situationSummary,
-      args.orchCtxPack?.topicDigest,
-      args.orchExtra?.topicDigest,
-      args.orchCtxPack?.conversationLine
-    )
+    isReferenceFollowup
+      ? pickText(
+          currentQuestion,
+          sourceAssistantText,
+          sourcePreviousUserText,
+          historyDigestV1?.topic?.situationSummary,
+          historyDigestV1?.situationSummary,
+          args.orchCtxPack?.topicDigest,
+          args.orchExtra?.topicDigest,
+          args.orchCtxPack?.conversationLine
+        )
+      : pickText(
+          currentQuestion,
+          sourcePreviousUserText,
+          sourceAssistantText,
+          historyDigestV1?.topic?.situationTopic,
+          historyDigestV1?.topic?.situationSummary,
+          historyDigestV1?.situationTopic,
+          historyDigestV1?.situationSummary,
+          args.orchCtxPack?.topicDigest,
+          args.orchExtra?.topicDigest,
+          args.orchCtxPack?.conversationLine
+        )
   );
 
   if (!referenceTarget) return null;
@@ -201,29 +230,31 @@ export function resolveWorkingReference(args: ResolveWorkingReferenceArgs): Work
       : null);
 
   const askFrame =
-    mainSubject && mainSubject !== 'これ' && mainSubject !== 'それ'
-      ? `${referenceTarget.slice(0, 120)}に照らして${mainSubject}を判定する`
-      : `${referenceTarget.slice(0, 120)}が何を指すかを説明する`;
+    isReferenceFollowup
+      ? `${referenceTarget.slice(0, 120)}を直前の文脈として、現在の短い返答を深める`
+      : mainSubject && mainSubject !== 'これ' && mainSubject !== 'それ'
+        ? `${referenceTarget.slice(0, 120)}に照らして${mainSubject}を判定する`
+        : `${referenceTarget.slice(0, 120)}が何を指すかを説明する`;
 
   return {
-    askType: 'reference_check',
+    askType: isReferenceFollowup ? 'reference_followup' : 'reference_check',
     currentQuestion,
     referenceTarget,
     mainSubject,
     sourceUserText: currentQuestion,
     sourceAssistantText,
     sourcePreviousUserText,
-    readingMode: isSituationalReferenceCheck ? 'situational_reference' : 'deictic_reference',
+    readingMode: isReferenceFollowup ? 'situational_reference' : isSituationalReferenceCheck ? 'situational_reference' : 'deictic_reference',
     askFrame,
-    sourcePhrase: isSituationalReferenceCheck
-      ? 'この場合'
-      : /それ/u.test(currentQuestion)
+    sourcePhrase: isReferenceFollowup
+      ? followupSourcePhrase
+      : isSituationalReferenceCheck
         ? 'それ'
         : /これ/u.test(currentQuestion)
           ? 'これ'
           : null,
     scope: 'current_turn',
     expiresAfterTurn: true,
-    confidence: isSituationalReferenceCheck ? 0.9 : 0.86,
+    confidence: isReferenceFollowup ? 0.88 : isSituationalReferenceCheck ? 0.9 : 0.86,
   };
 }
