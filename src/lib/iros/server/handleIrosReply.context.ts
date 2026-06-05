@@ -592,7 +592,7 @@ export async function buildTurnContext(
     (baseMetaForTurn as any).extra.ctxPack.memoryRecallMode = memoryDecision.recallMode;
   }
   const isFollowupRequest =
-    /詳しく|詳しく教えて|詳しく説明|部分|この部分|その部分|という部分|箇所|この箇所|その箇所|具体的に|具体化|わかりやすく|分かりやすく|つまり|どういうこと|それって|どうすれば|何をすれば|何から|どこから|どう扱えば|どう受け取れば|どう見れば|続き|続きを|診断の続き|言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|説明して|解説して|補足して|もう少し|もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|どんな内容|その内容|内容でした|内容を教えて|中身|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(
+    /詳しく|詳しく教えて|詳しく説明|部分|この部分|その部分|という部分|と言う部分|箇所|この箇所|その箇所|とはどんな状態|とはどういう状態|とは何|ってどんな状態|ってどういう状態|どんな状態ですか|どういう状態ですか|具体的に|具体化|わかりやすく|分かりやすく|つまり|どういうこと|それって|どうすれば|何をすれば|何から|どこから|どう扱えば|どう受け取れば|どう見れば|続き|続きを|診断の続き|言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|説明して|解説して|補足して|もう少し|もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|どうしてそうなる|どうして|なんでそうなる|なんで|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|どんな内容|その内容|内容でした|内容を教えて|中身|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(
       followupSourceText
     );
 
@@ -827,7 +827,7 @@ export async function buildTurnContext(
         ? 'action'
         : /言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|わかりやすく|分かりやすく|つまり|どういうこと|説明して|解説して|補足して|どんなでしたっけ|どんなでしたか|何でしたっけ|診断の結果/.test(followupSourceText)
           ? 'rephrase'
-          : /詳しく|詳しく教えて|詳しく説明|部分|この部分|その部分|という部分|箇所|この箇所|その箇所|もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(followupSourceText)
+          : /詳しく|詳しく教えて|詳しく説明|部分|この部分|その部分|という部分|と言う部分|箇所|この箇所|その箇所|とはどんな状態|とはどういう状態|とは何|ってどんな状態|ってどういう状態|どんな状態ですか|どういう状態ですか|もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|どうしてそうなる|どうして|なんでそうなる|なんで|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(followupSourceText)
             ? 'deepen'
             : 'concretize';
 
@@ -1051,6 +1051,28 @@ export async function buildTurnContext(
       (baseMetaForTurn as any).extra.ctxPack.replyGoal = {
         kind: resolvedFollowupKind === 'action' ? 'action' : 'clarify',
       };
+      // IROS_DIAG_FOLLOWUP_STALE_SEED_CLEANUP
+      // 診断フォロー用の内部seedは、そのターン専用。次ターンへ持ち越さない。
+      {
+        const extraAny: any = (baseMetaForTurn as any).extra ?? {};
+        const ctxPackAny: any = extraAny.ctxPack ?? {};
+
+        delete extraAny.diagnosisFollowupAnalysisSeed;
+        delete ctxPackAny.diagnosisFollowupAnalysisSeed;
+
+        const existingMemoryPreSeedText = String(
+          extraAny.memoryPreSeedText ?? ctxPackAny.memoryPreSeedText ?? ''
+        ).trim();
+
+        if (
+          existingMemoryPreSeedText.startsWith('DIAGNOSIS_FOLLOWUP_ANALYSIS_SEED:') ||
+          existingMemoryPreSeedText.startsWith('PRE_SEED_DIAGNOSIS_FOLLOWUP_PHRASE_DETAIL_DIRECT:')
+        ) {
+          delete extraAny.memoryPreSeedText;
+          delete ctxPackAny.memoryPreSeedText;
+        }
+      }
+
       let preSeedAssistResult = await runPreSeedAssist({
         userText: followupSourceText,
         ctxPack: (baseMetaForTurn as any).extra.ctxPack,
@@ -1065,7 +1087,7 @@ export async function buildTurnContext(
       });
 
       const diagnosisFollowupPhraseDetailRequested =
-        /詳しく|詳しく教えて|詳しく説明|部分|この部分|その部分|という部分|と言う部分|箇所|この箇所|その箇所/u.test(followupSourceText);
+        /詳しく|詳しく教えて|詳しく説明|部分|この部分|その部分|という部分|と言う部分|箇所|この箇所|その箇所|とはどんな状態|とはどういう状態|とは何|ってどんな状態|ってどういう状態|どんな状態ですか|どういう状態ですか/u.test(followupSourceText);
 
       if (diagnosisFollowupPhraseDetailRequested && lastIrDiagnosisResolved) {
         const diagnosisFollowupSourceText = String(
@@ -1080,7 +1102,7 @@ export async function buildTurnContext(
         ).trim();
 
         const phraseMatch = followupSourceText.match(
-          /(.+?)(?:と(?:い|言)う部分|という部分|の部分|という箇所|の箇所|を詳しく|について詳しく|を説明|を教えて)/u
+          /(.+?)(?:と(?:い|言)う部分|という部分|の部分|という箇所|の箇所|とはどんな状態|とはどういう状態|とは何|ってどんな状態|ってどういう状態|はどんな状態|はどういう状態|を詳しく|について詳しく|を説明|を教えて)/u
         );
 
         const diagnosisFollowupSourcePhrase = String(phraseMatch?.[1] ?? '')
@@ -1104,7 +1126,8 @@ export async function buildTurnContext(
 
           const supportSentence =
             diagnosisSentences.find((x) =>
-              /ポイント|関係を広げる|手が止まり|連絡|約束|温度|具体的な段取り/u.test(x)
+              x !== phraseSentence &&
+              /現状|ポイント|意識の向かう先|メッセージ|曖昧|踏み込む|距離を引く|反応を見ながら|形にする|関わり|興味|温度|具体的/u.test(x)
             ) ??
             diagnosisSentences.find((x) => x !== phraseSentence) ??
             '';
@@ -1113,29 +1136,59 @@ export async function buildTurnContext(
             ? `診断本文では、「${phraseSentence}。」という文脈で出ています。`
             : '前回診断本文の中で出ていた表現です。';
 
-          const supportLine = supportSentence
-            ? `補足すると、「${supportSentence}。」という内容ともつながっています。`
-            : '';
+          const supportLine =
+            supportSentence && supportSentence !== phraseSentence
+              ? `補足すると、「${supportSentence}。」という内容ともつながっています。`
+              : '';
+
+          const diagnosisTargetLabelForReply = String(resolvedDiagnosisTargetLabel ?? '').trim();
+          const diagnosisSubjectLabel =
+            !diagnosisTargetLabelForReply || /^(自分|自分自身|私|僕|俺)$/u.test(diagnosisTargetLabelForReply)
+              ? 'あなた自身'
+              : /関係|二人|ふたり|相性/u.test(diagnosisTargetLabelForReply)
+                ? '二人の関係全体'
+                : `${diagnosisTargetLabelForReply}側`;
+
+          const isForkPhrase = /分かれ道|踏み込む|距離を引く/u.test(diagnosisFollowupSourcePhrase);
+
+          const meaningLine = isForkPhrase
+            ? `つまり、${diagnosisSubjectLabel}が、曖昧なまま関わりを続けることに引っかかりを感じやすくなっていて、続けるなら少し具体的に踏み込む、離れるなら距離を引いて空気を変える、そのどちらかに寄りやすい状態です。`
+            : `つまり、${diagnosisSubjectLabel}で、反応や具体的な動きがまだ外へ出にくい状態を指しています。`;
+
+          const closingLine = isForkPhrase
+            ? '完全に終わったというより、このまま曖昧に続けるのか、もう少し具体的に動かすのかで、温度が分かれやすい状態です。'
+            : '完全に終わったというより、表に出る形がまだ揃いにくい、という意味です。';
 
           const diagnosisFollowupPhraseDetailDirectReply = [
-            `ここで言う「${diagnosisFollowupSourcePhrase}」は、その状態が完全に固定されたという意味ではありません。`,
+            `ここで言う「${diagnosisFollowupSourcePhrase}」は、${diagnosisSubjectLabel}の状態として見る表現です。`,
             '',
             phraseLine,
             '',
             supportLine,
             supportLine ? '' : null,
-            `つまり、${String(resolvedDiagnosisTargetLabel ?? '相手')}側の反応や具体的な動きが、まだ外へ出にくい状態を指しています。`,
-            '連絡・約束・関係を広げる話の温度が安定しにくく、動きたい気持ちはあっても、表に出る形がまだ揃いにくい、という意味です。',
+            meaningLine,
+            '',
+            closingLine,
           ]
             .filter((x): x is string => typeof x === 'string' && x.length > 0)
             .join('\n');
+          const diagnosisPhraseDetailContext = {
+            kind: 'diagnosis_phrase_detail',
+            targetLabel: String(resolvedDiagnosisTargetLabel ?? ''),
+            sourcePhrase: diagnosisFollowupSourcePhrase,
+            diagnosisId:
+              typeof (lastIrDiagnosisResolved as any)?.id === 'number'
+                ? (lastIrDiagnosisResolved as any).id
+                : null,
+            sourceTextHead: diagnosisFollowupSourceText.slice(0, 240),
+            createdAt: new Date().toISOString(),
+          };
 
-          (baseMetaForTurn as any).extra.diagnosisFollowupOutputMode =
-            'phrase_detail_direct';
-          (baseMetaForTurn as any).extra.ctxPack.diagnosisFollowupOutputMode =
-            'phrase_detail_direct';
-          (baseMetaForTurn as any).extra.ctxPack.diagnosisFollowupSourcePhrase =
-            diagnosisFollowupSourcePhrase;
+          (baseMetaForTurn as any).extra.lastClarificationContext =
+            diagnosisPhraseDetailContext;
+          (baseMetaForTurn as any).extra.ctxPack.lastClarificationContext =
+            diagnosisPhraseDetailContext;
+
 
           preSeedAssistResult = {
             ...preSeedAssistResult,
@@ -1151,6 +1204,159 @@ export async function buildTurnContext(
             reason:
               String(preSeedAssistResult.reason ?? '') +
               '; diagnosis_followup_phrase_detail_direct_reply',
+          };
+        }
+      }
+
+      const diagnosisFollowupReasonDetailRequested =
+        /なぜ|どうして|なんで|理由|原因|なぜそうなる|どういう理由/u.test(followupSourceText);
+
+      if (
+        diagnosisFollowupReasonDetailRequested &&
+        !preSeedAssistResult.shouldBypassWriter &&
+        lastIrDiagnosisResolved
+      ) {
+        const diagnosisFollowupSourceText = String(
+          (lastIrDiagnosisResolved as any)?.summary ??
+            (lastIrDiagnosisResolved as any)?.diagnosisText ??
+            (lastIrDiagnosisResolved as any)?.diagnosis_text ??
+            (lastIrDiagnosisResolved as any)?.text ??
+            (lastIrDiagnosisResolved as any)?.assistantText ??
+            (lastIrDiagnosisResolved as any)?.observation ??
+            (lastIrDiagnosisResolved as any)?.state ??
+            ''
+        ).trim();
+
+        if (diagnosisFollowupSourceText) {
+          const normalizedDiagnosisText = diagnosisFollowupSourceText
+            .replace(/\s+/g, ' ')
+            .trim();
+
+          const diagnosisSentences = normalizedDiagnosisText
+            .split(/[。！？]/u)
+            .map((x) => x.trim())
+            .filter(Boolean);
+
+          const previousClarificationContext: any =
+            (baseMetaForTurn as any).extra?.ctxPack?.lastClarificationContext ??
+            (baseMetaForTurn as any).extra?.lastClarificationContext ??
+            null;
+
+          const reasonTargetRaw = String(followupSourceText)
+            .replace(/^[\s「『]*(なぜ|どうして|なんで)[、,\s]*/u, '')
+            .replace(/(のですか|なのですか|ですか|でしょうか|なの|です|[？?。])$/u, '')
+            .trim();
+
+          const previousSourcePhrase = String(
+            previousClarificationContext?.relatedPhrase ??
+              previousClarificationContext?.sourcePhrase ??
+              ''
+          ).trim();
+
+          const reasonTargetPhrase =
+            reasonTargetRaw && !/^(その理由|理由|原因|なぜ|どうして|なんで)$/u.test(reasonTargetRaw)
+              ? reasonTargetRaw
+              : previousSourcePhrase || followupSourceText;
+
+          const reasonKeywordMatches = Array.from(
+            reasonTargetPhrase.matchAll(
+              /関係を広げる|手が止まり|手が止まる|連絡|約束|温度|具体的な段取り|形にする|一緒に|楽しめる|動きにくい|閉じたまま|広げる|確かめたい/gu
+            )
+          ).map((m) => m[0]);
+
+          const reasonKeywords = Array.from(
+            new Set([reasonTargetPhrase, ...reasonKeywordMatches].filter((x) => String(x).trim().length >= 2))
+          );
+
+          const reasonSentence =
+            diagnosisSentences.find((x) => reasonKeywords.some((k) => x.includes(k))) ??
+            diagnosisSentences.find((x) => /ポイント|現状|意識の向かう先/u.test(x)) ??
+            diagnosisSentences[0] ??
+            '';
+
+          const supportSentence =
+            diagnosisSentences.find(
+              (x) =>
+                x !== reasonSentence &&
+                /意識の向かう先|まず|二人|実際|どこまで|整えて|確かめたい|具体的な段取り|温度|連絡|約束|関係を広げる/u.test(x)
+            ) ??
+            diagnosisSentences.find((x) => x !== reasonSentence) ??
+            '';
+
+          const isRelationReason = /関係|連絡|約束|相手|二人|広げる|温度|みゆ/u.test(
+            reasonTargetPhrase + normalizedDiagnosisText
+          );
+
+          const openingLine = isRelationReason
+            ? `「${reasonTargetPhrase}」理由は、${String(resolvedDiagnosisTargetLabel ?? '相手')}側が関係そのものを大きく進める前に、まず二人の間で実際に何ができるかを確かめたい段階に見えるからです。`
+            : `「${reasonTargetPhrase}」理由は、前回診断の中で、その部分が単独の反応ではなく、現状・ポイント・向かう先の流れとしてつながって出ているからです。`;
+
+          const reasonLine = reasonSentence
+            ? `診断本文では、「${reasonSentence}。」という内容が根拠になります。`
+            : '前回診断本文の流れをもとに見ると、そこは理由を説明できる部分です。';
+
+          const supportLine = supportSentence
+            ? `さらに、「${supportSentence}。」という内容ともつながっています。`
+            : '';
+
+          const closingLine = isRelationReason
+            ? 'つまり、気持ちがないというより、関係の意味を大きく広げる前に、現実の動きとして安心できる形を先に確認したい、という読み方です。'
+            : 'つまり、表面の一言だけではなく、その前後にある流れまで含めて見る必要がある、ということです。';
+
+          const actionLine = isRelationReason
+            ? 'なので今は、関係の意味を確認するより、一緒にできる具体的な一手を軽く出すほうが合います。'
+            : 'なので今は、結論を急ぐより、その状態がどこから出ているのかを分けて見るほうが合います。';
+
+          const diagnosisFollowupReasonDetailDirectReply = [
+            openingLine,
+            '',
+            reasonLine,
+            '',
+            supportLine,
+            supportLine ? '' : null,
+            closingLine,
+            '',
+            actionLine,
+          ]
+            .filter((x): x is string => typeof x === 'string' && x.length > 0)
+            .join('\n');
+
+          const diagnosisReasonDetailContext = {
+            kind: 'diagnosis_reason_detail',
+            targetLabel: String(resolvedDiagnosisTargetLabel ?? ''),
+            sourcePhrase: reasonTargetPhrase,
+            relatedPhrase: previousSourcePhrase || null,
+            diagnosisId:
+              typeof (lastIrDiagnosisResolved as any)?.id === 'number'
+                ? (lastIrDiagnosisResolved as any).id
+                : null,
+            sourceTextHead: diagnosisFollowupSourceText.slice(0, 240),
+            createdAt: new Date().toISOString(),
+          };
+
+          (baseMetaForTurn as any).extra.diagnosisFollowupOutputMode =
+            'reason_detail_direct';
+          (baseMetaForTurn as any).extra.ctxPack.diagnosisFollowupOutputMode =
+            'reason_detail_direct';
+          (baseMetaForTurn as any).extra.lastClarificationContext =
+            diagnosisReasonDetailContext;
+          (baseMetaForTurn as any).extra.ctxPack.lastClarificationContext =
+            diagnosisReasonDetailContext;
+
+          preSeedAssistResult = {
+            ...preSeedAssistResult,
+            kind: 'diagnosis_followup',
+            directReply: diagnosisFollowupReasonDetailDirectReply,
+            shouldBypassWriter: true,
+            seedText: [
+              'PRE_SEED_DIAGNOSIS_FOLLOWUP_REASON_DETAIL_DIRECT:',
+              'targetLabel=' + String(resolvedDiagnosisTargetLabel ?? ''),
+              'sourcePhrase=' + reasonTargetPhrase,
+              'rule=診断フォローの理由説明なので、Writerへ流さず directReply で返す。',
+            ].join('\n'),
+            reason:
+              String(preSeedAssistResult.reason ?? '') +
+              '; diagnosis_followup_reason_detail_direct_reply',
           };
         }
       }
@@ -1199,9 +1405,19 @@ export async function buildTurnContext(
       (baseMetaForTurn as any).extra.ctxPack.preSeedAssistShouldBypassWriter =
         preSeedAssistResult.shouldBypassWriter;
 
-      if (preSeedAssistResult.seedText) {
-        (baseMetaForTurn as any).extra.memoryPreSeedText = preSeedAssistResult.seedText;
-        (baseMetaForTurn as any).extra.ctxPack.memoryPreSeedText = preSeedAssistResult.seedText;
+      const preSeedAssistSeedTextForMemory = String(preSeedAssistResult.seedText ?? '').trim();
+      const shouldPersistPreSeedAssistSeedText =
+        Boolean(preSeedAssistSeedTextForMemory) &&
+        !(preSeedAssistResult.directReply && preSeedAssistResult.shouldBypassWriter) &&
+        !preSeedAssistSeedTextForMemory.startsWith('DIAGNOSIS_FOLLOWUP_ANALYSIS_SEED:') &&
+        !preSeedAssistSeedTextForMemory.startsWith('PRE_SEED_DIAGNOSIS_FOLLOWUP_PHRASE_DETAIL_DIRECT:');
+
+      if (shouldPersistPreSeedAssistSeedText) {
+        (baseMetaForTurn as any).extra.memoryPreSeedText = preSeedAssistSeedTextForMemory;
+        (baseMetaForTurn as any).extra.ctxPack.memoryPreSeedText = preSeedAssistSeedTextForMemory;
+      } else if (preSeedAssistSeedTextForMemory) {
+        delete (baseMetaForTurn as any).extra.memoryPreSeedText;
+        delete (baseMetaForTurn as any).extra.ctxPack.memoryPreSeedText;
       }
 
       if (preSeedAssistResult.directReply && preSeedAssistResult.shouldBypassWriter) {
