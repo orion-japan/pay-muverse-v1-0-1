@@ -59,9 +59,22 @@ function cleanTargetLabel(value: unknown): string | null {
     .replace(/(について|に関して)$/u, '')
     .trim();
 
-  return cleaned.length > 0 ? cleaned : null;
-}
+  if (!cleaned) return null;
 
+  const compact = cleaned.replace(/[\s　]+/g, '');
+
+  // 「この前の診断」「前回の診断」などの時間参照は、
+  // 診断対象者名ではないため targetLabel として採用しない。
+  if (
+    /^(この前|このまえ|前回|以前|さっき|さっきの|前|前の|今回|今|今の|この|その|あの|これ|それ|あれ|診断|診断内容|診断結果|状況|状態|内容)$/u.test(
+      compact
+    )
+  ) {
+    return null;
+  }
+
+  return cleaned;
+}
 function isDeicticRelationshipTarget(value: unknown): boolean {
   const s = String(value ?? '')
     .replace(/[\s　]+/g, '')
