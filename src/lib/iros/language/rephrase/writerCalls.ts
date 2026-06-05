@@ -1244,14 +1244,53 @@ const mirrorFlowV1ForSeed: any =
               ? `この先は「${flowNextMeaning}」が開きやすい`
               : '(bridge_unknown)';
               console.log('[IROS/TRANSITION_SKELETON_FORCE_CHECK]', true);
+              const offerContinuityControlForSkeleton =
+                (ctxPack as any)?.offerContinuityControl ??
+                (args as any)?.offerContinuityControl ??
+                (args as any)?.userContext?.ctxPack?.offerContinuityControl ??
+                (extra as any)?.offerContinuityControl ??
+                null;
+
+              const offerContinuitySelectedActionFromControlForSkeleton =
+                offerContinuityControlForSkeleton &&
+                typeof offerContinuityControlForSkeleton === 'object' &&
+                String((offerContinuityControlForSkeleton as any).status ?? '').trim() === 'FOUND' &&
+                String((offerContinuityControlForSkeleton as any).selectedAction ?? '').trim()
+                  ? cleanMeaningLine(String((offerContinuityControlForSkeleton as any).selectedAction ?? '').trim())
+                  : '';
+
+              const offerContinuitySelectedActionFromSeedForSkeleton = (() => {
+                const seed = String(memorySeedTextForWriter ?? '');
+                if (!seed.includes('OFFER_CONTINUITY_CONTROL:')) return '';
+
+                const match = seed.match(/(?:^|\n)selectedAction=([^\n]+)/);
+                return cleanMeaningLine(String(match?.[1] ?? '').trim());
+              })();
+
+              const offerContinuitySelectedActionForSkeleton =
+                offerContinuitySelectedActionFromControlForSkeleton ||
+                offerContinuitySelectedActionFromSeedForSkeleton ||
+                '';
+
+              const skeletonGoalKind =
+                offerContinuitySelectedActionForSkeleton ? 'action' : earlyGoalKind;
+
+              if (offerContinuitySelectedActionForSkeleton) {
+                console.log('[IROS/OFFER][SKELETON_SOURCE_OVERRIDE]', {
+                  selectedLabel: String((offerContinuityControlForSkeleton as any)?.selectedLabel ?? '').trim(),
+                  selectedActionHead: offerContinuitySelectedActionForSkeleton.slice(0, 160),
+                });
+              }
               // =============================================
               // 🧠 MeaningSkeleton 生成（seed正本）
               // =============================================
               const canonicalSeed = buildSeedCanonical({
+                meaning: offerContinuitySelectedActionForSkeleton || null,
                 meaningSkeleton: {
                   transitionMeaning:
                     cleanMeaningLine(
                       pick(
+                        offerContinuitySelectedActionForSkeleton,
                         (ctxPack as any)?.seed?.meaning,
                         (ctxPack as any)?.seed?.transitionMeaning,
                         '',
@@ -1260,6 +1299,7 @@ const mirrorFlowV1ForSeed: any =
                     focus:
                     cleanMeaningLine(
                       pick(
+                        offerContinuitySelectedActionForSkeleton,
                         (ctxPack as any)?.seed?.focus,
                         latestUserText,
                         '',
@@ -1267,7 +1307,7 @@ const mirrorFlowV1ForSeed: any =
                     ) || null,
                     oneLineConstraint:
                     (() => {
-                      if (earlyGoalKind === 'resonate') {
+                      if (skeletonGoalKind === 'resonate') {
                         return '1核心 / 意味展開しない / 定義化しない / 背景構造化しない / 理由化しない / 輪郭だけ返す / 質問しない';
                       }
 
@@ -1293,6 +1333,7 @@ const mirrorFlowV1ForSeed: any =
                 userCore:
                   cleanMeaningLine(
                     pick(
+                      offerContinuitySelectedActionForSkeleton,
                       (ctxPack as any)?.seed?.focus,
                       latestUserText,
                       '',
@@ -1316,7 +1357,7 @@ const mirrorFlowV1ForSeed: any =
                   flowFrom: String((args as any)?.flow180?.from ?? '').trim() || null,
                   flowTo: String((args as any)?.flow180?.to ?? '').trim() || null,
                   writeConstraints:
-                    earlyGoalKind === 'resonate'
+                    skeletonGoalKind === 'resonate'
                       ? [
                           '1核心',
                           '意味展開しない',

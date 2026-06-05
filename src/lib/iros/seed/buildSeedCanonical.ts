@@ -1,4 +1,4 @@
-﻿// src/lib/iros/seed/buildSeedCanonical.ts
+// src/lib/iros/seed/buildSeedCanonical.ts
 
 export type SeedTone = 'soft' | 'normal' | 'assertive';
 export type SeedDepth = 'shallow' | 'normal' | 'deep';
@@ -510,6 +510,7 @@ function buildSeedText(seed: Omit<SeedCanonical, 'text'>): string {
 
 export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
   const baseMeaning = buildMeaning(input);
+  const hasExplicitMeaning = clean(input.meaning) != null;
   const focus = buildFocus(input);
   const tone = mapTone(clean(input.tone), clean(input.goalKind));
   const depth = mapDepth(clean(input.depthStage));
@@ -578,7 +579,7 @@ export function buildSeedCanonical(input: SeedCanonicalInput): SeedCanonical {
       ? userCore.split(/でも|けど|しかし/).pop()?.trim() ?? ''
       : '';
 
-      const meaning = hasDeepCStructure
+      const meaning = !hasExplicitMeaning && hasDeepCStructure
       ? (() => {
           const b =
             pickB ||

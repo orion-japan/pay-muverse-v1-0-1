@@ -1,4 +1,4 @@
-﻿// file: src/lib/iros/server/handleIrosReply.ts
+// file: src/lib/iros/server/handleIrosReply.ts
 // iros — handleIrosReply (V2 / single-writer friendly)
 //
 // ✅ 方針（ここを徹底）
@@ -33,6 +33,7 @@ import {
   formatReferenceJudgeSeed,
 } from '@/lib/iros/judge/referenceJudge';
 import { resolveWorkingReference } from '@/lib/iros/memory/workingReferenceResolver';
+import { resolvePendingOfferFromUserText } from '@/lib/iros/memory/continuityOffer.extractor';
 import { buildBlockPlanWithDiag } from '@/lib/iros/blockPlan/blockPlanEngine';
 import { extractSlotsForRephrase, rephraseSlotsFinal } from '@/lib/iros/language/rephraseEngine';
 import {
@@ -3379,6 +3380,114 @@ function normForRecall(v: any): string {
               }
             }
 
+            // MEANING_CARRY_FROM_PENDING_OFFER
+            // 直前assistantの選択肢に対する「前者で」「後者で」「それで」などを、
+            // userText単体ではなく、直前提案の意味へ戻してからWriterへ渡す。
+            if (!isCategoryOnlyConsultation) {
+              const currentTextForMeaningCarry = String(text ?? '').trim();
+              const userIsStructureDesignRequestForMeaningCarry =
+                /(今の話|この話|構造|設計|実装|seed|シード|回路|接続|直結|意味に入|意味を作る|内面の説明ではなく|使える形|動く形|TCF|SRI)/u.test(
+                  currentTextForMeaningCarry,
+                );
+
+              const pendingOfferForMeaningCarry =
+                preOrchCtxPack.pendingOffer &&
+                typeof preOrchCtxPack.pendingOffer === 'object' &&
+                Array.isArray(preOrchCtxPack.pendingOffer.options)
+                  ? preOrchCtxPack.pendingOffer
+                  : histCtx?.pendingOffer &&
+                      typeof histCtx.pendingOffer === 'object' &&
+                      Array.isArray(histCtx.pendingOffer.options)
+                    ? histCtx.pendingOffer
+                    : (extraLocal as any)?.ctxPack?.pendingOffer &&
+                        typeof (extraLocal as any).ctxPack.pendingOffer === 'object' &&
+                        Array.isArray((extraLocal as any).ctxPack.pendingOffer.options)
+                      ? (extraLocal as any).ctxPack.pendingOffer
+                      : null;
+
+              if (!preOrchCtxPack.pendingOffer && pendingOfferForMeaningCarry) {
+                preOrchCtxPack.pendingOffer = pendingOfferForMeaningCarry;
+              }
+
+              const resolvedOfferForMeaningCarry = resolvePendingOfferFromUserText({
+                userText: currentTextForMeaningCarry,
+                pendingOffer: pendingOfferForMeaningCarry,
+              });
+
+              console.log('[IROS/OFFER][MEANING_CARRY_CHECK]', {
+                hasPendingOffer: Boolean(pendingOfferForMeaningCarry),
+                status: resolvedOfferForMeaningCarry.status,
+                selected: resolvedOfferForMeaningCarry.selected,
+                matchedBy: resolvedOfferForMeaningCarry.source.matchedBy,
+                confidence: resolvedOfferForMeaningCarry.source.confidence,
+                actionHead: String(resolvedOfferForMeaningCarry.action ?? '').slice(0, 120),
+              });
+
+              if (
+                !userIsStructureDesignRequestForMeaningCarry &&
+                resolvedOfferForMeaningCarry.status === 'resolved' &&
+                resolvedOfferForMeaningCarry.action
+              ) {
+                const selectedActionForMeaningCarry = String(
+                  resolvedOfferForMeaningCarry.action ?? '',
+                ).trim();
+
+                const resolvedAskForMeaningCarry = {
+                  askType: 'offer_followup',
+                  topic: selectedActionForMeaningCarry,
+                  askFrame: selectedActionForMeaningCarry,
+                  currentQuestion: currentTextForMeaningCarry,
+                  referenceTarget: selectedActionForMeaningCarry,
+                  mainSubject:
+                    resolvedOfferForMeaningCarry.targetLabel ??
+                    resolvedOfferForMeaningCarry.selected.label ??
+                    '直前提案',
+                  sourceUserText: currentTextForMeaningCarry,
+                  selectedLabel: resolvedOfferForMeaningCarry.selected.label,
+                  selectedType: resolvedOfferForMeaningCarry.selected.type,
+                  offerId: resolvedOfferForMeaningCarry.offerId,
+                };
+
+                preOrchCtxPack.resolvedAsk = resolvedAskForMeaningCarry;
+                preOrchCtxPack.resolvedAskType = 'offer_followup';
+                preOrchCtxPack.resolvedOffer = resolvedOfferForMeaningCarry;
+                preOrchCtxPack.continuityKind = 'offer_followup';
+                preOrchCtxPack.goalKind = 'action';
+                preOrchCtxPack.targetKind = 'action';
+                preOrchCtxPack.replyGoal = { kind: 'action' };
+                preOrchCtxPack.question = null;
+                preOrchCtxPack.conversationLine = selectedActionForMeaningCarry;
+                preOrchCtxPack.situationSummary = selectedActionForMeaningCarry;
+                preOrchCtxPack.situationTopic =
+                  resolvedOfferForMeaningCarry.targetLabel
+                    ? resolvedOfferForMeaningCarry.targetLabel + 'に関する直前提案の実行'
+                    : '直前提案の実行';
+
+                (extraLocal as any).resolvedAsk = resolvedAskForMeaningCarry;
+                (extraLocal as any).ctxPack ??= {};
+                (extraLocal as any).ctxPack.resolvedAsk = resolvedAskForMeaningCarry;
+                (extraLocal as any).ctxPack.resolvedAskType = 'offer_followup';
+                (extraLocal as any).ctxPack.resolvedOffer = resolvedOfferForMeaningCarry;
+                (extraLocal as any).ctxPack.continuityKind = 'offer_followup';
+                (extraLocal as any).ctxPack.goalKind = 'action';
+                (extraLocal as any).ctxPack.targetKind = 'action';
+                (extraLocal as any).ctxPack.replyGoal = { kind: 'action' };
+                (extraLocal as any).ctxPack.question = null;
+                (extraLocal as any).ctxPack.conversationLine = selectedActionForMeaningCarry;
+                (extraLocal as any).ctxPack.situationSummary = selectedActionForMeaningCarry;
+                (extraLocal as any).ctxPack.situationTopic = preOrchCtxPack.situationTopic;
+
+                console.log('[IROS/OFFER][MEANING_CARRY_RESOLVED]', {
+                  offerId: resolvedOfferForMeaningCarry.offerId,
+                  selected: resolvedOfferForMeaningCarry.selected,
+                  actionHead: selectedActionForMeaningCarry.slice(0, 160),
+                  targetLabel: resolvedOfferForMeaningCarry.targetLabel,
+                  domain: resolvedOfferForMeaningCarry.domain,
+                  continuityKind: preOrchCtxPack.continuityKind,
+                });
+              }
+            }
+
 
             if (
               !isCategoryOnlyConsultation &&
@@ -6326,6 +6435,20 @@ const restoreCtxPackFromHistory = (historyForTurn: any[]): any | null => {
           String((ctx as any).memorySeedKind).trim()
             ? String((ctx as any).memorySeedKind).trim()
             : null,
+        pendingOffer:
+          (ctx as any).pendingOffer &&
+          typeof (ctx as any).pendingOffer === 'object' &&
+          Array.isArray((ctx as any).pendingOffer.options)
+            ? {
+                ...(ctx as any).pendingOffer,
+                guard: {
+                  ...(((ctx as any).pendingOffer as any).guard ?? {}),
+                  currentTurnOnly: true,
+                  allowLongTermSave: false,
+                  allowPastStateMerge: false,
+                },
+              }
+            : null,
     };
 
     if (
@@ -6347,6 +6470,7 @@ const restoreCtxPackFromHistory = (historyForTurn: any[]): any | null => {
         restored.memorySeedText ||
         restored.memorySeedResult ||
         restored.memorySeedKind ||
+        restored.pendingOffer ||
       restoredDepthHistoryLite.length > 0
     ) {
       return restored;
@@ -6363,6 +6487,152 @@ if (restored) {
     ...restored,
     ...(extra2.ctxPack as any),
   };
+}
+
+// POST_RESTORE_MEANING_CARRY_FROM_PENDING_OFFER
+// restoreCtxPackFromHistory 後に見える pendingOffer を、Writer前の正本ctxPackへ戻す。
+try {
+  const cpForOfferContinuity: any = ((extra2 as any).ctxPack ??= {});
+  const currentTextForOfferContinuity = String(text ?? '').trim();
+
+  const userIsStructureDesignRequestForOfferContinuity =
+    /(今の話|この話|構造|設計|実装|seed|シード|回路|接続|直結|意味に入|意味を作る|内面の説明ではなく|使える形|動く形|TCF|SRI)/u.test(
+      currentTextForOfferContinuity,
+    );
+
+  const pendingOfferForOfferContinuity =
+    cpForOfferContinuity.pendingOffer &&
+    typeof cpForOfferContinuity.pendingOffer === 'object' &&
+    Array.isArray(cpForOfferContinuity.pendingOffer.options)
+      ? cpForOfferContinuity.pendingOffer
+      : null;
+
+  const resolvedOfferForOfferContinuity = resolvePendingOfferFromUserText({
+    userText: currentTextForOfferContinuity,
+    pendingOffer: pendingOfferForOfferContinuity,
+  });
+
+  console.log('[IROS/OFFER][POST_RESTORE_MEANING_CARRY_CHECK]', {
+    hasPendingOffer: Boolean(pendingOfferForOfferContinuity),
+    status: resolvedOfferForOfferContinuity.status,
+    selected: resolvedOfferForOfferContinuity.selected,
+    matchedBy: resolvedOfferForOfferContinuity.source.matchedBy,
+    confidence: resolvedOfferForOfferContinuity.source.confidence,
+    actionHead: String(resolvedOfferForOfferContinuity.action ?? '').slice(0, 120),
+  });
+
+  if (
+    !userIsStructureDesignRequestForOfferContinuity &&
+    resolvedOfferForOfferContinuity.status === 'resolved' &&
+    resolvedOfferForOfferContinuity.action
+  ) {
+    const selectedActionForOfferContinuity = String(
+      resolvedOfferForOfferContinuity.action ?? '',
+    ).trim();
+
+    const offerContinuityControl = {
+      status: 'FOUND',
+      continuityKind: 'offer_followup',
+      selectedLabel: resolvedOfferForOfferContinuity.selected.label,
+      selectedAction: selectedActionForOfferContinuity,
+      targetLabel: resolvedOfferForOfferContinuity.targetLabel,
+      targetKey: resolvedOfferForOfferContinuity.targetKey,
+      domain: resolvedOfferForOfferContinuity.domain,
+      source: 'pendingOffer',
+      rule: 'USER_TEXTは材料。Writerは前者/後者を推測せず、selectedActionを正本として返答する。',
+    };
+
+    const offerContinuitySeedText = [
+      'OFFER_CONTINUITY_CONTROL:',
+      'status=FOUND',
+      'continuityKind=offer_followup',
+      'selectedLabel=' + String(resolvedOfferForOfferContinuity.selected.label ?? ''),
+      'selectedAction=' + selectedActionForOfferContinuity,
+      'targetLabel=' + String(resolvedOfferForOfferContinuity.targetLabel ?? ''),
+      'rule=USER_TEXTは材料。Writerは前者/後者を推測せず、selectedActionを正本として返答する。',
+    ].join('\n');
+
+    const resolvedAskForOfferContinuity = {
+      askType: 'offer_followup',
+      topic: selectedActionForOfferContinuity,
+      askFrame: selectedActionForOfferContinuity,
+      currentQuestion: currentTextForOfferContinuity,
+      referenceTarget: selectedActionForOfferContinuity,
+      mainSubject:
+        resolvedOfferForOfferContinuity.targetLabel ??
+        resolvedOfferForOfferContinuity.selected.label ??
+        '直前提案',
+      sourceUserText: currentTextForOfferContinuity,
+      selectedLabel: resolvedOfferForOfferContinuity.selected.label,
+      selectedType: resolvedOfferForOfferContinuity.selected.type,
+      offerId: resolvedOfferForOfferContinuity.offerId,
+    };
+
+    cpForOfferContinuity.resolvedAsk = resolvedAskForOfferContinuity;
+    cpForOfferContinuity.resolvedAskType = 'offer_followup';
+    cpForOfferContinuity.resolvedOffer = resolvedOfferForOfferContinuity;
+    cpForOfferContinuity.offerContinuityControl = offerContinuityControl;
+    cpForOfferContinuity.offerContinuitySeedText = offerContinuitySeedText;
+    cpForOfferContinuity.continuityKind = 'offer_followup';
+    cpForOfferContinuity.goalKind = 'action';
+    cpForOfferContinuity.targetKind = 'action';
+    cpForOfferContinuity.replyGoal = { kind: 'action' };
+    cpForOfferContinuity.question = null;
+    cpForOfferContinuity.conversationLine = selectedActionForOfferContinuity;
+    cpForOfferContinuity.situationSummary = selectedActionForOfferContinuity;
+    cpForOfferContinuity.situationTopic =
+      resolvedOfferForOfferContinuity.targetLabel
+        ? resolvedOfferForOfferContinuity.targetLabel + 'に関する直前提案の実行'
+        : '直前提案の実行';
+
+    if (typeof cpForOfferContinuity.memorySeedText !== 'string' || !cpForOfferContinuity.memorySeedText.trim()) {
+      cpForOfferContinuity.memorySeedText = offerContinuitySeedText;
+    }
+
+    (extra2 as any).resolvedAsk = resolvedAskForOfferContinuity;
+    (extra2 as any).offerContinuityControl = offerContinuityControl;
+    (extra2 as any).offerContinuitySeedText = offerContinuitySeedText;
+
+    (out as any).metaForSave = (out as any).metaForSave ?? {};
+    (out as any).metaForSave.extra = (out as any).metaForSave.extra ?? {};
+    (out as any).metaForSave.extra.ctxPack =
+      (out as any).metaForSave.extra.ctxPack &&
+      typeof (out as any).metaForSave.extra.ctxPack === 'object'
+        ? (out as any).metaForSave.extra.ctxPack
+        : {};
+
+    (out as any).metaForSave.extra.resolvedAsk = resolvedAskForOfferContinuity;
+    (out as any).metaForSave.extra.offerContinuityControl = offerContinuityControl;
+    (out as any).metaForSave.extra.offerContinuitySeedText = offerContinuitySeedText;
+    (out as any).metaForSave.extra.ctxPack = {
+      ...(out as any).metaForSave.extra.ctxPack,
+      ...cpForOfferContinuity,
+      resolvedAsk: resolvedAskForOfferContinuity,
+      resolvedAskType: 'offer_followup',
+      resolvedOffer: resolvedOfferForOfferContinuity,
+      offerContinuityControl,
+      offerContinuitySeedText,
+      continuityKind: 'offer_followup',
+      goalKind: 'action',
+      targetKind: 'action',
+      replyGoal: { kind: 'action' },
+      question: null,
+      conversationLine: selectedActionForOfferContinuity,
+      situationSummary: selectedActionForOfferContinuity,
+      situationTopic: cpForOfferContinuity.situationTopic,
+    };
+
+    console.log('[IROS/OFFER][POST_RESTORE_MEANING_CARRY_RESOLVED]', {
+      offerId: resolvedOfferForOfferContinuity.offerId,
+      selected: resolvedOfferForOfferContinuity.selected,
+      actionHead: selectedActionForOfferContinuity.slice(0, 160),
+      targetLabel: resolvedOfferForOfferContinuity.targetLabel,
+      domain: resolvedOfferForOfferContinuity.domain,
+      continuityKind: cpForOfferContinuity.continuityKind,
+    });
+  }
+} catch (error) {
+  console.warn('[IROS/OFFER][POST_RESTORE_MEANING_CARRY_FAILED]', error);
 }
 // ===== Relationship Layer injection =====
 try {

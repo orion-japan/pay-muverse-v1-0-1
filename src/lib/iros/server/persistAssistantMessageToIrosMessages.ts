@@ -1,4 +1,4 @@
-﻿// src/lib/iros/server/persistAssistantMessageToIrosMessages.ts
+// src/lib/iros/server/persistAssistantMessageToIrosMessages.ts
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -519,6 +519,131 @@ if (ex.ctxPack && typeof ex.ctxPack === 'object') {
         nextCp.detailMode = true;
       }
 
+
+      // PERSIST_SHRINK_KEEP_PENDING_OFFER
+      // 次ターンで「前者で」「後者で」を直前提案の意味へ戻すため、短期Offerだけ最小保存する。
+      if (cp.pendingOffer && typeof cp.pendingOffer === 'object' && Array.isArray(cp.pendingOffer.options)) {
+        const po: any = cp.pendingOffer;
+        const nextPo: any = {};
+
+        if (typeof po.offerId === 'string' && po.offerId.trim()) {
+          nextPo.offerId = po.offerId.trim().slice(0, 120);
+        }
+
+        if (typeof po.kind === 'string' && po.kind.trim()) {
+          const kind = po.kind.trim();
+          if (kind === 'choice' || kind === 'suggestion' || kind === 'next_action' || kind === 'analysis_menu') {
+            nextPo.kind = kind;
+          }
+        }
+
+        if (typeof po.createdAt === 'string' && po.createdAt.trim()) {
+          nextPo.createdAt = po.createdAt.trim().slice(0, 40);
+        }
+
+        if (typeof po.expiresAfterTurns === 'number' && Number.isFinite(po.expiresAfterTurns)) {
+          nextPo.expiresAfterTurns = Math.max(1, Math.min(3, Math.floor(po.expiresAfterTurns)));
+        } else {
+          nextPo.expiresAfterTurns = 1;
+        }
+
+        if (po.subject && typeof po.subject === 'object') {
+          const subject: any = {};
+
+          if (typeof po.subject.label === 'string' && po.subject.label.trim()) {
+            subject.label = po.subject.label.trim().slice(0, 80);
+          } else {
+            subject.label = null;
+          }
+
+          if (typeof po.subject.targetKey === 'string' && po.subject.targetKey.trim()) {
+            subject.targetKey = po.subject.targetKey.trim().slice(0, 120);
+          } else {
+            subject.targetKey = null;
+          }
+
+          if (typeof po.subject.domain === 'string' && po.subject.domain.trim()) {
+            subject.domain = po.subject.domain.trim().slice(0, 40);
+          } else {
+            subject.domain = 'unknown';
+          }
+
+          nextPo.subject = subject;
+        }
+
+        if (po.source && typeof po.source === 'object') {
+          nextPo.source = {
+            assistantMessageId:
+              typeof po.source.assistantMessageId === 'string' && po.source.assistantMessageId.trim()
+                ? po.source.assistantMessageId.trim().slice(0, 120)
+                : null,
+            assistantTextHead:
+              typeof po.source.assistantTextHead === 'string' && po.source.assistantTextHead.trim()
+                ? po.source.assistantTextHead.trim().slice(0, 240)
+                : null,
+          };
+        }
+
+        const options = po.options
+          .map((opt: any, index: number) => {
+            if (!opt || typeof opt !== 'object') return null;
+
+            const label = typeof opt.label === 'string' ? opt.label.trim().slice(0, 80) : '';
+            const action = typeof opt.action === 'string' ? opt.action.trim().slice(0, 360) : '';
+            const sourceText = typeof opt.sourceText === 'string' ? opt.sourceText.trim().slice(0, 360) : action;
+
+            if (!label || !action) return null;
+
+            return {
+              index: typeof opt.index === 'number' && Number.isFinite(opt.index) ? opt.index : index + 1,
+              label,
+              aliases: Array.isArray(opt.aliases)
+                ? opt.aliases.map((v: any) => String(v ?? '').trim()).filter(Boolean).slice(0, 8).map((v: string) => v.slice(0, 40))
+                : [],
+              action,
+              sourceText,
+              targetLabel:
+                typeof opt.targetLabel === 'string' && opt.targetLabel.trim()
+                  ? opt.targetLabel.trim().slice(0, 80)
+                  : null,
+              targetKey:
+                typeof opt.targetKey === 'string' && opt.targetKey.trim()
+                  ? opt.targetKey.trim().slice(0, 120)
+                  : null,
+              domain:
+                typeof opt.domain === 'string' && opt.domain.trim()
+                  ? opt.domain.trim().slice(0, 40)
+                  : nextPo.subject?.domain ?? 'unknown',
+              expectedUserPhrases: Array.isArray(opt.expectedUserPhrases)
+                ? opt.expectedUserPhrases.map((v: any) => String(v ?? '').trim()).filter(Boolean).slice(0, 8).map((v: string) => v.slice(0, 40))
+                : [],
+            };
+          })
+          .filter(Boolean)
+          .slice(0, 4);
+
+        if (options.length > 0) {
+          nextPo.options = options;
+        }
+
+        nextPo.acceptPhrases = Array.isArray(po.acceptPhrases)
+          ? po.acceptPhrases.map((v: any) => String(v ?? '').trim()).filter(Boolean).slice(0, 8).map((v: string) => v.slice(0, 40))
+          : [];
+
+        nextPo.guard = {
+          currentTurnOnly: true,
+          allowLongTermSave: false,
+          allowPastStateMerge: false,
+          confidence:
+            typeof po.guard?.confidence === 'number' && Number.isFinite(po.guard.confidence)
+              ? po.guard.confidence
+              : 0,
+        };
+
+        if (nextPo.offerId && nextPo.kind && nextPo.subject && Array.isArray(nextPo.options) && nextPo.options.length > 0) {
+          nextCp.pendingOffer = nextPo;
+        }
+      }
       // digest は軽く保ちながら、sameTopic 判定に必要な芯は残す
       const d = cp.historyDigestV1;
       if (d && typeof d === 'object') {

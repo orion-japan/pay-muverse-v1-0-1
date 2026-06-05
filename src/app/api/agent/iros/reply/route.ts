@@ -1,4 +1,4 @@
-﻿// src/app/api/agent/iros/reply/route.ts
+// src/app/api/agent/iros/reply/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +20,7 @@ import { attachNextStepMeta, extractNextStepChoiceFromText, findNextStepOptionBy
 import { ensureIrosConversationUuid } from '@/lib/iros/server/ensureIrosConversationUuid';
 import { persistAssistantMessageToIrosMessages } from '@/lib/iros/server/persistAssistantMessageToIrosMessages';
 import { saveIrDiagnosisResult } from '@/lib/iros/memory/saveIrDiagnosisResult';
+import { extractPendingOfferFromAssistantText } from '@/lib/iros/memory/continuityOffer.extractor';
 import { runNormalBase } from '@/lib/iros/conversation/normalBase';
 import { decideExpressionLane } from '@/lib/iros/expression/decideExpressionLane';
 import { normalizeIrosStyleFinal } from '@/lib/iros/language/normalizeIrosStyleFinal';
@@ -2506,6 +2507,39 @@ const persistAssistantAllowed =
             ...mfsForPersist.extra.ctxPack,
             ...resultCtxPack,
           };
+        }
+
+        // ✅ UI返却本文の正本 contentForPersist から pendingOffer を抽出して保存直前ctxPackへ乗せる
+        // - 「前者/後者」「お願いします」などを次ターンで userText 単体として深掘りしないための短期正本
+        // - Long Term Memory には保存しない。assistant保存meta.extra.ctxPack の current/short-lived 文脈として扱う
+        {
+          const finalForOffer = String(contentForPersist ?? '').trim();
+          const pendingOffer = finalForOffer
+            ? extractPendingOfferFromAssistantText({
+                assistantText: finalForOffer,
+                assistantMessageId: null,
+                nowIso: new Date().toISOString(),
+              })
+            : null;
+
+          if (pendingOffer) {
+            mfsForPersist.extra.ctxPack.pendingOffer = pendingOffer;
+
+            console.info('[IROS/OFFER][EXTRACT]', {
+              traceId: traceId ?? null,
+              conversationId: conversationId ?? null,
+              userCode: userCode ?? null,
+              hasPendingOffer: true,
+              offerId: pendingOffer.offerId,
+              kind: pendingOffer.kind,
+              optionCount: pendingOffer.options.length,
+              subjectLabel: pendingOffer.subject.label,
+              subjectTargetKey: pendingOffer.subject.targetKey,
+              subjectDomain: pendingOffer.subject.domain,
+              confidence: pendingOffer.guard.confidence,
+              source: 'contentForPersist',
+            });
+          }
         }
 
         console.log('[IROS/ROUTE_FINAL_MEMORY_CTXPACK_MERGE_BEFORE_PERSIST]', {

@@ -12,6 +12,7 @@ import { resolveWorkingReference } from '@/lib/iros/memory/workingReferenceResol
 import { guardIrosMemoryDecision } from '@/lib/iros/memory/memoryGuard';
 import { buildMemorySeed } from '@/lib/iros/memory/memorySeedBuilder';
 import { runPreSeedAssist } from '@/lib/iros/memory/preSeedAssist';
+import { resolvePendingOfferFromUserText } from '@/lib/iros/memory/continuityOffer.extractor';
 import { buildDiagnosisActiveContextFrame } from '@/lib/iros/anchor/activeContextAnchor';
 
 // ✅ FramePlan（器＋スロット）(Layer C/D)
@@ -1753,7 +1754,100 @@ export async function buildTurnContext(
         currentTextForPriorOffer,
       );
 
+    let hasResolvedPendingOfferFollowup = false;
+
+    const pendingOfferForPriorOffer = (() => {
+      const direct =
+        (baseMetaForTurn as any)?.extra?.ctxPack?.pendingOffer ??
+        (baseMetaForTurn as any)?.extra?.pendingOffer ??
+        null;
+
+      if (direct && typeof direct === 'object') return direct;
+
+      if (!Array.isArray(historyForPriorOffer)) return null;
+
+      const found = [...historyForPriorOffer]
+        .reverse()
+        .find((turn: any) => {
+          if (String(turn?.role ?? '').toLowerCase().trim() !== 'assistant') return false;
+
+          const pendingOffer =
+            turn?.meta?.extra?.ctxPack?.pendingOffer ??
+            turn?.meta?.ctxPack?.pendingOffer ??
+            turn?.ctxPack?.pendingOffer ??
+            null;
+
+          return (
+            pendingOffer &&
+            typeof pendingOffer === 'object' &&
+            Array.isArray(pendingOffer.options)
+          );
+        });
+
+      return (
+        (found as any)?.meta?.extra?.ctxPack?.pendingOffer ??
+        (found as any)?.meta?.ctxPack?.pendingOffer ??
+        (found as any)?.ctxPack?.pendingOffer ??
+        null
+      );
+    })();
+
+    const resolvedOfferForPriorOffer = resolvePendingOfferFromUserText({
+      userText: currentTextForPriorOffer,
+      pendingOffer: pendingOfferForPriorOffer,
+    });
+
     if (
+      !userIsStructureDesignRequestForPriorOffer &&
+      resolvedOfferForPriorOffer.status === 'resolved' &&
+      resolvedOfferForPriorOffer.action
+    ) {
+      const resolvedAsk = {
+        askType: 'offer_followup',
+        topic: resolvedOfferForPriorOffer.action,
+        sourceUserText: currentTextForPriorOffer,
+        sourceAssistantText: lastAssistantForPriorOffer.slice(0, 220),
+        selectedLabel: resolvedOfferForPriorOffer.selected.label,
+        selectedType: resolvedOfferForPriorOffer.selected.type,
+        offerId: resolvedOfferForPriorOffer.offerId,
+      };
+
+      (baseMetaForTurn as any).extra ??= {};
+      (baseMetaForTurn as any).extra.ctxPack ??= {};
+
+      (baseMetaForTurn as any).extra.resolvedAsk = resolvedAsk;
+      (baseMetaForTurn as any).extra.ctxPack.resolvedAsk = resolvedAsk;
+      (baseMetaForTurn as any).extra.ctxPack.resolvedAskType = 'offer_followup';
+      (baseMetaForTurn as any).extra.ctxPack.resolvedOffer = resolvedOfferForPriorOffer;
+      (baseMetaForTurn as any).extra.ctxPack.goalKind = 'action';
+      (baseMetaForTurn as any).extra.ctxPack.replyGoal = { kind: 'action' };
+      (baseMetaForTurn as any).extra.ctxPack.continuityKind = 'offer_followup';
+      (baseMetaForTurn as any).extra.ctxPack.situationSummary =
+        resolvedOfferForPriorOffer.action.slice(0, 160);
+      (baseMetaForTurn as any).extra.ctxPack.situationTopic =
+        resolvedOfferForPriorOffer.targetLabel
+          ? resolvedOfferForPriorOffer.targetLabel + 'に関する直前提案の実行'
+          : '直前提案の実行';
+
+      hasResolvedPendingOfferFollowup = true;
+
+      console.log(
+        '[IROS/OFFER][RESOLVED]',
+        JSON.stringify({
+          status: resolvedOfferForPriorOffer.status,
+          offerId: resolvedOfferForPriorOffer.offerId,
+          selected: resolvedOfferForPriorOffer.selected,
+          actionHead: String(resolvedOfferForPriorOffer.action ?? '').slice(0, 120),
+          targetLabel: resolvedOfferForPriorOffer.targetLabel,
+          domain: resolvedOfferForPriorOffer.domain,
+          matchedBy: resolvedOfferForPriorOffer.source.matchedBy,
+          confidence: resolvedOfferForPriorOffer.source.confidence,
+        }),
+      );
+    }
+
+    if (
+      !hasResolvedPendingOfferFollowup &&
       !userIsStructureDesignRequestForPriorOffer &&
       assistantOfferedCompose &&
       (
