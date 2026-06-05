@@ -3482,6 +3482,11 @@ if (isIrDiagnosis) {
 
   const diagnosisFollowupSeedFromCtx = (() => {
     const candidates = [
+      (opts as any)?.meta?.extra?.ctxPack?.diagnosisFollowupAnalysisSeed,
+      (opts as any)?.meta?.extra?.diagnosisFollowupAnalysisSeed,
+      (opts as any)?.ctxPack?.diagnosisFollowupAnalysisSeed,
+      (opts as any)?.userContext?.ctxPack?.diagnosisFollowupAnalysisSeed,
+
       (opts as any)?.meta?.extra?.ctxPack?.lastIrDiagnosis?.summary,
       (opts as any)?.meta?.extra?.ctxPack?.lastIrDiagnosis?.diagnosisText,
       (opts as any)?.meta?.extra?.ctxPack?.lastIrDiagnosis?.text,
@@ -3551,6 +3556,7 @@ if (isIrDiagnosis) {
           '【診断フォロー回答必須】',
           'ユーザーは前回診断の中身を確認している。',
           '前回診断の内容を背景扱いで終わらせず、回答本文に必ず反映する。',
+          'DIAGNOSIS_FOLLOWUP_ANALYSIS_SEED がある場合は、task/not_task/answer_start を最優先し、診断全文を再掲しない。',
           '前回診断本文がある場合は、その本文から確認できる内容をそのまま回答に使う。',
           '前回診断本文がない場合は、「今は前回診断の中身を確認できません」と正直に答える。',
           '確認できない診断を、あるように言わない。確認できる診断を、ないように言わない。',

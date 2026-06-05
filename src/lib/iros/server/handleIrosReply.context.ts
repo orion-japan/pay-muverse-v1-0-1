@@ -592,7 +592,7 @@ export async function buildTurnContext(
     (baseMetaForTurn as any).extra.ctxPack.memoryRecallMode = memoryDecision.recallMode;
   }
   const isFollowupRequest =
-    /具体的に|具体化|わかりやすく|分かりやすく|つまり|どういうこと|それって|どうすれば|何をすれば|何から|どこから|どう扱えば|どう受け取れば|どう見れば|続き|続きを|診断の続き|言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|説明して|解説して|補足して|もう少し|もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|どんな内容|その内容|内容でした|内容を教えて|中身|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(
+    /詳しく|詳しく教えて|詳しく説明|部分|この部分|その部分|という部分|箇所|この箇所|その箇所|具体的に|具体化|わかりやすく|分かりやすく|つまり|どういうこと|それって|どうすれば|何をすれば|何から|どこから|どう扱えば|どう受け取れば|どう見れば|続き|続きを|診断の続き|言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|説明して|解説して|補足して|もう少し|もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|どんな内容|その内容|内容でした|内容を教えて|中身|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(
       followupSourceText
     );
 
@@ -827,7 +827,7 @@ export async function buildTurnContext(
         ? 'action'
         : /言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|わかりやすく|分かりやすく|つまり|どういうこと|説明して|解説して|補足して|どんなでしたっけ|どんなでしたか|何でしたっけ|診断の結果/.test(followupSourceText)
           ? 'rephrase'
-          : /もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(followupSourceText)
+          : /詳しく|詳しく教えて|詳しく説明|部分|この部分|その部分|という部分|箇所|この箇所|その箇所|もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(followupSourceText)
             ? 'deepen'
             : 'concretize';
 
@@ -967,15 +967,16 @@ export async function buildTurnContext(
         activeContextFrameForDiagnosis;
     }
 
+    const presentationKindForDiagnosisContext = isDiagnosisFollowup ? 'diagnosis_followup' : 'diagnosis';
     (baseMetaForTurn as any).targetLabel = resolvedDiagnosisTargetLabel;
-    (baseMetaForTurn as any).presentationKind = 'diagnosis';
+    (baseMetaForTurn as any).presentationKind = presentationKindForDiagnosisContext;
 
     (baseMetaForTurn as any).extra.isIrDiagnosisTurn = false;
-    (baseMetaForTurn as any).extra.presentationKind = 'diagnosis';
+    (baseMetaForTurn as any).extra.presentationKind = presentationKindForDiagnosisContext;
     (baseMetaForTurn as any).extra.targetLabel = resolvedDiagnosisTargetLabel;
     (baseMetaForTurn as any).extra.irMeta = normalizedIrMeta;
 
-    (baseMetaForTurn as any).extra.ctxPack.presentationKind = 'diagnosis';
+    (baseMetaForTurn as any).extra.ctxPack.presentationKind = presentationKindForDiagnosisContext;
     (baseMetaForTurn as any).extra.ctxPack.targetLabel = resolvedDiagnosisTargetLabel;
     (baseMetaForTurn as any).extra.ctxPack.irMeta = normalizedIrMeta;
     if (lastIrDiagnosisResolved) {
@@ -1062,6 +1063,97 @@ export async function buildTurnContext(
         conversationId,
         userCode,
       });
+
+      const diagnosisFollowupPhraseDetailRequested =
+        /詳しく|詳しく教えて|詳しく説明|部分|この部分|その部分|という部分|と言う部分|箇所|この箇所|その箇所/u.test(followupSourceText);
+
+      if (diagnosisFollowupPhraseDetailRequested && lastIrDiagnosisResolved) {
+        const diagnosisFollowupSourceText = String(
+          (lastIrDiagnosisResolved as any)?.summary ??
+            (lastIrDiagnosisResolved as any)?.diagnosisText ??
+            (lastIrDiagnosisResolved as any)?.diagnosis_text ??
+            (lastIrDiagnosisResolved as any)?.text ??
+            (lastIrDiagnosisResolved as any)?.assistantText ??
+            (lastIrDiagnosisResolved as any)?.observation ??
+            (lastIrDiagnosisResolved as any)?.state ??
+            ''
+        ).trim();
+
+        const phraseMatch = followupSourceText.match(
+          /(.+?)(?:と(?:い|言)う部分|という部分|の部分|という箇所|の箇所|を詳しく|について詳しく|を説明|を教えて)/u
+        );
+
+        const diagnosisFollowupSourcePhrase = String(phraseMatch?.[1] ?? '')
+          .replace(/^(この|その|前の|さっきの)/u, '')
+          .trim() || followupSourceText;
+
+        if (diagnosisFollowupSourceText) {
+          const normalizedDiagnosisText = diagnosisFollowupSourceText
+            .replace(/\s+/g, ' ')
+            .trim();
+
+          const diagnosisSentences = normalizedDiagnosisText
+            .split(/[。！？]/u)
+            .map((x) => x.trim())
+            .filter(Boolean);
+
+          const phraseSentence =
+            diagnosisSentences.find((x) => x.includes(diagnosisFollowupSourcePhrase)) ??
+            diagnosisSentences[0] ??
+            '';
+
+          const supportSentence =
+            diagnosisSentences.find((x) =>
+              /ポイント|関係を広げる|手が止まり|連絡|約束|温度|具体的な段取り/u.test(x)
+            ) ??
+            diagnosisSentences.find((x) => x !== phraseSentence) ??
+            '';
+
+          const phraseLine = phraseSentence
+            ? `診断本文では、「${phraseSentence}。」という文脈で出ています。`
+            : '前回診断本文の中で出ていた表現です。';
+
+          const supportLine = supportSentence
+            ? `補足すると、「${supportSentence}。」という内容ともつながっています。`
+            : '';
+
+          const diagnosisFollowupPhraseDetailDirectReply = [
+            `ここで言う「${diagnosisFollowupSourcePhrase}」は、その状態が完全に固定されたという意味ではありません。`,
+            '',
+            phraseLine,
+            '',
+            supportLine,
+            supportLine ? '' : null,
+            `つまり、${String(resolvedDiagnosisTargetLabel ?? '相手')}側の反応や具体的な動きが、まだ外へ出にくい状態を指しています。`,
+            '連絡・約束・関係を広げる話の温度が安定しにくく、動きたい気持ちはあっても、表に出る形がまだ揃いにくい、という意味です。',
+          ]
+            .filter((x): x is string => typeof x === 'string' && x.length > 0)
+            .join('\n');
+
+          (baseMetaForTurn as any).extra.diagnosisFollowupOutputMode =
+            'phrase_detail_direct';
+          (baseMetaForTurn as any).extra.ctxPack.diagnosisFollowupOutputMode =
+            'phrase_detail_direct';
+          (baseMetaForTurn as any).extra.ctxPack.diagnosisFollowupSourcePhrase =
+            diagnosisFollowupSourcePhrase;
+
+          preSeedAssistResult = {
+            ...preSeedAssistResult,
+            kind: 'diagnosis_followup',
+            directReply: diagnosisFollowupPhraseDetailDirectReply,
+            shouldBypassWriter: true,
+            seedText: [
+              'PRE_SEED_DIAGNOSIS_FOLLOWUP_PHRASE_DETAIL_DIRECT:',
+              'targetLabel=' + String(resolvedDiagnosisTargetLabel ?? ''),
+              'sourcePhrase=' + diagnosisFollowupSourcePhrase,
+              'rule=診断フォローの指定部分説明なので、Writerへ流さず directReply で返す。',
+            ].join('\n'),
+            reason:
+              String(preSeedAssistResult.reason ?? '') +
+              '; diagnosis_followup_phrase_detail_direct_reply',
+          };
+        }
+      }
 
       const isDiagnosisResultRecallRequest =
         /(診断の結果|診断結果|以前の診断|前回の診断|さっきの診断|前の診断).*(どんなでしたっけ|どんなでしたか|何でしたっけ|何でしたか|教えて|見せて|確認|再提示|もう一度)|(?:どんなでしたっけ|どんなでしたか|何でしたっけ|何でしたか).*(診断の結果|診断結果|以前の診断|前回の診断|さっきの診断|前の診断)/u.test(
