@@ -616,12 +616,12 @@ export async function buildTurnContext(
     try {
       const diagnosisInventory = await loadIrDiagnosisInventorySnapshot(supabase, userCode, 10);
 
-      const recentLines = diagnosisInventory.recent.map((item, index) => {
+      const recentLines = diagnosisInventory.recent.map((item) => {
+        const id = typeof item.id === 'number' ? String(item.id) : '不明';
         const target = item.targetLabel ? item.targetLabel : '対象未設定';
-        const depth = item.depthStage ? item.depthStage : '-';
         const created = item.createdAt ? item.createdAt.slice(0, 10) : '日付不明';
         const head = item.diagnosisTextHead ? item.diagnosisTextHead.replace(/\s+/g, ' ').slice(0, 72) : '本文なし';
-        return `${index + 1}. ${target} / ${depth} / ${created} / ${head}`;
+        return 'ID:' + id + ' / ' + target + ' / ' + created + ' / ' + head;
       });
 
       const directReply = diagnosisInventory.error
@@ -692,22 +692,33 @@ export async function buildTurnContext(
     }
   }
 
-  const diagnosisDetailMatch = followupSourceText.match(
+  const diagnosisDetailIdMatch = followupSourceText.match(
+    /(?:^|\s)(?:ID|id)[:：]?\s*(\d+)\s*(?:の)?(?:内容|詳しく|詳細|教えて|見せて|確認)/u
+  );
+
+  const diagnosisDetailLegacyMatch = followupSourceText.match(
     /^\s*([^\/\n]+?)\s*\/\s*([SFRCTI]\d)\s*\/\s*(\d{4}-\d{2}-\d{2})\s*\/?.*(?:内容|詳しく|詳細|教えて|見せて|確認)/u
   );
 
+  const diagnosisDetailMatch = diagnosisDetailIdMatch || diagnosisDetailLegacyMatch;
+
   if (!isIrDiagnosisTurn && !isCreativeContinuationRequest && diagnosisDetailMatch) {
     try {
-      const diagnosisDetailTargetLabel = String(diagnosisDetailMatch[1] ?? '').trim();
-      const diagnosisDetailDepthStage = String(diagnosisDetailMatch[2] ?? '').trim();
-      const diagnosisDetailCreatedDate = String(diagnosisDetailMatch[3] ?? '').trim();
+      const diagnosisDetailId = diagnosisDetailIdMatch ? Number(diagnosisDetailIdMatch[1] ?? 0) : null;
+      const diagnosisDetailTargetLabel = diagnosisDetailLegacyMatch ? String(diagnosisDetailLegacyMatch[1] ?? '').trim() : '';
+      const diagnosisDetailDepthStage = diagnosisDetailLegacyMatch ? String(diagnosisDetailLegacyMatch[2] ?? '').trim() : '';
+      const diagnosisDetailCreatedDate = diagnosisDetailLegacyMatch ? String(diagnosisDetailLegacyMatch[3] ?? '').trim() : '';
 
-      const diagnosisDetail = await loadIrDiagnosisDetailSnapshot(supabase, userCode, {
-        targetLabel: diagnosisDetailTargetLabel,
-        depthStage: diagnosisDetailDepthStage,
-        createdDate: diagnosisDetailCreatedDate,
-      });
+      const diagnosisDetailLookup =
+        Number.isFinite(diagnosisDetailId) && Number(diagnosisDetailId) > 0
+          ? { id: Math.trunc(Number(diagnosisDetailId)) }
+          : {
+              targetLabel: diagnosisDetailTargetLabel,
+              depthStage: diagnosisDetailDepthStage,
+              createdDate: diagnosisDetailCreatedDate,
+            };
 
+      const diagnosisDetail = await loadIrDiagnosisDetailSnapshot(supabase, userCode, diagnosisDetailLookup);
       const directReply = diagnosisDetail.error
         ? [
             '今は指定された診断本文を確認できません。',
@@ -718,8 +729,8 @@ export async function buildTurnContext(
           ? [
               '診断の本文はこちらです。',
               '',
+              'ID:' + String(diagnosisDetail.id ?? diagnosisDetailId ?? ''),
               '対象: ' + (diagnosisDetail.targetLabel ?? diagnosisDetailTargetLabel),
-              '深度: ' + (diagnosisDetail.depthStage ?? diagnosisDetailDepthStage),
               '日付: ' + (diagnosisDetail.createdAt ? diagnosisDetail.createdAt.slice(0, 10) : diagnosisDetailCreatedDate),
               '',
               String(diagnosisDetail.diagnosisText ?? '').trim(),
@@ -727,7 +738,7 @@ export async function buildTurnContext(
           : [
               '指定された診断本文は、今のDB上では見つかりませんでした。',
               '',
-              '指定: ' + diagnosisDetailTargetLabel + ' / ' + diagnosisDetailDepthStage + ' / ' + diagnosisDetailCreatedDate,
+              '指定: ' + (Number.isFinite(diagnosisDetailId) && Number(diagnosisDetailId) > 0 ? 'ID:' + String(Math.trunc(Number(diagnosisDetailId))) : diagnosisDetailTargetLabel + ' / ' + diagnosisDetailCreatedDate),
             ].join('\n');
 
       const detailPreSeedResult = {
@@ -740,6 +751,7 @@ export async function buildTurnContext(
         seedText: [
           'PRE_SEED_DIAGNOSIS_DETAIL:',
           'userText=' + followupSourceText,
+          'id=' + (Number.isFinite(diagnosisDetailId) && Number(diagnosisDetailId) > 0 ? String(Math.trunc(Number(diagnosisDetailId))) : ''),
           'targetLabel=' + diagnosisDetailTargetLabel,
           'depthStage=' + diagnosisDetailDepthStage,
           'createdDate=' + diagnosisDetailCreatedDate,
@@ -775,7 +787,7 @@ export async function buildTurnContext(
       console.log('[IROS/DIAGNOSIS_DETAIL_DIRECT]', {
         userCode,
         targetLabel: diagnosisDetailTargetLabel,
-        depthStage: diagnosisDetailDepthStage,
+        id: Number.isFinite(diagnosisDetailId) && Number(diagnosisDetailId) > 0 ? Math.trunc(Number(diagnosisDetailId)) : null,
         createdDate: diagnosisDetailCreatedDate,
         found: diagnosisDetail.found,
         error: diagnosisDetail.error ?? null,
