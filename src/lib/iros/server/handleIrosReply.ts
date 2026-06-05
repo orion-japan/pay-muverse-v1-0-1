@@ -2963,6 +2963,42 @@ function normForRecall(v: any): string {
             null,
         });
 
+        console.log('[IROS/TRACE_SUMMARY][DIAGNOSIS_PIPELINE]', {
+          userText: String(text ?? '').trim(),
+          isDiagnosisFollowup: Boolean(
+            preOrchCtxPack?.diagnosisFollowup === true ||
+              histCtx?.diagnosisFollowup === true ||
+              (extraLocal as any)?.ctxPack?.diagnosisFollowup === true ||
+              (extraLocal as any)?.diagnosisFollowup === true
+          ),
+          hasLastIrDiagnosis: Boolean(
+            preOrchCtxPack?.lastIrDiagnosis ||
+              histCtx?.lastIrDiagnosis ||
+              (extraLocal as any)?.ctxPack?.lastIrDiagnosis ||
+              (extraLocal as any)?.lastIrDiagnosis
+          ),
+          lastIrDiagnosisTarget:
+            preOrchCtxPack?.lastIrDiagnosis?.target ??
+            histCtx?.lastIrDiagnosis?.target ??
+            (extraLocal as any)?.ctxPack?.lastIrDiagnosis?.target ??
+            (extraLocal as any)?.lastIrDiagnosis?.target ??
+            null,
+          preSeedKind:
+            preOrchCtxPack?.preSeedAssistKind ??
+            histCtx?.preSeedAssistKind ??
+            (extraLocal as any)?.ctxPack?.preSeedAssistKind ??
+            (extraLocal as any)?.preSeedAssistKind ??
+            null,
+          shouldBypassWriter: preSeedShouldBypassWriter,
+          stoppedAt: 'PRE_SEED_DIRECT_REPLY',
+          writerReached: false,
+          diagOutSyncReached: false,
+          finalCtxPackHasLastIrDiagnosis: Boolean(
+            metaForSavePreSeedDirect?.extra?.ctxPack?.lastIrDiagnosis
+          ),
+          directReplyHead: String(preSeedDirectReplyCandidate ?? '').slice(0, 120),
+        });
+
         return {
           ok: true as const,
           result: { gate: 'pre_seed_direct_reply' as const },
