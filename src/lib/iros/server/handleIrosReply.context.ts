@@ -1,4 +1,4 @@
-﻿// file: src/lib/iros/server/handleIrosReply.context.ts
+// file: src/lib/iros/server/handleIrosReply.context.ts
 // iros - Turn context builder (minimal + frame plan)
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -484,7 +484,7 @@ export async function buildTurnContext(
     '';
 
   const wantsDetail =
-    /詳しく|詳細|もう少し|深く|深めて|深める|掘り下げ|掘って|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断内容|診断結果|さっきの診断|前の診断|この診断|今の診断/.test(
+    /詳しく|詳細|もう少し|深く|深めて|深める|掘り下げ|掘って|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(
       detailSourceText
     );
 
@@ -591,7 +591,7 @@ export async function buildTurnContext(
     (baseMetaForTurn as any).extra.ctxPack.memoryRecallMode = memoryDecision.recallMode;
   }
   const isFollowupRequest =
-    /具体的に|具体化|わかりやすく|分かりやすく|つまり|どういうこと|それって|どうすれば|何をすれば|何から|どこから|どう扱えば|どう受け取れば|どう見れば|続き|続きを|診断の続き|言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|説明して|解説して|補足して|もう少し|もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|さっきの診断|前の診断|この診断|今の診断/.test(
+    /具体的に|具体化|わかりやすく|分かりやすく|つまり|どういうこと|それって|どうすれば|何をすれば|何から|どこから|どう扱えば|どう受け取れば|どう見れば|続き|続きを|診断の続き|言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|説明して|解説して|補足して|もう少し|もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(
       followupSourceText
     );
 
@@ -629,9 +629,9 @@ export async function buildTurnContext(
       ? null
       : /どうすれば|何をすれば|次は|どう動く|何から|どこから|どう扱えば|どう進める|進め方|一手|行動|対処/.test(followupSourceText)
         ? 'action'
-        : /言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|わかりやすく|分かりやすく|つまり|どういうこと|説明して|解説して|補足して/.test(followupSourceText)
+        : /言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|わかりやすく|分かりやすく|つまり|どういうこと|説明して|解説して|補足して|どんなでしたっけ|どんなでしたか|何でしたっけ|診断の結果/.test(followupSourceText)
           ? 'rephrase'
-          : /もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|さっきの診断|前の診断|この診断|今の診断/.test(followupSourceText)
+          : /もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(followupSourceText)
             ? 'deepen'
             : 'concretize';
 
@@ -854,7 +854,7 @@ export async function buildTurnContext(
       (baseMetaForTurn as any).extra.ctxPack.replyGoal = {
         kind: resolvedFollowupKind === 'action' ? 'action' : 'clarify',
       };
-      const preSeedAssistResult = await runPreSeedAssist({
+      let preSeedAssistResult = await runPreSeedAssist({
         userText: followupSourceText,
         ctxPack: (baseMetaForTurn as any).extra.ctxPack,
         activeContextFrame: activeContextFrameForDiagnosis,
@@ -866,6 +866,33 @@ export async function buildTurnContext(
         conversationId,
         userCode,
       });
+
+      const isDiagnosisResultRecallRequest =
+        /(診断の結果|診断結果|以前の診断|前回の診断|さっきの診断|前の診断).*(どんなでしたっけ|どんなでしたか|何でしたっけ|何でしたか|教えて|見せて|確認|再提示|もう一度)|(?:どんなでしたっけ|どんなでしたか|何でしたっけ|何でしたか).*(診断の結果|診断結果|以前の診断|前回の診断|さっきの診断|前の診断)/u.test(
+          followupSourceText
+        );
+
+      if (
+        isDiagnosisResultRecallRequest &&
+        preSeedAssistResult.kind === 'diagnosis_followup'
+      ) {
+        const diagnosisResultRecallDirectReply = String(diagnosisTopicHint ?? '').trim()
+          ? ['診断の結果はこちらです。', '', String(diagnosisTopicHint ?? '').trim()].join('\n')
+          : null;
+
+        preSeedAssistResult = {
+          ...preSeedAssistResult,
+          directReply: diagnosisResultRecallDirectReply,
+          shouldBypassWriter: Boolean(diagnosisResultRecallDirectReply),
+          seedText: [
+            'PRE_SEED_DIAGNOSIS_RESULT_RECALL:',
+            'userText=' + followupSourceText,
+            'targetLabel=' + (resolvedDiagnosisTargetLabel ?? ''),
+            'rule=診断結果の再提示要求なので、DBから取得済みのlastIrDiagnosisを正本としてそのまま再提示する。',
+          ].join('\n'),
+          reason: String(preSeedAssistResult.reason ?? '') + '; direct_reply_from_last_ir_diagnosis_for_result_recall',
+        };
+      }
 
       (baseMetaForTurn as any).extra.preSeedAssistResult = preSeedAssistResult;
       (baseMetaForTurn as any).extra.preSeedAssistKind = preSeedAssistResult.kind;
