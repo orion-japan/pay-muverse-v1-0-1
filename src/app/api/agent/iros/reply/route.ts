@@ -1,7 +1,3 @@
-// src/app/api/agent/iros/reply/route.ts
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -2274,6 +2270,74 @@ const uiResolvedText = stripInternalLines(resolvedUiTextRaw); // ✅ 監査/救�
 const fromBlocks = stripInternalLines(blocksJoinedCleaned);
 const fromResultObj = stripInternalLines(resultObjFinalRaw);
 
+
+// ✅ preSeed direct reply は persist 前にも result.content をロックする
+// - 後段 final lock だけだと、DB保存/Training が短縮済み本文を拾う
+// - ここで保存前の result.content / assistantText / meta.extra を全文へ戻す
+{
+  const resultAny: any = result && typeof result === 'object' ? result : null;
+  const metaForSaveAny: any = metaForSave && typeof metaForSave === 'object' ? metaForSave : null;
+  const mfsExtra: any =
+    metaForSaveAny?.extra && typeof metaForSaveAny.extra === 'object'
+      ? metaForSaveAny.extra
+      : null;
+  const ctxPackAny: any =
+    mfsExtra?.ctxPack && typeof mfsExtra.ctxPack === 'object'
+      ? mfsExtra.ctxPack
+      : null;
+
+  const isPreSeedDirectReplyPrePersist = Boolean(
+    resultAny?.gate === 'pre_seed_direct_reply' ||
+      resultAny?.result?.gate === 'pre_seed_direct_reply' ||
+      resultAny?.meta?.extra?.preSeedDirectReply === true ||
+      resultAny?.metaForSave?.extra?.preSeedDirectReply === true ||
+      mfsExtra?.preSeedDirectReply === true ||
+      ctxPackAny?.preSeedDirectReply === true ||
+      mfsExtra?.preSeedAssistKind === 'diagnosis_detail' ||
+      ctxPackAny?.preSeedAssistKind === 'diagnosis_detail'
+  );
+
+  const directReplyPrePersist =
+    [
+      ctxPackAny?.directReplyCandidate,
+      mfsExtra?.directReplyCandidate,
+      ctxPackAny?.preSeedAssistDirectReply,
+      mfsExtra?.preSeedAssistDirectReply,
+      ctxPackAny?.preSeedAssistResult?.directReply,
+      mfsExtra?.preSeedAssistResult?.directReply,
+      assistantText,
+    ]
+      .map((v) => String(v ?? '').trim())
+      .find(Boolean) ?? '';
+
+  if (resultAny && isPreSeedDirectReplyPrePersist && directReplyPrePersist) {
+    resultAny.content = directReplyPrePersist;
+    resultAny.assistantText = directReplyPrePersist;
+    resultAny.text = directReplyPrePersist;
+    assistantText = directReplyPrePersist;
+
+    if (metaForSaveAny) {
+      metaForSaveAny.extra = {
+        ...(metaForSaveAny.extra ?? {}),
+        finalTextPolicy: 'FINAL_TEXT_SYNCED_PRE_PERSIST',
+        resolvedText: directReplyPrePersist,
+        finalAssistantText: directReplyPrePersist,
+        rawTextFromModel: directReplyPrePersist,
+        extractedTextFromModel: directReplyPrePersist,
+        preSeedDirectReplyPrePersistLocked: true,
+      };
+    }
+
+    console.log('[IROS/ROUTE_PRE_SEED_DIRECT_REPLY_PRE_PERSIST_LOCK]', {
+      conversationId,
+      userCode,
+      finalLen: directReplyPrePersist.length,
+      resultContentLen: String(resultAny.content ?? '').trim().length,
+      kind: mfsExtra?.preSeedAssistKind ?? ctxPackAny?.preSeedAssistKind ?? null,
+    });
+  }
+}
+
 const contentForPersist = (() => {
   const fromBlocks = blocksJoinedCleaned.trim();
   const uiReturnText = stripInternalLines(
@@ -2714,16 +2778,88 @@ if (!skipTraining) {
   };
 }
       // result 側の衝突キー除去
+      // ✅ preSeed direct reply は最終返却直前で result.content をロックする
+      // - handleIrosReply 側で directReply が作れていても、後段 render/slot 側で result.content が短縮されることがある
+      // - UI最終返却は result.content を見るため、ここで directReply を正本として戻す
+      {
+        const resultAny: any = result && typeof result === 'object' ? result : null;
+        const metaForSaveAny: any = metaForSave && typeof metaForSave === 'object' ? metaForSave : null;
+        const mfsExtra: any =
+          metaForSaveAny?.extra && typeof metaForSaveAny.extra === 'object'
+            ? metaForSaveAny.extra
+            : null;
+        const ctxPackAny: any =
+          mfsExtra?.ctxPack && typeof mfsExtra.ctxPack === 'object'
+            ? mfsExtra.ctxPack
+            : null;
+
+        const isPreSeedDirectReplyFinal = Boolean(
+          resultAny?.gate === 'pre_seed_direct_reply' ||
+            resultAny?.result?.gate === 'pre_seed_direct_reply' ||
+            resultAny?.meta?.extra?.preSeedDirectReply === true ||
+            resultAny?.metaForSave?.extra?.preSeedDirectReply === true ||
+            mfsExtra?.preSeedDirectReply === true ||
+            ctxPackAny?.preSeedDirectReply === true ||
+            mfsExtra?.preSeedAssistKind === 'diagnosis_detail' ||
+            ctxPackAny?.preSeedAssistKind === 'diagnosis_detail'
+        );
+
+        const directReplyFinal =
+          [
+            ctxPackAny?.directReplyCandidate,
+            mfsExtra?.directReplyCandidate,
+            ctxPackAny?.preSeedAssistDirectReply,
+            mfsExtra?.preSeedAssistDirectReply,
+            ctxPackAny?.preSeedAssistResult?.directReply,
+            mfsExtra?.preSeedAssistResult?.directReply,
+            assistantText,
+          ]
+            .map((v) => String(v ?? '').trim())
+            .find(Boolean) ?? '';
+
+        if (resultAny && isPreSeedDirectReplyFinal && directReplyFinal) {
+          resultAny.content = directReplyFinal;
+          resultAny.assistantText = directReplyFinal;
+          resultAny.text = directReplyFinal;
+          assistantText = directReplyFinal;
+
+          if (metaForSaveAny) {
+            metaForSaveAny.extra = {
+              ...(metaForSaveAny.extra ?? {}),
+              finalTextPolicy: 'FINAL_TEXT_SYNCED',
+              resolvedText: directReplyFinal,
+              finalAssistantText: directReplyFinal,
+              rawTextFromModel: directReplyFinal,
+              extractedTextFromModel: directReplyFinal,
+              preSeedDirectReplyFinalLocked: true,
+            };
+          }
+
+          console.log('[IROS/ROUTE_PRE_SEED_DIRECT_REPLY_FINAL_LOCK]', {
+            conversationId,
+            userCode,
+            finalLen: directReplyFinal.length,
+            resultContentLen: String(resultAny.content ?? '').trim().length,
+            kind: mfsExtra?.preSeedAssistKind ?? ctxPackAny?.preSeedAssistKind ?? null,
+          });
+        }
+      }
+
       const resultObj = { ...(result as any) };
       delete (resultObj as any).mode;
       delete (resultObj as any).meta;
       delete (resultObj as any).ok;
       delete (resultObj as any).credit;
 
+      const finalResponseText = String((result as any)?.content ?? '').trim();
+
       return NextResponse.json(
         {
           ok: true,
-          text: String((result as any)?.content ?? ''),
+          text: finalResponseText,
+          assistant: finalResponseText,
+          assistantText: finalResponseText,
+          content: finalResponseText,
           assistantMessageId: saved?.messageId ?? null,
           meta: metaForSave ?? null,
         },

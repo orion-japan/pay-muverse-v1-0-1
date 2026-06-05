@@ -6,7 +6,7 @@ import type { IrosStyle } from '@/lib/iros/system';
 import type { IrosUserProfileRow } from './loadUserProfile';
 
 import { loadBaseMetaFromMemoryState } from './handleIrosReply.state';
-import { loadLatestIrDiagnosisSnapshot } from '@/lib/iros/memoryRecall';
+import { loadLatestIrDiagnosisSnapshot, loadIrDiagnosisInventorySnapshot, loadIrDiagnosisDetailSnapshot } from '@/lib/iros/memoryRecall';
 import { routeIrosMemory } from '@/lib/iros/memory/memoryRouter';
 import { resolveWorkingReference } from '@/lib/iros/memory/workingReferenceResolver';
 import { guardIrosMemoryDecision } from '@/lib/iros/memory/memoryGuard';
@@ -592,7 +592,7 @@ export async function buildTurnContext(
     (baseMetaForTurn as any).extra.ctxPack.memoryRecallMode = memoryDecision.recallMode;
   }
   const isFollowupRequest =
-    /具体的に|具体化|わかりやすく|分かりやすく|つまり|どういうこと|それって|どうすれば|何をすれば|何から|どこから|どう扱えば|どう受け取れば|どう見れば|続き|続きを|診断の続き|言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|説明して|解説して|補足して|もう少し|もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(
+    /具体的に|具体化|わかりやすく|分かりやすく|つまり|どういうこと|それって|どうすれば|何をすれば|何から|どこから|どう扱えば|どう受け取れば|どう見れば|続き|続きを|診断の続き|言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|説明して|解説して|補足して|もう少し|もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|どんな内容|その内容|内容でした|内容を教えて|中身|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(
       followupSourceText
     );
 
@@ -604,6 +604,189 @@ export async function buildTurnContext(
       followupSourceText
     );
 
+
+  const wantsDiagnosisInventory =
+    !isIrDiagnosisTurn &&
+    !isCreativeContinuationRequest &&
+    /(?:診断|ir診断|IR診断|診断内容|診断結果).*(?:どれくらい|何件|何個|いくつ|一覧|リスト|持ってる|持っています|残ってる|保存|記録)|(?:どれくらい|何件|何個|いくつ|一覧|リスト).*(?:診断|ir診断|IR診断|診断内容|診断結果)/u.test(
+      followupSourceText
+    );
+
+  if (wantsDiagnosisInventory) {
+    try {
+      const diagnosisInventory = await loadIrDiagnosisInventorySnapshot(supabase, userCode, 10);
+
+      const recentLines = diagnosisInventory.recent.map((item, index) => {
+        const target = item.targetLabel ? item.targetLabel : '対象未設定';
+        const depth = item.depthStage ? item.depthStage : '-';
+        const created = item.createdAt ? item.createdAt.slice(0, 10) : '日付不明';
+        const head = item.diagnosisTextHead ? item.diagnosisTextHead.replace(/\s+/g, ' ').slice(0, 72) : '本文なし';
+        return `${index + 1}. ${target} / ${depth} / ${created} / ${head}`;
+      });
+
+      const directReply = diagnosisInventory.error
+        ? ['今は保存済み診断リストを確認できません。', '', `理由: ${diagnosisInventory.error}`].join('\n')
+        : diagnosisInventory.totalCount > 0
+          ? [
+              `保存済みのir診断は ${diagnosisInventory.totalCount}件あります。`,
+              `直近で見えているのは ${diagnosisInventory.recent.length}件です。`,
+              diagnosisInventory.hasMore ? 'それ以前の診断もDB上には残っています。' : '今見えている範囲で全件です。',
+              '',
+              ...recentLines,
+            ].join('\n')
+          : '保存済みのir診断は、今のDB上では0件です。';
+
+      const inventoryPreSeedResult = {
+        version: 'pre_seed_assist_v1',
+        kind: 'diagnosis_inventory',
+        confidence: 1,
+        targetLabel: null,
+        targetKey: null,
+        directReply,
+        seedText: [
+          'PRE_SEED_DIAGNOSIS_INVENTORY:',
+          'userText=' + followupSourceText,
+          'totalCount=' + diagnosisInventory.totalCount,
+          'recentCount=' + diagnosisInventory.recent.length,
+          'hasMore=' + String(diagnosisInventory.hasMore),
+          'rule=保存済みir診断の件数と直近リストをDB結果として直返しする。',
+        ].join('\n'),
+        shouldBypassWriter: true,
+        reason: 'diagnosis_inventory_direct_reply',
+      };
+
+      (baseMetaForTurn as any).extra = (baseMetaForTurn as any).extra ?? {};
+      (baseMetaForTurn as any).extra.ctxPack =
+        (baseMetaForTurn as any).extra.ctxPack ?? {};
+
+      (baseMetaForTurn as any).extra.preSeedAssistResult = inventoryPreSeedResult;
+      (baseMetaForTurn as any).extra.preSeedAssistKind = inventoryPreSeedResult.kind;
+      (baseMetaForTurn as any).extra.preSeedAssistConfidence = inventoryPreSeedResult.confidence;
+      (baseMetaForTurn as any).extra.preSeedAssistSeedText = inventoryPreSeedResult.seedText;
+      (baseMetaForTurn as any).extra.preSeedAssistDirectReply = directReply;
+      (baseMetaForTurn as any).extra.preSeedAssistShouldBypassWriter = true;
+      (baseMetaForTurn as any).extra.directReplyCandidate = directReply;
+      (baseMetaForTurn as any).extra.diagnosisInventory = diagnosisInventory;
+
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistResult = inventoryPreSeedResult;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistKind = inventoryPreSeedResult.kind;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistConfidence = inventoryPreSeedResult.confidence;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistSeedText = inventoryPreSeedResult.seedText;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistDirectReply = directReply;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistShouldBypassWriter = true;
+      (baseMetaForTurn as any).extra.ctxPack.directReplyCandidate = directReply;
+      (baseMetaForTurn as any).extra.ctxPack.diagnosisInventory = diagnosisInventory;
+
+      console.log('[IROS/DIAGNOSIS_INVENTORY_DIRECT]', {
+        userCode,
+        totalCount: diagnosisInventory.totalCount,
+        recentCount: diagnosisInventory.recent.length,
+        hasMore: diagnosisInventory.hasMore,
+        error: diagnosisInventory.error ?? null,
+      });
+    } catch (e) {
+      console.warn('[IROS/DIAGNOSIS_INVENTORY_DIRECT][FAILED]', {
+        userCode,
+        error: String((e as any)?.message ?? e),
+      });
+    }
+  }
+
+  const diagnosisDetailMatch = followupSourceText.match(
+    /^\s*([^\/\n]+?)\s*\/\s*([SFRCTI]\d)\s*\/\s*(\d{4}-\d{2}-\d{2})\s*\/?.*(?:内容|詳しく|詳細|教えて|見せて|確認)/u
+  );
+
+  if (!isIrDiagnosisTurn && !isCreativeContinuationRequest && diagnosisDetailMatch) {
+    try {
+      const diagnosisDetailTargetLabel = String(diagnosisDetailMatch[1] ?? '').trim();
+      const diagnosisDetailDepthStage = String(diagnosisDetailMatch[2] ?? '').trim();
+      const diagnosisDetailCreatedDate = String(diagnosisDetailMatch[3] ?? '').trim();
+
+      const diagnosisDetail = await loadIrDiagnosisDetailSnapshot(supabase, userCode, {
+        targetLabel: diagnosisDetailTargetLabel,
+        depthStage: diagnosisDetailDepthStage,
+        createdDate: diagnosisDetailCreatedDate,
+      });
+
+      const directReply = diagnosisDetail.error
+        ? [
+            '今は指定された診断本文を確認できません。',
+            '',
+            '理由: ' + diagnosisDetail.error,
+          ].join('\n')
+        : diagnosisDetail.found && diagnosisDetail.diagnosisText
+          ? [
+              '診断の本文はこちらです。',
+              '',
+              '対象: ' + (diagnosisDetail.targetLabel ?? diagnosisDetailTargetLabel),
+              '深度: ' + (diagnosisDetail.depthStage ?? diagnosisDetailDepthStage),
+              '日付: ' + (diagnosisDetail.createdAt ? diagnosisDetail.createdAt.slice(0, 10) : diagnosisDetailCreatedDate),
+              '',
+              String(diagnosisDetail.diagnosisText ?? '').trim(),
+            ].join('\n')
+          : [
+              '指定された診断本文は、今のDB上では見つかりませんでした。',
+              '',
+              '指定: ' + diagnosisDetailTargetLabel + ' / ' + diagnosisDetailDepthStage + ' / ' + diagnosisDetailCreatedDate,
+            ].join('\n');
+
+      const detailPreSeedResult = {
+        version: 'pre_seed_assist_v1',
+        kind: 'diagnosis_detail',
+        confidence: 1,
+        targetLabel: diagnosisDetailTargetLabel,
+        targetKey: null,
+        directReply,
+        seedText: [
+          'PRE_SEED_DIAGNOSIS_DETAIL:',
+          'userText=' + followupSourceText,
+          'targetLabel=' + diagnosisDetailTargetLabel,
+          'depthStage=' + diagnosisDetailDepthStage,
+          'createdDate=' + diagnosisDetailCreatedDate,
+          'found=' + String(diagnosisDetail.found),
+          'rule=保存済みir診断の指定1件をDB結果として直返しする。',
+        ].join('\n'),
+        shouldBypassWriter: true,
+        reason: 'diagnosis_detail_direct_reply',
+      };
+
+      (baseMetaForTurn as any).extra = (baseMetaForTurn as any).extra ?? {};
+      (baseMetaForTurn as any).extra.ctxPack =
+        (baseMetaForTurn as any).extra.ctxPack ?? {};
+
+      (baseMetaForTurn as any).extra.preSeedAssistResult = detailPreSeedResult;
+      (baseMetaForTurn as any).extra.preSeedAssistKind = detailPreSeedResult.kind;
+      (baseMetaForTurn as any).extra.preSeedAssistConfidence = detailPreSeedResult.confidence;
+      (baseMetaForTurn as any).extra.preSeedAssistSeedText = detailPreSeedResult.seedText;
+      (baseMetaForTurn as any).extra.preSeedAssistDirectReply = directReply;
+      (baseMetaForTurn as any).extra.preSeedAssistShouldBypassWriter = true;
+      (baseMetaForTurn as any).extra.directReplyCandidate = directReply;
+      (baseMetaForTurn as any).extra.diagnosisDetail = diagnosisDetail;
+
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistResult = detailPreSeedResult;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistKind = detailPreSeedResult.kind;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistConfidence = detailPreSeedResult.confidence;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistSeedText = detailPreSeedResult.seedText;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistDirectReply = directReply;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistShouldBypassWriter = true;
+      (baseMetaForTurn as any).extra.ctxPack.directReplyCandidate = directReply;
+      (baseMetaForTurn as any).extra.ctxPack.diagnosisDetail = diagnosisDetail;
+
+      console.log('[IROS/DIAGNOSIS_DETAIL_DIRECT]', {
+        userCode,
+        targetLabel: diagnosisDetailTargetLabel,
+        depthStage: diagnosisDetailDepthStage,
+        createdDate: diagnosisDetailCreatedDate,
+        found: diagnosisDetail.found,
+        error: diagnosisDetail.error ?? null,
+      });
+    } catch (e) {
+      console.warn('[IROS/DIAGNOSIS_DETAIL_DIRECT][FAILED]', {
+        userCode,
+        error: String((e as any)?.message ?? e),
+      });
+    }
+  }
   // 🔶 先に DB 側の最新診断 snapshot を読む
   // いままでは isDiagnosisFollowup が true の時しか読まなかったため、
   // prevIrMeta が null のケースで永久に発火しない循環になっていた
@@ -923,6 +1106,7 @@ export async function buildTurnContext(
         (baseMetaForTurn as any).extra.ctxPack.directReplyCandidate =
           preSeedAssistResult.directReply;
       }
+
 
       const memorySeedResult = buildMemorySeed({
         memoryDecision,

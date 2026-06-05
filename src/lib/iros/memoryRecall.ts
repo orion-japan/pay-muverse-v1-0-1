@@ -927,3 +927,242 @@ export async function preparePastStateNoteForTurn(args: {
     matchedTerms,
   };
 }
+
+export type IrDiagnosisInventoryItem = {
+  id: number | null;
+  targetLabel: string | null;
+  targetKey: string | null;
+  qPrimary: string | null;
+  depthStage: string | null;
+  phase: string | null;
+  diagnosisTextHead: string | null;
+  createdAt: string | null;
+};
+
+export type IrDiagnosisInventorySnapshot = {
+  totalCount: number;
+  recent: IrDiagnosisInventoryItem[];
+  hasMore: boolean;
+  error?: string | null;
+};
+
+// 🔶 loadIrDiagnosisInventorySnapshot
+// 保存済みir診断の「件数」と「直近リスト」を取得する。
+// 最新1件ではなく、ユーザーが「どれくらい持ってる？」「一覧ある？」と聞いた時の正本。
+export async function loadIrDiagnosisInventorySnapshot(
+  supabase: any,
+  userCode: string,
+  limit = 10
+): Promise<IrDiagnosisInventorySnapshot> {
+  const ownerUserCode = String(userCode ?? '').trim();
+  const safeLimit = Math.max(1, Math.min(30, Number.isFinite(Number(limit)) ? Math.trunc(Number(limit)) : 10));
+
+  if (!ownerUserCode) {
+    return {
+      totalCount: 0,
+      recent: [],
+      hasMore: false,
+      error: 'missing_user_code',
+    };
+  }
+
+  try {
+    const { data, error, count } = await supabase
+      .from('iros_ir_diagnosis_results')
+      .select(
+        'id, target_label, target_key, q_primary, depth_stage, phase, diagnosis_text, created_at',
+        { count: 'exact' }
+      )
+      .eq('owner_user_code', ownerUserCode)
+      .order('created_at', { ascending: false })
+      .limit(safeLimit);
+
+    if (error) {
+      console.warn('[IROS][loadIrDiagnosisInventorySnapshot] query error', {
+        userCode: ownerUserCode,
+        limit: safeLimit,
+        error,
+      });
+
+      return {
+        totalCount: 0,
+        recent: [],
+        hasMore: false,
+        error: String(error?.message ?? error),
+      };
+    }
+
+    const rows = Array.isArray(data) ? data : [];
+    const totalCount = typeof count === 'number' ? count : rows.length;
+
+    const recent: IrDiagnosisInventoryItem[] = rows.map((row: any) => ({
+      id: typeof row?.id === 'number' ? row.id : null,
+      targetLabel: typeof row?.target_label === 'string' ? row.target_label : null,
+      targetKey: typeof row?.target_key === 'string' ? row.target_key : null,
+      qPrimary: typeof row?.q_primary === 'string' ? row.q_primary : null,
+      depthStage: typeof row?.depth_stage === 'string' ? row.depth_stage : null,
+      phase: typeof row?.phase === 'string' ? row.phase : null,
+      diagnosisTextHead:
+        typeof row?.diagnosis_text === 'string'
+          ? row.diagnosis_text.slice(0, 160)
+          : null,
+      createdAt: typeof row?.created_at === 'string' ? row.created_at : null,
+    }));
+
+    return {
+      totalCount,
+      recent,
+      hasMore: totalCount > recent.length,
+      error: null,
+    };
+  } catch (e) {
+    console.warn('[IROS][loadIrDiagnosisInventorySnapshot] failed', e);
+
+    return {
+      totalCount: 0,
+      recent: [],
+      hasMore: false,
+      error: String((e as any)?.message ?? e),
+    };
+  }
+}
+
+export type IrDiagnosisDetailLookupArgs = {
+  id?: number | null;
+  targetLabel?: string | null;
+  depthStage?: string | null;
+  createdDate?: string | null;
+};
+
+export type IrDiagnosisDetailSnapshot = {
+  found: boolean;
+  id: number | null;
+  targetLabel: string | null;
+  targetKey: string | null;
+  qPrimary: string | null;
+  depthStage: string | null;
+  phase: string | null;
+  diagnosisText: string | null;
+  diagnosisTextHead: string | null;
+  createdAt: string | null;
+  error?: string | null;
+};
+
+// 🔶 loadIrDiagnosisDetailSnapshot
+// 診断一覧の1行を指定された時に、該当する保存済みir診断の本文を取得する。
+export async function loadIrDiagnosisDetailSnapshot(
+  supabase: any,
+  userCode: string,
+  lookup: IrDiagnosisDetailLookupArgs
+): Promise<IrDiagnosisDetailSnapshot> {
+  const ownerUserCode = String(userCode ?? '').trim();
+  const id = Number(lookup?.id ?? 0);
+  const targetLabel = String(lookup?.targetLabel ?? '').trim();
+  const depthStage = String(lookup?.depthStage ?? '').trim();
+  const createdDate = String(lookup?.createdDate ?? '').trim();
+
+  if (!ownerUserCode) {
+    return {
+      found: false,
+      id: null,
+      targetLabel: null,
+      targetKey: null,
+      qPrimary: null,
+      depthStage: null,
+      phase: null,
+      diagnosisText: null,
+      diagnosisTextHead: null,
+      createdAt: null,
+      error: 'missing_user_code',
+    };
+  }
+
+  try {
+    let query = supabase
+      .from('iros_ir_diagnosis_results')
+      .select('id, target_label, target_key, q_primary, depth_stage, phase, diagnosis_text, created_at')
+      .eq('owner_user_code', ownerUserCode);
+
+    if (Number.isFinite(id) && id > 0) {
+      query = query.eq('id', Math.trunc(id));
+    } else {
+      if (targetLabel) {
+        query = query.eq('target_label', targetLabel);
+      }
+
+      if (depthStage) {
+        query = query.eq('depth_stage', depthStage);
+      }
+
+      if (/^\d{4}-\d{2}-\d{2}$/.test(createdDate)) {
+        const dayStart = new Date(createdDate + 'T00:00:00.000Z');
+        if (!Number.isNaN(dayStart.getTime())) {
+          const nextDay = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+          query = query
+            .gte('created_at', dayStart.toISOString())
+            .lt('created_at', nextDay.toISOString());
+        }
+      }
+    }
+
+    const { data, error } = await query
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.warn('[IROS][loadIrDiagnosisDetailSnapshot] query error', {
+        userCode: ownerUserCode,
+        lookup,
+        error,
+      });
+
+      return {
+        found: false,
+        id: null,
+        targetLabel: targetLabel || null,
+        targetKey: null,
+        qPrimary: null,
+        depthStage: depthStage || null,
+        phase: null,
+        diagnosisText: null,
+        diagnosisTextHead: null,
+        createdAt: null,
+        error: String(error?.message ?? error),
+      };
+    }
+
+    const row = Array.isArray(data) ? data[0] : null;
+    const diagnosisText =
+      typeof row?.diagnosis_text === 'string' ? row.diagnosis_text : null;
+
+    return {
+      found: Boolean(row),
+      id: typeof row?.id === 'number' ? row.id : null,
+      targetLabel: typeof row?.target_label === 'string' ? row.target_label : null,
+      targetKey: typeof row?.target_key === 'string' ? row.target_key : null,
+      qPrimary: typeof row?.q_primary === 'string' ? row.q_primary : null,
+      depthStage: typeof row?.depth_stage === 'string' ? row.depth_stage : null,
+      phase: typeof row?.phase === 'string' ? row.phase : null,
+      diagnosisText,
+      diagnosisTextHead: diagnosisText ? diagnosisText.slice(0, 160) : null,
+      createdAt: typeof row?.created_at === 'string' ? row.created_at : null,
+      error: null,
+    };
+  } catch (e) {
+    console.warn('[IROS][loadIrDiagnosisDetailSnapshot] failed', e);
+
+    return {
+      found: false,
+      id: null,
+      targetLabel: targetLabel || null,
+      targetKey: null,
+      qPrimary: null,
+      depthStage: depthStage || null,
+      phase: null,
+      diagnosisText: null,
+      diagnosisTextHead: null,
+      createdAt: null,
+      error: String((e as any)?.message ?? e),
+    };
+  }
+}

@@ -1,4 +1,4 @@
-﻿/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 // src/lib/iros/language/rephraseEngine.ts
 // iros — Rephrase/Generate Engine (slot-preserving)
@@ -3414,6 +3414,9 @@ const isIrDiagnosis =
 // ir診断は完全に軽量seed固定
 // =========================
 let seedFinal = '';
+let diagnosisFollowupRequiredRuleText = '';
+let diagnosisFollowupSeedForMaterialize = '';
+let isDiagnosisFollowupSeedForMaterialize = false;
 
 if (isIrDiagnosis) {
   const override =
@@ -3540,6 +3543,32 @@ if (isIrDiagnosis) {
     canonicalOneLineSeed ||
     FALLBACK_SEED;
 
+
+  diagnosisFollowupRequiredRuleText =
+    isDiagnosisFollowupSeed && diagnosisFollowupSeedFromCtx
+      ? [
+          '',
+          '【診断フォロー回答必須】',
+          'ユーザーは前回診断の中身を確認している。',
+          '前回診断の内容を背景扱いで終わらせず、回答本文に必ず反映する。',
+          '前回診断本文がある場合は、その本文から確認できる内容をそのまま回答に使う。',
+          '前回診断本文がない場合は、「今は前回診断の中身を確認できません」と正直に答える。',
+          '確認できない診断を、あるように言わない。確認できる診断を、ないように言わない。',
+          '診断本文・保存メタ・履歴の区別を混ぜない。本文があるなら本文、本文がないなら無い、履歴だけなら履歴だけと分けて答える。',
+          '推測で補完せず、取得できている情報の範囲だけを答える。',
+          '少なくとも「現状」「ポイント」「意識の向かう先」「メッセージ」のうち、診断本文に存在する要素を2つ以上使って答える。',
+          '「確認したい流れです」「気になっているようです」だけで終わらせない。',
+          '前回診断本文:',
+          diagnosisFollowupSeedFromCtx,
+          '',
+        ].join('\n')
+      : '';
+
+  isDiagnosisFollowupSeedForMaterialize = isDiagnosisFollowupSeed;
+  diagnosisFollowupSeedForMaterialize =
+    isDiagnosisFollowupSeed && diagnosisFollowupSeedFromCtx
+      ? diagnosisFollowupSeedFromCtx
+      : '';
   console.log('[IROS/DIAG_FOLLOWUP_SEED_PICK]', {
     isDiagnosisFollowupSeed,
     diagnosisFollowupSeedLen: String(diagnosisFollowupSeedFromCtx ?? '').length,
@@ -3846,11 +3875,12 @@ const shiftKindForLane =
   // ✅ レーン契約は「最後」に示す（後段の詳細指示が勝つ）
   const laneContractTail = (tConcretizeHeader || '') + (ideaBandHeader || '');
 
-  const systemPrompt = baseSystemPrompt + mustIncludeRuleText + laneContractTail;
+  const systemPrompt = baseSystemPrompt + mustIncludeRuleText + diagnosisFollowupRequiredRuleText + laneContractTail;
   try {
     console.log('[IROS/MUST_INCLUDE][LEN]', {
       hasRecall: Boolean(recallMust?.restoreNeedle || recallMust?.questionNeedle),
       mustLen: mustIncludeRuleText ? String(mustIncludeRuleText).length : 0,
+      diagnosisFollowupRequiredLen: diagnosisFollowupRequiredRuleText ? String(diagnosisFollowupRequiredRuleText).length : 0,
     });
   } catch {}
   // ✅ q/depth/phase を “確証つきで” internalPack に入れる（STATE_SNAPSHOTの土台）
@@ -7012,7 +7042,12 @@ if (
   Array.isArray(patternBlocksResult.blocks) &&
   patternBlocksResult.blocks.length > 0
 ) {
-  const sourceBlocksRaw = (Array.isArray(blocksText) ? blocksText : [])
+  const diagnosisFollowupSourceBlocks =
+    isDiagnosisFollowupSeedForMaterialize && diagnosisFollowupSeedForMaterialize
+      ? [diagnosisFollowupSeedForMaterialize]
+      : (Array.isArray(blocksText) ? blocksText : []);
+
+  const sourceBlocksRaw = diagnosisFollowupSourceBlocks
     .map((x) => String(x ?? '').trim())
     .filter(Boolean);
 

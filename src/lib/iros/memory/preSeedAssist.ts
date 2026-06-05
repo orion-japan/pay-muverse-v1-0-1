@@ -1,4 +1,4 @@
-﻿import { chatComplete, type ChatMessage } from '@/lib/llm/chatComplete';
+import { chatComplete, type ChatMessage } from '@/lib/llm/chatComplete';
 
 export type PreSeedAssistKind =
   | 'diagnosis_target_confirm'
@@ -96,10 +96,17 @@ function normalizeResult(raw: any, fallbackSeedText: string): PreSeedAssistResul
   const directReply = cleanString(raw?.directReply) || null;
   const reason = cleanString(raw?.reason) || 'pre-seed assist normalized';
 
-  const shouldBypassWriter =
+  const rawShouldBypassWriter =
     typeof raw?.shouldBypassWriter === 'boolean'
       ? raw.shouldBypassWriter
       : Boolean(directReply && kind !== 'normal' && confidence >= 0.75);
+
+  // followup は診断・関係の中身を Writer に渡す。
+  // directReply で早期終了すると、診断正本を取得しても本文に反映されない。
+  const shouldBypassWriter =
+    kind === 'diagnosis_followup' || kind === 'relationship_followup'
+      ? false
+      : rawShouldBypassWriter;
 
   const seedText =
     cleanString(raw?.seedText) ||
