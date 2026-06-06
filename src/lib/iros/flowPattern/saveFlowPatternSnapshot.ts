@@ -189,6 +189,14 @@ export async function saveFlowPatternSnapshot(args: SaveFlowPatternSnapshotArgs)
       memoryStateSnapshot.q_primary,
       qCounts.q_primary,
       qCounts.qPrimary,
+      extra.qPrimary,
+      extra.q_primary,
+      metaForSave.qPrimary,
+      metaForSave.q_primary,
+      extra.resonanceState?.qPrimary,
+      extra.resonanceState?.q_primary,
+      extra.mirrorFlowV1?.qPrimary,
+      extra.mirrorFlowV1?.q_primary,
     ),
     40,
   );
@@ -201,6 +209,18 @@ export async function saveFlowPatternSnapshot(args: SaveFlowPatternSnapshotArgs)
       qCounts.eTurnNow,
       qCounts.e_turn,
       qCounts.eTurn,
+      extra.e_turn,
+      extra.eTurn,
+      metaForSave.e_turn,
+      metaForSave.eTurn,
+      extra.resonanceState?.e_turn,
+      extra.resonanceState?.eTurn,
+      extra.mirrorFlowV1?.e_turn,
+      extra.mirrorFlowV1?.eTurn,
+      extra.mirror?.e_turn,
+      extra.mirror?.eTurn,
+      extra.flowMirror?.e_turn,
+      extra.flowMirror?.eTurn,
     ),
     40,
   );
@@ -399,3 +419,4 @@ export async function saveFlowPatternSnapshot(args: SaveFlowPatternSnapshotArgs)
     id: data?.id ?? null,
   };
 }
+
