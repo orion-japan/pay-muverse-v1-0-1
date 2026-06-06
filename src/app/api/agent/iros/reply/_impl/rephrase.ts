@@ -1187,12 +1187,34 @@ const intentBandForCtx =
 
   // flowDigest は既存 util を使う（upstream の flow があれば触らない）
   if (ctxPack.flowDigest == null) ctxPack.flowDigest = buildFlowDigest();
-  
+
   // MEMORY_DELTA_FOR_REPHRASE_CTX
   // 前ターンの核心 / 現ターンの入力 / 次焦点を、Writerへ渡るctxPackに載せる
   const previousUserForMemoryDelta = (() => {
-    const hist: any[] = Array.isArray(normalizedHistory) ? normalizedHistory : [];
     const currentNorm = TRIM(userText);
+
+    const hfwCandidates = [
+      (ctxPack as any)?.historyForWriter,
+      (extraMerged as any)?.historyForWriter,
+      (extraMerged as any)?.ctxPack?.historyForWriter,
+      (meta as any)?.extra?.historyForWriter,
+      (meta as any)?.extra?.ctxPack?.historyForWriter,
+    ];
+
+    for (const hfw of hfwCandidates) {
+      if (!Array.isArray(hfw)) continue;
+
+      for (let i = hfw.length - 1; i >= 0; i--) {
+        const t = hfw[i];
+        if (t?.role !== 'user') continue;
+        const st = TRIM(t?.content ?? t?.text ?? '');
+        if (!st) continue;
+        if (st === currentNorm) continue;
+        return st.slice(0, 1200);
+      }
+    }
+
+    const hist: any[] = Array.isArray(normalizedHistory) ? normalizedHistory : [];
     for (let i = hist.length - 1; i >= 0; i--) {
       const t = hist[i];
       if (t?.role !== 'user') continue;
@@ -1201,19 +1223,30 @@ const intentBandForCtx =
       if (st === currentNorm) continue;
       return st.slice(0, 1200);
     }
+
     return null;
   })();
 
   const memoryDeltaCurrentAskForCtx = TRIM(userText);
+
+  const previousCoreCandidateForMemoryDelta = TRIM(
+    (ctxPack as any)?.historyDigestV1?.continuity?.last_user_core ??
+      (ctxPack as any)?.historyDigestV1?.continuity?.lastUserCore ??
+      (ctxPack as any)?.historyDigestV1?.situationSummary ??
+      (ctxPack as any)?.situationSummary ??
+      ''
+  );
+
+  const previousCoreForMemoryDelta =
+    previousCoreCandidateForMemoryDelta &&
+    previousCoreCandidateForMemoryDelta !== memoryDeltaCurrentAskForCtx
+      ? previousCoreCandidateForMemoryDelta
+      : previousUserForMemoryDelta;
+
+
   const memoryDeltaForCtx = memoryDeltaCurrentAskForCtx
     ? buildMemoryDelta({
-        previousCore:
-          (ctxPack as any)?.historyDigestV1?.continuity?.last_user_core ??
-          (ctxPack as any)?.historyDigestV1?.continuity?.lastUserCore ??
-          (ctxPack as any)?.historyDigestV1?.situationSummary ??
-          (ctxPack as any)?.situationSummary ??
-          previousUserForMemoryDelta ??
-          null,
+        previousCore: previousCoreForMemoryDelta ?? null,
         currentAsk: memoryDeltaCurrentAskForCtx,
         nextFocus:
           (ctxPack as any)?.focusResolution?.nextFocus ??
