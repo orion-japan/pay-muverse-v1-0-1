@@ -139,6 +139,62 @@ export async function OPTIONS(req: NextRequest) {
   return new NextResponse(null, { status: 204, headers: withTrace(CORS_HEADERS, traceId) });
 }
 
+function sanitizeIrosReplyMetaForClient(metaInput: any): any {
+  if (!metaInput || typeof metaInput !== 'object') return null;
+
+  const meta = metaInput as Record<string, any>;
+  const extra =
+    meta.extra && typeof meta.extra === 'object'
+      ? (meta.extra as Record<string, any>)
+      : {};
+
+  const pick = (obj: Record<string, any>, keys: string[]) => {
+    const out: Record<string, any> = {};
+    for (const key of keys) {
+      if (obj[key] !== undefined) out[key] = obj[key];
+    }
+    return out;
+  };
+
+  const clientMeta: Record<string, any> = pick(meta, [
+    'style',
+    'depth',
+    'depthStage',
+    'depth_stage',
+    'intentLayer',
+    'phase',
+    'spinLoop',
+    'spinStep',
+    'descentGate',
+    'intent_anchor',
+    'intent_anchor_key',
+    'rotationState',
+    'selfAcceptance',
+    'yLevel',
+    'hLevel',
+    'inputKind',
+    'framePlan',
+  ]);
+
+  const clientExtra: Record<string, any> = pick(extra, [
+    'uiCue',
+    'e_turn',
+    'polarity',
+    'mirrorConfidence',
+    'exprDecision',
+    'finalTextPolicy',
+    'speechAct',
+    'speechActReason',
+    'speechActConfidence',
+  ]);
+
+  if (Object.keys(clientExtra).length > 0) {
+    clientMeta.extra = clientExtra;
+  }
+
+  return clientMeta;
+}
+
 // =========================================================
 // Local helpers
 // =========================================================
@@ -1848,7 +1904,7 @@ return NextResponse.json({
   ok: true,
   text: finalText,
   assistant: finalText,
-  meta: metaForSave ?? meta ?? null,
+  meta: sanitizeIrosReplyMetaForClient(metaForSave ?? meta ?? null),
 });
     }
   const isActiveContextClarification = Boolean(
@@ -3403,7 +3459,7 @@ if (!skipTraining) {
           assistantText: finalResponseText,
           content: finalResponseText,
           assistantMessageId: saved?.messageId ?? null,
-          meta: metaForSave ?? null,
+          meta: sanitizeIrosReplyMetaForClient(metaForSave ?? null),
         },
         { status: 200, headers },
       );
@@ -3420,7 +3476,7 @@ if (!skipTraining) {
         {
           ok: true,
           text: softened,
-          meta: metaForSave ?? null,
+          meta: sanitizeIrosReplyMetaForClient(metaForSave ?? null),
         },
         { status: 200, headers },
       );
@@ -3432,6 +3488,7 @@ if (!skipTraining) {
     );
   }
 }
+
 
 
 
