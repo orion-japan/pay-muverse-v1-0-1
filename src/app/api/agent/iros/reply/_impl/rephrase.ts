@@ -3,6 +3,7 @@
 
 import { pickSpeechAct } from '../_helpers';
 import { extractSlotsForRephrase, rephraseSlotsFinal } from '@/lib/iros/language/rephraseEngine';
+import { buildMemoryDelta, formatMemoryDeltaSeed } from '@/lib/iros/delta/memoryDelta';
 
 type RenderBlock = { text: string | null | undefined; kind?: string };
 
@@ -1186,6 +1187,63 @@ const intentBandForCtx =
 
   // flowDigest は既存 util を使う（upstream の flow があれば触らない）
   if (ctxPack.flowDigest == null) ctxPack.flowDigest = buildFlowDigest();
+  
+  // MEMORY_DELTA_FOR_REPHRASE_CTX
+  // 前ターンの核心 / 現ターンの入力 / 次焦点を、Writerへ渡るctxPackに載せる
+  const previousUserForMemoryDelta = (() => {
+    const hist: any[] = Array.isArray(normalizedHistory) ? normalizedHistory : [];
+    const currentNorm = TRIM(userText);
+    for (let i = hist.length - 1; i >= 0; i--) {
+      const t = hist[i];
+      if (t?.role !== 'user') continue;
+      const st = TRIM(t?.content ?? t?.text ?? '');
+      if (!st) continue;
+      if (st === currentNorm) continue;
+      return st.slice(0, 1200);
+    }
+    return null;
+  })();
+
+  const memoryDeltaCurrentAskForCtx = TRIM(userText);
+  const memoryDeltaForCtx = memoryDeltaCurrentAskForCtx
+    ? buildMemoryDelta({
+        previousCore:
+          (ctxPack as any)?.historyDigestV1?.continuity?.last_user_core ??
+          (ctxPack as any)?.historyDigestV1?.continuity?.lastUserCore ??
+          (ctxPack as any)?.historyDigestV1?.situationSummary ??
+          (ctxPack as any)?.situationSummary ??
+          previousUserForMemoryDelta ??
+          null,
+        currentAsk: memoryDeltaCurrentAskForCtx,
+        nextFocus:
+          (ctxPack as any)?.focusResolution?.nextFocus ??
+          (ctxPack as any)?.nextFocus ??
+          (ctxPack as any)?.shiftHint ??
+          null,
+        stableHint:
+          (ctxPack as any)?.topicDigest ??
+          (ctxPack as any)?.conversationLine ??
+          null,
+      })
+    : null;
+
+  const memoryDeltaSeedForCtx = formatMemoryDeltaSeed(memoryDeltaForCtx);
+
+  if (memoryDeltaForCtx && (ctxPack as any).memoryDelta == null) {
+    (ctxPack as any).memoryDelta = memoryDeltaForCtx;
+  }
+
+  if (memoryDeltaSeedForCtx && isBlankLike((ctxPack as any).memoryDeltaSeed)) {
+    (ctxPack as any).memoryDeltaSeed = memoryDeltaSeedForCtx;
+  }
+
+  try {
+    console.log('[IROS/_impl/rephrase.ts][MEMORY_DELTA_FOR_REPHRASE_CTX]', {
+      hasMemoryDelta: Boolean(memoryDeltaForCtx),
+      hasMemoryDeltaSeed: Boolean(memoryDeltaSeedForCtx),
+      memoryDeltaSeedHead: String(memoryDeltaSeedForCtx ?? '').slice(0, 200),
+    });
+  } catch {}
 
   const pickResolvedAskText = (...cands: any[]): string | null => {
     for (const v of cands) {
@@ -2335,6 +2393,7 @@ try {
           ...(((extraMerged as any)?.ctxPack && typeof (extraMerged as any).ctxPack === 'object')
             ? (extraMerged as any).ctxPack
             : {}),
+          ...(ctxPack && typeof ctxPack === 'object' ? ctxPack : {}),
           personDepthPattern: personDepthPatternForLLM,
           person_depth_pattern: personDepthPatternForLLM,
           depthDelta: depthDeltaForLLM,

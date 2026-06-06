@@ -995,7 +995,7 @@ const mirrorFlowV1ForSeed: any =
       ].join('\n');
     })();
 
-    const memorySeedTextForWriter = String(
+    const memorySeedTextBaseForWriter = String(
       firstNonNull(
         (ctxPack as any)?.memorySeedText,
         (extra as any)?.memorySeedText,
@@ -1007,6 +1007,30 @@ const mirrorFlowV1ForSeed: any =
         null,
       ) ?? '',
     ).trim();
+
+    const memoryDeltaSeedForWriter = String(
+      firstNonNull(
+        (ctxPack as any)?.memoryDeltaSeed,
+        (extra as any)?.memoryDeltaSeed,
+        (extra as any)?.ctxPack?.memoryDeltaSeed,
+        (args as any)?.memoryDeltaSeed,
+        (args as any)?.userContext?.ctxPack?.memoryDeltaSeed,
+        (args as any)?.userContext?.meta?.extra?.memoryDeltaSeed,
+        (args as any)?.userContext?.meta?.extra?.ctxPack?.memoryDeltaSeed,
+        null,
+      ) ?? '',
+    ).trim();
+
+    const memorySeedTextForWriter = [
+      memorySeedTextBaseForWriter,
+      memoryDeltaSeedForWriter &&
+      !/MEMORY_DELTA\s*\(DO NOT OUTPUT\)/.test(memorySeedTextBaseForWriter)
+        ? memoryDeltaSeedForWriter
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+      .trim();
 
     const seedTextRawBase = String(
       pick(
@@ -1026,11 +1050,15 @@ const mirrorFlowV1ForSeed: any =
       const hasMirrorFlowAlready = /MIRROR_FLOW_SEED_V1\b/.test(seedTextRawBase);
       const hasReferenceCheckRuleAlready = /REFERENCE_CHECK_RULE\b/.test(seedTextRawBase);
       const hasMemorySeedAlready = /MEMORY_SEED\b/.test(seedTextRawBase);
+      const hasMemoryDeltaAlready =
+        /MEMORY_DELTA\s*\(DO NOT OUTPUT\)/.test(seedTextRawBase) ||
+        /MEMORY_DELTA\s*\(DO NOT OUTPUT\)/.test(memorySeedTextBaseForWriter);
 
       const parts = [
         hasMirrorFlowAlready ? '' : mirrorFlowSeedText,
         hasReferenceCheckRuleAlready ? '' : referenceCheckRuleSeedText,
-        hasMemorySeedAlready ? '' : memorySeedTextForWriter,
+        hasMemorySeedAlready ? '' : memorySeedTextBaseForWriter,
+        hasMemoryDeltaAlready ? '' : memoryDeltaSeedForWriter,
         seedTextRawBase,
       ].filter(Boolean);
 
@@ -1043,12 +1071,15 @@ const mirrorFlowV1ForSeed: any =
         mirrorFlowSeedTextHead: String(mirrorFlowSeedText ?? '').slice(0, 200),
         memorySeedTextForWriterLen: String(memorySeedTextForWriter ?? '').length,
         memorySeedTextForWriterHead: String(memorySeedTextForWriter ?? '').slice(0, 200),
+        memoryDeltaSeedForWriterLen: String(memoryDeltaSeedForWriter ?? '').length,
+        memoryDeltaSeedForWriterHead: String(memoryDeltaSeedForWriter ?? '').slice(0, 200),
         seedTextRawBaseHead: String(seedTextRawBase ?? '').slice(0, 200),
         seedTextRawHead: String(seedTextRaw ?? '').slice(0, 360),
         seedTextRawHasMirrorFlowSeed: /MIRROR_FLOW_SEED_V1\b/.test(String(seedTextRaw ?? '')),
         seedTextRawBaseHasMirrorFlowSeed: /MIRROR_FLOW_SEED_V1\b/.test(String(seedTextRawBase ?? '')),
         seedTextRawHasMemorySeed: /MEMORY_SEED\b/.test(String(seedTextRaw ?? '')),
         seedTextRawBaseHasMemorySeed: /MEMORY_SEED\b/.test(String(seedTextRawBase ?? '')),
+        seedTextRawHasMemoryDelta: /MEMORY_DELTA\s*\(DO NOT OUTPUT\)/.test(String(seedTextRaw ?? '')),
       })
     );
   const flowDelta2 = String(pick(flow?.delta, (flow as any)?.flowDelta) ?? '').trim();
