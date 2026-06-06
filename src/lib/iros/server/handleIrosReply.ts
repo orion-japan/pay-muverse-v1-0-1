@@ -17,6 +17,7 @@ import { getIrosSupabaseAdmin } from './handleIrosReply.supabase';
 import { resolveAwakenState } from '@/lib/iros/awaken/resolveAwakenState';
 import { resolveRemakeState } from '@/lib/iros/remake/resolveRemakeState';
 import { diagnosisEngine } from '@/lib/iros/diagnosis/diagnosisEngine';
+import { normalizeDiagnosisTarget } from '@/lib/iros/diagnosis/diagnosisTarget';
 
 import { runGreetingGate } from './handleIrosReply.gates';
 import { buildTurnContext } from './handleIrosReply.context';
@@ -1261,7 +1262,8 @@ if (isIrDiagnosisInput) {
     return beforeTrigger || afterTrigger;
   })();
 
-    const targetLabel = cleanedTargetLabel || '自分';
+    const normalizedDiagnosisTarget = normalizeDiagnosisTarget(cleanedTargetLabel || '自分');
+    const targetLabel = normalizedDiagnosisTarget.targetLabel;
 
     const diagRelationshipMemoryRows =
       typeof userCode === 'string' &&
@@ -1437,6 +1439,28 @@ const irMeta =
           summaryText: null,
         };
 
+      (irMeta as any).targetLabel =
+        String((irMeta as any)?.targetLabel ?? normalizedDiagnosisTarget.targetLabel).trim() ||
+        normalizedDiagnosisTarget.targetLabel;
+      (irMeta as any).targetType = normalizedDiagnosisTarget.targetType;
+      (irMeta as any).targetScope = normalizedDiagnosisTarget.targetScope;
+      (irMeta as any).targetKey = normalizedDiagnosisTarget.targetKey;
+      (irMeta as any).structuredTargetKey = normalizedDiagnosisTarget.structuredTargetKey;
+      (irMeta as any).targetPersons = normalizedDiagnosisTarget.targetPersons;
+      (irMeta as any).targetTopic = normalizedDiagnosisTarget.targetTopic;
+      (irMeta as any).targetNormalization = {
+        rawLabel: normalizedDiagnosisTarget.rawLabel,
+        targetLabel: normalizedDiagnosisTarget.targetLabel,
+        targetType: normalizedDiagnosisTarget.targetType,
+        targetScope: normalizedDiagnosisTarget.targetScope,
+        targetKey: normalizedDiagnosisTarget.targetKey,
+        structuredTargetKey: normalizedDiagnosisTarget.structuredTargetKey,
+        targetPersons: normalizedDiagnosisTarget.targetPersons,
+        targetTopic: normalizedDiagnosisTarget.targetTopic,
+        confidence: normalizedDiagnosisTarget.confidence,
+        reason: normalizedDiagnosisTarget.reason,
+      };
+
       const diagnosisHistoryAt = new Date().toISOString();
 
       const diagnosisTargetLabelForHistory =
@@ -1449,25 +1473,29 @@ const irMeta =
             (finalText.match(/観測対象[:：]\s*([^\n]+)/u)?.[1] ?? '')
         ).trim() || '対象未指定';
 
-      const diagnosisTargetNormForHistory = diagnosisTargetLabelForHistory
-        .replace(/[\s　]+/g, '')
-        .replace(/さん|様|先生|くん|ちゃん/g, '');
+      const diagnosisTargetTypeForHistory =
+        String((irMeta as any)?.targetType ?? normalizedDiagnosisTarget.targetType ?? '').trim() ||
+        normalizedDiagnosisTarget.targetType;
 
-      const diagnosisTargetScopeForHistory = (() => {
-        if (/^(自分|今の自分|自分自身|本当の自分|わたし|私|僕|俺|自分のこと)$/u.test(diagnosisTargetNormForHistory)) {
-          return 'self';
-        }
+      const diagnosisTargetScopeForHistory =
+        ((irMeta as any)?.targetScope === 'self' ||
+        (irMeta as any)?.targetScope === 'other' ||
+        (irMeta as any)?.targetScope === 'situation'
+          ? (irMeta as any).targetScope
+          : normalizedDiagnosisTarget.targetScope) as 'self' | 'other' | 'situation';
 
-        if (/(相手|浮気相手|不倫相手|彼|彼氏|彼女|妻|嫁|奥さん|夫|旦那|主人|恋人|好きな人|元彼|元カレ|元彼女|元カノ|友達|親友|上司|部下|同僚|社長|先生|母|父|親|子ども|息子|娘|兄|弟|姉|妹|家族|お客|顧客)/u.test(diagnosisTargetNormForHistory)) {
-          return 'other';
-        }
+      const diagnosisTargetKeyForHistory =
+        String((irMeta as any)?.targetKey ?? normalizedDiagnosisTarget.targetKey ?? '').trim() || null;
 
-        if (/(仕事|計画|企画|事業|申請|助成金|映像|動画|投稿|サービス|アプリ|実装|開発|設計|資料|文章|プロンプト|プロジェクト|契約|会議|打ち合わせ|この件|この問題|問題|課題|状況|状態|流れ|関係|関係性|浮気|不倫|離婚|連絡|返信|返事|予定|お金|売上|集客|TikTok|SNS|サイト|LP|講座|商品|企画書)/u.test(diagnosisTargetNormForHistory)) {
-          return 'situation';
-        }
+      const diagnosisStructuredTargetKeyForHistory =
+        String((irMeta as any)?.structuredTargetKey ?? normalizedDiagnosisTarget.structuredTargetKey ?? '').trim() || null;
 
-        return 'other';
-      })();
+      const diagnosisTargetPersonsForHistory = Array.isArray((irMeta as any)?.targetPersons)
+        ? (irMeta as any).targetPersons
+        : normalizedDiagnosisTarget.targetPersons;
+
+      const diagnosisTargetTopicForHistory =
+        String((irMeta as any)?.targetTopic ?? normalizedDiagnosisTarget.targetTopic ?? '').trim() || null;
 
       const diagnosisId =
         `diag_${diagnosisHistoryAt.replace(/[^0-9]/g, '').slice(0, 14)}_${Math.random()
@@ -1488,6 +1516,11 @@ const irMeta =
         target: diagnosisTargetLabelForHistory,
         targetLabel: diagnosisTargetLabelForHistory,
         targetScope: diagnosisTargetScopeForHistory,
+        targetType: diagnosisTargetTypeForHistory,
+        targetKey: diagnosisTargetKeyForHistory,
+        structuredTargetKey: diagnosisStructuredTargetKeyForHistory,
+        targetPersons: diagnosisTargetPersonsForHistory,
+        targetTopic: diagnosisTargetTopicForHistory,
         text: finalText,
         diagnosisText: finalText,
         assistantText: finalText,
@@ -1534,6 +1567,12 @@ const irMeta =
               detailMode: true,
               targetLabel: diagnosisTargetLabelForHistory,
               targetScope: diagnosisTargetScopeForHistory,
+              targetType: diagnosisTargetTypeForHistory,
+              targetKey: diagnosisTargetKeyForHistory,
+              structuredTargetKey: diagnosisStructuredTargetKeyForHistory,
+              targetPersons: diagnosisTargetPersonsForHistory,
+              targetTopic: diagnosisTargetTopicForHistory,
+              targetNormalization: (irMeta as any)?.targetNormalization ?? null,
               diagnosisHistory,
               activeDiagnosisId,
               lastIrDiagnosis,
@@ -1566,6 +1605,12 @@ const irMeta =
                 detailMode: true,
                 targetLabel: diagnosisTargetLabelForHistory,
                 targetScope: diagnosisTargetScopeForHistory,
+                targetType: diagnosisTargetTypeForHistory,
+                targetKey: diagnosisTargetKeyForHistory,
+                structuredTargetKey: diagnosisStructuredTargetKeyForHistory,
+                targetPersons: diagnosisTargetPersonsForHistory,
+                targetTopic: diagnosisTargetTopicForHistory,
+                targetNormalization: (irMeta as any)?.targetNormalization ?? null,
                 diagnosisHistory,
                 activeDiagnosisId,
                 lastIrDiagnosis,
@@ -3730,26 +3775,54 @@ function normForRecall(v: any): string {
                         (finalText.match(/観測対象[:：]\\s*([^\\n]+)/u)?.[1] ?? '')
                     ).trim() || '対象未指定';
 
-                  const diagnosisTargetNormForHistoryAfterOrch =
-                    diagnosisTargetLabelForHistoryAfterOrch
-                      .replace(/[\\s　]+/g, '')
-                      .replace(/さん|様|先生|くん|ちゃん/g, '');
+                  const normalizedDiagnosisTargetAfterOrch =
+                    normalizeDiagnosisTarget(diagnosisTargetLabelForHistoryAfterOrch || '自分');
 
-                  const diagnosisTargetScopeForHistoryAfterOrch = (() => {
-                    if (/^(自分|今の自分|自分自身|本当の自分|わたし|私|僕|俺|自分のこと)$/u.test(diagnosisTargetNormForHistoryAfterOrch)) {
-                      return 'self';
-                    }
+                  (irMeta as any).targetLabel =
+                    String((irMeta as any)?.targetLabel ?? normalizedDiagnosisTargetAfterOrch.targetLabel).trim() ||
+                    normalizedDiagnosisTargetAfterOrch.targetLabel;
+                  (irMeta as any).targetType = normalizedDiagnosisTargetAfterOrch.targetType;
+                  (irMeta as any).targetScope = normalizedDiagnosisTargetAfterOrch.targetScope;
+                  (irMeta as any).targetKey = normalizedDiagnosisTargetAfterOrch.targetKey;
+                  (irMeta as any).structuredTargetKey = normalizedDiagnosisTargetAfterOrch.structuredTargetKey;
+                  (irMeta as any).targetPersons = normalizedDiagnosisTargetAfterOrch.targetPersons;
+                  (irMeta as any).targetTopic = normalizedDiagnosisTargetAfterOrch.targetTopic;
+                  (irMeta as any).targetNormalization = {
+                    rawLabel: normalizedDiagnosisTargetAfterOrch.rawLabel,
+                    targetLabel: normalizedDiagnosisTargetAfterOrch.targetLabel,
+                    targetType: normalizedDiagnosisTargetAfterOrch.targetType,
+                    targetScope: normalizedDiagnosisTargetAfterOrch.targetScope,
+                    targetKey: normalizedDiagnosisTargetAfterOrch.targetKey,
+                    structuredTargetKey: normalizedDiagnosisTargetAfterOrch.structuredTargetKey,
+                    targetPersons: normalizedDiagnosisTargetAfterOrch.targetPersons,
+                    targetTopic: normalizedDiagnosisTargetAfterOrch.targetTopic,
+                    confidence: normalizedDiagnosisTargetAfterOrch.confidence,
+                    reason: normalizedDiagnosisTargetAfterOrch.reason,
+                  };
 
-                    if (/(相手|浮気相手|不倫相手|彼|彼氏|彼女|妻|嫁|奥さん|夫|旦那|主人|恋人|好きな人|元彼|元カレ|元彼女|元カノ|友達|親友|上司|部下|同僚|社長|先生|母|父|親|子ども|息子|娘|兄|弟|姉|妹|家族|お客|顧客)/u.test(diagnosisTargetNormForHistoryAfterOrch)) {
-                      return 'other';
-                    }
+                  const diagnosisTargetTypeForHistoryAfterOrch =
+                    String((irMeta as any)?.targetType ?? normalizedDiagnosisTargetAfterOrch.targetType ?? '').trim() ||
+                    normalizedDiagnosisTargetAfterOrch.targetType;
 
-                    if (/(仕事|計画|企画|事業|申請|助成金|映像|動画|投稿|サービス|アプリ|実装|開発|設計|資料|文章|プロンプト|プロジェクト|契約|会議|打ち合わせ|この件|この問題|問題|課題|状況|状態|流れ|関係|関係性|浮気|不倫|離婚|連絡|返信|返事|予定|お金|売上|集客|TikTok|SNS|サイト|LP|講座|商品|企画書)/u.test(diagnosisTargetNormForHistoryAfterOrch)) {
-                      return 'situation';
-                    }
+                  const diagnosisTargetScopeForHistoryAfterOrch =
+                    ((irMeta as any)?.targetScope === 'self' ||
+                    (irMeta as any)?.targetScope === 'other' ||
+                    (irMeta as any)?.targetScope === 'situation'
+                      ? (irMeta as any).targetScope
+                      : normalizedDiagnosisTargetAfterOrch.targetScope) as 'self' | 'other' | 'situation';
 
-                    return 'other';
-                  })();
+                  const diagnosisTargetKeyForHistoryAfterOrch =
+                    String((irMeta as any)?.targetKey ?? normalizedDiagnosisTargetAfterOrch.targetKey ?? '').trim() || null;
+
+                  const diagnosisStructuredTargetKeyForHistoryAfterOrch =
+                    String((irMeta as any)?.structuredTargetKey ?? normalizedDiagnosisTargetAfterOrch.structuredTargetKey ?? '').trim() || null;
+
+                  const diagnosisTargetPersonsForHistoryAfterOrch = Array.isArray((irMeta as any)?.targetPersons)
+                    ? (irMeta as any).targetPersons
+                    : normalizedDiagnosisTargetAfterOrch.targetPersons;
+
+                  const diagnosisTargetTopicForHistoryAfterOrch =
+                    String((irMeta as any)?.targetTopic ?? normalizedDiagnosisTargetAfterOrch.targetTopic ?? '').trim() || null;
 
                   const diagnosisIdForOrchBranch =
                     `diag_${diagnosisHistoryAtForOrchBranch.replace(/[^0-9]/g, '').slice(0, 14)}_${Math.random()
@@ -3774,6 +3847,11 @@ function normForRecall(v: any): string {
                     target: diagnosisTargetLabelForHistoryAfterOrch,
                     targetLabel: diagnosisTargetLabelForHistoryAfterOrch,
                     targetScope: diagnosisTargetScopeForHistoryAfterOrch,
+                    targetType: diagnosisTargetTypeForHistoryAfterOrch,
+                    targetKey: diagnosisTargetKeyForHistoryAfterOrch,
+                    structuredTargetKey: diagnosisStructuredTargetKeyForHistoryAfterOrch,
+                    targetPersons: diagnosisTargetPersonsForHistoryAfterOrch,
+                    targetTopic: diagnosisTargetTopicForHistoryAfterOrch,
                     text: finalText,
                     diagnosisText: finalText,
                     assistantText: finalText,
@@ -3810,6 +3888,12 @@ function normForRecall(v: any): string {
                         detailMode: true,
                         targetLabel: diagnosisTargetLabelForHistoryAfterOrch,
                         targetScope: diagnosisTargetScopeForHistoryAfterOrch,
+                        targetType: diagnosisTargetTypeForHistoryAfterOrch,
+                        targetKey: diagnosisTargetKeyForHistoryAfterOrch,
+                        structuredTargetKey: diagnosisStructuredTargetKeyForHistoryAfterOrch,
+                        targetPersons: diagnosisTargetPersonsForHistoryAfterOrch,
+                        targetTopic: diagnosisTargetTopicForHistoryAfterOrch,
+                        targetNormalization: (irMeta as any)?.targetNormalization ?? null,
                         diagnosisHistory: diagnosisHistoryAfterOrch,
                         activeDiagnosisId: activeDiagnosisIdAfterOrch,
                         lastIrDiagnosis: lastIrDiagnosisAfterOrch,
@@ -3821,6 +3905,12 @@ function normForRecall(v: any): string {
                         detailMode: true,
                         targetLabel: diagnosisTargetLabelForHistoryAfterOrch,
                         targetScope: diagnosisTargetScopeForHistoryAfterOrch,
+                        targetType: diagnosisTargetTypeForHistoryAfterOrch,
+                        targetKey: diagnosisTargetKeyForHistoryAfterOrch,
+                        structuredTargetKey: diagnosisStructuredTargetKeyForHistoryAfterOrch,
+                        targetPersons: diagnosisTargetPersonsForHistoryAfterOrch,
+                        targetTopic: diagnosisTargetTopicForHistoryAfterOrch,
+                        targetNormalization: (irMeta as any)?.targetNormalization ?? null,
                         diagnosisHistory: diagnosisHistoryAfterOrch,
                         activeDiagnosisId: activeDiagnosisIdAfterOrch,
                         lastIrDiagnosis: lastIrDiagnosisAfterOrch,
