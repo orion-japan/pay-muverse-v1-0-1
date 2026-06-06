@@ -4678,6 +4678,50 @@ if (ctxPackForWriter && typeof ctxPackForWriter === 'object') {
 }
 
 // question の正本をここで一度だけ決める
+const isOfferFollowupQuestionSuppressed =
+  String((ctxPackForWriter as any)?.continuityKind ?? '').trim() === 'offer_followup' ||
+  String((ctxPackForWriter as any)?.resolvedAsk?.askType ?? '').trim() === 'offer_followup' ||
+  String((opts as any)?.ctxPack?.continuityKind ?? '').trim() === 'offer_followup' ||
+  String((opts as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() === 'offer_followup' ||
+  String((opts as any)?.userContext?.ctxPack?.continuityKind ?? '').trim() === 'offer_followup' ||
+  String((opts as any)?.userContext?.ctxPack?.resolvedAsk?.askType ?? '').trim() === 'offer_followup' ||
+  String((opts as any)?.meta?.extra?.ctxPack?.continuityKind ?? '').trim() === 'offer_followup' ||
+  String((opts as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() === 'offer_followup' ||
+  String((ctxPackForWriter as any)?.memorySeedText ?? '').includes('OFFER_CONTINUITY_CONTROL:') ||
+  String((opts as any)?.ctxPack?.memorySeedText ?? '').includes('OFFER_CONTINUITY_CONTROL:') ||
+  String((opts as any)?.userContext?.ctxPack?.memorySeedText ?? '').includes('OFFER_CONTINUITY_CONTROL:') ||
+  String((opts as any)?.meta?.extra?.ctxPack?.memorySeedText ?? '').includes('OFFER_CONTINUITY_CONTROL:');
+
+if (isOfferFollowupQuestionSuppressed) {
+  if (ctxPackForWriter && typeof ctxPackForWriter === 'object') {
+    (ctxPackForWriter as any).question = null;
+  }
+
+  if ((opts as any)?.ctxPack && typeof (opts as any).ctxPack === 'object') {
+    (opts as any).ctxPack.question = null;
+  }
+
+  if ((opts as any)?.userContext && typeof (opts as any).userContext === 'object') {
+    (opts as any).userContext.question = null;
+  }
+
+  if ((opts as any)?.userContext?.ctxPack && typeof (opts as any).userContext.ctxPack === 'object') {
+    (opts as any).userContext.ctxPack.question = null;
+  }
+
+  if ((opts as any)?.extra && typeof (opts as any).extra === 'object') {
+    (opts as any).extra.question = null;
+  }
+
+  if ((opts as any)?.meta?.extra && typeof (opts as any).meta.extra === 'object') {
+    (opts as any).meta.extra.question = null;
+  }
+
+  if ((opts as any)?.userContext?.meta?.extra && typeof (opts as any).userContext.meta.extra === 'object') {
+    (opts as any).userContext.meta.extra.question = null;
+  }
+}
+
 const primaryQuestionForWriter =
   (ctxPackForWriter?.question &&
   typeof ctxPackForWriter.question === 'object')
@@ -6841,6 +6885,22 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
         ''
     ).trim();
 
+    const compactPatternFollowupTextForMuCapabilityMeta = patternFollowupText.replace(
+      /[\s　、。！？!?「」『』（）()]/g,
+      ''
+    );
+
+    const isMuCapabilityMetaQuestionForPattern =
+      /^(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(どうして|なんで|なぜ|何で).*(わかる|分かる|読める|見える|回答|答え|返答|できる|出来る)/u.test(
+        compactPatternFollowupTextForMuCapabilityMeta
+      ) ||
+      /^(どうして|なんで|なぜ|何で).*(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(わかる|分かる|読める|見える|回答|答え|返答|できる|出来る)/u.test(
+        compactPatternFollowupTextForMuCapabilityMeta
+      ) ||
+      /(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(仕組み|原理|なぜ|どうして|なんで|何で).*(回答|答え|返答|わかる|分かる|できる|出来る)/u.test(
+        compactPatternFollowupTextForMuCapabilityMeta
+      );
+
     // ✅ 創作・書き直し系の継続要求は、診断詳細パターンに入れない。
     // 例: 「はい、書いてください」「もう少しリアルに書いてください」「それを書いて」「続きを書いて」
     const isCreativeContinuationForPattern =
@@ -6849,12 +6909,14 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
       );
 
     const isDiagnosisFollowupPhrase =
+      !isMuCapabilityMetaQuestionForPattern &&
       !isCreativeContinuationForPattern &&
       /診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|さっきの診断|前の診断|この診断|今の診断|深めて|深める|掘り下げ|掘って/u.test(
         patternFollowupText
       );
 
     const hasPriorDiagnosisForPattern =
+      !isMuCapabilityMetaQuestionForPattern &&
       !isCreativeContinuationForPattern &&
       (
         patternPresentationKind === 'diagnosis' ||
@@ -6889,17 +6951,22 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
         patternFollowupText
       );
 
-    const effectivePatternPresentationKind = isConsultAnswerLikeForPattern
-      ? 'consult'
-      : patternPresentationKind;
+    const effectivePatternPresentationKind = isMuCapabilityMetaQuestionForPattern
+      ? 'normal'
+      : isConsultAnswerLikeForPattern
+        ? 'consult'
+        : patternPresentationKind;
 
-    const effectivePatternDetailMode = isConsultAnswerLikeForPattern
+    const effectivePatternDetailMode = isMuCapabilityMetaQuestionForPattern
       ? false
-      : patternDetailMode;
+      : isConsultAnswerLikeForPattern
+        ? false
+        : patternDetailMode;
 
-    const effectiveHasPriorDiagnosisForPattern = isConsultAnswerLikeForPattern
-      ? false
-      : hasPriorDiagnosisForPattern;
+    const effectiveHasPriorDiagnosisForPattern =
+      isMuCapabilityMetaQuestionForPattern || isConsultAnswerLikeForPattern
+        ? false
+        : hasPriorDiagnosisForPattern;
 
     const patternSelectInput = {
       line: effectivePatternPresentationKind === 'diagnosis' ? 'diagnosis' : effectivePatternPresentationKind,
@@ -6913,7 +6980,7 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
 
     const preSelectedPatternKeyRaw = String((opts as any)?.meta?.extra?.patternKey ?? '').trim();
     const preSelectedPatternKey =
-      (isConsultAnswerLikeForPattern || isCreativeContinuationForPattern) &&
+      (isMuCapabilityMetaQuestionForPattern || isConsultAnswerLikeForPattern || isCreativeContinuationForPattern) &&
       (preSelectedPatternKeyRaw === 'IR_DETAIL_V1' || preSelectedPatternKeyRaw === 'NORMAL_DETAIL_V1')
         ? ''
         : preSelectedPatternKeyRaw;
@@ -6968,7 +7035,9 @@ const inferQuestionType = (v: string): SlotWeightInput['questionType'] => {
       resolvedAskReadingModeForMaterialize === 'partner_side_resonance';
 
     const patternKey = (
-      isConsultAnswerLikeForPattern
+      isMuCapabilityMetaQuestionForPattern
+        ? 'NORMAL_RESONANCE_V1'
+        : isConsultAnswerLikeForPattern
         ? 'NORMAL_COMPRESSED_V1'
         : isPartnerSideResonanceForMaterialize
         ? 'PARTNER_SIDE_RESONANCE_V1'
@@ -9549,6 +9618,22 @@ const writerPatternFollowupText = String(
     ''
 ).trim();
 
+const compactWriterPatternFollowupTextForMuCapabilityMeta = writerPatternFollowupText.replace(
+  /[\s　、。！？!?「」『』（）()]/g,
+  ''
+);
+
+const isMuCapabilityMetaQuestionForWriterPattern =
+  /^(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(どうして|なんで|なぜ|何で).*(わかる|分かる|読める|見える|回答|答え|返答|できる|出来る)/u.test(
+    compactWriterPatternFollowupTextForMuCapabilityMeta
+  ) ||
+  /^(どうして|なんで|なぜ|何で).*(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(わかる|分かる|読める|見える|回答|答え|返答|できる|出来る)/u.test(
+    compactWriterPatternFollowupTextForMuCapabilityMeta
+  ) ||
+  /(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(仕組み|原理|なぜ|どうして|なんで|何で).*(回答|答え|返答|わかる|分かる|できる|出来る)/u.test(
+    compactWriterPatternFollowupTextForMuCapabilityMeta
+  );
+
 const writerPatternTargetLabel =
   String(
     (opts as any)?.meta?.extra?.targetLabel ??
@@ -9595,13 +9680,17 @@ const writerPatternHasLastIrDiagnosis =
   !!(opts as any)?.userContext?.meta?.extra?.ctxPack?.lastIrDiagnosis;
 
 const writerPatternIsDiagnosisFollowupPhrase =
+  !isMuCapabilityMetaQuestionForWriterPattern &&
   /診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|さっきの診断|前の診断|この診断|今の診断|深めて|深める|掘り下げ|掘って/u.test(
     writerPatternFollowupText
   );
 
 const writerPatternHasPriorDiagnosis =
-  writerPatternPresentationKind === 'diagnosis' ||
-  (!!writerPatternTargetLabel && writerPatternIsDiagnosisFollowupPhrase);
+  !isMuCapabilityMetaQuestionForWriterPattern &&
+  (
+    writerPatternPresentationKind === 'diagnosis' ||
+    (!!writerPatternTargetLabel && writerPatternIsDiagnosisFollowupPhrase)
+  );
 
 const writerPatternFollowupKindForConsult = String(
   (ctxPackForWriter as any)?.followupKind ??
@@ -9649,13 +9738,17 @@ const writerPatternIsCreativeContinuation =
   );
 
 const writerPatternEffectiveHasPriorDiagnosis =
-  writerPatternIsConsultAnswerLike || writerPatternIsCreativeContinuation
+  isMuCapabilityMetaQuestionForWriterPattern ||
+  writerPatternIsConsultAnswerLike ||
+  writerPatternIsCreativeContinuation
     ? false
     : writerPatternHasPriorDiagnosis;
 
-const writerPatternEffectivePresentationKind = writerPatternIsConsultAnswerLike
-  ? 'consult'
-  : writerPatternPresentationKind;
+const writerPatternEffectivePresentationKind = isMuCapabilityMetaQuestionForWriterPattern
+  ? 'normal'
+  : writerPatternIsConsultAnswerLike
+    ? 'consult'
+    : writerPatternPresentationKind;
 
 const writerPatternEarlySelected = selectSlotPattern({
   line: writerPatternEffectiveHasPriorDiagnosis ? 'diagnosis' : writerPatternEffectivePresentationKind,
@@ -9669,6 +9762,7 @@ const writerPatternEarlySelected = selectSlotPattern({
         ''
     ).trim() || null,
   detailMode:
+    !isMuCapabilityMetaQuestionForWriterPattern &&
     !writerPatternIsConsultAnswerLike &&
     !writerPatternIsCreativeContinuation &&
     (
@@ -9710,7 +9804,7 @@ const carryPatternKeyForWriter = (() => {
       ''
   ).trim();
 
-  if (carried === 'IR_DETAIL_V1' && !writerPatternEffectiveHasPriorDiagnosis) {
+  if ((carried === 'IR_DETAIL_V1' || carried === 'NORMAL_DETAIL_V1') && (isMuCapabilityMetaQuestionForWriterPattern || !writerPatternEffectiveHasPriorDiagnosis)) {
     return '';
   }
 
@@ -9719,7 +9813,9 @@ const carryPatternKeyForWriter = (() => {
 
 const selectedPatternKey = String(
   storyPatternKeyForPattern ||
-    (writerPatternIsConsultAnswerLike
+    (isMuCapabilityMetaQuestionForWriterPattern
+      ? 'NORMAL_RESONANCE_V1'
+      : writerPatternIsConsultAnswerLike
       ? 'NORMAL_COMPRESSED_V1'
       : writerPatternEffectiveHasPriorDiagnosis && writerPatternEarlySelected === 'IR_DETAIL_V1'
         ? 'IR_DETAIL_V1'

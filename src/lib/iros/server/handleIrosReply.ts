@@ -2658,6 +2658,198 @@ function normForRecall(v: any): string {
         convSignals: convSignalsForTurn,
         explicitUserSignal: convSignalsForTurn.explicitUserSignal,
       };
+
+      const compactUserTextForDiagnosisExitGate = currentUserTextForMemoryGate.replace(
+        /[\s　、。！？!?「」『』（）()]/g,
+        ''
+      );
+
+      const isMuCapabilityMetaQuestionForDiagnosisExitGate =
+        /^(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(どうして|なんで|なぜ|何で).*(わかる|分かる|読める|見える|回答|答え|返答|できる|出来る)/u.test(
+          compactUserTextForDiagnosisExitGate
+        ) ||
+        /^(どうして|なんで|なぜ|何で).*(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(わかる|分かる|読める|見える|回答|答え|返答|できる|出来る)/u.test(
+          compactUserTextForDiagnosisExitGate
+        ) ||
+        /(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(仕組み|原理|なぜ|どうして|なんで|何で).*(回答|答え|返答|わかる|分かる|できる|出来る)/u.test(
+          compactUserTextForDiagnosisExitGate
+        );
+
+      const isSystemBehaviorQuestionForDiagnosisExitGate =
+        /(通常会話|一般会話|新規チャット|最初のターン|診断の続き|混線|混戦|フラグ|トリガー|終了|pre-seed|Pre-SEED|seed|ctxPack|route\.ts|ログ|実装|コード)/iu.test(
+          currentUserTextForMemoryGate
+        ) &&
+        /(診断|続き|なった|なる|なっちゃう|理由|なんで|なぜ|どうして|終了|抜ける|戻る|混ざる|混線|混戦)/u.test(
+          currentUserTextForMemoryGate
+        );
+
+      const isExplicitDiagnosisContinuationForExitGate =
+        /(診断内容を詳しく|診断内容|診断結果|この診断|今の診断|さっきの診断|前の診断|診断を深め|診断を掘|診断について|なんでわかるの|なんで分かるの|なぜわかるの|なぜ分かるの|どうしてわかるの|どうして分かるの)/u.test(
+          currentUserTextForMemoryGate
+        );
+
+      const lastAssistantTextForDiagnosisExitGate = (() => {
+        const turns = Array.isArray(historyForTurn) ? historyForTurn : [];
+        for (let i = turns.length - 1; i >= 0; i--) {
+          const turn: any = turns[i];
+          if (String(turn?.role ?? '').trim() !== 'assistant') continue;
+          return String(turn?.content ?? turn?.text ?? '').trim();
+        }
+        return '';
+      })();
+
+      const hasImmediatePriorDiagnosisForExitGate =
+        /観測対象[:：]|🧭\s*現状|🧩\s*ポイント|🌿\s*意識の向かう先|type\s*diagnosis/u.test(
+          lastAssistantTextForDiagnosisExitGate
+        );
+
+      const hasActiveDiagnosisFollowupCarry = Boolean(
+        (extraLocal as any)?.diagnosisFollowup === true ||
+          (extraLocal as any)?.ctxPack?.diagnosisFollowup === true ||
+          String((extraLocal as any)?.ctxPack?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+          String((extraLocal as any)?.ctxPack?.shiftKind ?? '').trim() === 'diagnosis_followup_shift' ||
+          String((extraLocal as any)?.presentationKind ?? '').trim() === 'diagnosis' ||
+          String((extraLocal as any)?.ctxPack?.presentationKind ?? '').trim() === 'diagnosis' ||
+          Boolean((extraLocal as any)?.ctxPack?.lastIrDiagnosis) ||
+          Boolean((baseMetaMergedForTurn as any)?.extra?.ctxPack?.lastIrDiagnosis) ||
+          /DIAGNOSIS_SEED/u.test(String((extraLocal as any)?.slotPlanSeed ?? '')) ||
+          /DIAGNOSIS_SEED/u.test(String((extraLocal as any)?.llmRewriteSeed ?? ''))
+      );
+
+      const shouldKeepDiagnosisFollowupForCurrentTurn =
+        hasActiveDiagnosisFollowupCarry &&
+        !isMuCapabilityMetaQuestionForDiagnosisExitGate &&
+        !isSystemBehaviorQuestionForDiagnosisExitGate &&
+        isExplicitDiagnosisContinuationForExitGate &&
+        hasImmediatePriorDiagnosisForExitGate;
+
+      const shouldEndDiagnosisFollowupForCurrentTurn =
+        hasActiveDiagnosisFollowupCarry && !shouldKeepDiagnosisFollowupForCurrentTurn;
+
+      const clearActiveDiagnosisCarryForCurrentTurn = (container: any) => {
+        if (!container || typeof container !== 'object') return;
+
+        container.diagnosisFollowup = false;
+
+        if (String(container.presentationKind ?? '').trim() === 'diagnosis') {
+          container.presentationKind = 'normal';
+        }
+
+        if (String(container.mode ?? '').trim() === 'diagnosis') {
+          container.mode = 'normal';
+        }
+
+        if (String(container.continuityKind ?? '').trim() === 'diagnosis_followup') {
+          delete container.continuityKind;
+        }
+
+        if (String(container.shiftKind ?? '').trim() === 'diagnosis_followup_shift') {
+          delete container.shiftKind;
+        }
+
+        delete container.followupKind;
+        delete container.lastIrDiagnosis;
+        delete container.irMeta;
+        delete container.diagnosisHistory;
+        delete container.activeDiagnosisId;
+        delete container.historyForWriter;
+        delete container.historyForWriterAt;
+        delete container.targetLabel;
+        delete container.diagnosisFollowupTargetLabel;
+
+        for (const key of [
+          'slotPlanSeed',
+          'llmRewriteSeed',
+          'llmRewriteSeedRaw',
+          'flowSeedSyncedForRephraseBridge',
+          'memorySeedText',
+          'topicDigest',
+          'conversationLine',
+          'situationSummary',
+          'situationTopic',
+          'topicHint'
+        ]) {
+          const value = container[key];
+          if (typeof value === 'string' && /DIAGNOSIS_SEED|diagnosis_followup|観測対象[:：]|🧭\s*現状|🧩\s*ポイント/u.test(value)) {
+            container[key] = '';
+          }
+        }
+      };
+
+      if (shouldEndDiagnosisFollowupForCurrentTurn) {
+        clearActiveDiagnosisCarryForCurrentTurn(extraLocal as any);
+        clearActiveDiagnosisCarryForCurrentTurn((extraLocal as any)?.ctxPack);
+        clearActiveDiagnosisCarryForCurrentTurn((baseMetaMergedForTurn as any)?.extra);
+        clearActiveDiagnosisCarryForCurrentTurn((baseMetaMergedForTurn as any)?.extra?.ctxPack);
+        clearActiveDiagnosisCarryForCurrentTurn((ctx.baseMetaForTurn as any)?.extra);
+        clearActiveDiagnosisCarryForCurrentTurn((ctx.baseMetaForTurn as any)?.extra?.ctxPack);
+
+        console.log('[IROS/DIAG_FOLLOWUP_EXIT][ROUTE]', {
+          conversationId,
+          userCode,
+          userTextHead: currentUserTextForMemoryGate.slice(0, 120),
+          isMuCapabilityMetaQuestionForDiagnosisExitGate,
+          isSystemBehaviorQuestionForDiagnosisExitGate,
+          isExplicitDiagnosisContinuationForExitGate,
+          hasImmediatePriorDiagnosisForExitGate,
+          hasActiveDiagnosisFollowupCarry,
+          shouldKeepDiagnosisFollowupForCurrentTurn,
+          cleared: true,
+        });
+
+      if (isMuCapabilityMetaQuestionForDiagnosisExitGate) {
+        const muCapabilityMetaDirectReply = [
+          'Muが「なんでわかるの？」と感じる返答を出せるのは、言葉だけを見ているのではなく、会話の流れと今の反応を合わせて見ているからです。',
+          '',
+          '同じ言葉でも、直前までの流れや、相手が本当に知りたがっていることによって、返すべき答えは変わります。',
+          '',
+          'Muはそこを分けて見て、今の会話で使ってよい材料だけを選び、できるだけ自然な言葉に戻します。',
+          '',
+          'だから、当てにいくというより、今の言葉がどこに向かっているかを整理して返している感じです。'
+        ].join('\n');
+
+        (extraLocal as any).preSeedAssistDirectReply = muCapabilityMetaDirectReply;
+        (extraLocal as any).preSeedAssistShouldBypassWriter = true;
+        (extraLocal as any).directReplyCandidate = muCapabilityMetaDirectReply;
+        (extraLocal as any).preSeedAssistKind = 'normal';
+        (extraLocal as any).preSeedAssistConfidence = 1;
+        (extraLocal as any).preSeedAssistResult = {
+          kind: 'normal',
+          confidence: 1,
+          directReply: muCapabilityMetaDirectReply,
+          shouldBypassWriter: true,
+          seedText: '',
+          reason: 'MU_CAPABILITY_META_DIRECT_REPLY',
+        };
+
+        (extraLocal as any).ctxPack =
+          (extraLocal as any).ctxPack && typeof (extraLocal as any).ctxPack === 'object'
+            ? (extraLocal as any).ctxPack
+            : {};
+
+        (extraLocal as any).ctxPack.preSeedAssistDirectReply = muCapabilityMetaDirectReply;
+        (extraLocal as any).ctxPack.preSeedAssistShouldBypassWriter = true;
+        (extraLocal as any).ctxPack.directReplyCandidate = muCapabilityMetaDirectReply;
+        (extraLocal as any).ctxPack.preSeedAssistKind = 'normal';
+        (extraLocal as any).ctxPack.preSeedAssistConfidence = 1;
+        (extraLocal as any).ctxPack.preSeedAssistResult = {
+          kind: 'normal',
+          confidence: 1,
+          directReply: muCapabilityMetaDirectReply,
+          shouldBypassWriter: true,
+          seedText: '',
+          reason: 'MU_CAPABILITY_META_DIRECT_REPLY',
+        };
+
+        console.log('[IROS/MU_CAPABILITY_META_DIRECT_REPLY]', {
+          conversationId,
+          userCode,
+          userTextHead: currentUserTextForMemoryGate.slice(0, 120),
+          directReplyLen: muCapabilityMetaDirectReply.length,
+          shouldBypassWriter: true,
+        });
+      }
+      }
     }
 
     // ✅ GreetingGate の slotPlan を “root” に持ち上げる（extra 側だけだと拾われない経路がある）
@@ -6675,7 +6867,24 @@ try {
       'selectedLabel=' + String(resolvedOfferForOfferContinuity.selected.label ?? ''),
       'selectedAction=' + selectedActionForOfferContinuity,
       'targetLabel=' + String(resolvedOfferForOfferContinuity.targetLabel ?? ''),
+      'targetKey=' + String(resolvedOfferForOfferContinuity.targetKey ?? ''),
+      'domain=' + String(resolvedOfferForOfferContinuity.domain ?? ''),
+      'source=pendingOffer',
       'rule=USER_TEXTは材料。Writerは前者/後者を推測せず、selectedActionを正本として返答する。',
+      'TARGET_CONTEXT_CONTROL:',
+      'targetLabel=' + String(resolvedOfferForOfferContinuity.targetLabel ?? ''),
+      'targetKey=' + String(resolvedOfferForOfferContinuity.targetKey ?? ''),
+      'domain=' + String(resolvedOfferForOfferContinuity.domain ?? ''),
+      'source=pendingOffer',
+      'confidence=' + String(resolvedOfferForOfferContinuity.source.confidence ?? 0),
+      'guard=targetKey不一致の記憶をSeedに混ぜない',
+      'WRITER_CONTRACT:',
+      'seedIsPrimary=true',
+      'forbidUserTextDeepening=true',
+      'forbidFakeDiagnosisReference=true',
+      'forbidUnresolvedChoice=true',
+      'forbidTargetKeyMismatchMemory=true',
+      'rule=CONTINUITY_SEEDがある場合、WriterはUSER_TEXT単体を深掘りせず、選別済みSeedを自然文にする。',
     ].join('\n');
 
     const resolvedAskForOfferContinuity = {
@@ -6711,9 +6920,18 @@ try {
         ? resolvedOfferForOfferContinuity.targetLabel + 'に関する直前提案の実行'
         : '直前提案の実行';
 
-    if (typeof cpForOfferContinuity.memorySeedText !== 'string' || !cpForOfferContinuity.memorySeedText.trim()) {
-      cpForOfferContinuity.memorySeedText = offerContinuitySeedText;
-    }
+    const existingMemorySeedTextForOfferContinuity =
+      typeof cpForOfferContinuity.memorySeedText === 'string'
+        ? cpForOfferContinuity.memorySeedText.trim()
+        : '';
+
+    cpForOfferContinuity.memorySeedText = existingMemorySeedTextForOfferContinuity.includes(
+      'OFFER_CONTINUITY_CONTROL:'
+    )
+      ? existingMemorySeedTextForOfferContinuity
+      : [existingMemorySeedTextForOfferContinuity, offerContinuitySeedText]
+          .filter(Boolean)
+          .join('\n\n');
 
     (extra2 as any).resolvedAsk = resolvedAskForOfferContinuity;
     (extra2 as any).offerContinuityControl = offerContinuityControl;
@@ -11963,11 +12181,14 @@ try {
   const finalCtxPackForMemory: any = finalExtraForMemory.ctxPack;
 
   const sourceCtxPackForMemory: any =
-    (extraLocal as any)?.ctxPack && typeof (extraLocal as any).ctxPack === 'object'
-      ? (extraLocal as any).ctxPack
-      : (extra as any)?.ctxPack && typeof (extra as any).ctxPack === 'object'
-        ? (extra as any).ctxPack
-        : null;
+    (out.metaForSave as any)?.extra?.ctxPack &&
+    typeof (out.metaForSave as any).extra.ctxPack === 'object'
+      ? (out.metaForSave as any).extra.ctxPack
+      : (extraLocal as any)?.ctxPack && typeof (extraLocal as any).ctxPack === 'object'
+        ? (extraLocal as any).ctxPack
+        : (extra as any)?.ctxPack && typeof (extra as any).ctxPack === 'object'
+          ? (extra as any).ctxPack
+          : null;
 
   if (sourceCtxPackForMemory) {
     if (sourceCtxPackForMemory.relationship != null) {

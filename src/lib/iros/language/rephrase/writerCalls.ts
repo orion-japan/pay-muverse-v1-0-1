@@ -1267,6 +1267,27 @@ const mirrorFlowV1ForSeed: any =
                 return cleanMeaningLine(String(match?.[1] ?? '').trim());
               })();
 
+              const offerContinuitySelectedLabelFromControlForSkeleton =
+                offerContinuityControlForSkeleton &&
+                typeof offerContinuityControlForSkeleton === 'object' &&
+                String((offerContinuityControlForSkeleton as any).status ?? '').trim() === 'FOUND' &&
+                String((offerContinuityControlForSkeleton as any).selectedLabel ?? '').trim()
+                  ? cleanMeaningLine(String((offerContinuityControlForSkeleton as any).selectedLabel ?? '').trim())
+                  : '';
+
+              const offerContinuitySelectedLabelFromSeedForSkeleton = (() => {
+                const seed = String(memorySeedTextForWriter ?? '');
+                if (!seed.includes('OFFER_CONTINUITY_CONTROL:')) return '';
+
+                const match = seed.match(/(?:^|\n)selectedLabel=([^\n]+)/);
+                return cleanMeaningLine(String(match?.[1] ?? '').trim());
+              })();
+
+              const offerContinuitySelectedLabelForSkeleton =
+                offerContinuitySelectedLabelFromControlForSkeleton ||
+                offerContinuitySelectedLabelFromSeedForSkeleton ||
+                '';
+
               const offerContinuitySelectedActionForSkeleton =
                 offerContinuitySelectedActionFromControlForSkeleton ||
                 offerContinuitySelectedActionFromSeedForSkeleton ||
@@ -1277,7 +1298,7 @@ const mirrorFlowV1ForSeed: any =
 
               if (offerContinuitySelectedActionForSkeleton) {
                 console.log('[IROS/OFFER][SKELETON_SOURCE_OVERRIDE]', {
-                  selectedLabel: String((offerContinuityControlForSkeleton as any)?.selectedLabel ?? '').trim(),
+                  selectedLabel: offerContinuitySelectedLabelForSkeleton,
                   selectedActionHead: offerContinuitySelectedActionForSkeleton.slice(0, 160),
                 });
               }

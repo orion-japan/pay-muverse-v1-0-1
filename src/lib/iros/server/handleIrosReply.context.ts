@@ -1139,10 +1139,41 @@ export async function buildTurnContext(
         userCode,
       });
 
+      const compactFollowupSourceTextForMuCapabilityMeta =
+        followupSourceText.replace(/[\s　、。！？!?「」『』（）()]/g, '');
+
+      const isMuCapabilityMetaQuestionForPreSeedAssist =
+        /^(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(どうして|なんで|なぜ|何で).*(わかる|分かる|読める|見える|回答|答え|返答|できる|出来る)/u.test(
+          compactFollowupSourceTextForMuCapabilityMeta
+        ) ||
+        /^(どうして|なんで|なぜ|何で).*(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(わかる|分かる|読める|見える|回答|答え|返答|できる|出来る)/u.test(
+          compactFollowupSourceTextForMuCapabilityMeta
+        ) ||
+        /(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(仕組み|原理|なぜ|どうして|なんで|何で).*(回答|答え|返答|わかる|分かる|できる|出来る)/u.test(
+          compactFollowupSourceTextForMuCapabilityMeta
+        );
+
+      if (isMuCapabilityMetaQuestionForPreSeedAssist) {
+        preSeedAssistResult = {
+          ...preSeedAssistResult,
+          kind: 'normal',
+          directReply: null,
+          shouldBypassWriter: false,
+          seedText: '',
+          reason:
+            String(preSeedAssistResult.reason ?? '') +
+            '; mu_capability_meta_question_skip_diagnosis_followup',
+        };
+      }
+
       const diagnosisFollowupPhraseDetailRequested =
         /詳しく|詳しく教えて|詳しく説明|部分|この部分|その部分|という部分|と言う部分|箇所|この箇所|その箇所|とはどんな状態|とはどういう状態|とは何|ってどんな状態|ってどういう状態|どんな状態ですか|どういう状態ですか/u.test(followupSourceText);
 
-      if (diagnosisFollowupPhraseDetailRequested && lastIrDiagnosisResolved) {
+      if (
+        !isMuCapabilityMetaQuestionForPreSeedAssist &&
+        diagnosisFollowupPhraseDetailRequested &&
+        lastIrDiagnosisResolved
+      ) {
         const diagnosisFollowupSourceText = String(
           (lastIrDiagnosisResolved as any)?.summary ??
             (lastIrDiagnosisResolved as any)?.diagnosisText ??
@@ -1265,6 +1296,7 @@ export async function buildTurnContext(
         /なぜ|どうして|なんで|理由|原因|なぜそうなる|どういう理由/u.test(followupSourceText);
 
       if (
+        !isMuCapabilityMetaQuestionForPreSeedAssist &&
         diagnosisFollowupReasonDetailRequested &&
         !preSeedAssistResult.shouldBypassWriter &&
         lastIrDiagnosisResolved
@@ -1420,6 +1452,7 @@ export async function buildTurnContext(
         );
 
       if (
+        !isMuCapabilityMetaQuestionForPreSeedAssist &&
         isDiagnosisResultRecallRequest &&
         preSeedAssistResult.kind === 'diagnosis_followup'
       ) {

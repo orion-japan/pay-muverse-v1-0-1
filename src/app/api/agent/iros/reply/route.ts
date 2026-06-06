@@ -1302,6 +1302,23 @@ if (isNonForwardButEmpty) {
 // =========================================================
 // ✅ LTM / memoryStateNoteText を extraSoT に確実に含める
 // =========================================================
+const userTextForForcedLtmGate = String(userTextClean ?? '').replace(/\s+/g, ' ').trim();
+const compactUserTextForForcedLtmGate = userTextForForcedLtmGate.replace(
+  /[\s　、。！？!?「」『』（）()]/g,
+  ''
+);
+
+const shouldBlockForcedLongTermMemoryForMetaQuestion =
+  /^(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(どうして|なんで|なぜ|何で).*(わかる|分かる|読める|見える|回答|答え|返答|できる|出来る)/u.test(
+    compactUserTextForForcedLtmGate
+  ) ||
+  /^(どうして|なんで|なぜ|何で).*(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(わかる|分かる|読める|見える|回答|答え|返答|できる|出来る)/u.test(
+    compactUserTextForForcedLtmGate
+  ) ||
+  /(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(仕組み|原理|なぜ|どうして|なんで|何で).*(回答|答え|返答|わかる|分かる|できる|出来る)/u.test(
+    compactUserTextForForcedLtmGate
+  );
+
 let forcedLongTermMemory: string | null = null;
 
 try {
@@ -1399,6 +1416,19 @@ try {
 } catch (e) {
   console.error('[IROS][RECALL_FAIL]', e);
 }
+if (shouldBlockForcedLongTermMemoryForMetaQuestion) {
+  forcedLongTermMemory = null;
+  recallCandidates = [];
+
+  console.log('[IROS][LTM_META_QUESTION_BLOCKED]', {
+    conversationId,
+    userCode,
+    userTextHead: userTextForForcedLtmGate.slice(0, 120),
+    droppedForcedLongTermMemory: true,
+    droppedRecallCandidates: true,
+  });
+}
+
 console.log(
   '[IROS][LTM_FORCED_LOAD_JSON]',
   JSON.stringify({
@@ -1406,10 +1436,12 @@ console.log(
     userCode,
     forcedLongTermMemory,
     memoryState_longTermNoteText: memoryStateForCtx?.longTermNoteText ?? null,
-    final_longTermMemoryNoteText:
-      forcedLongTermMemory ??
-      memoryStateForCtx?.longTermNoteText ??
-      null,
+    shouldBlockForcedLongTermMemoryForMetaQuestion,
+    final_longTermMemoryNoteText: shouldBlockForcedLongTermMemoryForMetaQuestion
+      ? null
+      : forcedLongTermMemory ??
+        memoryStateForCtx?.longTermNoteText ??
+        null,
     reqMeta_pastStateNoteText:
       (result as any)?.metaForSave?.extra?.pastStateNoteText ??
       metaForSave?.extra?.pastStateNoteText ??
@@ -1471,7 +1503,12 @@ if (shouldClearPastStateNoteForDiagnosisFollowup) {
 }
 
 // 👉 ここが今回の本質
-if (!shouldClearPastStateNoteForDiagnosisFollowup && !pastStateNoteText && recallCandidates.length > 0) {
+if (
+  !shouldBlockForcedLongTermMemoryForMetaQuestion &&
+  !shouldClearPastStateNoteForDiagnosisFollowup &&
+  !pastStateNoteText &&
+  recallCandidates.length > 0
+) {
   const topRecall = recallCandidates[0]?.text?.trim();
   if (topRecall) {
     pastStateNoteText = topRecall.slice(0, 800);
@@ -1485,11 +1522,12 @@ extraSoT = {
   memoryStateForCtx,
   memoryStateNoteText: memoryStateForCtx?.noteText ?? null,
 
-  longTermMemoryNoteText: shouldClearPastStateNoteForDiagnosisFollowup
-    ? null
-    : forcedLongTermMemory ??
-      memoryStateForCtx?.longTermNoteText ??
-      null,
+  longTermMemoryNoteText:
+    shouldBlockForcedLongTermMemoryForMetaQuestion || shouldClearPastStateNoteForDiagnosisFollowup
+      ? null
+      : forcedLongTermMemory ??
+        memoryStateForCtx?.longTermNoteText ??
+        null,
 
   // ✅ relationship / recall 系は writer が pastStateNoteText で読む
   pastStateNoteText,

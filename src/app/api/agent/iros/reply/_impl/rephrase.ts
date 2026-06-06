@@ -1,4 +1,4 @@
-﻿// src/app/api/agent/iros/reply/_impl/rephrase.ts
+// src/app/api/agent/iros/reply/_impl/rephrase.ts
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { pickSpeechAct } from '../_helpers';
@@ -746,17 +746,36 @@ const intentBandForCtx =
     );
   })();
   // 3点セット（会話を散らさない）
+  const compactUserTextForDiagnosisSeedCtx = String(userText ?? '').replace(
+    /[\s　、。！？!?「」『』（）()]/g,
+    ''
+  );
+
+  const isMuCapabilityMetaQuestionForDiagnosisSeedCtx =
+    /^(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(どうして|なんで|なぜ|何で).*(わかる|分かる|読める|見える|回答|答え|返答|できる|出来る)/u.test(
+      compactUserTextForDiagnosisSeedCtx
+    ) ||
+    /^(どうして|なんで|なぜ|何で).*(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(わかる|分かる|読める|見える|回答|答え|返答|できる|出来る)/u.test(
+      compactUserTextForDiagnosisSeedCtx
+    ) ||
+    /(Mu|mu|ム|む|IROS|iros|アイロス|Sofia|sofia|ソフィア).*(仕組み|原理|なぜ|どうして|なんで|何で).*(回答|答え|返答|わかる|分かる|できる|出来る)/u.test(
+      compactUserTextForDiagnosisSeedCtx
+    );
+
   const isDiagnosisFollowupForCtx =
-    (extraMerged as any)?.diagnosisFollowup === true ||
-    (extraMerged as any)?.ctxPack?.diagnosisFollowup === true ||
-    String((extraMerged as any)?.ctxPack?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
-    (meta as any)?.extra?.diagnosisFollowup === true ||
-    (meta as any)?.extra?.ctxPack?.diagnosisFollowup === true ||
-    String((meta as any)?.extra?.ctxPack?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
-    Boolean((extraMerged as any)?.ctxPack?.lastIrDiagnosis) ||
-    Boolean((extraMerged as any)?.extra?.ctxPack?.lastIrDiagnosis) ||
-    Boolean((meta as any)?.extra?.ctxPack?.lastIrDiagnosis) ||
-    Boolean((meta as any)?.ctxPack?.lastIrDiagnosis);
+    !isMuCapabilityMetaQuestionForDiagnosisSeedCtx &&
+    (
+      (extraMerged as any)?.diagnosisFollowup === true ||
+      (extraMerged as any)?.ctxPack?.diagnosisFollowup === true ||
+      String((extraMerged as any)?.ctxPack?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+      (meta as any)?.extra?.diagnosisFollowup === true ||
+      (meta as any)?.extra?.ctxPack?.diagnosisFollowup === true ||
+      String((meta as any)?.extra?.ctxPack?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+      Boolean((extraMerged as any)?.ctxPack?.lastIrDiagnosis) ||
+      Boolean((extraMerged as any)?.extra?.ctxPack?.lastIrDiagnosis) ||
+      Boolean((meta as any)?.extra?.ctxPack?.lastIrDiagnosis) ||
+      Boolean((meta as any)?.ctxPack?.lastIrDiagnosis)
+    );
 
   const lastIrDiagnosisForCtx =
     (extraMerged as any)?.ctxPack?.lastIrDiagnosis ??
@@ -1263,7 +1282,7 @@ const intentBandForCtx =
     if (
       upstreamResolvedAskForCtx &&
       typeof upstreamResolvedAskForCtx === 'object' &&
-      String((upstreamResolvedAskForCtx as any)?.askType ?? '').trim() === 'reference_check'
+      ['reference_check', 'offer_followup'].includes(String((upstreamResolvedAskForCtx as any)?.askType ?? '').trim())
     ) {
       return upstreamResolvedAskForCtx as any;
     }
@@ -1308,6 +1327,24 @@ const intentBandForCtx =
       currentQuestion: resolvedAskForCtx.currentQuestion,
       source: 'resolvedAsk',
     };
+  }
+
+  const resolvedAskTypeForCtxForQuestionGuard = String(
+    (ctxPack as any)?.resolvedAsk?.askType ??
+      (upstreamResolvedAskForCtx as any)?.askType ??
+      ''
+  ).trim();
+
+  if (resolvedAskTypeForCtxForQuestionGuard === 'offer_followup') {
+    (ctxPack as any).question = null;
+
+    if ((extraMerged as any)?.ctxPack && typeof (extraMerged as any).ctxPack === 'object') {
+      (extraMerged as any).ctxPack.question = null;
+    }
+
+    if ((meta as any)?.extra?.ctxPack && typeof (meta as any).extra.ctxPack === 'object') {
+      (meta as any).extra.ctxPack.question = null;
+    }
   }
 
   const userContext: any = {

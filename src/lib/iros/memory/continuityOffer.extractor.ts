@@ -136,7 +136,7 @@ function labelInfoFromLine(line: string): LabelInfo | null {
   if (/^前者/u.test(compact)) {
     return {
       label: '前者',
-      aliases: ['前者', '前者で', '前者お願いします', '1', '1で', '一つ目', '一つ目で'],
+      aliases: ['前者', '前者で', '前者お願いします', '前者でお願いします', '前者をお願いします', '前者でお願い', '前者にします', '1', '1で', '1でお願いします', '一つ目', '一つ目で', '一つ目でお願いします'],
       index: 1,
     };
   }
@@ -144,7 +144,7 @@ function labelInfoFromLine(line: string): LabelInfo | null {
   if (/^後者/u.test(compact)) {
     return {
       label: '後者',
-      aliases: ['後者', '後者で', '後者お願いします', '2', '2で', '二つ目', '二つ目で'],
+      aliases: ['後者', '後者で', '後者お願いします', '後者でお願いします', '後者をお願いします', '後者でお願い', '後者にします', '2', '2で', '2でお願いします', '二つ目', '二つ目で', '二つ目でお願いします'],
       index: 2,
     };
   }
@@ -152,7 +152,7 @@ function labelInfoFromLine(line: string): LabelInfo | null {
   if (/^(一つ目|1つ目|１つ目)/u.test(compact)) {
     return {
       label: '一つ目',
-      aliases: ['一つ目', '一つ目で', '1', '1で', '前者', '前者で'],
+      aliases: ['一つ目', '一つ目で', '一つ目でお願いします', '1', '1で', '1でお願いします', '前者', '前者で', '前者でお願いします'],
       index: 1,
     };
   }
@@ -160,7 +160,7 @@ function labelInfoFromLine(line: string): LabelInfo | null {
   if (/^(二つ目|2つ目|２つ目)/u.test(compact)) {
     return {
       label: '二つ目',
-      aliases: ['二つ目', '二つ目で', '2', '2で', '後者', '後者で'],
+      aliases: ['二つ目', '二つ目で', '二つ目でお願いします', '2', '2で', '2でお願いします', '後者', '後者で', '後者でお願いします'],
       index: 2,
     };
   }
@@ -278,7 +278,10 @@ export function extractPendingOfferFromAssistantText(
   const assistantText = String(args.assistantText ?? '').trim();
   if (!assistantText) return null;
 
-  const normalized = assistantText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const normalized = assistantText
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/([^\n])\s*(#{1,6}\s*)?(前者|後者|一つ目|二つ目|1つ目|2つ目|１つ目|２つ目)(?=\s*(?:$|\n|[：:、。]))/gu, '$1\n$3');
   const lines = normalized
     .split('\n')
     .map((line) => stripMarkdownForParsing(line))

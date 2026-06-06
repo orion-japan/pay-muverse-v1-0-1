@@ -427,7 +427,15 @@ export async function saveIrosTrainingSample(params: SaveIrosTrainingSampleParam
     return resolved === 'stabilize' ? 'resonate' : resolved;
   })();
 
-  const targetLabel = pickString(meta?.targetLabel) ?? pickString(meta?.target_label) ?? null;
+  const isMuCapabilityMetaDirectReplyForTraining =
+    pickString(meta?.extra?.preSeedAssistResult?.reason) === 'MU_CAPABILITY_META_DIRECT_REPLY' ||
+    pickString(meta?.extra?.ctxPack?.preSeedAssistResult?.reason) === 'MU_CAPABILITY_META_DIRECT_REPLY' ||
+    pickString(meta?.preSeedAssistResult?.reason) === 'MU_CAPABILITY_META_DIRECT_REPLY' ||
+    pickString(meta?.ctxPack?.preSeedAssistResult?.reason) === 'MU_CAPABILITY_META_DIRECT_REPLY';
+
+  const targetLabel = isMuCapabilityMetaDirectReplyForTraining
+    ? null
+    : pickString(meta?.targetLabel) ?? pickString(meta?.target_label) ?? null;
 
   /**
    * ★重要：analysis_text は「分析/メタ」専用
