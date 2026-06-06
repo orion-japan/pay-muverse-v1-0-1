@@ -2752,7 +2752,7 @@ meta.extra = {
 // - 通常会話 chat の状態パターンを保存する
 // - Production serverless でも確実に走らせるため await する
 // - Similar Flow Lookup は read-only / seed logging まで確認する
-console.log('[IROS/FLOW_PATTERN_GATE]', {
+const flowPatternDebug = {
   conversationId,
   userCode,
   messageId,
@@ -2762,7 +2762,17 @@ console.log('[IROS/FLOW_PATTERN_GATE]', {
     saved?.ok === true &&
     saved?.inserted === true &&
     messageId != null,
-});
+};
+
+console.log('[IROS/FLOW_PATTERN_GATE]', flowPatternDebug);
+
+if (metaForSave && typeof metaForSave === 'object') {
+  (metaForSave as any).extra = {
+    ...(((metaForSave as any).extra ?? {}) as any),
+    flowPatternDebug,
+  };
+}
+
 
 if (saved?.ok === true && saved?.inserted === true && messageId != null) {
   const t0 = Date.now();
@@ -3346,6 +3356,7 @@ if (!skipTraining) {
     );
   }
 }
+
 
 
 
