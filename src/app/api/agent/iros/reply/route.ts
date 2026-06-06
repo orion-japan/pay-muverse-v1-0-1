@@ -8,6 +8,7 @@ import { loadIrosUserProfile } from '@/lib/iros/server/loadUserProfile';
 import { saveIrosTrainingSample } from '@/lib/iros/server/saveTrainingSample';
 import { saveFlowPatternSnapshot } from '@/lib/iros/flowPattern/saveFlowPatternSnapshot';
 import { loadSimilarFlowSnapshots } from '@/lib/iros/flowPattern/loadSimilarFlowSnapshots';
+import { buildSimilarFlowSeed } from '@/lib/iros/flowPattern/buildSimilarFlowSeed';
 import { loadFeedbackSummary } from '@/lib/iros/server/loadFeedbackSummary';
 import { handleIrosReply, type HandleIrosReplyOutput } from '@/lib/iros/server/handleIrosReply';
 
@@ -2839,6 +2840,85 @@ if (saved?.ok === true && saved?.inserted === true && messageId != null) {
       const sriContextForLookup = asRouteRecord(ctxPackForLookup.sriContext);
       const sriSelfStateForLookup = asRouteRecord(sriContextForLookup.selfState);
 
+      const similarFlowCurrentState = {
+        qCode: asRouteText(
+          pickFirst(
+            ctxPackForLookup.qCode,
+            ctxPackForLookup.q_code,
+            memoryStateSnapshotForLookup.qCode,
+            memoryStateSnapshotForLookup.q_code,
+            metaForLookup.qCode,
+            metaForLookup.q_code,
+          ),
+          40,
+        ),
+        qPrimary: asRouteText(
+          pickFirst(
+            ctxPackForLookup.qPrimary,
+            ctxPackForLookup.q_primary,
+            memoryStateSnapshotForLookup.qPrimary,
+            memoryStateSnapshotForLookup.q_primary,
+            qCountsForLookup.q_primary,
+            qCountsForLookup.qPrimary,
+            sriSelfStateForLookup.qPrimary,
+            sriSelfStateForLookup.q_primary,
+            extraForLookup.qPrimary,
+            extraForLookup.q_primary,
+            metaForLookup.qPrimary,
+            metaForLookup.q_primary,
+            extraForLookup.resonanceState?.qPrimary,
+            extraForLookup.resonanceState?.q_primary,
+            extraForLookup.mirrorFlowV1?.qPrimary,
+            extraForLookup.mirrorFlowV1?.q_primary,
+          ),
+          40,
+        ),
+        eTurn: asRouteText(
+          pickFirst(
+            ctxPackForLookup.eTurn,
+            ctxPackForLookup.e_turn,
+            qCountsForLookup.e_turn_now,
+            qCountsForLookup.eTurnNow,
+            qCountsForLookup.e_turn,
+            qCountsForLookup.eTurn,
+            sriSelfStateForLookup.eTurn,
+            sriSelfStateForLookup.e_turn,
+            extraForLookup.e_turn,
+            extraForLookup.eTurn,
+            metaForLookup.e_turn,
+            metaForLookup.eTurn,
+            extraForLookup.resonanceState?.e_turn,
+            extraForLookup.resonanceState?.eTurn,
+            extraForLookup.mirrorFlowV1?.e_turn,
+            extraForLookup.mirrorFlowV1?.eTurn,
+            extraForLookup.mirror?.e_turn,
+            extraForLookup.mirror?.eTurn,
+            extraForLookup.flowMirror?.e_turn,
+            extraForLookup.flowMirror?.eTurn,
+          ),
+          40,
+        ),
+        depthStage: asRouteText(
+          pickFirst(
+            ctxPackForLookup.depthStage,
+            ctxPackForLookup.depth_stage,
+            memoryStateSnapshotForLookup.depthStage,
+            memoryStateSnapshotForLookup.depth_stage,
+            metaForLookup.depthStage,
+            metaForLookup.depth_stage,
+          ),
+          40,
+        ),
+        phase: asRouteText(
+          pickFirst(
+            ctxPackForLookup.phase,
+            memoryStateSnapshotForLookup.phase,
+            metaForLookup.phase,
+          ),
+          40,
+        ),
+      };
+
       const lookup = await loadSimilarFlowSnapshots({
         supabase,
         userCode,
@@ -3000,6 +3080,25 @@ if (saved?.ok === true && saved?.inserted === true && messageId != null) {
         limit: 3,
       });
 
+      const similarFlowSeed = buildSimilarFlowSeed({
+        matches: lookup.matches,
+        currentState: similarFlowCurrentState,
+        limit: 3,
+        maxChars: 1600,
+      });
+
+      console.log('[IROS/SIMILAR_FLOW_SEED]', {
+        conversationId,
+        userCode,
+        messageId,
+        snapshotId: r.id ?? null,
+        ok: lookup.ok,
+        matchesLen: lookup.matches.length,
+        hasSeed: Boolean(similarFlowSeed),
+        seedLen: String(similarFlowSeed ?? '').length,
+        seedHead: String(similarFlowSeed ?? '').slice(0, 500),
+      });
+
       console.log('[IROS/FLOW_PATTERN_LOOKUP]', {
         conversationId,
         userCode,
@@ -3007,84 +3106,8 @@ if (saved?.ok === true && saved?.inserted === true && messageId != null) {
         snapshotId: r.id ?? null,
         ok: lookup.ok,
         matchesLen: lookup.matches.length,
-        inputState: {
-          qCode: asRouteText(
-            pickFirst(
-              ctxPackForLookup.qCode,
-              ctxPackForLookup.q_code,
-              memoryStateSnapshotForLookup.qCode,
-              memoryStateSnapshotForLookup.q_code,
-              metaForLookup.qCode,
-              metaForLookup.q_code,
-            ),
-            40,
-          ),
-          qPrimary: asRouteText(
-            pickFirst(
-              ctxPackForLookup.qPrimary,
-              ctxPackForLookup.q_primary,
-              memoryStateSnapshotForLookup.qPrimary,
-              memoryStateSnapshotForLookup.q_primary,
-              qCountsForLookup.q_primary,
-              qCountsForLookup.qPrimary,
-              sriSelfStateForLookup.qPrimary,
-              sriSelfStateForLookup.q_primary,
-              extraForLookup.qPrimary,
-              extraForLookup.q_primary,
-              metaForLookup.qPrimary,
-              metaForLookup.q_primary,
-              extraForLookup.resonanceState?.qPrimary,
-              extraForLookup.resonanceState?.q_primary,
-              extraForLookup.mirrorFlowV1?.qPrimary,
-              extraForLookup.mirrorFlowV1?.q_primary,
-            ),
-            40,
-          ),
-          eTurn: asRouteText(
-            pickFirst(
-              ctxPackForLookup.eTurn,
-              ctxPackForLookup.e_turn,
-              qCountsForLookup.e_turn_now,
-              qCountsForLookup.eTurnNow,
-              qCountsForLookup.e_turn,
-              qCountsForLookup.eTurn,
-              sriSelfStateForLookup.eTurn,
-              sriSelfStateForLookup.e_turn,
-              extraForLookup.e_turn,
-              extraForLookup.eTurn,
-              metaForLookup.e_turn,
-              metaForLookup.eTurn,
-              extraForLookup.resonanceState?.e_turn,
-              extraForLookup.resonanceState?.eTurn,
-              extraForLookup.mirrorFlowV1?.e_turn,
-              extraForLookup.mirrorFlowV1?.eTurn,
-              extraForLookup.mirror?.e_turn,
-              extraForLookup.mirror?.eTurn,
-              extraForLookup.flowMirror?.e_turn,
-              extraForLookup.flowMirror?.eTurn,
-            ),
-            40,
-          ),
-          depthStage: asRouteText(
-            pickFirst(
-              ctxPackForLookup.depthStage,
-              ctxPackForLookup.depth_stage,
-              memoryStateSnapshotForLookup.depthStage,
-              memoryStateSnapshotForLookup.depth_stage,
-              metaForLookup.depthStage,
-              metaForLookup.depth_stage,
-            ),
-            40,
-          ),
-          phase: asRouteText(
-            pickFirst(
-              ctxPackForLookup.phase,
-              memoryStateSnapshotForLookup.phase,
-              metaForLookup.phase,
-            ),
-            40,
-          ),
-        },
+        inputState: similarFlowCurrentState,
+        similarFlowSeedLen: String(similarFlowSeed ?? '').length,
         matchesHead: lookup.matches.slice(0, 3).map((match) => ({
           id: match.id,
           score: match.score,
@@ -3313,6 +3336,7 @@ if (!skipTraining) {
     );
   }
 }
+
 
 
 
