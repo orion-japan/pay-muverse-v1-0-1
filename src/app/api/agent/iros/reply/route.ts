@@ -2791,7 +2791,7 @@ if (saved?.ok === true && saved?.inserted === true && messageId != null) {
         ms,
         error: (r as any).error,
       });
-      return;
+      throw new Error('[IROS][FlowPatternSnapshot] insert failed; skip similar flow lookup');
     }
 
     console.log('[IROS][FlowPatternSnapshot] insert ok (awaited)', {
@@ -3346,6 +3346,7 @@ if (!skipTraining) {
     );
   }
 }
+
 
 
 
