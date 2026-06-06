@@ -1,4 +1,4 @@
-﻿import type { MemoryRouterDecision } from './memoryRouter';
+import type { MemoryRouterDecision } from './memoryRouter';
 import type { MemoryGuardDecision } from './memoryGuard';
 
 export type BuildMemorySeedArgs = {
@@ -74,7 +74,7 @@ function buildActiveContextSeedLines(frame: any): string[] {
   const targetKind = normalizeSeedString(target.kind) ?? 'unknown';
   const targetEntityId = normalizeSeedString(target.id);
   const activeDiagnosisId = normalizeSeedString(primary.sourceId ?? primary.meta?.activeDiagnosisId ?? primary.key);
-  const answer = `${targetLabel}の診断です。さっきの「ir診断 ${targetLabel}」を受けて、その内容を少し深めていました。`;
+  const answer = `${targetLabel}の保存済みir診断です。保存されている「ir診断 ${targetLabel}」を正本として、その内容を少し深めています。`;
 
   return [
     'ACTIVE_CONTEXT_SEED_V1 (DO NOT OUTPUT)',
