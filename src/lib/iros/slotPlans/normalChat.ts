@@ -1,4 +1,4 @@
-// src/lib/iros/slotPlans/normalChat.ts
+﻿// src/lib/iros/slotPlans/normalChat.ts
 // iros — normal chat slot plan (FINAL-only, flow-first, sofia-aligned)
 //
 // ✅ 新憲法（全文整理）
@@ -574,7 +574,7 @@ function buildClarify(
                       : shouldAnswerTruthStructure
                         ? wantsResonanceStructureReading
                           ? '事実確認だけで閉じず、対象に響いている象徴構造と関係構造を読む'
-                          : '中心の気配だけが、静かに残っています'
+                          : '中心にある論点を、固定文や余韻の決め台詞にせず、ユーザーの発話に沿った日常語で明確にする'
                         : clarifyMeaning.line;
                 const askBackAllowedNow =
                   !isT &&
@@ -2304,3 +2304,4 @@ export function buildNormalChatSlotPlan(args: {
     slots,
   };
 }
+

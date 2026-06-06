@@ -1,4 +1,4 @@
-// file: src/lib/iros/server/handleIrosReply.context.ts
+﻿// file: src/lib/iros/server/handleIrosReply.context.ts
 // iros - Turn context builder (minimal + frame plan)
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -596,6 +596,30 @@ export async function buildTurnContext(
       followupSourceText
     );
 
+  // IROS_DIAG_FOLLOWUP_ENTRY_GUARD
+  // 「詳しく」「わかりやすく」「もう少し」だけでは診断フォローに入れない。
+  // 通常会話の直前文脈を優先し、診断フォローは明示的な診断参照か直前診断文脈に限定する。
+  const hasExplicitDiagnosisReferenceForFollowup =
+    /(?:診断|ir診断|IR診断|診断内容|診断結果|診断の結果|前回の診断|さっきの診断|前の診断|この診断|今の診断|以前の診断|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|観測対象)/u.test(
+      followupSourceText
+    );
+
+  const previousTurnLooksDiagnosisForFollowup =
+    Boolean(prevIrMeta) ||
+    (baseMetaForTurn as any)?.prevMeta?.presentationKind === 'diagnosis' ||
+    (baseMetaForTurn as any)?.prevMeta?.extra?.presentationKind === 'diagnosis' ||
+    (baseMetaForTurn as any)?.prevMeta?.extra?.ctxPack?.presentationKind === 'diagnosis' ||
+    (baseMetaForTurn as any)?.prevMeta?.extra?.isIrDiagnosisTurn === true ||
+    (baseMetaForTurn as any)?.prevMeta?.extra?.ctxPack?.isIrDiagnosisTurn === true ||
+    (baseMetaForTurn as any)?.prevMeta?.extra?.diagnosisFollowup === true ||
+    (baseMetaForTurn as any)?.prevMeta?.extra?.ctxPack?.diagnosisFollowup === true ||
+    String((baseMetaForTurn as any)?.prevMeta?.extra?.ctxPack?.continuityKind ?? '').trim() ===
+      'diagnosis_followup';
+
+  const canEnterDiagnosisFollowup =
+    hasExplicitDiagnosisReferenceForFollowup || previousTurnLooksDiagnosisForFollowup;
+
+
   // ✅ 創作・書き直し系の継続要求は、診断 followup に入れない。
   // 例: 「はい、書いてください」「もう少しリアルに書いてください」「それを書いて」「続きを書いて」
   // これらは直前イベントの継続であり、IR_DETAIL_V1 の診断深掘りではない。
@@ -857,7 +881,12 @@ export async function buildTurnContext(
   // prevIrMeta が null のケースで永久に発火しない循環になっていた
   let lastIrDiagnosis: any = null;
 
-  if (!isIrDiagnosisTurn && isFollowupRequest && !isCreativeContinuationRequest) {
+  if (
+    !isIrDiagnosisTurn &&
+    isFollowupRequest &&
+    !isCreativeContinuationRequest &&
+    canEnterDiagnosisFollowup
+  ) {
     try {
       lastIrDiagnosis = await loadLatestIrDiagnosisSnapshot(supabase, userCode, diagnosisFollowupTargetLabel);
     } catch (e) {
@@ -870,6 +899,7 @@ export async function buildTurnContext(
   const isDiagnosisFollowup =
     !isCreativeContinuationRequest &&
     !isIrDiagnosisTurn &&
+    canEnterDiagnosisFollowup &&
     hasDiagnosisSource &&
     isFollowupRequest;
 
@@ -889,6 +919,7 @@ export async function buildTurnContext(
     !isCreativeContinuationRequest &&
     !isIrDiagnosisTurn &&
     !isDiagnosisFollowup &&
+    canEnterDiagnosisFollowup &&
     wantsDetail &&
     hasDiagnosisSource;
 
@@ -901,6 +932,9 @@ export async function buildTurnContext(
       hasDiagnosisSource,
       isDiagnosisFollowup,
       isDiagnosisDetailTurn,
+      hasExplicitDiagnosisReferenceForFollowup,
+      previousTurnLooksDiagnosisForFollowup,
+      canEnterDiagnosisFollowup,
       diagnosisFollowupKind,
       diagnosisFollowupTargetLabel,
       followupSourceText,

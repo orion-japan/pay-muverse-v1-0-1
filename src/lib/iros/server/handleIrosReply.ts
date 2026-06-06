@@ -1,4 +1,4 @@
-// file: src/lib/iros/server/handleIrosReply.ts
+﻿// file: src/lib/iros/server/handleIrosReply.ts
 // iros — handleIrosReply (V2 / single-writer friendly)
 //
 // ✅ 方針（ここを徹底）
@@ -4590,6 +4590,25 @@ function normForRecall(v: any): string {
 
       if (previousReplyRephraseSeed) {
         (extraLocal as any).ctxPack ??= {};
+
+        const previousEventSourceTextForCtx =
+          String(previousReplyRephraseSeed ?? '').match(/直前assistant返答：([\s\S]*)$/u)?.[1]?.trim() ?? '';
+
+        if (previousEventSourceTextForCtx) {
+          (extraLocal as any).ctxPack.previousEventSourceText =
+            previousEventSourceTextForCtx.slice(0, 2400);
+          (extraLocal as any).ctxPack.previousReplySourceText =
+            previousEventSourceTextForCtx.slice(0, 2400);
+          (extraLocal as any).ctxPack.eventFrame = {
+            ...((extraLocal as any).ctxPack.eventFrame ?? {}),
+            kind: 'operate_previous_event',
+            operation: 'rewrite',
+            target: 'last_assistant_content',
+            style: 'rephrase',
+            sourceText: previousEventSourceTextForCtx.slice(0, 2400),
+          };
+        }
+
         (extraLocal as any).ctxPack.previousReplyRephrase = true;
         (extraLocal as any).ctxPack.previousReplyStyleRewrite = true;
         (extraLocal as any).ctxPack.patternKey = 'previous_reply_rephrase';
@@ -4609,6 +4628,8 @@ function normForRecall(v: any): string {
             patternKey: (extraLocal as any).ctxPack.patternKey,
             patternMode: (extraLocal as any).ctxPack.patternMode,
             currentText: String(text ?? '').slice(0, 120),
+            previousEventSourceTextLen: String((extraLocal as any)?.ctxPack?.previousEventSourceText ?? '').length,
+            previousEventSourceTextHead: String((extraLocal as any)?.ctxPack?.previousEventSourceText ?? '').slice(0, 160),
           }),
         );
       }

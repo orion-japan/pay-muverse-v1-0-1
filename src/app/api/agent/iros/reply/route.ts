@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 import { verifyFirebaseAndAuthorize } from '@/lib/authz';
@@ -6,6 +6,7 @@ import { authorizeChat, captureChat, makeIrosRef } from '@/lib/credits/auto';
 
 import { loadIrosUserProfile } from '@/lib/iros/server/loadUserProfile';
 import { saveIrosTrainingSample } from '@/lib/iros/server/saveTrainingSample';
+import { saveFlowPatternSnapshot } from '@/lib/iros/flowPattern/saveFlowPatternSnapshot';
 import { loadFeedbackSummary } from '@/lib/iros/server/loadFeedbackSummary';
 import { handleIrosReply, type HandleIrosReplyOutput } from '@/lib/iros/server/handleIrosReply';
 
@@ -1370,7 +1371,23 @@ try {
         .replace(/自分の位置まで揺れてしまう/g, '自分の価値まで揺れてしまう')
         .trim();
 
-      forcedLongTermMemory = sanitized.slice(0, 220);
+      const isContaminatedForcedLongTermMemory =
+        /SOURCE_TEXT|PREVIOUS_EVENT_SOURCE|診断本文では|観測対象[:：]|二人の関係全体の状態として見る表現|ここで言う「?もう少しわかりやすく、詳しくして/u.test(
+          sanitized
+        );
+
+      if (isContaminatedForcedLongTermMemory) {
+        forcedLongTermMemory = null;
+
+        console.warn('[IROS][LTM_FORCED_LOAD_DROPPED_CONTAMINATED]', {
+          conversationId,
+          userCode,
+          reason: 'contaminated_forced_long_term_memory',
+          sanitizedHead: sanitized.slice(0, 180),
+        });
+      } else {
+        forcedLongTermMemory = sanitized.slice(0, 220);
+      }
     }
   }
 } catch (e) {
@@ -2729,6 +2746,62 @@ meta.extra = {
   },
 };
 
+// FlowPatternSnapshot 保存（Phase 2-1）
+// - 通常会話 chat の状態パターンを保存する
+// - 返信を止めないため non-blocking
+// - Similar Flow Lookup は次フェーズで使う
+if (saved?.ok === true && saved?.inserted === true && messageId != null) {
+  void (async () => {
+    const t0 = Date.now();
+
+    try {
+      const r = await saveFlowPatternSnapshot({
+        supabase,
+        userCode,
+        conversationId,
+        messageId,
+        sourceType: 'chat',
+        userText: userTextClean,
+        assistantText: contentForPersist,
+        meta,
+        metaForSave,
+        tags: ['iros', 'flow_pattern', 'chat'],
+      });
+
+      const ms = Date.now() - t0;
+
+      if (!r.ok) {
+        console.error('[IROS][FlowPatternSnapshot] insert error (non-blocking)', {
+          conversationId,
+          userCode,
+          messageId,
+          ms,
+          error: (r as any).error,
+        });
+        return;
+      }
+
+      console.log('[IROS][FlowPatternSnapshot] insert ok (non-blocking)', {
+        conversationId,
+        userCode,
+        messageId,
+        snapshotId: r.id ?? null,
+        ms,
+      });
+    } catch (e) {
+      const ms = Date.now() - t0;
+      console.error('[IROS][FlowPatternSnapshot] insert failed (non-blocking)', {
+        conversationId,
+        userCode,
+        messageId,
+        ms,
+        error: e,
+      });
+    }
+  })();
+}
+
+
 try {
   console.log('[IROS/ROUTE][FINAL_CTXPACK_WILLROTATION]', {
     traceId,
@@ -2928,3 +3001,4 @@ if (!skipTraining) {
     );
   }
 }
+

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+﻿/* eslint-disable @typescript-eslint/no-explicit-any */
 
 // src/lib/iros/language/rephraseEngine.ts
 // iros — Rephrase/Generate Engine (slot-preserving)
@@ -11771,7 +11771,7 @@ const isResonanceStructureFollowup =
                         ? '最後は「はい。ここでは未来ではなく、前からあったという意味です。」の方向で短く閉じる。'
                         : isPlainMeaningQuestionForFinal
                           ? '最後は、質問された言葉が何を指すかを日常語で短く閉じる。'
-                          : '最後は「選んでいない、止めていない、受け入れている。そこをそのまま採用します。」の方向で閉じる。',
+                          : '最後は、ユーザーが否定していない事実だけを受け取り、固定文・決め台詞・同じ締め文をそのまま出さず、現在の文脈に合わせた自然な一文で閉じる。',
                     }
                   : {}),
                 writeConstraints: [
@@ -12899,13 +12899,37 @@ const finalWriterDirectivesMsg =
             return '';
           };
 
-          const sourceText = pickLastAssistantText(
-            (ctxPackForWriter as any)?.historyForWriter,
-            (opts as any)?.ctxPack?.historyForWriter,
-            (opts as any)?.userContext?.ctxPack?.historyForWriter,
-            (opts as any)?.meta?.extra?.ctxPack?.historyForWriter,
-            (opts as any)?.userContext?.meta?.extra?.ctxPack?.historyForWriter,
+          const pickDirectPreviousEventSourceText = (...cands: any[]): string => {
+            for (const v of cands) {
+              const s = String(v ?? '').replace(/\s+/g, ' ').replace(/[🌀🪔]/g, '').trim();
+              if (s) return s.slice(0, 2400);
+            }
+            return '';
+          };
+
+          const directPreviousEventSourceText = pickDirectPreviousEventSourceText(
+            (eventFrameForWriter as any)?.sourceText,
+            (ctxPackForWriter as any)?.previousEventSourceText,
+            (ctxPackForWriter as any)?.previousReplySourceText,
+            (opts as any)?.ctxPack?.previousEventSourceText,
+            (opts as any)?.ctxPack?.previousReplySourceText,
+            (opts as any)?.userContext?.ctxPack?.previousEventSourceText,
+            (opts as any)?.userContext?.ctxPack?.previousReplySourceText,
+            (opts as any)?.meta?.extra?.ctxPack?.previousEventSourceText,
+            (opts as any)?.meta?.extra?.ctxPack?.previousReplySourceText,
+            (opts as any)?.userContext?.meta?.extra?.ctxPack?.previousEventSourceText,
+            (opts as any)?.userContext?.meta?.extra?.ctxPack?.previousReplySourceText,
           );
+
+          const sourceText =
+            directPreviousEventSourceText ||
+            pickLastAssistantText(
+              (ctxPackForWriter as any)?.historyForWriter,
+              (opts as any)?.ctxPack?.historyForWriter,
+              (opts as any)?.userContext?.ctxPack?.historyForWriter,
+              (opts as any)?.meta?.extra?.ctxPack?.historyForWriter,
+              (opts as any)?.userContext?.meta?.extra?.ctxPack?.historyForWriter,
+            );
 
           const sourceTextLenForRewrite = sourceText.length;
           const minOutputCharsForRewrite = Math.max(
@@ -12922,6 +12946,8 @@ const finalWriterDirectivesMsg =
               enabled: true,
               sourceTextLen: sourceTextLenForRewrite,
               minOutputChars: minOutputCharsForRewrite,
+              directPreviousEventSourceTextLen: directPreviousEventSourceText.length,
+              pickedFrom: directPreviousEventSourceText ? 'ctxPack.previousEventSourceText' : 'historyForWriter',
               sourceTextHead: sourceText.slice(0, 320),
               sourceTextTail: sourceText.slice(-220),
             }),
@@ -13289,12 +13315,23 @@ const finalWriterDirectivesMsg =
                 // ✅ 前イベント操作ターンでは、最後の user 文を読解対象にしない。
                 // user 文は PREVIOUS_EVENT_SOURCE 内の user_instruction として扱い、
                 // 最終 user message は「SOURCE_TEXT を操作せよ」という実行命令に置き換える。
+                const previousEventSourceContentForCall =
+                  messagesForWriterFinal
+                    .map((mm: any) => String(mm?.content ?? ''))
+                    .find((s: string) => s.includes('PREVIOUS_EVENT_SOURCE (DO NOT OUTPUT):')) ?? '';
+
                 return {
                   ...m,
                   content: [
                     'PREVIOUS_EVENT_OPERATION_EXECUTE:',
-                    'PREVIOUS_EVENT_SOURCE の SOURCE_TEXT を、user_instruction に従って直接書き直す。',
+                    '以下の PREVIOUS_EVENT_SOURCE に含まれる SOURCE_TEXT を、user_instruction に従って直接書き直す。',
+                    '',
+                    'PREVIOUS_EVENT_SOURCE_INLINE (DO NOT OUTPUT):',
+                    previousEventSourceContentForCall,
+                    '',
+                    'OUTPUT_ONLY:',
                     '出力するのは、書き直した本文そのものだけ。',
+                    'SOURCE_TEXT が見えていない、元文を貼ってください、などの不足説明を絶対に出さない。',
                     '命令文・依頼文・説明文・提案文・確認文を出力しない。',
                     '「〜してください」「〜したいです」「〜にしてください」「必要なら」「たとえば」で終わらない。',
                     '現在のユーザー文そのものに答えない。',
@@ -16082,3 +16119,4 @@ return await runRetryPass({
     slotsForGuard,
   });
 }
+

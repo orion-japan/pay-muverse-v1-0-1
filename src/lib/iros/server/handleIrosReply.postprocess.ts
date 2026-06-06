@@ -1,4 +1,4 @@
-// file: src/lib/iros/server/handleIrosReply.postprocess.ts
+﻿// file: src/lib/iros/server/handleIrosReply.postprocess.ts
 // iros - Postprocess (MIN)
 // 目的：
 // - orchResult から assistantText / metaForSave を確定
@@ -3192,7 +3192,7 @@ try {
   const userTextNowForPrevRephrase = String(userText ?? '').replace(/\s+/g, ' ').trim();
 
   const wantsPreviousReplyRephrase =
-    /(意味がわからない|意味が分からない|わかりにくい|分かりにくい|わかりやすく|分かりやすく|どういうこと|つまり|言い換えて|言い換え|翻訳して|翻訳)/u.test(
+    /(意味がわからない|意味が分からない|わかりにくい|分かりにくい|わかりやすく|分かりやすく|詳しく|詳しくして|詳しく教えて|詳しく説明|もう少し|もう少し詳しく|もう少しわかりやすく|もう少し分かりやすく|どういうこと|つまり|言い換えて|言い換え|補足して|説明して|解説して|翻訳して|翻訳)/u.test(
       userTextNowForPrevRephrase,
     );
 
