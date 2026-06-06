@@ -3108,6 +3108,17 @@ if (saved?.ok === true && saved?.inserted === true && messageId != null) {
       maxChars: 1600,
     });
 
+    Object.assign(flowPatternDebug, {
+      snapshotOk: true,
+      snapshotId: r.id ?? null,
+      snapshotMs: ms,
+      lookupOk: lookup.ok,
+      matchesLen: lookup.matches.length,
+      hasSeed: Boolean(similarFlowSeed),
+      seedLen: String(similarFlowSeed ?? '').length,
+      lookupError: lookup.ok ? null : String((lookup as any).error ?? ''),
+    });
+
     console.log('[IROS/SIMILAR_FLOW_SEED]', {
       conversationId,
       userCode,
@@ -3356,6 +3367,7 @@ if (!skipTraining) {
     );
   }
 }
+
 
 
 
