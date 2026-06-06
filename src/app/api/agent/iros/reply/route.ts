@@ -745,6 +745,71 @@ let extraSoT: Record<string, any> = {
     }
 
     // -------------------------------------------------------
+    // 11.9) Similar Flow pre-writer seed（best-effort）
+    // -------------------------------------------------------
+    try {
+      const preSimilarFlowLookup = await loadSimilarFlowSnapshots({
+        supabase: supabase as any,
+        userCode,
+        conversationId,
+        sourceTypes: ['chat'],
+        situationTopic: userTextClean,
+        keywords: [userTextClean].filter((v): v is string => Boolean(String(v ?? '').trim())),
+        recentLimit: 80,
+        limit: 3,
+      });
+
+      const preSimilarFlowSeed = buildSimilarFlowSeed({
+        matches: preSimilarFlowLookup.matches,
+        currentState: {},
+        limit: 3,
+        maxChars: 1600,
+      });
+
+      if (preSimilarFlowSeed) {
+        const previousCtxPack =
+          extraSoT.ctxPack && typeof extraSoT.ctxPack === 'object'
+            ? extraSoT.ctxPack
+            : {};
+
+        const preSimilarFlowDebug = {
+          source: 'pre_writer',
+          lookupOk: preSimilarFlowLookup.ok,
+          matchesLen: preSimilarFlowLookup.matches.length,
+          hasSeed: true,
+          seedLen: String(preSimilarFlowSeed).length,
+          lookupError: preSimilarFlowLookup.ok ? null : String((preSimilarFlowLookup as any).error ?? ''),
+        };
+
+        extraSoT = {
+          ...extraSoT,
+          similarFlowSeed: preSimilarFlowSeed,
+          similarFlowDebug: preSimilarFlowDebug,
+          ctxPack: {
+            ...previousCtxPack,
+            similarFlowSeed: preSimilarFlowSeed,
+            similarFlowDebug: preSimilarFlowDebug,
+          },
+        };
+      }
+
+      console.log('[IROS/SIMILAR_FLOW_PRE_WRITER]', {
+        conversationId,
+        userCode,
+        lookupOk: preSimilarFlowLookup.ok,
+        matchesLen: preSimilarFlowLookup.matches.length,
+        hasSeed: Boolean(preSimilarFlowSeed),
+        seedLen: String(preSimilarFlowSeed ?? '').length,
+      });
+    } catch (e) {
+      console.warn('[IROS/SIMILAR_FLOW_PRE_WRITER][FAILED]', {
+        conversationId,
+        userCode,
+        error: e,
+      });
+    }
+
+    // -------------------------------------------------------
     // 12) handle
     // -------------------------------------------------------
 
@@ -3367,6 +3432,8 @@ if (!skipTraining) {
     );
   }
 }
+
+
 
 
 

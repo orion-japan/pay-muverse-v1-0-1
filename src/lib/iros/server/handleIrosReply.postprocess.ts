@@ -3185,6 +3185,26 @@ const shouldInjectPreface =
   !microNow;
 
 let seedForWriterRaw = shouldInjectPreface ? `${preface}\n${slotTextStr}` : slotTextStr;
+
+// ✅ Similar Flow seed を Writer seed に混ぜる
+// - route.ts の pre-writer lookup で extraSoT / ctxPack に積まれた seed を使う
+// - 出力は禁止。Writer の内部参照材料としてだけ使う
+const similarFlowSeedForWriter = String(
+  (metaForSave as any)?.extra?.similarFlowSeed ??
+    (metaForSave as any)?.extra?.ctxPack?.similarFlowSeed ??
+    '',
+).trim();
+
+if (similarFlowSeedForWriter) {
+  seedForWriterRaw = (seedForWriterRaw + '\n\n' + similarFlowSeedForWriter).trim();
+
+  (metaForSave as any).extra = {
+    ...((metaForSave as any).extra ?? {}),
+    similarFlowSeedInjectedToWriter: true,
+    similarFlowSeedInjectedLen: similarFlowSeedForWriter.length,
+  };
+}
+
 // ✅ 直前返答の言い換え要求
 // - 「意味がわからないので、翻訳してください」は翻訳タスクではなく、直前assistant返答の平易化として扱う
 // - userTextそのものを seed にすると writer が英訳/意味説明へ流れるため、直前assistant本文を seed 正本にする
