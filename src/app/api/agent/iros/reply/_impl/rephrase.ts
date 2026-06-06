@@ -1,9 +1,10 @@
-// src/app/api/agent/iros/reply/_impl/rephrase.ts
+﻿// src/app/api/agent/iros/reply/_impl/rephrase.ts
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { pickSpeechAct } from '../_helpers';
 import { extractSlotsForRephrase, rephraseSlotsFinal } from '@/lib/iros/language/rephraseEngine';
 import { buildMemoryDelta, formatMemoryDeltaSeed } from '@/lib/iros/delta/memoryDelta';
+import { buildIntuitionCandidate, formatIntuitionSeed } from '@/lib/iros/intuition/intuitionCandidate';
 
 type RenderBlock = { text: string | null | undefined; kind?: string };
 
@@ -1277,6 +1278,72 @@ const intentBandForCtx =
       memoryDeltaSeedHead: String(memoryDeltaSeedForCtx ?? '').slice(0, 200),
     });
   } catch {}
+
+  // INTUITION_CANDIDATE_FOR_REPHRASE_CTX
+  // Memory Delta と状態メタから、Writerへ渡す直観候補Seedを生成する
+  const intuitionCandidateForCtx = memoryDeltaForCtx
+    ? buildIntuitionCandidate({
+        previousCore: memoryDeltaForCtx.previousCore,
+        currentAsk: memoryDeltaForCtx.currentAsk,
+        changedPoint: memoryDeltaForCtx.changedPoint,
+        stablePoint: memoryDeltaForCtx.stablePoint,
+        nextFocus: memoryDeltaForCtx.nextFocus,
+
+        depthStage:
+          (ctxPack as any)?.depthStage ??
+          (ctxPack as any)?.depth_stage ??
+          (ctxPack as any)?.depth ??
+          null,
+        qCode:
+          (ctxPack as any)?.qCode ??
+          (ctxPack as any)?.q_code ??
+          (ctxPack as any)?.qPrimary ??
+          (ctxPack as any)?.q_primary ??
+          null,
+        phase:
+          (ctxPack as any)?.phase ??
+          (ctxPack as any)?.phaseCode ??
+          null,
+        eTurn:
+          (ctxPack as any)?.eTurn ??
+          (ctxPack as any)?.e_turn ??
+          null,
+        flowDelta:
+          (ctxPack as any)?.flowDelta ??
+          (ctxPack as any)?.flow_delta ??
+          null,
+        returnStreak:
+          (ctxPack as any)?.returnStreak ??
+          (ctxPack as any)?.return_streak ??
+          null,
+
+        topicDigest:
+          (ctxPack as any)?.topicDigest ??
+          null,
+        conversationLine:
+          (ctxPack as any)?.conversationLine ??
+          null,
+      })
+    : null;
+
+  const intuitionSeedForCtx = formatIntuitionSeed(intuitionCandidateForCtx);
+
+  if (intuitionCandidateForCtx && (ctxPack as any).intuitionCandidate == null) {
+    (ctxPack as any).intuitionCandidate = intuitionCandidateForCtx;
+  }
+
+  if (intuitionSeedForCtx && isBlankLike((ctxPack as any).intuitionSeed)) {
+    (ctxPack as any).intuitionSeed = intuitionSeedForCtx;
+  }
+
+  try {
+    console.log('[IROS/_impl/rephrase.ts][INTUITION_CANDIDATE_FOR_REPHRASE_CTX]', {
+      hasIntuitionCandidate: Boolean(intuitionCandidateForCtx),
+      hasIntuitionSeed: Boolean(intuitionSeedForCtx),
+      intuitionSeedHead: String(intuitionSeedForCtx ?? '').slice(0, 200),
+    });
+  } catch {}
+
 
   const pickResolvedAskText = (...cands: any[]): string | null => {
     for (const v of cands) {
@@ -2701,4 +2768,5 @@ try {
 
   attachBlocksFromTextOrSkip(fallbackText, 'REPHRASE_EXCEPTION_FALLBACK');
 }}
+
 

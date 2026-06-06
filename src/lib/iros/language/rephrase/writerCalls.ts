@@ -1,4 +1,4 @@
-// =============================================
+﻿// =============================================
 // file: src/lib/iros/language/rephrase/writerCalls.ts
 // ✅ buildFirstPassMessages を「最後 user で終わる」ように拡張
 // ✅ HistoryDigest v1 をここで注入できるようにする（唯一の choke point）
@@ -1021,11 +1021,28 @@ const mirrorFlowV1ForSeed: any =
       ) ?? '',
     ).trim();
 
+    const intuitionSeedForWriter = String(
+      firstNonNull(
+        (ctxPack as any)?.intuitionSeed,
+        (extra as any)?.intuitionSeed,
+        (extra as any)?.ctxPack?.intuitionSeed,
+        (args as any)?.intuitionSeed,
+        (args as any)?.userContext?.ctxPack?.intuitionSeed,
+        (args as any)?.userContext?.meta?.extra?.intuitionSeed,
+        (args as any)?.userContext?.meta?.extra?.ctxPack?.intuitionSeed,
+        null,
+      ) ?? '',
+    ).trim();
+
     const memorySeedTextForWriter = [
       memorySeedTextBaseForWriter,
       memoryDeltaSeedForWriter &&
       !/MEMORY_DELTA\s*\(DO NOT OUTPUT\)/.test(memorySeedTextBaseForWriter)
         ? memoryDeltaSeedForWriter
+        : '',
+      intuitionSeedForWriter &&
+      !/INTUITION_CANDIDATE\s*\(DO NOT OUTPUT\)/.test(memorySeedTextBaseForWriter)
+        ? intuitionSeedForWriter
         : '',
     ]
       .filter(Boolean)
@@ -1054,11 +1071,16 @@ const mirrorFlowV1ForSeed: any =
         /MEMORY_DELTA\s*\(DO NOT OUTPUT\)/.test(seedTextRawBase) ||
         /MEMORY_DELTA\s*\(DO NOT OUTPUT\)/.test(memorySeedTextBaseForWriter);
 
+      const hasIntuitionCandidateAlready =
+        /INTUITION_CANDIDATE\s*\(DO NOT OUTPUT\)/.test(seedTextRawBase) ||
+        /INTUITION_CANDIDATE\s*\(DO NOT OUTPUT\)/.test(memorySeedTextBaseForWriter);
+
       const parts = [
         hasMirrorFlowAlready ? '' : mirrorFlowSeedText,
         hasReferenceCheckRuleAlready ? '' : referenceCheckRuleSeedText,
         hasMemorySeedAlready ? '' : memorySeedTextBaseForWriter,
         hasMemoryDeltaAlready ? '' : memoryDeltaSeedForWriter,
+        hasIntuitionCandidateAlready ? '' : intuitionSeedForWriter,
         seedTextRawBase,
       ].filter(Boolean);
 
@@ -1073,6 +1095,8 @@ const mirrorFlowV1ForSeed: any =
         memorySeedTextForWriterHead: String(memorySeedTextForWriter ?? '').slice(0, 200),
         memoryDeltaSeedForWriterLen: String(memoryDeltaSeedForWriter ?? '').length,
         memoryDeltaSeedForWriterHead: String(memoryDeltaSeedForWriter ?? '').slice(0, 200),
+        intuitionSeedForWriterLen: String(intuitionSeedForWriter ?? '').length,
+        intuitionSeedForWriterHead: String(intuitionSeedForWriter ?? '').slice(0, 200),
         seedTextRawBaseHead: String(seedTextRawBase ?? '').slice(0, 200),
         seedTextRawHead: String(seedTextRaw ?? '').slice(0, 360),
         seedTextRawHasMirrorFlowSeed: /MIRROR_FLOW_SEED_V1\b/.test(String(seedTextRaw ?? '')),
@@ -1080,6 +1104,7 @@ const mirrorFlowV1ForSeed: any =
         seedTextRawHasMemorySeed: /MEMORY_SEED\b/.test(String(seedTextRaw ?? '')),
         seedTextRawBaseHasMemorySeed: /MEMORY_SEED\b/.test(String(seedTextRawBase ?? '')),
         seedTextRawHasMemoryDelta: /MEMORY_DELTA\s*\(DO NOT OUTPUT\)/.test(String(seedTextRaw ?? '')),
+        seedTextRawHasIntuitionCandidate: /INTUITION_CANDIDATE\s*\(DO NOT OUTPUT\)/.test(String(seedTextRaw ?? '')),
       })
     );
   const flowDelta2 = String(pick(flow?.delta, (flow as any)?.flowDelta) ?? '').trim();
