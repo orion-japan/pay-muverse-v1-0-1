@@ -2750,391 +2750,389 @@ meta.extra = {
 
 // FlowPatternSnapshot 保存（Phase 2-1）
 // - 通常会話 chat の状態パターンを保存する
-// - 返信を止めないため non-blocking
-// - Similar Flow Lookup は read-only でログ確認する
+// - Production serverless でも確実に走らせるため await する
+// - Similar Flow Lookup は read-only / seed logging まで確認する
 if (saved?.ok === true && saved?.inserted === true && messageId != null) {
-  void (async () => {
-    const t0 = Date.now();
+  const t0 = Date.now();
 
-    try {
-      const r = await saveFlowPatternSnapshot({
-        supabase,
-        userCode,
-        conversationId,
-        messageId,
-        sourceType: 'chat',
-        userText: userTextClean,
-        assistantText: contentForPersist,
-        meta,
-        metaForSave,
-        tags: ['iros', 'flow_pattern', 'chat'],
-      });
+  try {
+    const r = await saveFlowPatternSnapshot({
+      supabase,
+      userCode,
+      conversationId,
+      messageId,
+      sourceType: 'chat',
+      userText: userTextClean,
+      assistantText: contentForPersist,
+      meta,
+      metaForSave,
+      tags: ['iros', 'flow_pattern', 'chat'],
+    });
 
-      const ms = Date.now() - t0;
+    const ms = Date.now() - t0;
 
-      if (!r.ok) {
-        console.error('[IROS][FlowPatternSnapshot] insert error (non-blocking)', {
-          conversationId,
-          userCode,
-          messageId,
-          ms,
-          error: (r as any).error,
-        });
-        return;
-      }
-
-      console.log('[IROS][FlowPatternSnapshot] insert ok (non-blocking)', {
-        conversationId,
-        userCode,
-        messageId,
-        snapshotId: r.id ?? null,
-        ms,
-      });
-
-      const pickFirst = (...values: unknown[]): unknown => {
-        for (const value of values) {
-          if (value === null || value === undefined) continue;
-          if (typeof value === 'string' && value.trim() === '') continue;
-          return value;
-        }
-        return null;
-      };
-
-      const asRouteText = (value: unknown, max = 240): string | null => {
-        const text = String(value ?? '')
-          .replace(/\r\n/g, '\n')
-          .replace(/\r/g, '\n')
-          .replace(/[ \t　]+/g, ' ')
-          .replace(/\n{3,}/g, '\n\n')
-          .trim()
-          .replace(/\n+/g, ' ');
-
-        if (!text) return null;
-        return text.length > max ? text.slice(0, max) : text;
-      };
-
-      const asRouteRecord = (value: unknown): Record<string, any> => {
-        return value && typeof value === 'object' && !Array.isArray(value)
-          ? (value as Record<string, any>)
-          : {};
-      };
-
-      const metaForLookup = asRouteRecord(metaForSave ?? meta);
-      const extraForLookup = asRouteRecord(metaForLookup.extra);
-      const ctxPackForLookup = asRouteRecord(extraForLookup.ctxPack);
-      const memoryStateSnapshotForLookup = asRouteRecord(
-        pickFirst(
-          ctxPackForLookup.memoryStateSnapshot,
-          extraForLookup.memoryStateSnapshot,
-          metaForLookup.memoryStateSnapshot,
-        ),
-      );
-      const qCountsForLookup = asRouteRecord(
-        pickFirst(
-          ctxPackForLookup.qCounts,
-          extraForLookup.qCounts,
-          memoryStateSnapshotForLookup.qCounts,
-          memoryStateSnapshotForLookup.q_counts,
-        ),
-      );
-      const sriContextForLookup = asRouteRecord(ctxPackForLookup.sriContext);
-      const sriSelfStateForLookup = asRouteRecord(sriContextForLookup.selfState);
-
-      const similarFlowCurrentState = {
-        qCode: asRouteText(
-          pickFirst(
-            ctxPackForLookup.qCode,
-            ctxPackForLookup.q_code,
-            memoryStateSnapshotForLookup.qCode,
-            memoryStateSnapshotForLookup.q_code,
-            metaForLookup.qCode,
-            metaForLookup.q_code,
-          ),
-          40,
-        ),
-        qPrimary: asRouteText(
-          pickFirst(
-            ctxPackForLookup.qPrimary,
-            ctxPackForLookup.q_primary,
-            memoryStateSnapshotForLookup.qPrimary,
-            memoryStateSnapshotForLookup.q_primary,
-            qCountsForLookup.q_primary,
-            qCountsForLookup.qPrimary,
-            sriSelfStateForLookup.qPrimary,
-            sriSelfStateForLookup.q_primary,
-            extraForLookup.qPrimary,
-            extraForLookup.q_primary,
-            metaForLookup.qPrimary,
-            metaForLookup.q_primary,
-            extraForLookup.resonanceState?.qPrimary,
-            extraForLookup.resonanceState?.q_primary,
-            extraForLookup.mirrorFlowV1?.qPrimary,
-            extraForLookup.mirrorFlowV1?.q_primary,
-          ),
-          40,
-        ),
-        eTurn: asRouteText(
-          pickFirst(
-            ctxPackForLookup.eTurn,
-            ctxPackForLookup.e_turn,
-            qCountsForLookup.e_turn_now,
-            qCountsForLookup.eTurnNow,
-            qCountsForLookup.e_turn,
-            qCountsForLookup.eTurn,
-            sriSelfStateForLookup.eTurn,
-            sriSelfStateForLookup.e_turn,
-            extraForLookup.e_turn,
-            extraForLookup.eTurn,
-            metaForLookup.e_turn,
-            metaForLookup.eTurn,
-            extraForLookup.resonanceState?.e_turn,
-            extraForLookup.resonanceState?.eTurn,
-            extraForLookup.mirrorFlowV1?.e_turn,
-            extraForLookup.mirrorFlowV1?.eTurn,
-            extraForLookup.mirror?.e_turn,
-            extraForLookup.mirror?.eTurn,
-            extraForLookup.flowMirror?.e_turn,
-            extraForLookup.flowMirror?.eTurn,
-          ),
-          40,
-        ),
-        depthStage: asRouteText(
-          pickFirst(
-            ctxPackForLookup.depthStage,
-            ctxPackForLookup.depth_stage,
-            memoryStateSnapshotForLookup.depthStage,
-            memoryStateSnapshotForLookup.depth_stage,
-            metaForLookup.depthStage,
-            metaForLookup.depth_stage,
-          ),
-          40,
-        ),
-        phase: asRouteText(
-          pickFirst(
-            ctxPackForLookup.phase,
-            memoryStateSnapshotForLookup.phase,
-            metaForLookup.phase,
-          ),
-          40,
-        ),
-      };
-
-      const lookup = await loadSimilarFlowSnapshots({
-        supabase,
-        userCode,
-        conversationId,
-        excludeMessageId: messageId,
-        excludeSnapshotId: r.id ?? null,
-        sourceTypes: ['chat'],
-
-        targetLabel: asRouteText(
-          pickFirst(
-            ctxPackForLookup.targetLabel,
-            ctxPackForLookup.diagnosisFollowupTargetLabel,
-            extraForLookup.targetLabel,
-            extraForLookup.diagnosisFollowupTargetLabel,
-          ),
-          120,
-        ),
-        targetType: asRouteText(
-          pickFirst(
-            ctxPackForLookup.targetType,
-            extraForLookup.targetType,
-          ),
-          80,
-        ),
-
-        qCode: asRouteText(
-          pickFirst(
-            ctxPackForLookup.qCode,
-            ctxPackForLookup.q_code,
-            memoryStateSnapshotForLookup.qCode,
-            memoryStateSnapshotForLookup.q_code,
-            metaForLookup.qCode,
-            metaForLookup.q_code,
-          ),
-          40,
-        ),
-        qPrimary: asRouteText(
-          pickFirst(
-            ctxPackForLookup.qPrimary,
-            ctxPackForLookup.q_primary,
-            memoryStateSnapshotForLookup.qPrimary,
-            memoryStateSnapshotForLookup.q_primary,
-            qCountsForLookup.q_primary,
-            qCountsForLookup.qPrimary,
-            sriSelfStateForLookup.qPrimary,
-            sriSelfStateForLookup.q_primary,
-            extraForLookup.qPrimary,
-            extraForLookup.q_primary,
-            metaForLookup.qPrimary,
-            metaForLookup.q_primary,
-            extraForLookup.resonanceState?.qPrimary,
-            extraForLookup.resonanceState?.q_primary,
-            extraForLookup.mirrorFlowV1?.qPrimary,
-            extraForLookup.mirrorFlowV1?.q_primary,
-          ),
-          40,
-        ),
-        eTurn: asRouteText(
-          pickFirst(
-            ctxPackForLookup.eTurn,
-            ctxPackForLookup.e_turn,
-            qCountsForLookup.e_turn_now,
-            qCountsForLookup.eTurnNow,
-            qCountsForLookup.e_turn,
-            qCountsForLookup.eTurn,
-            sriSelfStateForLookup.eTurn,
-            sriSelfStateForLookup.e_turn,
-            extraForLookup.e_turn,
-            extraForLookup.eTurn,
-            metaForLookup.e_turn,
-            metaForLookup.eTurn,
-            extraForLookup.resonanceState?.e_turn,
-            extraForLookup.resonanceState?.eTurn,
-            extraForLookup.mirrorFlowV1?.e_turn,
-            extraForLookup.mirrorFlowV1?.eTurn,
-            extraForLookup.mirror?.e_turn,
-            extraForLookup.mirror?.eTurn,
-            extraForLookup.flowMirror?.e_turn,
-            extraForLookup.flowMirror?.eTurn,
-          ),
-          40,
-        ),
-        depthStage: asRouteText(
-          pickFirst(
-            ctxPackForLookup.depthStage,
-            ctxPackForLookup.depth_stage,
-            memoryStateSnapshotForLookup.depthStage,
-            memoryStateSnapshotForLookup.depth_stage,
-            metaForLookup.depthStage,
-            metaForLookup.depth_stage,
-          ),
-          40,
-        ),
-        phase: asRouteText(
-          pickFirst(
-            ctxPackForLookup.phase,
-            memoryStateSnapshotForLookup.phase,
-            metaForLookup.phase,
-          ),
-          40,
-        ),
-
-        relationFocus: asRouteText(
-          pickFirst(
-            ctxPackForLookup.relationFocus,
-            extraForLookup.relationFocus,
-          ),
-          120,
-        ),
-        emotionalTemperature: asRouteText(
-          pickFirst(
-            ctxPackForLookup.emotionalTemperature,
-            extraForLookup.emotionalTemperature,
-          ),
-          120,
-        ),
-
-        situationTopic: asRouteText(
-          pickFirst(
-            ctxPackForLookup.situationTopic,
-            extraForLookup.situationTopic,
-            memoryStateSnapshotForLookup.situationTopic,
-            userTextClean,
-          ),
-          160,
-        ),
-        situationSummary: asRouteText(
-          pickFirst(
-            ctxPackForLookup.situationSummary,
-            extraForLookup.situationSummary,
-            memoryStateSnapshotForLookup.situationSummary,
-          ),
-          240,
-        ),
-
-        followupKind: asRouteText(
-          pickFirst(
-            ctxPackForLookup.followupKind,
-            extraForLookup.followupKind,
-          ),
-          80,
-        ),
-        goalKind: asRouteText(
-          pickFirst(
-            ctxPackForLookup.goalKind,
-            ctxPackForLookup.replyGoal?.kind,
-            extraForLookup.goalKind,
-          ),
-          80,
-        ),
-
-        keywords: [
-          asRouteText(userTextClean, 120),
-          asRouteText(ctxPackForLookup.situationTopic, 120),
-          asRouteText(memoryStateSnapshotForLookup.situationTopic, 120),
-        ].filter((v): v is string => Boolean(v)),
-
-        recentLimit: 80,
-        limit: 3,
-      });
-
-      const similarFlowSeed = buildSimilarFlowSeed({
-        matches: lookup.matches,
-        currentState: similarFlowCurrentState,
-        limit: 3,
-        maxChars: 1600,
-      });
-
-      console.log('[IROS/SIMILAR_FLOW_SEED]', {
-        conversationId,
-        userCode,
-        messageId,
-        snapshotId: r.id ?? null,
-        ok: lookup.ok,
-        matchesLen: lookup.matches.length,
-        hasSeed: Boolean(similarFlowSeed),
-        seedLen: String(similarFlowSeed ?? '').length,
-        seedHead: String(similarFlowSeed ?? '').slice(0, 500),
-      });
-
-      console.log('[IROS/FLOW_PATTERN_LOOKUP]', {
-        conversationId,
-        userCode,
-        messageId,
-        snapshotId: r.id ?? null,
-        ok: lookup.ok,
-        matchesLen: lookup.matches.length,
-        inputState: similarFlowCurrentState,
-        similarFlowSeedLen: String(similarFlowSeed ?? '').length,
-        matchesHead: lookup.matches.slice(0, 3).map((match) => ({
-          id: match.id,
-          score: match.score,
-          reason: match.reason.slice(0, 8),
-          sourceType: match.sourceType,
-          qCode: match.qCode,
-          qPrimary: match.qPrimary,
-          eTurn: match.eTurn,
-          depthStage: match.depthStage,
-          phase: match.phase,
-          situationTopic: match.situationTopic,
-          userTextHead: match.userTextHead,
-          createdAt: match.createdAt,
-        })),
-        error: lookup.ok ? null : (lookup as any).error,
-      });
-    } catch (e) {
-      const ms = Date.now() - t0;
-      console.error('[IROS][FlowPatternSnapshot] insert/lookup failed (non-blocking)', {
+    if (!r.ok) {
+      console.error('[IROS][FlowPatternSnapshot] insert error (awaited)', {
         conversationId,
         userCode,
         messageId,
         ms,
-        error: e,
+        error: (r as any).error,
       });
+      return;
     }
-  })();
+
+    console.log('[IROS][FlowPatternSnapshot] insert ok (awaited)', {
+      conversationId,
+      userCode,
+      messageId,
+      snapshotId: r.id ?? null,
+      ms,
+    });
+
+    const pickFirst = (...values: unknown[]): unknown => {
+      for (const value of values) {
+        if (value === null || value === undefined) continue;
+        if (typeof value === 'string' && value.trim() === '') continue;
+        return value;
+      }
+      return null;
+    };
+
+    const asRouteText = (value: unknown, max = 240): string | null => {
+      const text = String(value ?? '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .replace(/[ \t　]+/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim()
+        .replace(/\n+/g, ' ');
+
+      if (!text) return null;
+      return text.length > max ? text.slice(0, max) : text;
+    };
+
+    const asRouteRecord = (value: unknown): Record<string, any> => {
+      return value && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, any>)
+        : {};
+    };
+
+    const metaForLookup = asRouteRecord(metaForSave ?? meta);
+    const extraForLookup = asRouteRecord(metaForLookup.extra);
+    const ctxPackForLookup = asRouteRecord(extraForLookup.ctxPack);
+    const memoryStateSnapshotForLookup = asRouteRecord(
+      pickFirst(
+        ctxPackForLookup.memoryStateSnapshot,
+        extraForLookup.memoryStateSnapshot,
+        metaForLookup.memoryStateSnapshot,
+      ),
+    );
+    const qCountsForLookup = asRouteRecord(
+      pickFirst(
+        ctxPackForLookup.qCounts,
+        extraForLookup.qCounts,
+        memoryStateSnapshotForLookup.qCounts,
+        memoryStateSnapshotForLookup.q_counts,
+      ),
+    );
+    const sriContextForLookup = asRouteRecord(ctxPackForLookup.sriContext);
+    const sriSelfStateForLookup = asRouteRecord(sriContextForLookup.selfState);
+
+    const similarFlowCurrentState = {
+      qCode: asRouteText(
+        pickFirst(
+          ctxPackForLookup.qCode,
+          ctxPackForLookup.q_code,
+          memoryStateSnapshotForLookup.qCode,
+          memoryStateSnapshotForLookup.q_code,
+          metaForLookup.qCode,
+          metaForLookup.q_code,
+        ),
+        40,
+      ),
+      qPrimary: asRouteText(
+        pickFirst(
+          ctxPackForLookup.qPrimary,
+          ctxPackForLookup.q_primary,
+          memoryStateSnapshotForLookup.qPrimary,
+          memoryStateSnapshotForLookup.q_primary,
+          qCountsForLookup.q_primary,
+          qCountsForLookup.qPrimary,
+          sriSelfStateForLookup.qPrimary,
+          sriSelfStateForLookup.q_primary,
+          extraForLookup.qPrimary,
+          extraForLookup.q_primary,
+          metaForLookup.qPrimary,
+          metaForLookup.q_primary,
+          extraForLookup.resonanceState?.qPrimary,
+          extraForLookup.resonanceState?.q_primary,
+          extraForLookup.mirrorFlowV1?.qPrimary,
+          extraForLookup.mirrorFlowV1?.q_primary,
+        ),
+        40,
+      ),
+      eTurn: asRouteText(
+        pickFirst(
+          ctxPackForLookup.eTurn,
+          ctxPackForLookup.e_turn,
+          qCountsForLookup.e_turn_now,
+          qCountsForLookup.eTurnNow,
+          qCountsForLookup.e_turn,
+          qCountsForLookup.eTurn,
+          sriSelfStateForLookup.eTurn,
+          sriSelfStateForLookup.e_turn,
+          extraForLookup.e_turn,
+          extraForLookup.eTurn,
+          metaForLookup.e_turn,
+          metaForLookup.eTurn,
+          extraForLookup.resonanceState?.e_turn,
+          extraForLookup.resonanceState?.eTurn,
+          extraForLookup.mirrorFlowV1?.e_turn,
+          extraForLookup.mirrorFlowV1?.eTurn,
+          extraForLookup.mirror?.e_turn,
+          extraForLookup.mirror?.eTurn,
+          extraForLookup.flowMirror?.e_turn,
+          extraForLookup.flowMirror?.eTurn,
+        ),
+        40,
+      ),
+      depthStage: asRouteText(
+        pickFirst(
+          ctxPackForLookup.depthStage,
+          ctxPackForLookup.depth_stage,
+          memoryStateSnapshotForLookup.depthStage,
+          memoryStateSnapshotForLookup.depth_stage,
+          metaForLookup.depthStage,
+          metaForLookup.depth_stage,
+        ),
+        40,
+      ),
+      phase: asRouteText(
+        pickFirst(
+          ctxPackForLookup.phase,
+          memoryStateSnapshotForLookup.phase,
+          metaForLookup.phase,
+        ),
+        40,
+      ),
+    };
+
+    const lookup = await loadSimilarFlowSnapshots({
+      supabase,
+      userCode,
+      conversationId,
+      excludeMessageId: messageId,
+      excludeSnapshotId: r.id ?? null,
+      sourceTypes: ['chat'],
+
+      targetLabel: asRouteText(
+        pickFirst(
+          ctxPackForLookup.targetLabel,
+          ctxPackForLookup.diagnosisFollowupTargetLabel,
+          extraForLookup.targetLabel,
+          extraForLookup.diagnosisFollowupTargetLabel,
+        ),
+        120,
+      ),
+      targetType: asRouteText(
+        pickFirst(
+          ctxPackForLookup.targetType,
+          extraForLookup.targetType,
+        ),
+        80,
+      ),
+
+      qCode: asRouteText(
+        pickFirst(
+          ctxPackForLookup.qCode,
+          ctxPackForLookup.q_code,
+          memoryStateSnapshotForLookup.qCode,
+          memoryStateSnapshotForLookup.q_code,
+          metaForLookup.qCode,
+          metaForLookup.q_code,
+        ),
+        40,
+      ),
+      qPrimary: asRouteText(
+        pickFirst(
+          ctxPackForLookup.qPrimary,
+          ctxPackForLookup.q_primary,
+          memoryStateSnapshotForLookup.qPrimary,
+          memoryStateSnapshotForLookup.q_primary,
+          qCountsForLookup.q_primary,
+          qCountsForLookup.qPrimary,
+          sriSelfStateForLookup.qPrimary,
+          sriSelfStateForLookup.q_primary,
+          extraForLookup.qPrimary,
+          extraForLookup.q_primary,
+          metaForLookup.qPrimary,
+          metaForLookup.q_primary,
+          extraForLookup.resonanceState?.qPrimary,
+          extraForLookup.resonanceState?.q_primary,
+          extraForLookup.mirrorFlowV1?.qPrimary,
+          extraForLookup.mirrorFlowV1?.q_primary,
+        ),
+        40,
+      ),
+      eTurn: asRouteText(
+        pickFirst(
+          ctxPackForLookup.eTurn,
+          ctxPackForLookup.e_turn,
+          qCountsForLookup.e_turn_now,
+          qCountsForLookup.eTurnNow,
+          qCountsForLookup.e_turn,
+          qCountsForLookup.eTurn,
+          sriSelfStateForLookup.eTurn,
+          sriSelfStateForLookup.e_turn,
+          extraForLookup.e_turn,
+          extraForLookup.eTurn,
+          metaForLookup.e_turn,
+          metaForLookup.eTurn,
+          extraForLookup.resonanceState?.e_turn,
+          extraForLookup.resonanceState?.eTurn,
+          extraForLookup.mirrorFlowV1?.e_turn,
+          extraForLookup.mirrorFlowV1?.eTurn,
+          extraForLookup.mirror?.e_turn,
+          extraForLookup.mirror?.eTurn,
+          extraForLookup.flowMirror?.e_turn,
+          extraForLookup.flowMirror?.eTurn,
+        ),
+        40,
+      ),
+      depthStage: asRouteText(
+        pickFirst(
+          ctxPackForLookup.depthStage,
+          ctxPackForLookup.depth_stage,
+          memoryStateSnapshotForLookup.depthStage,
+          memoryStateSnapshotForLookup.depth_stage,
+          metaForLookup.depthStage,
+          metaForLookup.depth_stage,
+        ),
+        40,
+      ),
+      phase: asRouteText(
+        pickFirst(
+          ctxPackForLookup.phase,
+          memoryStateSnapshotForLookup.phase,
+          metaForLookup.phase,
+        ),
+        40,
+      ),
+
+      relationFocus: asRouteText(
+        pickFirst(
+          ctxPackForLookup.relationFocus,
+          extraForLookup.relationFocus,
+        ),
+        120,
+      ),
+      emotionalTemperature: asRouteText(
+        pickFirst(
+          ctxPackForLookup.emotionalTemperature,
+          extraForLookup.emotionalTemperature,
+        ),
+        120,
+      ),
+
+      situationTopic: asRouteText(
+        pickFirst(
+          ctxPackForLookup.situationTopic,
+          extraForLookup.situationTopic,
+          memoryStateSnapshotForLookup.situationTopic,
+          userTextClean,
+        ),
+        160,
+      ),
+      situationSummary: asRouteText(
+        pickFirst(
+          ctxPackForLookup.situationSummary,
+          extraForLookup.situationSummary,
+          memoryStateSnapshotForLookup.situationSummary,
+        ),
+        240,
+      ),
+
+      followupKind: asRouteText(
+        pickFirst(
+          ctxPackForLookup.followupKind,
+          extraForLookup.followupKind,
+        ),
+        80,
+      ),
+      goalKind: asRouteText(
+        pickFirst(
+          ctxPackForLookup.goalKind,
+          ctxPackForLookup.replyGoal?.kind,
+          extraForLookup.goalKind,
+        ),
+        80,
+      ),
+
+      keywords: [
+        asRouteText(userTextClean, 120),
+        asRouteText(ctxPackForLookup.situationTopic, 120),
+        asRouteText(memoryStateSnapshotForLookup.situationTopic, 120),
+      ].filter((v): v is string => Boolean(v)),
+
+      recentLimit: 80,
+      limit: 3,
+    });
+
+    const similarFlowSeed = buildSimilarFlowSeed({
+      matches: lookup.matches,
+      currentState: similarFlowCurrentState,
+      limit: 3,
+      maxChars: 1600,
+    });
+
+    console.log('[IROS/SIMILAR_FLOW_SEED]', {
+      conversationId,
+      userCode,
+      messageId,
+      snapshotId: r.id ?? null,
+      ok: lookup.ok,
+      matchesLen: lookup.matches.length,
+      hasSeed: Boolean(similarFlowSeed),
+      seedLen: String(similarFlowSeed ?? '').length,
+      seedHead: String(similarFlowSeed ?? '').slice(0, 500),
+    });
+
+    console.log('[IROS/FLOW_PATTERN_LOOKUP]', {
+      conversationId,
+      userCode,
+      messageId,
+      snapshotId: r.id ?? null,
+      ok: lookup.ok,
+      matchesLen: lookup.matches.length,
+      inputState: similarFlowCurrentState,
+      similarFlowSeedLen: String(similarFlowSeed ?? '').length,
+      matchesHead: lookup.matches.slice(0, 3).map((match) => ({
+        id: match.id,
+        score: match.score,
+        reason: match.reason.slice(0, 8),
+        sourceType: match.sourceType,
+        qCode: match.qCode,
+        qPrimary: match.qPrimary,
+        eTurn: match.eTurn,
+        depthStage: match.depthStage,
+        phase: match.phase,
+        situationTopic: match.situationTopic,
+        userTextHead: match.userTextHead,
+        createdAt: match.createdAt,
+      })),
+      error: lookup.ok ? null : (lookup as any).error,
+    });
+  } catch (e) {
+    const ms = Date.now() - t0;
+    console.error('[IROS][FlowPatternSnapshot] insert/lookup failed (awaited)', {
+      conversationId,
+      userCode,
+      messageId,
+      ms,
+      error: e,
+    });
+  }
 }
 
 try {
@@ -3336,6 +3334,8 @@ if (!skipTraining) {
     );
   }
 }
+
+
 
 
 
