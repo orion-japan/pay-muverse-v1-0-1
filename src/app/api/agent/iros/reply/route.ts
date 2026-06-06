@@ -2752,6 +2752,18 @@ meta.extra = {
 // - 通常会話 chat の状態パターンを保存する
 // - Production serverless でも確実に走らせるため await する
 // - Similar Flow Lookup は read-only / seed logging まで確認する
+console.log('[IROS/FLOW_PATTERN_GATE]', {
+  conversationId,
+  userCode,
+  messageId,
+  savedOk: saved?.ok ?? null,
+  savedInserted: saved?.inserted ?? null,
+  canRun:
+    saved?.ok === true &&
+    saved?.inserted === true &&
+    messageId != null,
+});
+
 if (saved?.ok === true && saved?.inserted === true && messageId != null) {
   const t0 = Date.now();
 
@@ -3334,6 +3346,7 @@ if (!skipTraining) {
     );
   }
 }
+
 
 
 
