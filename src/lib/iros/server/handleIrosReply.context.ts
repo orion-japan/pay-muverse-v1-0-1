@@ -612,9 +612,35 @@ export async function buildTurnContext(
       followupSourceText
     );
 
+  const diagnosisInventoryTargetLabel = (() => {
+    const text = String(followupSourceText ?? '').trim();
+
+    if (/(自分|自分自身|僕|私|俺|わたし|ぼく)の(?:過去の)?(?:ir診断|IR診断|診断|診断内容|診断結果)/u.test(text)) {
+      return '自分';
+    }
+
+    const m =
+      text.match(/^\s*(.+?)(?:の|について|に関する)(?:過去の)?(?:ir診断|IR診断|診断|診断内容|診断結果)/u) ??
+      text.match(/(?:ir診断|IR診断|診断|診断内容|診断結果).*(?:対象|相手|人)[：:\s]*([^\s　、。？?]+)/u);
+
+    const raw = String(m?.[1] ?? '').trim();
+    if (!raw) return null;
+
+    const cleaned = raw
+      .replace(/[「」『』]/g, '')
+      .replace(/(さん|ちゃん|くん|様|先生)$/u, '')
+      .trim();
+
+    if (!cleaned || /^(過去|保存済み|直近|前回|今回|全部|全体|一覧|リスト|診断|ir診断|IR診断)$/u.test(cleaned)) {
+      return null;
+    }
+
+    return cleaned;
+  })();
+
   if (wantsDiagnosisInventory) {
     try {
-      const diagnosisInventory = await loadIrDiagnosisInventorySnapshot(supabase, userCode, 10);
+      const diagnosisInventory = await loadIrDiagnosisInventorySnapshot(supabase, userCode, 10, diagnosisInventoryTargetLabel);
 
       const recentLines = diagnosisInventory.recent.map((item) => {
         const id = typeof item.id === 'number' ? String(item.id) : '不明';
@@ -624,28 +650,54 @@ export async function buildTurnContext(
         return 'ID:' + id + ' / ' + target + ' / ' + created + ' / ' + head;
       });
 
+      const diagnosisInventoryTargetPrefix = diagnosisInventoryTargetLabel
+        ? diagnosisInventoryTargetLabel + 'の'
+        : '';
+
+      const suggestedTargetLabels = Array.isArray((diagnosisInventory as any).suggestedTargetLabels)
+        ? (diagnosisInventory as any).suggestedTargetLabels
+            .map((x: unknown) => String(x ?? '').trim())
+            .filter((x: string) => x.length > 0)
+        : [];
+
+      const suggestionLines =
+        diagnosisInventory.totalCount === 0 &&
+        diagnosisInventoryTargetLabel &&
+        suggestedTargetLabels.length > 0
+          ? [
+              '',
+              '近い対象名があります。',
+              ...suggestedTargetLabels.map((name: string) => '・' + name),
+              '',
+              '対象名をこの表記で聞くと絞り込めます。',
+            ]
+          : [];
+
       const directReply = diagnosisInventory.error
         ? ['今は保存済み診断リストを確認できません。', '', `理由: ${diagnosisInventory.error}`].join('\n')
         : diagnosisInventory.totalCount > 0
           ? [
-              `保存済みのir診断は ${diagnosisInventory.totalCount}件あります。`,
+              `${diagnosisInventoryTargetPrefix}保存済みのir診断は ${diagnosisInventory.totalCount}件あります。`,
               `直近で見えているのは ${diagnosisInventory.recent.length}件です。`,
               diagnosisInventory.hasMore ? 'それ以前の診断もDB上には残っています。' : '今見えている範囲で全件です。',
               '',
               ...recentLines,
             ].join('\n')
-          : '保存済みのir診断は、今のDB上では0件です。';
-
+          : [
+              `${diagnosisInventoryTargetPrefix}保存済みのir診断は、今のDB上では0件です。`,
+              ...suggestionLines,
+            ].join('\n');
       const inventoryPreSeedResult = {
         version: 'pre_seed_assist_v1',
         kind: 'diagnosis_inventory',
         confidence: 1,
-        targetLabel: null,
+        targetLabel: diagnosisInventoryTargetLabel,
         targetKey: null,
         directReply,
         seedText: [
           'PRE_SEED_DIAGNOSIS_INVENTORY:',
           'userText=' + followupSourceText,
+          'targetLabel=' + String(diagnosisInventoryTargetLabel ?? ''),
           'totalCount=' + diagnosisInventory.totalCount,
           'recentCount=' + diagnosisInventory.recent.length,
           'hasMore=' + String(diagnosisInventory.hasMore),
@@ -679,6 +731,7 @@ export async function buildTurnContext(
 
       console.log('[IROS/DIAGNOSIS_INVENTORY_DIRECT]', {
         userCode,
+        targetLabel: diagnosisInventoryTargetLabel,
         totalCount: diagnosisInventory.totalCount,
         recentCount: diagnosisInventory.recent.length,
         hasMore: diagnosisInventory.hasMore,

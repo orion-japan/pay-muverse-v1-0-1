@@ -1,4 +1,4 @@
-﻿// src/lib/iros/memoryRecall.ts
+// src/lib/iros/memoryRecall.ts
 // Iros MemoryRecall モジュール
 //
 // 役割：
@@ -944,6 +944,9 @@ export type IrDiagnosisInventorySnapshot = {
   recent: IrDiagnosisInventoryItem[];
   hasMore: boolean;
   error?: string | null;
+  targetLabel?: string | null;
+  targetKey?: string | null;
+  suggestedTargetLabels?: string[];
 };
 
 // 🔶 loadIrDiagnosisInventorySnapshot
@@ -952,10 +955,13 @@ export type IrDiagnosisInventorySnapshot = {
 export async function loadIrDiagnosisInventorySnapshot(
   supabase: any,
   userCode: string,
-  limit = 10
+  limit = 10,
+  targetLabel?: string | null
 ): Promise<IrDiagnosisInventorySnapshot> {
   const ownerUserCode = String(userCode ?? '').trim();
   const safeLimit = Math.max(1, Math.min(30, Number.isFinite(Number(limit)) ? Math.trunc(Number(limit)) : 10));
+  const requestedTargetLabel = String(targetLabel ?? '').trim();
+  const requestedTargetKey = normalizeDiagnosisTargetKey(targetLabel);
 
   if (!ownerUserCode) {
     return {
@@ -963,17 +969,28 @@ export async function loadIrDiagnosisInventorySnapshot(
       recent: [],
       hasMore: false,
       error: 'missing_user_code',
+      targetLabel: requestedTargetLabel || null,
+      targetKey: requestedTargetKey || null,
+      suggestedTargetLabels: [],
     };
   }
 
   try {
-    const { data, error, count } = await supabase
+    let query = supabase
       .from('iros_ir_diagnosis_results')
       .select(
         'id, target_label, target_key, q_primary, depth_stage, phase, diagnosis_text, created_at',
         { count: 'exact' }
       )
-      .eq('owner_user_code', ownerUserCode)
+      .eq('owner_user_code', ownerUserCode);
+
+    if (requestedTargetKey) {
+      query = query.eq('target_key', requestedTargetKey);
+    } else if (requestedTargetLabel) {
+      query = query.eq('target_label', requestedTargetLabel);
+    }
+
+    const { data, error, count } = await query
       .order('created_at', { ascending: false })
       .limit(safeLimit);
 
@@ -981,6 +998,8 @@ export async function loadIrDiagnosisInventorySnapshot(
       console.warn('[IROS][loadIrDiagnosisInventorySnapshot] query error', {
         userCode: ownerUserCode,
         limit: safeLimit,
+        targetLabel: requestedTargetLabel || null,
+        targetKey: requestedTargetKey || null,
         error,
       });
 
@@ -989,11 +1008,67 @@ export async function loadIrDiagnosisInventorySnapshot(
         recent: [],
         hasMore: false,
         error: String(error?.message ?? error),
+        targetLabel: requestedTargetLabel || null,
+        targetKey: requestedTargetKey || null,
+        suggestedTargetLabels: [],
       };
     }
 
     const rows = Array.isArray(data) ? data : [];
     const totalCount = typeof count === 'number' ? count : rows.length;
+
+    let suggestedTargetLabels: string[] = [];
+
+    if (rows.length === 0 && (requestedTargetLabel || requestedTargetKey)) {
+      try {
+        const { data: suggestionData, error: suggestionError } = await supabase
+          .from('iros_ir_diagnosis_results')
+          .select('target_label, target_key, created_at')
+          .eq('owner_user_code', ownerUserCode)
+          .order('created_at', { ascending: false })
+          .limit(80);
+
+        if (!suggestionError && Array.isArray(suggestionData)) {
+          const requestedKeyForHint =
+            requestedTargetKey || normalizeDiagnosisTargetKey(requestedTargetLabel);
+          const requestedRawForHint = String(requestedTargetLabel ?? '').trim();
+
+          const seen = new Set<string>();
+
+          for (const row of suggestionData as any[]) {
+            const label = typeof row?.target_label === 'string' ? row.target_label.trim() : '';
+            if (!label) continue;
+
+            const key =
+              typeof row?.target_key === 'string' && row.target_key.trim()
+                ? row.target_key.trim()
+                : normalizeDiagnosisTargetKey(label);
+
+            const labelKey = normalizeDiagnosisTargetKey(label);
+            const labelBase = label.replace(/(さん|ちゃん|くん|様|先生)$/u, '');
+
+            const isNear =
+              Boolean(requestedKeyForHint && (key === requestedKeyForHint || labelKey === requestedKeyForHint)) ||
+              Boolean(requestedRawForHint && label.includes(requestedRawForHint)) ||
+              Boolean(requestedRawForHint && requestedRawForHint.includes(labelBase));
+
+            if (isNear && !seen.has(label)) {
+              seen.add(label);
+              suggestedTargetLabels.push(label);
+            }
+
+            if (suggestedTargetLabels.length >= 5) break;
+          }
+        }
+      } catch (hintError) {
+        console.warn('[IROS][loadIrDiagnosisInventorySnapshot] target suggestion failed', {
+          userCode: ownerUserCode,
+          targetLabel: requestedTargetLabel || null,
+          targetKey: requestedTargetKey || null,
+          error: String((hintError as any)?.message ?? hintError),
+        });
+      }
+    }
 
     const recent: IrDiagnosisInventoryItem[] = rows.map((row: any) => ({
       id: typeof row?.id === 'number' ? row.id : null,
@@ -1014,6 +1089,9 @@ export async function loadIrDiagnosisInventorySnapshot(
       recent,
       hasMore: totalCount > recent.length,
       error: null,
+      targetLabel: requestedTargetLabel || null,
+      targetKey: requestedTargetKey || null,
+      suggestedTargetLabels,
     };
   } catch (e) {
     console.warn('[IROS][loadIrDiagnosisInventorySnapshot] failed', e);
@@ -1023,10 +1101,12 @@ export async function loadIrDiagnosisInventorySnapshot(
       recent: [],
       hasMore: false,
       error: String((e as any)?.message ?? e),
+      targetLabel: requestedTargetLabel || null,
+      targetKey: requestedTargetKey || null,
+      suggestedTargetLabels: [],
     };
   }
 }
-
 export type IrDiagnosisDetailLookupArgs = {
   id?: number | null;
   targetLabel?: string | null;
