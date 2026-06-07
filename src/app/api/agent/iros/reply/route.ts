@@ -2869,6 +2869,31 @@ meta.extra = {
   },
 };
 
+const isPreSeedDirectReplyForPostProcessing = Boolean(
+  (result as any)?.gate === 'pre_seed_direct_reply' ||
+    (result as any)?.result?.gate === 'pre_seed_direct_reply' ||
+    (result as any)?.meta?.extra?.preSeedDirectReply === true ||
+    (result as any)?.metaForSave?.extra?.preSeedDirectReply === true ||
+    (metaForSave as any)?.extra?.preSeedDirectReply === true ||
+    (metaForSave as any)?.extra?.ctxPack?.preSeedDirectReply === true ||
+    String((result as any)?.meta?.extra?.preSeedAssistKind ?? '').trim() === 'memory_recall_preflight_none' ||
+    String((result as any)?.metaForSave?.extra?.preSeedAssistKind ?? '').trim() === 'memory_recall_preflight_none' ||
+    String((metaForSave as any)?.extra?.preSeedAssistKind ?? '').trim() === 'memory_recall_preflight_none' ||
+    String((metaForSave as any)?.extra?.ctxPack?.preSeedAssistKind ?? '').trim() === 'memory_recall_preflight_none'
+);
+
+if (isPreSeedDirectReplyForPostProcessing && metaForSave && typeof metaForSave === 'object') {
+  (metaForSave as any).skipTraining = true;
+  (metaForSave as any).skip_training = true;
+  (metaForSave as any).extra = {
+    ...(((metaForSave as any).extra ?? {}) as any),
+    skipTraining: true,
+    skip_training: true,
+    skipFlowPattern: true,
+    skip_flow_pattern: true,
+    preSeedDirectReplyPostProcessingLocked: true,
+  };
+}
 // FlowPatternSnapshot 保存（Phase 2-1）
 // - 通常会話 chat の状態パターンを保存する
 // - Production serverless でも確実に走らせるため await する
@@ -2879,10 +2904,12 @@ const flowPatternDebug = {
   messageId,
   savedOk: saved?.ok ?? null,
   savedInserted: saved?.inserted ?? null,
+  skipFlowPattern: isPreSeedDirectReplyForPostProcessing,
   canRun:
     saved?.ok === true &&
     saved?.inserted === true &&
-    messageId != null,
+    messageId != null &&
+    !isPreSeedDirectReplyForPostProcessing,
 };
 
 console.log('[IROS/FLOW_PATTERN_GATE]', flowPatternDebug);
@@ -2895,7 +2922,7 @@ if (metaForSave && typeof metaForSave === 'object') {
 }
 
 
-if (saved?.ok === true && saved?.inserted === true && messageId != null) {
+if (flowPatternDebug.canRun) {
   const t0 = Date.now();
 
   try {
@@ -3323,10 +3350,15 @@ try {
 
 // training sample（skip flags）
 const skipTraining =
+  isPreSeedDirectReplyForPostProcessing ||
   meta?.skipTraining === true ||
   (meta as any)?.skip_training === true ||
   meta?.recallOnly === true ||
-  (meta as any)?.recall_only === true;
+  (meta as any)?.recall_only === true ||
+  (metaForSave as any)?.skipTraining === true ||
+  (metaForSave as any)?.skip_training === true ||
+  (metaForSave as any)?.extra?.skipTraining === true ||
+  (metaForSave as any)?.extra?.skip_training === true;
 
 if (!skipTraining) {
   const replyText = contentForPersist;
@@ -3488,6 +3520,7 @@ if (!skipTraining) {
     );
   }
 }
+
 
 
 
