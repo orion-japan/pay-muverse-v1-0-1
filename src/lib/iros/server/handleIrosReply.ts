@@ -3251,7 +3251,7 @@ function normForRecall(v: any): string {
           `matchedTerms=${Array.isArray(memoryRecallPreflight?.matchedTerms) ? memoryRecallPreflight.matchedTerms.join(',') : ''}`,
           'reason=MEMORY_RECALL_PREFLIGHT_NO_VERIFIED_SOURCE',
           'boundary=この話題について、検証済みの過去記憶は見つかっていない。記憶がある・覚えている・前に話した内容として残っているとは言わない。',
-          'writerTask=このターンはWriterに渡さず、directReplyで記憶なしを返す。',
+          'writerTask=このターンはWriterに渡し、検証済み記憶が見つかっていない事実だけを自然文で返す。覚えているふり、推測、作話は禁止。',
           'writerPolicy=do_not_invent_memory; do_not_claim_remembered; do_not_use_unverified_history_as_memory',
         ].join('\n');
 
@@ -3278,7 +3278,7 @@ function normForRecall(v: any): string {
             historyFalseRecall: true,
             flowMeaningExpansion: true,
           },
-          mustOpen: 'Muの記憶には、前に話した内容としては残っていません。',
+          mustOpen: '今の記憶検索では、検証済みの過去記憶は見つかっていません。',
           reason: 'MEMORY_RECALL_PREFLIGHT_NO_VERIFIED_SOURCE',
         };
 
@@ -3311,6 +3311,36 @@ function normForRecall(v: any): string {
           seedText: memoryRecallNoMemorySeedText,
           reason: 'MEMORY_RECALL_PREFLIGHT_NO_VERIFIED_SOURCE',
         };
+
+        // MEMORY_RECALL_PREFLIGHT_NO_MEMORY: Similar Flow は記憶証拠ではないため下流へ渡さない
+        const blockedSimilarFlowSeedForMemoryRecall = String(
+          (extraLocal as any)?.similarFlowSeed ??
+            (extraLocal as any)?.ctxPack?.similarFlowSeed ??
+            preOrchCtxPack?.similarFlowSeed ??
+            ''
+        ).trim();
+
+        if (blockedSimilarFlowSeedForMemoryRecall) {
+          (extraLocal as any).ctxPack =
+            (extraLocal as any).ctxPack && typeof (extraLocal as any).ctxPack === 'object'
+              ? (extraLocal as any).ctxPack
+              : {};
+          delete (extraLocal as any).similarFlowSeed;
+          delete (extraLocal as any).ctxPack.similarFlowSeed;
+          delete preOrchCtxPack.similarFlowSeed;
+
+          (extraLocal as any).similarFlowSeedBlockedForMemoryRecall = true;
+          (extraLocal as any).similarFlowSeedBlockedReason = 'memory_recall_preflight_none';
+          (extraLocal as any).similarFlowSeedBlockedLen = blockedSimilarFlowSeedForMemoryRecall.length;
+
+          (extraLocal as any).ctxPack.similarFlowSeedBlockedForMemoryRecall = true;
+          (extraLocal as any).ctxPack.similarFlowSeedBlockedReason = 'memory_recall_preflight_none';
+          (extraLocal as any).ctxPack.similarFlowSeedBlockedLen = blockedSimilarFlowSeedForMemoryRecall.length;
+
+          preOrchCtxPack.similarFlowSeedBlockedForMemoryRecall = true;
+          preOrchCtxPack.similarFlowSeedBlockedReason = 'memory_recall_preflight_none';
+          preOrchCtxPack.similarFlowSeedBlockedLen = blockedSimilarFlowSeedForMemoryRecall.length;
+        }
 
         (extraLocal as any).memoryCertainty = 'none';
         (extraLocal as any).memoryCertaintyGuardApplied = true;
@@ -3420,6 +3450,7 @@ function normForRecall(v: any): string {
         (extraLocal as any)?.activeContextClarification === true;
 
       const preSeedShouldBypassWriter =
+        !forceWriterForMemoryRecallNone &&
         !shouldPreferActiveContextClarificationReply &&
         Boolean(
           preOrchCtxPack?.preSeedAssistShouldBypassWriter === true ||
@@ -12978,6 +13009,8 @@ return {
     };
   }
 }
+
+
 
 
 

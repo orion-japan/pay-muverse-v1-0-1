@@ -856,6 +856,9 @@ let extraSoT: Record<string, any> = {
         matchesLen: preSimilarFlowLookup.matches.length,
         hasSeed: Boolean(preSimilarFlowSeed),
         seedLen: String(preSimilarFlowSeed ?? '').length,
+        similarFlowSeedHead: String(preSimilarFlowSeed ?? '').slice(0, 1200),
+        similarFlowSeedHasFalseRecall: /覚えています|もちろん、覚えています|残っています|受け取っています|沖縄の風|海の色|空気|景色|温度/.test(String(preSimilarFlowSeed ?? '')),
+        similarFlowSeedFalseRecallMatches: String(preSimilarFlowSeed ?? '').match(/覚えています|もちろん、覚えています|残っています|受け取っています|沖縄の風|海の色|空気|景色|温度/g) ?? [],
       });
     } catch (e) {
       console.warn('[IROS/SIMILAR_FLOW_PRE_WRITER][FAILED]', {

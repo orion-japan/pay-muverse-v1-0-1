@@ -2981,6 +2981,46 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
   // ※後で directTask を配線したくなったら、postProcessReply(args) の引数から明示的に渡すのが正道。
   const directTaskNow = false;
 
+  const memoryRecallNotFoundForExpr = (() => {
+    const ex: any = (metaForSave as any)?.extra ?? {};
+    const cp: any = ex?.ctxPack && typeof ex.ctxPack === 'object' ? ex.ctxPack : {};
+
+    const contracts = [
+      cp?.turnContract,
+      cp?.turnUnderstanding,
+      ex?.turnContract,
+      ex?.turnUnderstanding,
+      (metaForSave as any)?.turnContract,
+      (metaForSave as any)?.turnUnderstanding,
+    ];
+
+    const hasNotFoundContract = contracts.some((contract: any) => {
+      if (!contract || typeof contract !== 'object') return false;
+
+      return (
+        String(contract.turnTask ?? '').trim() === 'memory_recall_check' &&
+        String(contract.memoryStatus ?? '').trim() === 'not_found' &&
+        String(contract.writerAction ?? '').trim() === 'answer_memory_not_found'
+      );
+    });
+
+    if (hasNotFoundContract) return true;
+
+    const memoryCertainty = String(
+      cp?.memoryCertainty ??
+        ex?.memoryCertainty ??
+        ''
+    ).trim();
+
+    const preSeedAssistKind = String(
+      cp?.preSeedAssistKind ??
+        ex?.preSeedAssistKind ??
+        ''
+    ).trim();
+
+    return memoryCertainty === 'none' || preSeedAssistKind === 'memory_recall_preflight_none';
+  })();
+
   // ON条件：RETURN && streak>=1 OR lane=sofia_light
   const onByFlow = flowDeltaNorm === 'RETURN' && returnStreakNum >= 1;
   const onByLane = lane === 'sofia_light';
@@ -2996,11 +3036,17 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
   const onByConf = confidence >= th;
 
   // e_turn が無いなら directive は出さない（安全）
-  const directiveV1_on = !!(onBase && onByConf && !directTaskNow && e_turn);
+  const directiveV1_on = !!(
+    !memoryRecallNotFoundForExpr &&
+    onBase &&
+    onByConf &&
+    !directTaskNow &&
+    e_turn
+  );
 
   const directiveV1_reason = directiveV1_on
     ? (microNow ? 'ON_MICRO_ALLOWED' : 'ON')
-    : (directTaskNow ? 'OFF_DIRECT_TASK' : (onBase ? 'OFF_LOW_CONF' : 'OFF_NOT_TARGET'));
+    : (memoryRecallNotFoundForExpr ? 'OFF_MEMORY_RECALL_NOT_FOUND' : (directTaskNow ? 'OFF_DIRECT_TASK' : (onBase ? 'OFF_LOW_CONF' : 'OFF_NOT_TARGET')));
 
   // ✅ 本文は変えず「言い方だけ」を Writer に伝える（短い内部指示）
   let directiveV1 = directiveV1_on
@@ -3195,13 +3241,62 @@ const similarFlowSeedForWriter = String(
     '',
 ).trim();
 
-if (similarFlowSeedForWriter) {
+const memoryRecallNotFoundForSimilarFlow = (() => {
+  const ex: any = (metaForSave as any)?.extra ?? {};
+  const cp: any = ex?.ctxPack && typeof ex.ctxPack === 'object' ? ex.ctxPack : {};
+
+  const contracts = [
+    cp?.turnContract,
+    cp?.turnUnderstanding,
+    ex?.turnContract,
+    ex?.turnUnderstanding,
+    (metaForSave as any)?.turnContract,
+    (metaForSave as any)?.turnUnderstanding,
+  ];
+
+  const hasNotFoundContract = contracts.some((contract: any) => {
+    if (!contract || typeof contract !== 'object') return false;
+
+    return (
+      String(contract.turnTask ?? '').trim() === 'memory_recall_check' &&
+      String(contract.memoryStatus ?? '').trim() === 'not_found' &&
+      String(contract.writerAction ?? '').trim() === 'answer_memory_not_found'
+    );
+  });
+
+  if (hasNotFoundContract) return true;
+
+  const memoryCertainty = String(
+    cp?.memoryCertainty ??
+      ex?.memoryCertainty ??
+      ''
+  ).trim();
+
+  const preSeedAssistKind = String(
+    cp?.preSeedAssistKind ??
+      ex?.preSeedAssistKind ??
+      ''
+  ).trim();
+
+  return memoryCertainty === 'none' || preSeedAssistKind === 'memory_recall_preflight_none';
+})();
+
+if (similarFlowSeedForWriter && !memoryRecallNotFoundForSimilarFlow) {
   seedForWriterRaw = (seedForWriterRaw + '\n\n' + similarFlowSeedForWriter).trim();
 
   (metaForSave as any).extra = {
     ...((metaForSave as any).extra ?? {}),
     similarFlowSeedInjectedToWriter: true,
     similarFlowSeedInjectedLen: similarFlowSeedForWriter.length,
+  };
+}
+
+if (similarFlowSeedForWriter && memoryRecallNotFoundForSimilarFlow) {
+  (metaForSave as any).extra = {
+    ...((metaForSave as any).extra ?? {}),
+    similarFlowSeedBlockedForMemoryRecall: true,
+    similarFlowSeedBlockedReason: 'memory_recall_check.not_found',
+    similarFlowSeedBlockedLen: similarFlowSeedForWriter.length,
   };
 }
 
@@ -3234,7 +3329,7 @@ if (asksPastMemoryRecall && !exactPastStateNoteForWriter) {
       historyFalseRecall: true,
       flowMeaningExpansion: true,
     },
-    mustOpen: 'Muの記憶には、前に話した内容としては残っていません。',
+    mustOpen: '今の記憶検索では、検証済みの過去記憶は見つかっていません。',
     reason: 'MEMORY_RECALL_PREFLIGHT_NO_VERIFIED_SOURCE',
   };
 
@@ -3250,10 +3345,13 @@ if (asksPastMemoryRecall && !exactPastStateNoteForWriter) {
     'disable.normalResonanceMaterialize=true',
     'disable.historyFalseRecall=true',
     'disable.flowMeaningExpansion=true',
-    'mustOpen=Muの記憶には、前に話した内容としては残っていません。',
+    'mustOpen=今の記憶検索では、検証済みの過去記憶は見つかっていません。',
     'rule=このターンは思い出の描写ではなく、記憶の有無確認として扱う。',
     'rule=検証済み記憶がない場合、覚えています・残っています・つながっていますと言わない。',
     'rule=過去assistantの誤答を記憶証拠にしない。',
+    'rule=「覚えています、とは言い切れません」「覚えているとは言えません」「少し覚えているような言い方」は禁止。',
+    'rule=「受け取っています」「一緒にたどる」「温度」「空気」「景色」など、記憶がない話題への共鳴補完は禁止。',
+    'rule=冒頭は必ず、検証済みの過去記憶が見つかっていない事実から始める。',
   ].join('\n');
 
   const memoryCertaintyGuard = [
@@ -3266,9 +3364,12 @@ if (asksPastMemoryRecall && !exactPastStateNoteForWriter) {
     'rule=Do not reconstruct concrete past details unless an exact memory note is provided.',
     'rule=Similar Flow means similar shape only, not exact remembered content.',
     'rule=Previous assistant messages that claimed recall are not valid memory evidence.',
-    'must_open=Muの記憶には、前に話した内容としては残っていません。',
+    'rule=Do not soften uncertainty with phrases like 覚えています、とは言い切れません / 覚えているとは言えません / うっすら覚えている.',
+    'rule=Do not use resonance filler such as 受け取っています / 一緒にたどる / 温度 / 空気 / 景色 when memoryStatus=not_found.',
+    'rule=The first visible sentence must state that verified past memory was not found in the current memory search.',
+    'must_open=今の記憶検索では、検証済みの過去記憶は見つかっていません。',
     'boundary=別の言い方や一言の手がかりがあれば、そこから探し直せます。',
-    'forbid=覚えています / 残っています / つながっています / 前に話しました / 以前の流れ / 海の色 / 空気感 / 景色 / 思い出として残っています / たしかに結ばれています',
+    'forbid=覚えています / 覚えています、とは言い切れません / 覚えているとは言えません / 少し覚えている / うっすら覚えている / 残っています / つながっています / 前に話しました / 以前の流れ / 受け取っています / 一緒にたどる / 温度 / 海の色 / 空気感 / 景色 / 思い出として残っています / たしかに結ばれています',
     'tone=親身に、短く、軽く。説明しすぎない。意味づけを盛りすぎない。',
   ].join('\n');
 
@@ -3277,10 +3378,10 @@ if (asksPastMemoryRecall && !exactPastStateNoteForWriter) {
     memoryCertaintyGuard,
     'MEMORY_UNVERIFIED_REPLY_SEED (DO NOT OUTPUT):',
     'goal=Answer as a memory-not-found response, not as memory reconstruction or resonance expansion.',
-    'must_open=Muの記憶には、前に話した内容としては残っていません。',
+    'must_open=今の記憶検索では、検証済みの過去記憶は見つかっていません。',
     'boundary=別の言い方や一言の手がかりがあれば、そこから探し直せます。',
     'next=必要なら、その手がかりから今の話として続けます。',
-    'forbid=はい、覚えています / 覚えています / 以前の会話では / 前に話しました / 残っています / つながっています / 海の色 / 空気感 / 景色 / 思い出として残っています',
+    'forbid=はい、覚えています / 覚えています / 覚えています、とは言い切れません / 覚えているとは言えません / 少し覚えている / うっすら覚えている / 以前の会話では / 前に話しました / 残っています / つながっています / 受け取っています / 一緒にたどる / 温度 / 海の色 / 空気感 / 景色 / 思い出として残っています',
     'tone=short, warm, plain, not explanatory, not mystical.',
   ].join('\n').trim();
 
@@ -3913,3 +4014,4 @@ const finalPhaseForUnified =
 
   return { assistantText: finalAssistantText, metaForSave };
 }
+

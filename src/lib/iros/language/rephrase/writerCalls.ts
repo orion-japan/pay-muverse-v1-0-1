@@ -3237,6 +3237,63 @@ return {
                 return tcfBridgeResult;
               })();
 
+              const memoryRecallNotFoundForFlowSeed = (() => {
+                const contracts = [
+                  (args as any)?.turnContract,
+                  (args as any)?.turnUnderstanding,
+                  (args as any)?.extra?.turnContract,
+                  (args as any)?.extra?.turnUnderstanding,
+                  (args as any)?.extra?.ctxPack?.turnContract,
+                  (args as any)?.extra?.ctxPack?.turnUnderstanding,
+                  (args as any)?.userContext?.turnContract,
+                  (args as any)?.userContext?.turnUnderstanding,
+                  (args as any)?.userContext?.ctxPack?.turnContract,
+                  (args as any)?.userContext?.ctxPack?.turnUnderstanding,
+                  (args as any)?.userContext?.meta?.extra?.turnContract,
+                  (args as any)?.userContext?.meta?.extra?.turnUnderstanding,
+                  (args as any)?.userContext?.meta?.extra?.ctxPack?.turnContract,
+                  (args as any)?.userContext?.meta?.extra?.ctxPack?.turnUnderstanding,
+                  (ctxPack as any)?.turnContract,
+                  (ctxPack as any)?.turnUnderstanding,
+                  (extra as any)?.turnContract,
+                  (extra as any)?.turnUnderstanding,
+                  (extra as any)?.ctxPack?.turnContract,
+                  (extra as any)?.ctxPack?.turnUnderstanding,
+                ];
+
+                const hasContract = contracts.some((contract: any) => {
+                  if (!contract || typeof contract !== 'object') return false;
+
+                  return (
+                    String(contract.turnTask ?? '').trim() === 'memory_recall_check' &&
+                    String(contract.memoryStatus ?? '').trim() === 'not_found' &&
+                    String(contract.writerAction ?? '').trim() === 'answer_memory_not_found'
+                  );
+                });
+
+                if (hasContract) return true;
+
+                const memoryCertainty = String(
+                  (ctxPack as any)?.memoryCertainty ??
+                    (extra as any)?.memoryCertainty ??
+                    (extra as any)?.ctxPack?.memoryCertainty ??
+                    (args as any)?.extra?.memoryCertainty ??
+                    (args as any)?.extra?.ctxPack?.memoryCertainty ??
+                    ''
+                ).trim();
+
+                const preSeedAssistKind = String(
+                  (ctxPack as any)?.preSeedAssistKind ??
+                    (extra as any)?.preSeedAssistKind ??
+                    (extra as any)?.ctxPack?.preSeedAssistKind ??
+                    (args as any)?.extra?.preSeedAssistKind ??
+                    (args as any)?.extra?.ctxPack?.preSeedAssistKind ??
+                    ''
+                ).trim();
+
+                return memoryCertainty === 'none' || preSeedAssistKind === 'memory_recall_preflight_none';
+              })();
+
               const flowSeedV1 = buildFlowSeedV1({
                 flow: {
                   current: (() => {
@@ -3310,6 +3367,7 @@ return {
                     return fromFlowObj || null;
                   })(),
                 },
+
 
                 transferContext: (() => {
                   const pickNumber = (...vals: any[]) => {

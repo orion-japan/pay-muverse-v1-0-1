@@ -129,9 +129,31 @@ function normalizeLaneKeyOrNull(v: unknown): LaneKey | null {
 // ✅ Phase11: advance判定のための “橋” を必ず出す
 // - evidenceLog.ts は key==='NEXT' または content.startsWith('@NEXT_HINT') を検出し、
 //   さらに mode==='advance_hint' を拾えれば advance=1 になる。
-function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey | null; flowDelta?: string | null }): NormalChatSlot {
+function buildNextHintSlot(args: {
+  userText: string;
+  laneKey?: LaneKey | null;
+  flowDelta?: string | null;
+  memoryRecallCheck?: boolean | null;
+}): NormalChatSlot {
   const laneKey = safeLaneKey(args.laneKey);
   const delta = args.flowDelta ? String(args.flowDelta) : null;
+  const memoryRecallCheck = args.memoryRecallCheck === true;
+
+  if (memoryRecallCheck) {
+    return {
+      key: 'NEXT',
+      role: 'assistant',
+      style: 'neutral',
+      content: `@NEXT_HINT ${JSON.stringify({
+        mode: 'memory_recall_not_found_hint',
+        laneKey: laneKey ?? null,
+        delta,
+        hint: '記憶検索で見つかっていない事実を返す',
+        message: '覚えているふりをせず、別の手がかりがあれば探し直せると伝える。',
+      })}`,
+    };
+  }
+
 
   const mode =
     laneKey === 'T_CONCRETIZE'
@@ -729,7 +751,12 @@ function buildClarify(
                                 }),
                               },
                               safe,
-                              buildNextHintSlot({ userText, laneKey: lane, flowDelta: delta }),
+                              buildNextHintSlot({
+                                userText,
+                                laneKey: lane,
+                                flowDelta: delta,
+                                memoryRecallCheck: shouldMemoryRecallCheck,
+                              }),
                             ];
             }
 // ✅ HowTo/方法質問（QuestionSlots）を normalChat に合わせて「@行だけ」に正規化
@@ -2327,6 +2354,7 @@ export function buildNormalChatSlotPlan(args: {
     slots,
   };
 }
+
 
 
 
