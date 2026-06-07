@@ -3230,6 +3230,11 @@ function normForRecall(v: any): string {
       }
 
       if (isMemoryRecallCheckForDirectReply && !memoryRecallPreflightVerified) {
+        const memoryRecallNoMemoryDirectReply = [
+          'Muの記憶には、前に話した内容としては残っていません。',
+          '別の言い方や一言の手がかりがあれば、そこから探し直せます。',
+        ].join('\n');
+
         const memoryRecallNoMemorySeedText = [
           'MEMORY_SEED (DO NOT OUTPUT)',
           'seedKind=MEMORY_RECALL_PREFLIGHT_NO_MEMORY',
@@ -3246,8 +3251,8 @@ function normForRecall(v: any): string {
           `matchedTerms=${Array.isArray(memoryRecallPreflight?.matchedTerms) ? memoryRecallPreflight.matchedTerms.join(',') : ''}`,
           'reason=MEMORY_RECALL_PREFLIGHT_NO_VERIFIED_SOURCE',
           'boundary=この話題について、検証済みの過去記憶は見つかっていない。記憶がある・覚えている・前に話した内容として残っているとは言わない。',
-          'writerTask=ユーザーは過去の話を覚えているか確認している。検証済み記憶がないため、Muの記憶には前に話した内容としては残っていない、と自然に答える。固定文ではなく、このseedの事実に従って返答する。',
-          'writerPolicy=do_not_invent_memory; do_not_claim_remembered; do_not_use_unverified_history_as_memory; ask_user_to_share_one_hint_if_needed',
+          'writerTask=このターンはWriterに渡さず、directReplyで記憶なしを返す。',
+          'writerPolicy=do_not_invent_memory; do_not_claim_remembered; do_not_use_unverified_history_as_memory',
         ].join('\n');
 
         const memoryRecallNoMemorySeedResult = {
@@ -3257,7 +3262,6 @@ function normForRecall(v: any): string {
           blocked: false,
           reasons: ['MEMORY_RECALL_PREFLIGHT_NO_VERIFIED_SOURCE'],
         };
-
 
         const memoryRecallNoMemoryTurnContract = {
           version: 'turn_contract_v1',
@@ -3294,19 +3298,19 @@ function normForRecall(v: any): string {
         preOrchCtxPack.memorySeedKind = memoryRecallNoMemorySeedResult.seedKind;
         preOrchCtxPack.memorySeedBlocked = memoryRecallNoMemorySeedResult.blocked;
         preOrchCtxPack.memorySeedReasons = memoryRecallNoMemorySeedResult.reasons;
-        preOrchCtxPack.preSeedAssistShouldBypassWriter = false;
+        preOrchCtxPack.preSeedAssistShouldBypassWriter = true;
         preOrchCtxPack.preSeedAssistKind = 'memory_recall_preflight_none';
         preOrchCtxPack.preSeedAssistConfidence = 1;
+        preOrchCtxPack.preSeedAssistDirectReply = memoryRecallNoMemoryDirectReply;
+        preOrchCtxPack.directReplyCandidate = memoryRecallNoMemoryDirectReply;
         preOrchCtxPack.preSeedAssistResult = {
           kind: 'memory_recall_preflight_none',
           confidence: 1,
-          directReply: '',
-          shouldBypassWriter: false,
+          directReply: memoryRecallNoMemoryDirectReply,
+          shouldBypassWriter: true,
           seedText: memoryRecallNoMemorySeedText,
           reason: 'MEMORY_RECALL_PREFLIGHT_NO_VERIFIED_SOURCE',
         };
-        delete preOrchCtxPack.preSeedAssistDirectReply;
-        delete preOrchCtxPack.directReplyCandidate;
 
         (extraLocal as any).memoryCertainty = 'none';
         (extraLocal as any).memoryCertaintyGuardApplied = true;
@@ -3324,19 +3328,19 @@ function normForRecall(v: any): string {
         (extraLocal as any).memorySeedKind = memoryRecallNoMemorySeedResult.seedKind;
         (extraLocal as any).memorySeedBlocked = memoryRecallNoMemorySeedResult.blocked;
         (extraLocal as any).memorySeedReasons = memoryRecallNoMemorySeedResult.reasons;
-        (extraLocal as any).preSeedAssistShouldBypassWriter = false;
+        (extraLocal as any).preSeedAssistShouldBypassWriter = true;
         (extraLocal as any).preSeedAssistKind = 'memory_recall_preflight_none';
         (extraLocal as any).preSeedAssistConfidence = 1;
+        (extraLocal as any).preSeedAssistDirectReply = memoryRecallNoMemoryDirectReply;
+        (extraLocal as any).directReplyCandidate = memoryRecallNoMemoryDirectReply;
         (extraLocal as any).preSeedAssistResult = {
           kind: 'memory_recall_preflight_none',
           confidence: 1,
-          directReply: '',
-          shouldBypassWriter: false,
+          directReply: memoryRecallNoMemoryDirectReply,
+          shouldBypassWriter: true,
           seedText: memoryRecallNoMemorySeedText,
           reason: 'MEMORY_RECALL_PREFLIGHT_NO_VERIFIED_SOURCE',
         };
-        delete (extraLocal as any).preSeedAssistDirectReply;
-        delete (extraLocal as any).directReplyCandidate;
 
         (extraLocal as any).ctxPack =
           (extraLocal as any).ctxPack && typeof (extraLocal as any).ctxPack === 'object'
@@ -3359,21 +3363,21 @@ function normForRecall(v: any): string {
         (extraLocal as any).ctxPack.memorySeedKind = memoryRecallNoMemorySeedResult.seedKind;
         (extraLocal as any).ctxPack.memorySeedBlocked = memoryRecallNoMemorySeedResult.blocked;
         (extraLocal as any).ctxPack.memorySeedReasons = memoryRecallNoMemorySeedResult.reasons;
-        (extraLocal as any).ctxPack.preSeedAssistShouldBypassWriter = false;
+        (extraLocal as any).ctxPack.preSeedAssistShouldBypassWriter = true;
         (extraLocal as any).ctxPack.preSeedAssistKind = 'memory_recall_preflight_none';
         (extraLocal as any).ctxPack.preSeedAssistConfidence = 1;
+        (extraLocal as any).ctxPack.preSeedAssistDirectReply = memoryRecallNoMemoryDirectReply;
+        (extraLocal as any).ctxPack.directReplyCandidate = memoryRecallNoMemoryDirectReply;
         (extraLocal as any).ctxPack.preSeedAssistResult = {
           kind: 'memory_recall_preflight_none',
           confidence: 1,
-          directReply: '',
-          shouldBypassWriter: false,
+          directReply: memoryRecallNoMemoryDirectReply,
+          shouldBypassWriter: true,
           seedText: memoryRecallNoMemorySeedText,
           reason: 'MEMORY_RECALL_PREFLIGHT_NO_VERIFIED_SOURCE',
         };
-        delete (extraLocal as any).ctxPack.preSeedAssistDirectReply;
-        delete (extraLocal as any).ctxPack.directReplyCandidate;
 
-        console.log('[IROS/MEMORY_RECALL_PREFLIGHT][NONE_TO_WRITER_SEED]', {
+        console.log('[IROS/MEMORY_RECALL_PREFLIGHT][NONE_DIRECT_REPLY]', {
           conversationId,
           userCode,
           userTextHead: memoryRecallUserTextForDirectReply.slice(0, 120),
@@ -3382,9 +3386,11 @@ function normForRecall(v: any): string {
           keyword: memoryRecallPreflight?.keyword ?? null,
           matchedTerms: memoryRecallPreflight?.matchedTerms ?? [],
           memorySeedTextLen: memoryRecallNoMemorySeedText.length,
-          shouldBypassWriter: false,
+          shouldBypassWriter: true,
+          directReplyHead: memoryRecallNoMemoryDirectReply.slice(0, 80),
         });
       }
+
 
       const forceWriterForMemoryRecallNone =
         isMemoryRecallCheckForDirectReply && !memoryRecallPreflightVerified;
