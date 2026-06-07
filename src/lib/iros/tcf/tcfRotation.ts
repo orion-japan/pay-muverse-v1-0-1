@@ -797,6 +797,40 @@ export function buildTcfRotationDecision(
     meta.transferSeed ??
     null;
 
+  const hasMemoryRecallNotFoundTurnContract = (() => {
+    const extraCtxPack = asRecord(extra.ctxPack) ?? {};
+    const metaExtra = asRecord(meta.extra) ?? {};
+    const metaExtraCtxPack = asRecord(metaExtra.ctxPack) ?? {};
+
+    const contracts = [
+      (input as any)?.turnContract,
+      (input as any)?.turnUnderstanding,
+      ctxPack.turnContract,
+      ctxPack.turnUnderstanding,
+      extra.turnContract,
+      extra.turnUnderstanding,
+      extraCtxPack.turnContract,
+      extraCtxPack.turnUnderstanding,
+      meta.turnContract,
+      meta.turnUnderstanding,
+      metaExtra.turnContract,
+      metaExtra.turnUnderstanding,
+      metaExtraCtxPack.turnContract,
+      metaExtraCtxPack.turnUnderstanding,
+    ];
+
+    return contracts.some((contract) => {
+      const c = asRecord(contract);
+      if (!c) return false;
+
+      return (
+        String(c.turnTask ?? '').trim() === 'memory_recall_check' &&
+        String(c.memoryStatus ?? '').trim() === 'not_found' &&
+        String(c.writerAction ?? '').trim() === 'answer_memory_not_found'
+      );
+    });
+  })();
+
   const previousFocus = firstString(
     input.previousFocus,
     ctxPack.previousFocus,
@@ -825,48 +859,70 @@ export function buildTcfRotationDecision(
     });
 
   const cDirection =
-    input.cDirection ??
-    resolveTcfCDirection({
-      userText: input.userText,
-      currentFocus,
-      transferSeed,
-      memoryIntent: input.memoryIntent,
-      goalKind: input.goalKind,
-      writerPatternKey: input.writerPatternKey,
-      focusResolution,
-      meta,
-      extra,
-      ctxPack,
-      sriContext: input.sriContext,
-    });
+    hasMemoryRecallNotFoundTurnContract
+      ? 'none'
+      : input.cDirection ??
+        resolveTcfCDirection({
+          userText: input.userText,
+          currentFocus,
+          transferSeed,
+          memoryIntent: input.memoryIntent,
+          goalKind: input.goalKind,
+          writerPatternKey: input.writerPatternKey,
+          focusResolution,
+          meta,
+          extra,
+          ctxPack,
+          sriContext: input.sriContext,
+        });
 
   const userReaction =
-    input.userReaction ??
-    detectTcfUserReaction(input.userText);
+    hasMemoryRecallNotFoundTurnContract
+      ? 'unknown'
+      : input.userReaction ??
+        detectTcfUserReaction(input.userText);
 
   const convergence =
-    input.convergence ??
-    decideTcfConvergence({
-      previousFocus,
-      currentFocus,
-      userReaction,
-      tEvidence,
-      cDirection,
-    });
+    hasMemoryRecallNotFoundTurnContract
+      ? 'none'
+      : input.convergence ??
+        decideTcfConvergence({
+          previousFocus,
+          currentFocus,
+          userReaction,
+          tEvidence,
+          cDirection,
+        });
 
-  const shouldPersistFocus = shouldPersistTcfFocus({ convergence, tEvidence });
-  const shouldRebuildFocus = shouldRebuildTcfFocus(convergence);
+  const shouldPersistFocus = hasMemoryRecallNotFoundTurnContract
+    ? false
+    : shouldPersistTcfFocus({ convergence, tEvidence });
+
+  const shouldRebuildFocus = hasMemoryRecallNotFoundTurnContract
+    ? false
+    : shouldRebuildTcfFocus(convergence);
+
   const shouldPromoteDepth =
-    convergence === 'converged' || (tEvidence.hasT && cDirection !== 'none');
+    !hasMemoryRecallNotFoundTurnContract &&
+    (convergence === 'converged' || (tEvidence.hasT && cDirection !== 'none'));
+
   const shouldRouteToC =
+    !hasMemoryRecallNotFoundTurnContract &&
     cDirection !== 'none' &&
     convergence !== 'diverged' &&
     convergence !== 'unresolved';
 
-  const writerPatternKey = resolveTcfWriterPatternKey({ cDirection, convergence });
-  const surfacePlanKind = resolveTcfSurfacePlanKind({ cDirection, convergence });
+  const writerPatternKey = hasMemoryRecallNotFoundTurnContract
+    ? null
+    : resolveTcfWriterPatternKey({ cDirection, convergence });
 
-  const shouldUseTcfPattern = Boolean(writerPatternKey || surfacePlanKind);
+  const surfacePlanKind = hasMemoryRecallNotFoundTurnContract
+    ? null
+    : resolveTcfSurfacePlanKind({ cDirection, convergence });
+
+  const shouldUseTcfPattern = hasMemoryRecallNotFoundTurnContract
+    ? false
+    : Boolean(writerPatternKey || surfacePlanKind);
 
   return {
     previousFocus,
@@ -883,12 +939,14 @@ export function buildTcfRotationDecision(
     shouldUseTcfPattern,
     writerPatternKey,
     surfacePlanKind,
-    reason: buildTcfRotationReason({
-      tEvidence,
-      cDirection,
-      userReaction,
-      convergence,
-    }),
+    reason: hasMemoryRecallNotFoundTurnContract
+      ? 'memory_recall_not_found_guard / tcf=off'
+      : buildTcfRotationReason({
+          tEvidence,
+          cDirection,
+          userReaction,
+          convergence,
+        }),
   };
 }
 
