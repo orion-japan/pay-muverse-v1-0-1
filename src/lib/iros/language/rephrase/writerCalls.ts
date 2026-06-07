@@ -3148,6 +3148,59 @@ return {
                     '',
                 ).trim();
 
+                const hasMemoryRecallNotFoundTurnContractForWriter = (() => {
+                  const contracts = [
+                    (args as any)?.turnContract,
+                    (args as any)?.turnUnderstanding,
+
+                    (args as any)?.extra?.turnContract,
+                    (args as any)?.extra?.turnUnderstanding,
+                    (args as any)?.extra?.ctxPack?.turnContract,
+                    (args as any)?.extra?.ctxPack?.turnUnderstanding,
+
+                    (args as any)?.userContext?.turnContract,
+                    (args as any)?.userContext?.turnUnderstanding,
+                    (args as any)?.userContext?.ctxPack?.turnContract,
+                    (args as any)?.userContext?.ctxPack?.turnUnderstanding,
+                    (args as any)?.userContext?.meta?.extra?.turnContract,
+                    (args as any)?.userContext?.meta?.extra?.turnUnderstanding,
+                    (args as any)?.userContext?.meta?.extra?.ctxPack?.turnContract,
+                    (args as any)?.userContext?.meta?.extra?.ctxPack?.turnUnderstanding,
+
+                    (ctxPack as any)?.turnContract,
+                    (ctxPack as any)?.turnUnderstanding,
+
+                    (extra as any)?.turnContract,
+                    (extra as any)?.turnUnderstanding,
+                    (extra as any)?.ctxPack?.turnContract,
+                    (extra as any)?.ctxPack?.turnUnderstanding,
+                  ];
+
+                  return contracts.some((contract: any) => {
+                    if (!contract || typeof contract !== 'object') return false;
+
+                    return (
+                      String(contract.turnTask ?? '').trim() === 'memory_recall_check' &&
+                      String(contract.memoryStatus ?? '').trim() === 'not_found' &&
+                      String(contract.writerAction ?? '').trim() === 'answer_memory_not_found'
+                    );
+                  });
+                })();
+
+                if (hasMemoryRecallNotFoundTurnContractForWriter) {
+                  try {
+                    console.log('[IROS/writerCalls][TCF_SPIN_BRIDGE_DISABLED]', {
+                      traceId: (args as any)?.traceId ?? null,
+                      conversationId: (args as any)?.conversationId ?? null,
+                      userCode: (args as any)?.userCode ?? null,
+                      reason: 'memory_recall_check.not_found',
+                      userTextHead: userTextForSpin.slice(0, 120),
+                    });
+                  } catch {}
+
+                  return false;
+                }
+
                 const hasTConcretize =
                   laneKeyNow === 'T_CONCRETIZE' ||
                   /"laneKey"\s*:\s*"T_CONCRETIZE"/.test(raw) ||
