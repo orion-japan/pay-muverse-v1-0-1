@@ -3258,8 +3258,30 @@ function normForRecall(v: any): string {
           reasons: ['MEMORY_RECALL_PREFLIGHT_NO_VERIFIED_SOURCE'],
         };
 
+
+        const memoryRecallNoMemoryTurnContract = {
+          version: 'turn_contract_v1',
+          turnTask: 'memory_recall_check',
+          memoryStatus: 'not_found',
+          actualIntent: 'Muに過去記憶があるか確認している',
+          surfaceTopic: memoryRecallTopicLabelForDirectReply,
+          sourcePolicy: 'verified_memory_only',
+          writerAction: 'answer_memory_not_found',
+          disable: {
+            resonance: true,
+            tcfRefocus: true,
+            normalResonanceMaterialize: true,
+            historyFalseRecall: true,
+            flowMeaningExpansion: true,
+          },
+          mustOpen: 'Muの記憶には、前に話した内容としては残っていません。',
+          reason: 'MEMORY_RECALL_PREFLIGHT_NO_VERIFIED_SOURCE',
+        };
+
         preOrchCtxPack.memoryCertainty = 'none';
         preOrchCtxPack.memoryCertaintyGuardApplied = true;
+        preOrchCtxPack.turnContract = memoryRecallNoMemoryTurnContract;
+        preOrchCtxPack.turnUnderstanding = memoryRecallNoMemoryTurnContract;
         preOrchCtxPack.memoryRecallPreflight = {
           hasNote: Boolean(memoryRecallPreflight?.hasNote),
           triggerKind: memoryRecallPreflight?.triggerKind ?? null,
@@ -3288,6 +3310,8 @@ function normForRecall(v: any): string {
 
         (extraLocal as any).memoryCertainty = 'none';
         (extraLocal as any).memoryCertaintyGuardApplied = true;
+        (extraLocal as any).turnContract = memoryRecallNoMemoryTurnContract;
+        (extraLocal as any).turnUnderstanding = memoryRecallNoMemoryTurnContract;
         (extraLocal as any).memoryRecallPreflight = {
           hasNote: Boolean(memoryRecallPreflight?.hasNote),
           triggerKind: memoryRecallPreflight?.triggerKind ?? null,
@@ -3321,6 +3345,8 @@ function normForRecall(v: any): string {
 
         (extraLocal as any).ctxPack.memoryCertainty = 'none';
         (extraLocal as any).ctxPack.memoryCertaintyGuardApplied = true;
+        (extraLocal as any).ctxPack.turnContract = memoryRecallNoMemoryTurnContract;
+        (extraLocal as any).ctxPack.turnUnderstanding = memoryRecallNoMemoryTurnContract;
         (extraLocal as any).ctxPack.memoryRecallPreflight = {
           hasNote: Boolean(memoryRecallPreflight?.hasNote),
           triggerKind: memoryRecallPreflight?.triggerKind ?? null,
@@ -6363,7 +6389,31 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
 
         const normalizedFinalGoalKind = normalizeGoalKind(finalGoalKind);
 
+        const hasMemoryRecallNotFoundTurnContractForGoal = (...contracts: any[]): boolean => {
+          return contracts.some((contract) => {
+            if (!contract || typeof contract !== 'object') return false;
+
+            const turnTask = String((contract as any).turnTask ?? '').trim();
+            const memoryStatus = String((contract as any).memoryStatus ?? '').trim();
+            const writerAction = String((contract as any).writerAction ?? '').trim();
+
+            return (
+              turnTask === 'memory_recall_check' &&
+              memoryStatus === 'not_found' &&
+              writerAction === 'answer_memory_not_found'
+            );
+          });
+        };
+
         const isMemoryRecallNoneTurnForGoal =
+          hasMemoryRecallNotFoundTurnContractForGoal(
+            cpAny?.turnContract,
+            cpAny?.turnUnderstanding,
+            exAny?.turnContract,
+            exAny?.turnUnderstanding,
+            metaAny?.turnContract,
+            metaAny?.turnUnderstanding,
+          ) ||
           String(
             cpAny?.memoryCertainty ??
               exAny?.memoryCertainty ??
