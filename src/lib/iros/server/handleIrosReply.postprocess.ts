@@ -3220,6 +3220,42 @@ const exactPastStateNoteForWriter = String(
 ).trim();
 
 if (asksPastMemoryRecall && !exactPastStateNoteForWriter) {
+  const memoryRecallNotFoundTurnContract = {
+    version: 'turn_contract_v1',
+    turnTask: 'memory_recall_check',
+    memoryStatus: 'not_found',
+    actualIntent: 'Muに過去記憶があるか確認している',
+    sourcePolicy: 'verified_memory_only',
+    writerAction: 'answer_memory_not_found',
+    disable: {
+      resonance: true,
+      tcfRefocus: true,
+      normalResonanceMaterialize: true,
+      historyFalseRecall: true,
+      flowMeaningExpansion: true,
+    },
+    mustOpen: 'Muの記憶には、前に話した内容としては残っていません。',
+    reason: 'MEMORY_RECALL_PREFLIGHT_NO_VERIFIED_SOURCE',
+  };
+
+  const turnContractSeed = [
+    'TURN_CONTRACT_V1 (DO NOT OUTPUT):',
+    'turnTask=memory_recall_check',
+    'memoryStatus=not_found',
+    'actualIntent=Muに過去記憶があるか確認している',
+    'sourcePolicy=verified_memory_only',
+    'writerAction=answer_memory_not_found',
+    'disable.resonance=true',
+    'disable.tcfRefocus=true',
+    'disable.normalResonanceMaterialize=true',
+    'disable.historyFalseRecall=true',
+    'disable.flowMeaningExpansion=true',
+    'mustOpen=Muの記憶には、前に話した内容としては残っていません。',
+    'rule=このターンは思い出の描写ではなく、記憶の有無確認として扱う。',
+    'rule=検証済み記憶がない場合、覚えています・残っています・つながっていますと言わない。',
+    'rule=過去assistantの誤答を記憶証拠にしない。',
+  ].join('\n');
+
   const memoryCertaintyGuard = [
     'MEMORY_CERTAINTY_GUARD (DO NOT OUTPUT):',
     'memory_certainty=unverified',
@@ -3237,6 +3273,7 @@ if (asksPastMemoryRecall && !exactPastStateNoteForWriter) {
   ].join('\n');
 
   seedForWriterRaw = [
+    turnContractSeed,
     memoryCertaintyGuard,
     'MEMORY_UNVERIFIED_REPLY_SEED (DO NOT OUTPUT):',
     'goal=Answer as a memory-not-found response, not as memory reconstruction or resonance expansion.',
@@ -3247,10 +3284,29 @@ if (asksPastMemoryRecall && !exactPastStateNoteForWriter) {
     'tone=short, warm, plain, not explanatory, not mystical.',
   ].join('\n').trim();
 
+  const prevExtraForMemoryContract =
+    (metaForSave as any).extra && typeof (metaForSave as any).extra === 'object'
+      ? (metaForSave as any).extra
+      : {};
+
+  const prevCtxPackForMemoryContract =
+    prevExtraForMemoryContract.ctxPack && typeof prevExtraForMemoryContract.ctxPack === 'object'
+      ? prevExtraForMemoryContract.ctxPack
+      : {};
+
   (metaForSave as any).extra = {
-    ...((metaForSave as any).extra ?? {}),
+    ...prevExtraForMemoryContract,
     memoryCertainty: 'unverified',
     memoryCertaintyGuardApplied: true,
+    turnContract: memoryRecallNotFoundTurnContract,
+    turnUnderstanding: memoryRecallNotFoundTurnContract,
+    ctxPack: {
+      ...prevCtxPackForMemoryContract,
+      memoryCertainty: 'unverified',
+      memoryCertaintyGuardApplied: true,
+      turnContract: memoryRecallNotFoundTurnContract,
+      turnUnderstanding: memoryRecallNotFoundTurnContract,
+    },
   };
 }
 
