@@ -2304,6 +2304,88 @@ try {
 } catch (e) {
   console.warn('[IROS/_impl/rephrase.ts][HFW_ASSIGN][WARN]', e);
 }
+
+// Memory certainty history filter
+// - When exact memory is unverified, remove assistant history that falsely claimed exact recall.
+try {
+  const memoryCertaintyGuardApplied = Boolean(
+    (extraMerged as any)?.memoryCertaintyGuardApplied === true ||
+      (extraMerged as any)?.ctxPack?.memoryCertaintyGuardApplied === true ||
+      (meta as any)?.extra?.memoryCertaintyGuardApplied === true ||
+      (meta as any)?.extra?.ctxPack?.memoryCertaintyGuardApplied === true ||
+      (userContext as any)?.memoryCertaintyGuardApplied === true ||
+      (userContext as any)?.ctxPack?.memoryCertaintyGuardApplied === true ||
+      (userContext as any)?.meta?.extra?.memoryCertaintyGuardApplied === true,
+  );
+
+  if (memoryCertaintyGuardApplied) {
+    const shouldDropMemoryRecallContaminatedTurn = (turn: any): boolean => {
+      const role = String(turn?.role ?? turn?.type ?? '').trim().toLowerCase();
+
+      const content = String(
+        turn?.content ?? turn?.text ?? turn?.assistantText ?? turn?.message ?? '',
+      ).trim();
+
+      if (!content) return false;
+
+      const isMemoryRecallQuestion =
+        /(覚えて|覚えてる|覚えていますか|覚えてますか|前に話した|以前話した|前話した|この前話した|あの話|その話|続き)/u.test(content) &&
+        /(話|こと|件|覚えて|覚えてる|覚えていますか|覚えてますか)/u.test(content);
+
+      if (role === 'user') {
+        return isMemoryRecallQuestion;
+      }
+
+      if (role !== 'assistant' && role !== 'ai' && role !== 'model' && role !== 'iros') {
+        return false;
+      }
+
+      if (/(MEMORY_CERTAINTY_GUARD|DO NOT OUTPUT|STATE_CUES|WRITER_DIRECTIVES|PATTERN_OUTPUT_CONTRACT|HISTORY_LITE)/i.test(content)) {
+        return false;
+      }
+
+      return (
+        isMemoryRecallQuestion ||
+        /(覚えています|覚えてる|覚えてるよ|はい、覚えています|はい、.*覚えています|以前の会話では|前に話しました|前に出てきた流れ|前に出てきた|話でしたね|残っている|つながっている|前に出ていたテーマ|以前の流れ)/u.test(content)
+      );
+    };
+
+    const filterTurns = (value: any): any => {
+      if (!Array.isArray(value)) return value;
+      return value.filter((turn) => !shouldDropMemoryRecallContaminatedTurn(turn));
+    };
+
+    const beforeCtxHfwLen = Array.isArray((userContext.ctxPack as any).historyForWriter)
+      ? (userContext.ctxPack as any).historyForWriter.length
+      : 0;
+    const beforeTurnsForWriterLen = Array.isArray((userContext as any).turnsForWriter)
+      ? (userContext as any).turnsForWriter.length
+      : 0;
+
+    (userContext.ctxPack as any).historyForWriter = filterTurns((userContext.ctxPack as any).historyForWriter);
+    (userContext as any).turnsForWriter = filterTurns((userContext as any).turnsForWriter);
+
+    const afterCtxHfwLen = Array.isArray((userContext.ctxPack as any).historyForWriter)
+      ? (userContext.ctxPack as any).historyForWriter.length
+      : 0;
+    const afterTurnsForWriterLen = Array.isArray((userContext as any).turnsForWriter)
+      ? (userContext as any).turnsForWriter.length
+      : 0;
+
+    console.log('[IROS/_impl/rephrase.ts][MEMORY_CERTAINTY_HISTORY_FILTER]', {
+      conversationId,
+      userCode,
+      traceId: traceId ?? null,
+      beforeCtxHfwLen,
+      afterCtxHfwLen,
+      beforeTurnsForWriterLen,
+      afterTurnsForWriterLen,
+    });
+  }
+} catch (e) {
+  console.warn('[IROS/_impl/rephrase.ts][MEMORY_CERTAINTY_HISTORY_FILTER][WARN]', e);
+}
+
 const __hfw = (userContext as any)?.ctxPack?.historyForWriter;
 const __hfwLen = Array.isArray(__hfw) ? __hfw.length : 0;
 const __t4w = (userContext as any)?.turnsForWriter;
@@ -2768,5 +2850,6 @@ try {
 
   attachBlocksFromTextOrSkip(fallbackText, 'REPHRASE_EXCEPTION_FALLBACK');
 }}
+
 
 

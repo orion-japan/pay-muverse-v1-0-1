@@ -121,6 +121,7 @@ import { buildMemorySeed } from '@/lib/iros/memory/memorySeedBuilder';
 import { buildSriContext } from '@/lib/iros/conversation/sriContext';
 import { buildActiveContextClarificationReply, buildDiagnosisActiveContextFrame } from '@/lib/iros/anchor/activeContextAnchor';
 import { runPreSeedAssist } from '@/lib/iros/memory/preSeedAssist';
+import { preparePastStateNoteForTurn } from '@/lib/iros/memoryRecall';
 /* =========================
    Types
 ========================= */
@@ -3090,6 +3091,277 @@ function normForRecall(v: any): string {
         }
       }
 
+      // MEMORY_RECALL_PREFLIGHT_DIRECT_REPLY
+      // 「覚えてますか？」系は、Writerへ渡す前に MemoryRecall を先に実行する。
+      // verified は keyword 正本 hit のみ。recent_topic / semantic / no rows は「覚えています」と言わせない。
+      const memoryRecallUserTextForDirectReply = String(text ?? '').replace(/\s+/g, ' ').trim();
+
+      const isMemoryRecallCheckForDirectReply =
+        /(覚えて|覚えてる|覚えていますか|覚えてますか|前に話した|以前話した|前話した|この前話した|あの話|その話|続き)/u.test(
+          memoryRecallUserTextForDirectReply
+        ) &&
+        /(話|こと|件|覚えて|覚えてる|覚えていますか|覚えてますか)/u.test(
+          memoryRecallUserTextForDirectReply
+        );
+
+      const memoryRecallTopicForDirectReply = (() => {
+        const raw = memoryRecallUserTextForDirectReply
+          .replace(/[？?]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        const cleaned = raw
+          .replace(/^(あの|その|この)\s*/u, '')
+          .replace(/(覚えてる|覚えていますか|覚えてますか|覚えています|覚えてます|覚えて)$/u, '')
+          .replace(/(前に話した|以前話した|前話した|この前話した)$/u, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        if (!cleaned) return 'その話題';
+        return cleaned.length > 40 ? cleaned.slice(0, 40) : cleaned;
+      })();
+
+      const memoryRecallTopicLabelForDirectReply =
+        memoryRecallTopicForDirectReply === 'その話題'
+          ? 'その話題'
+          : `「${memoryRecallTopicForDirectReply}」`;
+
+      const memoryRecallPreflight = isMemoryRecallCheckForDirectReply
+        ? await preparePastStateNoteForTurn({
+            client: supabase as any,
+            userCode,
+            userText: memoryRecallUserTextForDirectReply,
+            topicLabel:
+              String(
+                preOrchCtxPack?.situationTopic ??
+                  preOrchCtxPack?.topicDigest ??
+                  histCtx?.situationTopic ??
+                  histCtx?.topicDigest ??
+                  memoryRecallTopicForDirectReply ??
+                  ''
+              ).trim() || null,
+            conversationLine:
+              String(
+                preOrchCtxPack?.conversationLine ??
+                  histCtx?.conversationLine ??
+                  ''
+              ).trim() || null,
+            topicDigest:
+              String(
+                preOrchCtxPack?.topicDigest ??
+                  histCtx?.topicDigest ??
+                  ''
+              ).trim() || null,
+            situationTopic:
+              String(
+                preOrchCtxPack?.situationTopic ??
+                  histCtx?.situationTopic ??
+                  ''
+              ).trim() || null,
+            depthStage:
+              String(
+                preOrchCtxPack?.depthStage ??
+                  histCtx?.depthStage ??
+                  ctx?.requestedDepth ??
+                  ''
+              ).trim() || null,
+            limit: 3,
+            forceRecentTopicFallback: false,
+          })
+        : null;
+
+      const memoryRecallPreflightVerified =
+        Boolean(memoryRecallPreflight?.hasNote) &&
+        typeof memoryRecallPreflight?.pastStateNoteText === 'string' &&
+        memoryRecallPreflight.pastStateNoteText.trim().length > 0 &&
+        memoryRecallPreflight?.triggerKind === 'keyword' &&
+        typeof memoryRecallPreflight?.keyword === 'string' &&
+        memoryRecallPreflight.keyword.trim().length > 0;
+
+      if (isMemoryRecallCheckForDirectReply && memoryRecallPreflightVerified) {
+        const verifiedNote = String(memoryRecallPreflight?.pastStateNoteText ?? '').trim();
+
+        preOrchCtxPack.memoryCertainty = 'verified';
+        preOrchCtxPack.memoryCertaintyGuardApplied = true;
+        preOrchCtxPack.pastStateNoteText = verifiedNote;
+        preOrchCtxPack.pastStateTriggerKind = memoryRecallPreflight?.triggerKind ?? null;
+        preOrchCtxPack.pastStateKeyword = memoryRecallPreflight?.keyword ?? null;
+        preOrchCtxPack.memoryRecallPreflight = {
+          hasNote: true,
+          triggerKind: memoryRecallPreflight?.triggerKind ?? null,
+          keyword: memoryRecallPreflight?.keyword ?? null,
+          matchedTerms: memoryRecallPreflight?.matchedTerms ?? [],
+          certainty: 'verified',
+        };
+
+        (extraLocal as any).memoryCertainty = 'verified';
+        (extraLocal as any).memoryCertaintyGuardApplied = true;
+        (extraLocal as any).pastStateNoteText = verifiedNote;
+        (extraLocal as any).pastStateTriggerKind = memoryRecallPreflight?.triggerKind ?? null;
+        (extraLocal as any).pastStateKeyword = memoryRecallPreflight?.keyword ?? null;
+
+        (extraLocal as any).ctxPack =
+          (extraLocal as any).ctxPack && typeof (extraLocal as any).ctxPack === 'object'
+            ? (extraLocal as any).ctxPack
+            : {};
+
+        (extraLocal as any).ctxPack.memoryCertainty = 'verified';
+        (extraLocal as any).ctxPack.memoryCertaintyGuardApplied = true;
+        (extraLocal as any).ctxPack.pastStateNoteText = verifiedNote;
+        (extraLocal as any).ctxPack.pastStateTriggerKind = memoryRecallPreflight?.triggerKind ?? null;
+        (extraLocal as any).ctxPack.pastStateKeyword = memoryRecallPreflight?.keyword ?? null;
+        (extraLocal as any).ctxPack.memoryRecallPreflight = {
+          hasNote: true,
+          triggerKind: memoryRecallPreflight?.triggerKind ?? null,
+          keyword: memoryRecallPreflight?.keyword ?? null,
+          matchedTerms: memoryRecallPreflight?.matchedTerms ?? [],
+          certainty: 'verified',
+        };
+
+        console.log('[IROS/MEMORY_RECALL_PREFLIGHT][VERIFIED]', {
+          conversationId,
+          userCode,
+          userTextHead: memoryRecallUserTextForDirectReply.slice(0, 120),
+          triggerKind: memoryRecallPreflight?.triggerKind ?? null,
+          keyword: memoryRecallPreflight?.keyword ?? null,
+          noteLen: verifiedNote.length,
+          shouldBypassWriter: false,
+        });
+      }
+
+      if (isMemoryRecallCheckForDirectReply && !memoryRecallPreflightVerified) {
+        const memoryRecallNoMemorySeedText = [
+          'MEMORY_SEED (DO NOT OUTPUT)',
+          'seedKind=MEMORY_RECALL_PREFLIGHT_NO_MEMORY',
+          'source=memory_recall_preflight',
+          'memoryIntent=memory_recall_check',
+          'memorySpace=conversation_memory',
+          'recallMode=explicit',
+          `targetLabel=${memoryRecallTopicLabelForDirectReply}`,
+          `targetKey=${memoryRecallTopicForDirectReply}`,
+          'certainty=none',
+          `hasNote=${Boolean(memoryRecallPreflight?.hasNote)}`,
+          `triggerKind=${String(memoryRecallPreflight?.triggerKind ?? 'null')}`,
+          `keyword=${String(memoryRecallPreflight?.keyword ?? 'null')}`,
+          `matchedTerms=${Array.isArray(memoryRecallPreflight?.matchedTerms) ? memoryRecallPreflight.matchedTerms.join(',') : ''}`,
+          'reason=MEMORY_RECALL_PREFLIGHT_NO_VERIFIED_SOURCE',
+          'boundary=この話題について、検証済みの過去記憶は見つかっていない。記憶がある・覚えている・前に話した内容として残っているとは言わない。',
+          'writerTask=ユーザーは過去の話を覚えているか確認している。検証済み記憶がないため、Muの記憶には前に話した内容としては残っていない、と自然に答える。固定文ではなく、このseedの事実に従って返答する。',
+          'writerPolicy=do_not_invent_memory; do_not_claim_remembered; do_not_use_unverified_history_as_memory; ask_user_to_share_one_hint_if_needed',
+        ].join('\n');
+
+        const memoryRecallNoMemorySeedResult = {
+          hasSeed: true,
+          seedText: memoryRecallNoMemorySeedText,
+          seedKind: 'memory_recall_none',
+          blocked: false,
+          reasons: ['MEMORY_RECALL_PREFLIGHT_NO_VERIFIED_SOURCE'],
+        };
+
+        preOrchCtxPack.memoryCertainty = 'none';
+        preOrchCtxPack.memoryCertaintyGuardApplied = true;
+        preOrchCtxPack.memoryRecallPreflight = {
+          hasNote: Boolean(memoryRecallPreflight?.hasNote),
+          triggerKind: memoryRecallPreflight?.triggerKind ?? null,
+          keyword: memoryRecallPreflight?.keyword ?? null,
+          matchedTerms: memoryRecallPreflight?.matchedTerms ?? [],
+          certainty: 'none',
+        };
+        preOrchCtxPack.memorySeedResult = memoryRecallNoMemorySeedResult;
+        preOrchCtxPack.memorySeedText = memoryRecallNoMemorySeedText;
+        preOrchCtxPack.memorySeedKind = memoryRecallNoMemorySeedResult.seedKind;
+        preOrchCtxPack.memorySeedBlocked = memoryRecallNoMemorySeedResult.blocked;
+        preOrchCtxPack.memorySeedReasons = memoryRecallNoMemorySeedResult.reasons;
+        preOrchCtxPack.preSeedAssistShouldBypassWriter = false;
+        preOrchCtxPack.preSeedAssistKind = 'memory_recall_preflight_none';
+        preOrchCtxPack.preSeedAssistConfidence = 1;
+        preOrchCtxPack.preSeedAssistResult = {
+          kind: 'memory_recall_preflight_none',
+          confidence: 1,
+          directReply: '',
+          shouldBypassWriter: false,
+          seedText: memoryRecallNoMemorySeedText,
+          reason: 'MEMORY_RECALL_PREFLIGHT_NO_VERIFIED_SOURCE',
+        };
+        delete preOrchCtxPack.preSeedAssistDirectReply;
+        delete preOrchCtxPack.directReplyCandidate;
+
+        (extraLocal as any).memoryCertainty = 'none';
+        (extraLocal as any).memoryCertaintyGuardApplied = true;
+        (extraLocal as any).memoryRecallPreflight = {
+          hasNote: Boolean(memoryRecallPreflight?.hasNote),
+          triggerKind: memoryRecallPreflight?.triggerKind ?? null,
+          keyword: memoryRecallPreflight?.keyword ?? null,
+          matchedTerms: memoryRecallPreflight?.matchedTerms ?? [],
+          certainty: 'none',
+        };
+        (extraLocal as any).memorySeedResult = memoryRecallNoMemorySeedResult;
+        (extraLocal as any).memorySeedText = memoryRecallNoMemorySeedText;
+        (extraLocal as any).memorySeedKind = memoryRecallNoMemorySeedResult.seedKind;
+        (extraLocal as any).memorySeedBlocked = memoryRecallNoMemorySeedResult.blocked;
+        (extraLocal as any).memorySeedReasons = memoryRecallNoMemorySeedResult.reasons;
+        (extraLocal as any).preSeedAssistShouldBypassWriter = false;
+        (extraLocal as any).preSeedAssistKind = 'memory_recall_preflight_none';
+        (extraLocal as any).preSeedAssistConfidence = 1;
+        (extraLocal as any).preSeedAssistResult = {
+          kind: 'memory_recall_preflight_none',
+          confidence: 1,
+          directReply: '',
+          shouldBypassWriter: false,
+          seedText: memoryRecallNoMemorySeedText,
+          reason: 'MEMORY_RECALL_PREFLIGHT_NO_VERIFIED_SOURCE',
+        };
+        delete (extraLocal as any).preSeedAssistDirectReply;
+        delete (extraLocal as any).directReplyCandidate;
+
+        (extraLocal as any).ctxPack =
+          (extraLocal as any).ctxPack && typeof (extraLocal as any).ctxPack === 'object'
+            ? (extraLocal as any).ctxPack
+            : {};
+
+        (extraLocal as any).ctxPack.memoryCertainty = 'none';
+        (extraLocal as any).ctxPack.memoryCertaintyGuardApplied = true;
+        (extraLocal as any).ctxPack.memoryRecallPreflight = {
+          hasNote: Boolean(memoryRecallPreflight?.hasNote),
+          triggerKind: memoryRecallPreflight?.triggerKind ?? null,
+          keyword: memoryRecallPreflight?.keyword ?? null,
+          matchedTerms: memoryRecallPreflight?.matchedTerms ?? [],
+          certainty: 'none',
+        };
+        (extraLocal as any).ctxPack.memorySeedResult = memoryRecallNoMemorySeedResult;
+        (extraLocal as any).ctxPack.memorySeedText = memoryRecallNoMemorySeedText;
+        (extraLocal as any).ctxPack.memorySeedKind = memoryRecallNoMemorySeedResult.seedKind;
+        (extraLocal as any).ctxPack.memorySeedBlocked = memoryRecallNoMemorySeedResult.blocked;
+        (extraLocal as any).ctxPack.memorySeedReasons = memoryRecallNoMemorySeedResult.reasons;
+        (extraLocal as any).ctxPack.preSeedAssistShouldBypassWriter = false;
+        (extraLocal as any).ctxPack.preSeedAssistKind = 'memory_recall_preflight_none';
+        (extraLocal as any).ctxPack.preSeedAssistConfidence = 1;
+        (extraLocal as any).ctxPack.preSeedAssistResult = {
+          kind: 'memory_recall_preflight_none',
+          confidence: 1,
+          directReply: '',
+          shouldBypassWriter: false,
+          seedText: memoryRecallNoMemorySeedText,
+          reason: 'MEMORY_RECALL_PREFLIGHT_NO_VERIFIED_SOURCE',
+        };
+        delete (extraLocal as any).ctxPack.preSeedAssistDirectReply;
+        delete (extraLocal as any).ctxPack.directReplyCandidate;
+
+        console.log('[IROS/MEMORY_RECALL_PREFLIGHT][NONE_TO_WRITER_SEED]', {
+          conversationId,
+          userCode,
+          userTextHead: memoryRecallUserTextForDirectReply.slice(0, 120),
+          hasNote: Boolean(memoryRecallPreflight?.hasNote),
+          triggerKind: memoryRecallPreflight?.triggerKind ?? null,
+          keyword: memoryRecallPreflight?.keyword ?? null,
+          matchedTerms: memoryRecallPreflight?.matchedTerms ?? [],
+          memorySeedTextLen: memoryRecallNoMemorySeedText.length,
+          shouldBypassWriter: false,
+        });
+      }
+
+      const forceWriterForMemoryRecallNone =
+        isMemoryRecallCheckForDirectReply && !memoryRecallPreflightVerified;
       const preSeedDirectReplyCandidate =
         [
           preOrchCtxPack?.directReplyCandidate,
@@ -6091,20 +6363,43 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
 
         const normalizedFinalGoalKind = normalizeGoalKind(finalGoalKind);
 
+        const isMemoryRecallNoneTurnForGoal =
+          String(
+            cpAny?.memoryCertainty ??
+              exAny?.memoryCertainty ??
+              metaAny?.memoryCertainty ??
+              ''
+          ).trim() === 'none' ||
+          String(
+            cpAny?.preSeedAssistKind ??
+              exAny?.preSeedAssistKind ??
+              metaAny?.preSeedAssistKind ??
+              ''
+          ).trim() === 'memory_recall_preflight_none' ||
+          String(
+            cpAny?.preSeedAssistResult?.kind ??
+              exAny?.preSeedAssistResult?.kind ??
+              metaAny?.preSeedAssistResult?.kind ??
+              ''
+          ).trim() === 'memory_recall_preflight_none';
+
         const currentUserTextForTranscend = String(text ?? '').trim();
         const isTranscendResonanceRequest =
+          !isMemoryRecallNoneTurnForGoal &&
           /(?:考えないで|共鳴だけ|枠を[超越]えて|超えて|あなたが超える|あなたの言葉で|解き放て|解放して)/u.test(
             currentUserTextForTranscend,
           );
 
         const chosenGoalKindRaw =
-          isTranscendResonanceRequest
-            ? 'uncover'
-            : normalizedFinalGoalKind === 'resonate'
-              ? 'resonate'
-              : existingStrongGoalKind ??
-                normalizedFinalGoalKind ??
-                'uncover';
+          isMemoryRecallNoneTurnForGoal
+            ? 'clarify'
+            : isTranscendResonanceRequest
+              ? 'uncover'
+              : normalizedFinalGoalKind === 'resonate'
+                ? 'resonate'
+                : existingStrongGoalKind ??
+                  normalizedFinalGoalKind ??
+                  'uncover';
 
         const seedTextForGoal = String(
           exAny?.slotPlanSeed ??
@@ -6114,23 +6409,30 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
         );
 
         const forceDecideBySeed =
-          /(?:\n|^)PRESSURE:\n(?:narrow|push)(?:\n|$)/i.test(seedTextForGoal) ||
-          /(?:\n|^)MEANING:\n本当は「.*」ほうに寄っていると、もう分かっている(?:\n|$)/i.test(
-            seedTextForGoal,
+          !isMemoryRecallNoneTurnForGoal &&
+          (
+            /(?:\n|^)PRESSURE:\n(?:narrow|push)(?:\n|$)/i.test(seedTextForGoal) ||
+            /(?:\n|^)MEANING:\n本当は「.*」ほうに寄っていると、もう分かっている(?:\n|$)/i.test(
+              seedTextForGoal,
+            )
           );
 
         const chosenGoalKind =
-          forceDecideBySeed
-            ? 'decide'
-            : chosenGoalKindRaw === 'commit'
+          isMemoryRecallNoneTurnForGoal
+            ? 'clarify'
+            : forceDecideBySeed
               ? 'decide'
-              : chosenGoalKindRaw;
+              : chosenGoalKindRaw === 'commit'
+                ? 'decide'
+                : chosenGoalKindRaw;
 
         const chosenTargetKindRaw =
-          normalizedFinalGoalKind === 'resonate'
-            ? 'resonate'
-            : existingStrongTargetKind ??
-              (chosenGoalKindRaw === 'commit' ? 'decide' : chosenGoalKindRaw);
+          isMemoryRecallNoneTurnForGoal
+            ? 'clarify'
+            : normalizedFinalGoalKind === 'resonate'
+              ? 'resonate'
+              : existingStrongTargetKind ??
+                (chosenGoalKindRaw === 'commit' ? 'decide' : chosenGoalKindRaw);
 
         const chosenTargetKind =
           chosenTargetKindRaw === 'commit'
@@ -12527,3 +12829,9 @@ return {
     };
   }
 }
+
+
+
+
+
+

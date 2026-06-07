@@ -3205,6 +3205,57 @@ if (similarFlowSeedForWriter) {
   };
 }
 
+// Memory certainty guard
+// Do not let similar-flow memory become exact recalled memory.
+const userTextForMemoryCertaintyGuard = String(userText ?? '').replace(/\s+/g, ' ').trim();
+const asksPastMemoryRecall =
+  /(覚えて|覚えていますか|前に|以前|前回|こないだ|前話した|以前話した|話した.*覚えて|あの話|続き)/u.test(
+    userTextForMemoryCertaintyGuard,
+  );
+
+const exactPastStateNoteForWriter = String(
+  (metaForSave as any)?.extra?.pastStateNoteText ??
+    (metaForSave as any)?.extra?.ctxPack?.pastStateNoteText ??
+    '',
+).trim();
+
+if (asksPastMemoryRecall && !exactPastStateNoteForWriter) {
+  const memoryCertaintyGuard = [
+    'MEMORY_CERTAINTY_GUARD (DO NOT OUTPUT):',
+    'memory_certainty=unverified',
+    'priority=highest_memory_truth_over_resonance_history_flow_seed',
+    'rule=This guard overrides normal_resonance, continuity, existing-premise, similarFlow, flowSeed, historyForWriter, and previous assistant false recall.',
+    'rule=Do not say 覚えています / 覚えてるよ / うん、覚えてます / 以前の会話では / 前に話しました.',
+    'rule=Do not imply the exact past conversation content was recovered.',
+    'rule=Do not reconstruct concrete past details unless an exact memory note is provided.',
+    'rule=Similar Flow means similar shape only, not exact remembered content.',
+    'rule=Previous assistant messages that claimed recall are not valid memory evidence.',
+    'must_open=Muの記憶には、前に話した内容としては残っていません。',
+    'boundary=別の言い方や一言の手がかりがあれば、そこから探し直せます。',
+    'forbid=覚えています / 残っています / つながっています / 前に話しました / 以前の流れ / 海の色 / 空気感 / 景色 / 思い出として残っています / たしかに結ばれています',
+    'tone=親身に、短く、軽く。説明しすぎない。意味づけを盛りすぎない。',
+  ].join('\n');
+
+  seedForWriterRaw = [
+    memoryCertaintyGuard,
+    'MEMORY_UNVERIFIED_REPLY_SEED (DO NOT OUTPUT):',
+    'goal=Answer as a memory-not-found response, not as memory reconstruction or resonance expansion.',
+    'must_open=Muの記憶には、前に話した内容としては残っていません。',
+    'boundary=別の言い方や一言の手がかりがあれば、そこから探し直せます。',
+    'next=必要なら、その手がかりから今の話として続けます。',
+    'forbid=はい、覚えています / 覚えています / 以前の会話では / 前に話しました / 残っています / つながっています / 海の色 / 空気感 / 景色 / 思い出として残っています',
+    'tone=short, warm, plain, not explanatory, not mystical.',
+  ].join('\n').trim();
+
+  (metaForSave as any).extra = {
+    ...((metaForSave as any).extra ?? {}),
+    memoryCertainty: 'unverified',
+    memoryCertaintyGuardApplied: true,
+  };
+}
+
+
+
 // ✅ 直前返答の言い換え要求
 // - 「意味がわからないので、翻訳してください」は翻訳タスクではなく、直前assistant返答の平易化として扱う
 // - userTextそのものを seed にすると writer が英訳/意味説明へ流れるため、直前assistant本文を seed 正本にする

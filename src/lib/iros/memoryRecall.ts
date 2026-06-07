@@ -1,4 +1,4 @@
-// src/lib/iros/memoryRecall.ts
+﻿// src/lib/iros/memoryRecall.ts
 // Iros MemoryRecall モジュール
 //
 // 役割：
@@ -138,6 +138,27 @@ function isQuestionLike(text: string): boolean {
   if (/(か|かな|かも)$/u.test(t)) return true;
 
   return false;
+}
+
+function isMemoryRecallCheckLikeText(value: unknown): boolean {
+  const t = normalizeForRecall(String(value ?? ''))
+    .replace(/\s+/g, '')
+    .replace(/[「」『』（）()【】\[\]、。,.!！?？]/g, '')
+    .trim();
+
+  if (!t) return false;
+
+  const hasRememberVerb =
+    /(覚えてる|覚えてます|覚えています|覚えていた|覚えていました|覚えて|思い出せる|思い出せます)/u.test(t);
+
+  const hasMemoryRecallShape =
+    hasRememberVerb &&
+    /(話|こと|件|前|以前|この前|あの|その|覚えて)/u.test(t);
+
+  const hasPastTopicQuestion =
+    /(なんの話だっけ|何の話だっけ|なんだっけ|何だっけ|前の話|あの話|その話)/u.test(t);
+
+  return hasMemoryRecallShape || hasPastTopicQuestion;
 }
 
 /**
@@ -312,6 +333,10 @@ async function loadRecentSnapshots(args: {
         if (topicNorm && topicNorm === currentInputNorm) return false;
       }
 
+
+      // 「覚えてますか？」系の確認文そのものは、過去記憶の証拠にしない
+      if (isMemoryRecallCheckLikeText(rawSummary)) return false;
+      if (isMemoryRecallCheckLikeText(rawTopic)) return false;
       // 低情報な相槌・短文は除外
       const lowInfoSet = new Set([
         'はい',
@@ -1246,3 +1271,4 @@ export async function loadIrDiagnosisDetailSnapshot(
     };
   }
 }
+

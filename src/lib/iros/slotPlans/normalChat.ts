@@ -328,6 +328,14 @@ function buildClarify(
     focusCandidateRaw.length > 0 ? String(focusCandidateRaw[0] ?? '').trim() : '';
   const questionFocus = tStateFocus || focusCandidateTop;
 
+  const asksMemoryRecallCheck =
+    /(覚えて|覚えてる|覚えていますか|覚えてますか|前に話した|以前話した|前話した|この前話した|あの話|その話|続き)/u.test(instructionText) &&
+    /(話|こと|件|覚えて|覚えてる|覚えていますか|覚えてますか)/u.test(instructionText);
+
+  const shouldMemoryRecallCheck =
+    !isT &&
+    asksMemoryRecallCheck;
+
   const usePastReframe = !!outputPolicy?.usePastReframe;
   const splitFactHypothesis = !!outputPolicy?.splitFactHypothesis;
   const avoidPrematureClosure = !!outputPolicy?.avoidPrematureClosure;
@@ -336,9 +344,12 @@ function buildClarify(
     questionType === 'truth';
 
   const questionSuggestsPastReframe =
-    questionType === 'unresolved_release' ||
-    tMode === 'reobserve_past' ||
-    usePastReframe;
+    !shouldMemoryRecallCheck &&
+    (
+      questionType === 'unresolved_release' ||
+      tMode === 'reobserve_past' ||
+      usePastReframe
+    );
 
   const buildClarifyMeaningV1 = (
     text: string,
@@ -534,15 +545,17 @@ function buildClarify(
     const shiftIntentBase =
       isT
         ? 'implement_next_step'
-        : questionSuggestsPastReframe
-          ? 'answer_past_reframe'
-          : shouldReanswerCapability
-            ? 'reanswer_capability'
-            : directAnswerRequested
-              ? 'answer_in_one_shot'
-              : shouldAnswerTruthStructure
-                ? 'answer_truth_structure'
-                : 'answer_user_meaning';
+        : shouldMemoryRecallCheck
+          ? 'memory_recall_check'
+          : questionSuggestsPastReframe
+            ? 'answer_past_reframe'
+            : shouldReanswerCapability
+              ? 'reanswer_capability'
+              : directAnswerRequested
+                ? 'answer_in_one_shot'
+                : shouldAnswerTruthStructure
+                  ? 'answer_truth_structure'
+                  : 'answer_user_meaning';
 
     const shiftHintBase =
       isT
@@ -565,17 +578,19 @@ function buildClarify(
               const shiftLineBase =
               isT
                 ? null
-                : questionSuggestsPastReframe
-                  ? '未完了の感じが、まだ戻ってきている'
-                  : shouldReanswerCapability
-                    ? 'できることの輪郭だけが、先に立っている'
-                    : directAnswerRequested
-                      ? '答えの芯だけが、先に出ている'
-                      : shouldAnswerTruthStructure
-                        ? wantsResonanceStructureReading
-                          ? '事実確認だけで閉じず、対象に響いている象徴構造と関係構造を読む'
-                          : '中心にある論点を、固定文や余韻の決め台詞にせず、ユーザーの発話に沿った日常語で明確にする'
-                        : clarifyMeaning.line;
+                : shouldMemoryRecallCheck
+                  ? '過去の記憶参照が取れるかを確認している'
+                  : questionSuggestsPastReframe
+                    ? '未完了の感じが、まだ戻ってきている'
+                    : shouldReanswerCapability
+                      ? 'できることの輪郭だけが、先に立っている'
+                      : directAnswerRequested
+                        ? '答えの芯だけが、先に出ている'
+                        : shouldAnswerTruthStructure
+                          ? wantsResonanceStructureReading
+                            ? '事実確認だけで閉じず、対象に響いている象徴構造と関係構造を読む'
+                            : '中心にある論点を、固定文や余韻の決め台詞にせず、ユーザーの発話に沿った日常語で明確にする'
+                          : clarifyMeaning.line;
                 const askBackAllowedNow =
                   !isT &&
                   !questionSuggestsPastReframe &&
@@ -609,47 +624,55 @@ function buildClarify(
                     line: shiftLineBase,
                     source: isT
                       ? 't_concretize'
-                      : questionSuggestsPastReframe
-                        ? 'question_engine'
-                        : shouldAnswerTruthStructure
-                          ? 'resolved_ask'
-                          : shouldReanswerCapability
+                      : shouldMemoryRecallCheck
+                        ? 'memory_recall'
+                        : questionSuggestsPastReframe
+                          ? 'question_engine'
+                          : shouldAnswerTruthStructure
                             ? 'resolved_ask'
-                            : clarifyMeaning.source,
+                            : shouldReanswerCapability
+                              ? 'resolved_ask'
+                              : clarifyMeaning.source,
                     meaning_kind: isT
                       ? null
-                      : questionSuggestsPastReframe
-                        ? 'past_reframe'
-                        : shouldAnswerTruthStructure
-                          ? 'truth_structure'
-                          : shouldReanswerCapability
-                            ? 'capability_reask'
-                            : clarifyMeaning.kind,
+                      : shouldMemoryRecallCheck
+                        ? 'memory_recall_check'
+                        : questionSuggestsPastReframe
+                          ? 'past_reframe'
+                          : shouldAnswerTruthStructure
+                            ? 'truth_structure'
+                            : shouldReanswerCapability
+                              ? 'capability_reask'
+                              : clarifyMeaning.kind,
                     question_type: questionType || null,
                     t_mode: tMode || null,
                     question_focus: questionFocus || null,
                     contract: isT
                       ? ['first_line_is_core', 'one_next_step', 'plain_words']
-                      : questionSuggestsPastReframe
-                        ? ['answer_in_one_shot', 'prefer_past_reframe_over_advice', 'plain_words']
-                        : shouldReanswerCapability
-                          ? ['answer_in_one_shot', 'first_line_is_definition_or_pointing', 'plain_words']
-                          : shouldAnswerTruthStructure
-                            ? ['answer_in_one_shot', 'first_line_is_core_answer', 'then_structure_brief', 'plain_words']
-                            : clarifyMeaning.kind === 'topic_recall'
-                              ? ['answer_in_one_shot', 'first_line_names_last_topic_directly', 'plain_words']
-                              : isDefinitionQuestion
-                                ? ['answer_in_one_shot', 'first_line_is_definition_or_pointing', 'plain_words']
-                                : questionType === 'meaning'
-                                  ? ['answer_in_one_shot', 'first_line_is_core_answer', 'plain_words']
-                                  : ['answer_in_one_shot', 'plain_words'],
+                      : shouldMemoryRecallCheck
+                        ? ['answer_in_one_shot', 'memory_result_required', 'no_memory_claim_without_source', 'plain_words']
+                        : questionSuggestsPastReframe
+                          ? ['answer_in_one_shot', 'prefer_past_reframe_over_advice', 'plain_words']
+                          : shouldReanswerCapability
+                            ? ['answer_in_one_shot', 'first_line_is_definition_or_pointing', 'plain_words']
+                            : shouldAnswerTruthStructure
+                              ? ['answer_in_one_shot', 'first_line_is_core_answer', 'then_structure_brief', 'plain_words']
+                              : clarifyMeaning.kind === 'topic_recall'
+                                ? ['answer_in_one_shot', 'first_line_names_last_topic_directly', 'plain_words']
+                                : isDefinitionQuestion
+                                  ? ['answer_in_one_shot', 'first_line_is_definition_or_pointing', 'plain_words']
+                                  : questionType === 'meaning'
+                                    ? ['answer_in_one_shot', 'first_line_is_core_answer', 'plain_words']
+                                    : ['answer_in_one_shot', 'plain_words'],
                                   rules: {
                                     ...(shiftPreset?.rules ?? {}),
                                     answer_user_meaning:
+                                      !shouldMemoryRecallCheck &&
                                       !questionSuggestsPastReframe &&
                                       !shouldAnswerTruthStructure &&
                                       !shouldReanswerCapability,
                                     answer_truth_structure: shouldAnswerTruthStructure,
+                                    memory_recall_check: shouldMemoryRecallCheck,
                                     use_past_reframe: questionSuggestsPastReframe,
                                     no_flow_lecture: true,
                                     no_meta_explain: true,
@@ -2304,4 +2327,6 @@ export function buildNormalChatSlotPlan(args: {
     slots,
   };
 }
+
+
 

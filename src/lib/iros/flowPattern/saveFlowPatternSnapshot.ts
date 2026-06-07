@@ -399,9 +399,24 @@ export async function saveFlowPatternSnapshot(args: SaveFlowPatternSnapshotArgs)
     meta: safeMeta(metaForSave),
   };
 
+  let rowForInsert: Record<string, any>;
+
+  try {
+    rowForInsert = JSON.parse(JSON.stringify(row));
+  } catch (e) {
+    return {
+      ok: false,
+      inserted: false,
+      error: {
+        message: 'flow_pattern_snapshot_row_json_stringify_failed',
+        detail: e instanceof Error ? e.message : String(e),
+      },
+    };
+  }
+
   const { data, error } = await (supabase as any)
     .from('iros_flow_pattern_snapshots')
-    .insert(row)
+    .insert(rowForInsert)
     .select('id')
     .single();
 

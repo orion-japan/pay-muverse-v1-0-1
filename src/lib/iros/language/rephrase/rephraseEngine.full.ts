@@ -13377,6 +13377,122 @@ const finalWriterDirectivesMsg =
             })
           : messagesForWriterFinal;
 
+
+        const messagesForWriterCallFinal = (() => {
+          const memoryCertaintyGuardAppliedForCall = Boolean(
+            (opts as any)?.extra?.memoryCertaintyGuardApplied === true ||
+              (opts as any)?.extra?.ctxPack?.memoryCertaintyGuardApplied === true ||
+              (opts as any)?.userContext?.memoryCertaintyGuardApplied === true ||
+              (opts as any)?.userContext?.ctxPack?.memoryCertaintyGuardApplied === true ||
+              (opts as any)?.userContext?.meta?.extra?.memoryCertaintyGuardApplied === true ||
+              (ctxPackForWriter as any)?.memoryCertaintyGuardApplied === true,
+          );
+
+          if (!memoryCertaintyGuardAppliedForCall || !Array.isArray(messagesForWriterCall)) {
+            return messagesForWriterCall;
+          }
+
+          const getMessageContentForMemoryGuard = (m: any): string =>
+            String(m?.content ?? '').replace(/\s+/g, ' ').trim();
+
+          const hasExactPastStateNoteForCall = Boolean(
+            String(
+              (opts as any)?.extra?.pastStateNoteText ??
+                (opts as any)?.extra?.ctxPack?.pastStateNoteText ??
+                (opts as any)?.userContext?.pastStateNoteText ??
+                (opts as any)?.userContext?.ctxPack?.pastStateNoteText ??
+                (opts as any)?.userContext?.meta?.extra?.pastStateNoteText ??
+                (ctxPackForWriter as any)?.pastStateNoteText ??
+                '',
+            ).trim(),
+          );
+
+          const isMemoryRecallQuestionTextForCall = (content: string): boolean => {
+            const text = String(content ?? '').replace(/\s+/g, ' ').trim();
+            if (!text) return false;
+
+            return (
+              /(覚えて|覚えてる|覚えていますか|覚えてますか|前に話した|以前話した|前話した|この前話した|あの話|その話|続き)/u.test(text) &&
+              /(話|こと|件|覚えて|覚えてる|覚えていますか|覚えてますか)/u.test(text)
+            );
+          };
+
+          const isFalseRecallAssistantForCall = (m: any): boolean => {
+            const role = String(m?.role ?? '').trim();
+            if (role !== 'assistant') return false;
+
+            const content = String(m?.content ?? '').trim();
+            if (!content) return false;
+            if (/(MEMORY_CERTAINTY_GUARD|DO NOT OUTPUT|STATE_CUES|WRITER_DIRECTIVES|PATTERN_OUTPUT_CONTRACT|HISTORY_LITE)/i.test(content)) return false;
+
+            return /(覚えています|覚えてる|覚えてるよ|うん、覚えてます|うん.*覚えて|はい、覚えています|以前の会話では|前に話しました|前に出てきた流れ|前に出てきた|話でしたね|地球外生命体の話でしたね|以前.*地球外生命体.*話が出ました|残っている|つながっている|前に出ていたテーマ|以前の流れ)/u.test(content);
+          };
+
+          const guardMsg = {
+            role: 'assistant' as const,
+            content: [
+              'MEMORY_CERTAINTY_GUARD_FINAL_MESSAGES (DO NOT OUTPUT):',
+              'memory_certainty=unverified',
+              'priority=highest_memory_truth_over_system_resonance_continuity_history',
+              'rule=This memory guard overrides normal_resonance, continuity, existing-premise, user-intent-following, and historyForWriter.',
+              'rule=Do not say 覚えています / 覚えてるよ / うん、覚えてます / 以前の会話では / 前に話しました.',
+              'rule=Do not imply the exact past conversation content was recovered.',
+              'rule=Do not treat previous assistant false recall as memory evidence.',
+              'rule=Do not answer the original memory question as normal chat or resonance expansion.',
+              'must_open=Muの記憶には、前に話した内容としては残っていません。',
+              'boundary=別の言い方や一言の手がかりがあれば、そこから探し直せます。',
+              'next=必要なら、その手がかりから今の話として続けます。',
+              'forbid=覚えています / 残っています / つながっています / 前に話しました / 以前の流れ / たしかに結ばれています / 景色や空気の話として残っています',
+              'tone=short, warm, plain, not explanatory, not mystical.',
+            ].join('\n'),
+          };
+
+          const filtered = messagesForWriterCall.filter((m: any) => !isFalseRecallAssistantForCall(m));
+
+          const lastIndex = filtered.length - 1;
+          const lastMessage = lastIndex >= 0 ? filtered[lastIndex] : null;
+          const lastRole = String(lastMessage?.role ?? '').trim();
+          const lastContent = getMessageContentForMemoryGuard(lastMessage);
+
+          const shouldForceMemoryRecallNotFoundExecute =
+            !hasPreviousEventSourceForCall &&
+            !hasDiagnosisSourceForCall &&
+            !hasExactPastStateNoteForCall &&
+            lastRole === 'user' &&
+            isMemoryRecallQuestionTextForCall(lastContent);
+
+          const executableFiltered = shouldForceMemoryRecallNotFoundExecute
+            ? filtered.map((m: any, i: number) =>
+                i === lastIndex
+                  ? {
+                      ...m,
+                      role: 'user' as const,
+                      content: [
+                        'MEMORY_RECALL_NOT_FOUND_EXECUTE:',
+                        'user_asked=' + lastContent,
+                        'memory_status=not_found',
+                        'rule=Do not answer the original question as normal chat.',
+                        'rule=Do not say 覚えています / 覚えてるよ / うん、覚えてます / 前に話した / 以前の流れ / 残っている / つながっている.',
+                        'rule=Do not invent details about the requested memory.',
+                        'output=記憶参照では見つかっていないことを短く親身に伝える。',
+                        'output=別の言い方や手がかりがあれば探せると伝える。',
+                        'tone=short, warm, plain.',
+                      ].join('\n'),
+                    }
+                  : m,
+              )
+            : filtered;
+
+          const systemIndex = executableFiltered.findIndex((m: any) => String(m?.role ?? '').trim() === 'system');
+          const guardIndex = systemIndex >= 0 ? systemIndex + 1 : 0;
+
+          return [
+            ...executableFiltered.slice(0, guardIndex),
+            guardMsg,
+            ...executableFiltered.slice(guardIndex),
+          ];
+        })();
+
         console.log(
           '[IROS/rephraseEngine][FINAL_MESSAGES_FOR_WRITER]',
           JSON.stringify({
@@ -13384,17 +13500,17 @@ const finalWriterDirectivesMsg =
             conversationId: debug.conversationId ?? null,
             userCode: debug.userCode ?? null,
             previousEventSourceForCall: hasPreviousEventSourceForCall,
-            len: Array.isArray(messagesForWriterCall) ? messagesForWriterCall.length : 0,
-            roles: Array.isArray(messagesForWriterCall)
-              ? messagesForWriterCall.map((m: any) => String(m?.role ?? ''))
+            len: Array.isArray(messagesForWriterCallFinal) ? messagesForWriterCallFinal.length : 0,
+            roles: Array.isArray(messagesForWriterCallFinal)
+              ? messagesForWriterCallFinal.map((m: any) => String(m?.role ?? ''))
               : [],
-            heads: Array.isArray(messagesForWriterCall)
-              ? messagesForWriterCall.map((m: any) => safeHead(String(m?.content ?? ''), 160))
+            heads: Array.isArray(messagesForWriterCallFinal)
+              ? messagesForWriterCallFinal.map((m: any) => safeHead(String(m?.content ?? ''), 160))
               : [],
           })
         );
 
-        return messagesForWriterCall;
+        return messagesForWriterCallFinal;
       })(),
       ...({ slotDecision: slotDecisionForWriter } as any),
       writerDirectives: {
@@ -16119,4 +16235,6 @@ return await runRetryPass({
     slotsForGuard,
   });
 }
+
+
 
