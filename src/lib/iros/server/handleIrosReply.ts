@@ -6151,6 +6151,99 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
       }
   }
 
+  const hasMemoryRecallNotFoundTurnContractForHfw = (() => {
+    const contracts = [
+      exAny?.turnContract,
+      exAny?.turnUnderstanding,
+      exAny?.ctxPack?.turnContract,
+      exAny?.ctxPack?.turnUnderstanding,
+      (out.metaForSave as any)?.extra?.turnContract,
+      (out.metaForSave as any)?.extra?.turnUnderstanding,
+      (out.metaForSave as any)?.extra?.ctxPack?.turnContract,
+      (out.metaForSave as any)?.extra?.ctxPack?.turnUnderstanding,
+    ];
+
+    return contracts.some((contract: any) => {
+      if (!contract || typeof contract !== 'object') return false;
+
+      return (
+        String(contract.turnTask ?? '').trim() === 'memory_recall_check' &&
+        String(contract.memoryStatus ?? '').trim() === 'not_found' &&
+        String(contract.writerAction ?? '').trim() === 'answer_memory_not_found'
+      );
+    });
+  })();
+
+  const normalizeRecallHistoryText = (value: unknown): string =>
+    String(value ?? '')
+      .replace(/\s+/g, '')
+      .replace(/[「」『』（）()【】\[\]、。,.!！?？]/g, '')
+      .trim();
+
+  const isMemoryRecallCheckForHfw = (value: unknown): boolean => {
+    const s = normalizeRecallHistoryText(value);
+    if (!s) return false;
+
+    const hasRememberVerb =
+      /(覚えてる|覚えてます|覚えています|覚えていた|覚えていました|覚えて|思い出せる|思い出せます)/u.test(s);
+
+    const hasRecallTarget =
+      /(思い出|記憶|話|こと|件|前|以前|この前|あの|その)/u.test(s);
+
+    return hasRememberVerb && hasRecallTarget;
+  };
+
+  const isFalseRecallAssistantForHfw = (value: unknown): boolean => {
+    const s = String(value ?? '').replace(/\s+/g, ' ').trim();
+    if (!s) return false;
+
+    return /(もちろん)?覚えています|覚えてます|覚えてるよ|前に話しました|以前の会話|残っています|残っている|つながっています|海の色|空気感|風や色|景色|思い出として/u.test(s);
+  };
+
+  if (hasMemoryRecallNotFoundTurnContractForHfw && isMemoryRecallCheckForHfw(text)) {
+    const beforeLen = tail.length;
+
+    const filteredTail: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+
+    for (let i = 0; i < tail.length; i++) {
+      const current = tail[i];
+      const next = tail[i + 1];
+
+      const isFalseRecallPair =
+        current?.role === 'user' &&
+        isMemoryRecallCheckForHfw(current.content) &&
+        next?.role === 'assistant' &&
+        isFalseRecallAssistantForHfw(next.content);
+
+      if (isFalseRecallPair) {
+        i += 1;
+        continue;
+      }
+
+      const isStandaloneFalseRecallAssistant =
+        current?.role === 'assistant' &&
+        isFalseRecallAssistantForHfw(current.content) &&
+        (i === 0 || isMemoryRecallCheckForHfw(tail[i - 1]?.content));
+
+      if (isStandaloneFalseRecallAssistant) {
+        continue;
+      }
+
+      filteredTail.push(current);
+    }
+
+    tail = filteredTail;
+
+    console.log('[IROS/HFW_FALSE_RECALL_FILTER]', {
+      conversationId,
+      userCode,
+      beforeLen,
+      afterLen: tail.length,
+      applied: beforeLen !== tail.length,
+      reason: 'turnContract.memory_recall_check.not_found',
+    });
+  }
+
   // 最大件数に再調整
   tail = tail.slice(-Math.max(1, maxMsgs));
 
