@@ -1,4 +1,4 @@
-﻿/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 // src/lib/iros/language/rephraseEngine.ts
 // iros — Rephrase/Generate Engine (slot-preserving)
@@ -5563,6 +5563,10 @@ const writerDirectivesFromSlotForFirstPass = isDetailPatternWriterForFirstPass
     e_turn: pickedETurn ?? null,
 
     userText: String((opts as any)?.userText ?? ''),
+    style: (opts as any)?.style ?? null,
+    effectiveStyle: (opts as any)?.effectiveStyle ?? (opts as any)?.style ?? null,
+    styleHint: (opts as any)?.styleHint ?? (opts as any)?.effectiveStyle ?? (opts as any)?.style ?? null,
+
 
     slotDecision: slotDecisionForFirstPass,
     writerDirectives: {
@@ -13530,6 +13534,10 @@ const finalWriterDirectivesMsg =
             }
           : {}),
       },
+
+        style: (opts as any)?.style ?? null,
+        effectiveStyle: (opts as any)?.effectiveStyle ?? (opts as any)?.style ?? null,
+        styleHint: (opts as any)?.styleHint ?? (opts as any)?.effectiveStyle ?? (opts as any)?.style ?? null,
 
         // ✅ 追加：冒頭オウム返しガード用（messagesには入れない。比較専用）
         echoGuardUserText: String((opts as any)?.userText ?? ''),

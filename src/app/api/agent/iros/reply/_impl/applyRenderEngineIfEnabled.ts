@@ -1,4 +1,4 @@
-// src/app/api/agent/iros/reply/_impl/applyRenderEngineIfEnabled.ts
+﻿// src/app/api/agent/iros/reply/_impl/applyRenderEngineIfEnabled.ts
 // iros — RenderEngine apply (single entry)
 // - enableRenderEngine=true の場合は render-v2 (renderGatewayAsReply)
 // - IT の場合のみ renderReply（従来）
@@ -23,6 +23,7 @@ export async function applyRenderEngineIfEnabled(params: {
   userCode: string;
   userText: string;
   historyMessages?: unknown[] | null;
+  style?: string | null;
 }): Promise<{ meta: any; extraForHandle: any }> {
   let {
     enableRenderEngine,
@@ -34,6 +35,7 @@ export async function applyRenderEngineIfEnabled(params: {
     userCode,
     userText,
     historyMessages,
+    style,
   } = params;
 
   // =========================
@@ -298,6 +300,7 @@ const attachRes: any = await maybeAttachRephraseForRenderV2({
   historyMessages: Array.isArray(historyMessages) ? historyMessages : undefined,
   traceId: String((meta as any)?.extra?.traceId ?? (meta as any)?.traceId ?? '').trim() || null,
   effectiveMode: (extraSoT as any)?.effectiveMode ?? (meta as any)?.extra?.effectiveMode ?? null,
+  style,
 });
 
 if (attachRes && typeof attachRes === 'object') {

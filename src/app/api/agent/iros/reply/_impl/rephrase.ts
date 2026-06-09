@@ -173,6 +173,7 @@ export async function maybeAttachRephraseForRenderV2(args: {
   memoryStateForCtx?: any | null;
   traceId?: string | null;
   effectiveMode?: string | null; // route で確定した最終 mode
+  style?: string | null;
 }) {
   const {
     conversationId,
@@ -184,6 +185,7 @@ export async function maybeAttachRephraseForRenderV2(args: {
     memoryStateForCtx,
     traceId,
     effectiveMode,
+    style,
   } = args;
 
   // ---------------------------------------------------------
@@ -2492,6 +2494,27 @@ try {
       userCode,
       traceId,
       userText,
+      style:
+        style ??
+        (meta as any)?.extra?.style ??
+        (extraMerged as any)?.style ??
+        (userContext as any)?.style ??
+        (userContext as any)?.ctxPack?.style ??
+        null,
+      effectiveStyle:
+        style ??
+        (meta as any)?.extra?.effectiveStyle ??
+        (extraMerged as any)?.effectiveStyle ??
+        (userContext as any)?.effectiveStyle ??
+        (userContext as any)?.ctxPack?.effectiveStyle ??
+        null,
+      styleHint:
+        style ??
+        (meta as any)?.extra?.styleHint ??
+        (extraMerged as any)?.styleHint ??
+        (userContext as any)?.styleHint ??
+        (userContext as any)?.ctxPack?.styleHint ??
+        null,
       goalKind:
         meta?.targetKind ??
         meta?.target_kind ??

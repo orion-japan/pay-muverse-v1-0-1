@@ -11865,6 +11865,10 @@ try {
         return resolved;
       })(),
 
+      style: ctx?.effectiveStyle ?? style ?? (userProfile as any)?.style ?? 'friendly',
+      effectiveStyle: ctx?.effectiveStyle ?? style ?? (userProfile as any)?.style ?? 'friendly',
+      styleHint: ctx?.effectiveStyle ?? style ?? (userProfile as any)?.style ?? 'friendly',
+
       extra: {
         ...(((out.metaForSave as any)?.extra ?? {}) as any),
 

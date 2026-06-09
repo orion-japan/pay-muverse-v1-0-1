@@ -1,4 +1,4 @@
-/* ========================================
+﻿/* ========================================
  🌍 1. 基本設定（Tailwind完全排除）
 ======================================== */
 
@@ -1313,6 +1313,12 @@ body:has(.iros-settings-main) .mu-main {
   max-width: 420px;
   margin: 0 auto;
   padding: 16px;
+  height: calc(100dvh - 56px - var(--footer-safe-pad, 72px));
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
+  padding-bottom: calc(var(--footer-safe-pad, 72px) + 96px);
 }
 .history-acc__summary {
   display: flex;

@@ -1,4 +1,4 @@
-﻿// =============================================
+// =============================================
 // file: src/lib/iros/language/rephrase/writerCalls.ts
 // ✅ buildFirstPassMessages を「最後 user で終わる」ように拡張
 // ✅ HistoryDigest v1 をここで注入できるようにする（唯一の choke point）
@@ -2916,6 +2916,84 @@ if (effectiveQuestionType === 'structure') {
 const isNormalCompressedPattern =
   patternKeyForDefaults === 'NORMAL_COMPRESSED_V1';
 
+  const selectedIrosStyle = (() => {
+    const raw = String(
+      (args as any)?.style ??
+        (args as any)?.effectiveStyle ??
+        (args as any)?.styleHint ??
+        (extra as any)?.style ??
+        (extra as any)?.effectiveStyle ??
+        (ctxPack as any)?.style ??
+        (ctxPack as any)?.effectiveStyle ??
+        ''
+    ).trim();
+
+    return raw === 'friendly' ||
+      raw === 'biz-soft' ||
+      raw === 'biz-formal' ||
+      raw === 'plain'
+      ? raw
+      : 'friendly';
+  })();
+
+  const irosStyleWriteConstraints = (() => {
+    switch (selectedIrosStyle) {
+      case 'friendly':
+        return [
+          '口調スタイル=friendly。Muの構造判断は保持しながら、かなり親しみやすい会話調で返す',
+          '文体は軽いタメ口寄りにしてよい。「〜だよ」「〜していい」「〜かも」「〜なんだよね」を自然に使う',
+          '最初に短く受け止める。ただしユーザー発話のオウム返しにはしない',
+          '硬い分析文、診断書のような文、レポート調を避ける',
+          '構造語・専門語は前面に出さず、日常語に置き換える',
+          '恋愛・人間関係では、相手を断定せず、ユーザーが安心して読める温度で返す',
+          '冷たく結論だけで切らない。少し寄り添いながら、でも長くしすぎない',
+          '絵文字は使ってよいが、多用しない。本文の流れに自然に添える',
+        ];
+
+      case 'biz-soft':
+        return [
+          '口調スタイル=biz-soft。Muの構造判断は保持しながら、やわらかい敬語で整理する',
+          '説明は丁寧にしつつ、日常会話より少し落ち着いた仕事向けの文体にする',
+          '結論を急ぎすぎず、相手に伝わる流れで要点をまとめる',
+          '過度に詩的な表現や強い断定を避ける',
+        ];
+
+      case 'biz-formal':
+        return [
+          '口調スタイル=biz-formal。Muの構造判断は保持しながら、会議・資料向けの明瞭な敬体にする',
+          '感情表現を控えめにし、結論、理由、示唆が分かる順序で書く',
+          '曖昧な余韻よりも、判断材料として使える整理を優先する',
+          'カジュアルな受け止め表現や会話調を避ける',
+        ];
+
+      case 'plain':
+        return [
+          '口調スタイル=plain。Muの構造判断は保持しながら、装飾を減らして簡潔に返す',
+          '象徴表現、余韻、詩的な言い回しを抑える',
+          '必要なことを短く、分かりやすい日常語で返す',
+          '構造語を多用せず、ユーザーがそのまま理解できる言葉に置き換える',
+        ];
+
+      default:
+        return [];
+    }
+  })();
+
+  try {
+    console.log('[IROS/STYLE_WRITER_CONSTRAINTS]', {
+      selectedIrosStyle,
+      argsStyle: (args as any)?.style ?? null,
+      argsEffectiveStyle: (args as any)?.effectiveStyle ?? null,
+      argsStyleHint: (args as any)?.styleHint ?? null,
+      extraStyle: (extra as any)?.style ?? null,
+      extraEffectiveStyle: (extra as any)?.effectiveStyle ?? null,
+      ctxPackStyle: (ctxPack as any)?.style ?? null,
+      ctxPackEffectiveStyle: (ctxPack as any)?.effectiveStyle ?? null,
+      irosStyleWriteConstraintsLen: irosStyleWriteConstraints.length,
+      irosStyleWriteConstraintsHead: irosStyleWriteConstraints.slice(0, 2),
+    });
+  } catch {}
+
   const mergedWriteConstraints = Array.from(
     new Set([
       ...incomingWriteConstraints,
@@ -3085,9 +3163,13 @@ return {
   flowFrom: String((args as any)?.flow180?.from ?? '').trim() || null,
   flowTo: String((args as any)?.flow180?.to ?? '').trim() || null,
 
-  writeConstraints: isResonancePattern
-    ? incomingWriteConstraints
-    : mergedWriteConstraints,
+  writeConstraints: Array.from(
+    new Set(
+      isResonancePattern
+        ? [...incomingWriteConstraints, ...irosStyleWriteConstraints]
+        : [...mergedWriteConstraints, ...irosStyleWriteConstraints]
+    )
+  ),
 };
               })();
 
@@ -5499,7 +5581,13 @@ export async function callWriterLLM(args: {
   extra?: any;
   userContext?: any;
   slotDecision?: any;
+  writerDirectives?: any;
   audit?: any;
+
+  // ✅ 最終Writer契約で使う口調スタイル
+  style?: string | null;
+  effectiveStyle?: string | null;
+  styleHint?: string | null;
 
   // ✅ 追加：HistoryDigest v1（存在する時だけ注入）
   historyDigestV1?: HistoryDigestV1 | null;
@@ -5580,6 +5668,117 @@ export async function callWriterLLM(args: {
       return { role: 'system', content: norm(m.content ?? '') } as WriterMessage;
     })
     .filter(Boolean) as WriterMessage[];
+
+  const finalWriterStyle = (() => {
+    const raw = String(
+      (args as any)?.style ??
+        (args as any)?.effectiveStyle ??
+        (args as any)?.styleHint ??
+        (args as any)?.writerDirectives?.style ??
+        (args as any)?.writerDirectives?.effectiveStyle ??
+        (args as any)?.writerDirectives?.styleHint ??
+        (args as any)?.extra?.style ??
+        (args as any)?.extra?.effectiveStyle ??
+        (args as any)?.extra?.styleHint ??
+        (args as any)?.userContext?.style ??
+        (args as any)?.userContext?.effectiveStyle ??
+        (args as any)?.userContext?.styleHint ??
+        (args as any)?.userContext?.ctxPack?.style ??
+        (args as any)?.userContext?.ctxPack?.effectiveStyle ??
+        (args as any)?.userContext?.ctxPack?.styleHint ??
+        ''
+    ).trim();
+
+    return raw === 'friendly' ||
+      raw === 'biz-soft' ||
+      raw === 'biz-formal' ||
+      raw === 'plain'
+      ? raw
+      : null;
+  })();
+
+  const finalWriterContract = (() => {
+    if (!finalWriterStyle) return '';
+
+    if (finalWriterStyle === 'friendly') {
+      return [
+        'FINAL_WRITER_CONTRACT (DO NOT OUTPUT):',
+        'priority=highest_style_contract_over_history_similarFlow_seed_expr_writerDirectives',
+        'style=friendly',
+        'rule=Use prior history, similarFlow, seed, expr, relationship context, and writerDirectives as content material only.',
+        'rule=Do not imitate the wording, sentence shape, ending pattern, or formal tone of prior assistant replies.',
+        'rule=Write in warm, natural, friendly Japanese.',
+        'rule=Light casual speech is allowed. Use endings such as「だよ」「していいよ」「かもね」「なんだよね」when natural.',
+        'rule=Do not make the answer sound like a report, diagnosis sheet, meeting note, or formal consultation memo.',
+        'rule=Avoid starting with stiff formulas such as「返事がないことを」「見方としては」「いちばん大事なのは」unless no better natural opening fits.',
+        'rule=For relationship advice, keep the structure accurate but make the surface language feel close and easy to read.',
+        'rule=Do not close with「必要なら次に」as a default ending.',
+      ].join('\n');
+    }
+
+    if (finalWriterStyle === 'plain') {
+      return [
+        'FINAL_WRITER_CONTRACT (DO NOT OUTPUT):',
+        'priority=highest_style_contract_over_history_similarFlow_seed_expr_writerDirectives',
+        'style=plain',
+        'rule=Use prior history, similarFlow, seed, expr, relationship context, and writerDirectives as content material only.',
+        'rule=Do not imitate decorative, poetic, or emotional wording from prior assistant replies.',
+        'rule=Write simply and plainly.',
+        'rule=Keep the answer short, direct, and easy to understand.',
+        'rule=Avoid symbolic wording, heavy warmth, and extra flourish.',
+      ].join('\n');
+    }
+
+    if (finalWriterStyle === 'biz-soft') {
+      return [
+        'FINAL_WRITER_CONTRACT (DO NOT OUTPUT):',
+        'priority=highest_style_contract_over_history_similarFlow_seed_expr_writerDirectives',
+        'style=biz-soft',
+        'rule=Use prior history, similarFlow, seed, expr, relationship context, and writerDirectives as content material only.',
+        'rule=Write in soft business Japanese.',
+        'rule=Use polite language, but keep it warm and easy to read.',
+        'rule=Avoid excessive casual speech and avoid stiff formal report tone.',
+      ].join('\n');
+    }
+
+    if (finalWriterStyle === 'biz-formal') {
+      return [
+        'FINAL_WRITER_CONTRACT (DO NOT OUTPUT):',
+        'priority=highest_style_contract_over_history_similarFlow_seed_expr_writerDirectives',
+        'style=biz-formal',
+        'rule=Use prior history, similarFlow, seed, expr, relationship context, and writerDirectives as content material only.',
+        'rule=Write in clear formal business Japanese.',
+        'rule=Prioritize structure, clarity, and useful judgment material.',
+        'rule=Avoid casual phrasing and emotional overstatement.',
+      ].join('\n');
+    }
+
+    return '';
+  })();
+
+  if (finalWriterContract) {
+    const systemIndex = messagesFinal.findIndex((m) => m?.role === 'system');
+
+    if (systemIndex >= 0) {
+      messagesFinal[systemIndex] = {
+        ...messagesFinal[systemIndex],
+        content: `${norm(messagesFinal[systemIndex]?.content ?? '')}\n\n${finalWriterContract}`.trim(),
+      };
+    } else {
+      messagesFinal.unshift({
+        role: 'system',
+        content: finalWriterContract,
+      });
+    }
+
+    try {
+      console.log('[IROS/FINAL_WRITER_CONTRACT]', {
+        style: finalWriterStyle,
+        injected: true,
+        messagesLen: messagesFinal.length,
+      });
+    } catch {}
+  }
 
   // --- ここから：冒頭オウム返し除去ガード（比較用の raw は echoGuardUserText を優先） ---
 
@@ -5702,3 +5901,4 @@ export async function callWriterLLM(args: {
 
   return text;
 }
+

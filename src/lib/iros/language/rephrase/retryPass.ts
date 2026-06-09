@@ -62,6 +62,10 @@ export async function runRetryPass(params: {
     userContext?: any;
 
     audit: any;
+
+    style?: string | null;
+    effectiveStyle?: string | null;
+    styleHint?: string | null;
     historyDigestV1?: any | null;
   }) => Promise<string>;
 
@@ -284,6 +288,10 @@ if (shouldRepairBlockPlanOnly && String(baseDraftForRepair ?? '').trim().length 
       (opts as any)?.writerDirectives && typeof (opts as any).writerDirectives === 'object'
         ? (opts as any).writerDirectives
         : {},
+
+    style: (opts as any)?.style ?? null,
+    effectiveStyle: (opts as any)?.effectiveStyle ?? (opts as any)?.style ?? null,
+    styleHint: (opts as any)?.styleHint ?? (opts as any)?.effectiveStyle ?? (opts as any)?.style ?? null,
 
     historyDigestV1: historyDigestV1 ?? null,
 
