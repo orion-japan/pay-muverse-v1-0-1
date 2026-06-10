@@ -1,4 +1,4 @@
-// src/app/LayoutClient.tsx
+﻿// src/app/LayoutClient.tsx
 'use client';
 
 import Footer from '../components/Footer';
@@ -90,18 +90,19 @@ function LayoutBody({ children }: { children: React.ReactNode }) {
   const isIros = pathname?.startsWith('/iros') === true;
   const isSofia = pathname?.startsWith('/sofia') === true;
   const isIrosAi = pathname?.startsWith('/iros-ai') === true; // ★ IROS-AI 判定
+  const isTikTokRadar = pathname?.startsWith('/admin/tiktok-radar') === true;
 
-  // /credit と /iros-ai 以外はフッター高さを測る
-  usePortalFooterPadding(!(isCredit || isIrosAi));
+  // /credit, /iros-ai, /admin/tiktok-radar 以外はフッター高さを測る
+  usePortalFooterPadding(!(isCredit || isIrosAi || isTikTokRadar));
 
   // main の padding-bottom
   const mainPad = useMemo(
-    () => (isCredit || isIrosAi ? '0' : 'var(--footer-safe-pad, 56px)'),
-    [isCredit, isIrosAi],
+    () => (isCredit || isIrosAi || isTikTokRadar ? '0' : 'var(--footer-safe-pad, 56px)'),
+    [isCredit, isIrosAi, isTikTokRadar],
   );
 
   // /iros-ai のときは外側スクロールを切る
-  const mainOverflowY: 'auto' | 'visible' = isIrosAi ? 'visible' : 'auto';
+  const mainOverflowY: 'auto' | 'visible' = isIrosAi || isTikTokRadar ? 'visible' : 'auto';
 
   // ★ IROS-AI: body / html 自体のスクロールも止める
   useEffect(() => {
@@ -130,12 +131,12 @@ function LayoutBody({ children }: { children: React.ReactNode }) {
   return (
     <>
       {/* /mu_ai, /mu_full, /iros, /sofia では PAY 側ヘッダー非表示 */}
-      {!(isMuAI || isIros || isSofia) && mounted && (
+      {!(isMuAI || isIros || isSofia || isTikTokRadar) && mounted && (
         <Header onLoginClick={() => setShowLogin(true)} />
       )}
 
       <main
-        className={`mu-main ${isMuAI ? 'mu-main--wide' : ''}`}
+        className={`mu-main ${isMuAI || isTikTokRadar ? 'mu-main--wide' : ''}`}
         style={{
           flex: '1 1 auto',
           overflowY: mainOverflowY,
@@ -143,18 +144,18 @@ function LayoutBody({ children }: { children: React.ReactNode }) {
           paddingBottom: mainPad,
         }}
       >
-        <div className={`mu-page ${isMuAI ? 'mu-page--wide' : ''}`}>{children}</div>
+        <div className={`mu-page ${isMuAI || isTikTokRadar ? 'mu-page--wide' : ''}`}>{children}</div>
       </main>
 
       {/* /credit と /iros-ai 以外はフッターを表示 */}
-      {!isCredit && !isIrosAi && mounted && (
+      {!isCredit && !isIrosAi && !isTikTokRadar && mounted && (
         <FooterPortal>
           <Footer />
         </FooterPortal>
       )}
 
       {/* ヘッダー由来モーダル */}
-      {!(isMuAI || isIros || isSofia) && mounted && (
+      {!(isMuAI || isIros || isSofia || isTikTokRadar) && mounted && (
         <LoginModal
           isOpen={showLogin}
           onClose={() => setShowLogin(false)}
@@ -208,6 +209,7 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
   const { userCode, idToken, loading } = useAuth();
   const isMuAI =
     pathname?.startsWith('/mu_ai') === true || pathname?.startsWith('/mu_full') === true;
+  const isTikTokRadar = pathname?.startsWith('/admin/tiktok-radar') === true;
 
 
   // 監視記録（テレメトリ）
@@ -277,9 +279,13 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
   return (
     <ResonanceProvider>
       <BootstrapResonanceUser />
-      <div className={`app-container ${isMuAI ? 'mu-ai' : ''}`} suppressHydrationWarning>
+      <div className={`app-container ${isMuAI || isTikTokRadar ? 'mu-ai' : ''}`} suppressHydrationWarning>
         <LayoutBody>{children}</LayoutBody>
       </div>
     </ResonanceProvider>
   );
 }
+
+
+
+
