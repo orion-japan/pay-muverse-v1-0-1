@@ -165,6 +165,33 @@ export default function EditTikTokRadarPage() {
     router.refresh();
   }
 
+  async function handleDelete() {
+    if (!id) return;
+
+    const ok = window.confirm("この市場データを削除します。よろしいですか？");
+
+    if (!ok) {
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+
+    const { error: deleteError } = await sofiaTikTokSupabase
+      .from("tiktok_market_research")
+      .delete()
+      .eq("id", id);
+
+    if (deleteError) {
+      setError(deleteError.message);
+      setSaving(false);
+      return;
+    }
+
+    router.push("/admin/tiktok-radar");
+    router.refresh();
+  }
+
   if (loading) {
     return <main style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>読み込み中...</main>;
   }
@@ -239,6 +266,25 @@ export default function EditTikTokRadarPage() {
 
         <button type="submit" disabled={saving || !form.video_url} style={submitStyle}>
           {saving ? "保存中..." : "更新する"}
+        </button>
+
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={saving}
+          style={{
+            marginTop: 24,
+            marginLeft: 12,
+            padding: "14px 24px",
+            borderRadius: 12,
+            border: "none",
+            background: "#b00020",
+            color: "#fff",
+            fontWeight: 800,
+            cursor: saving ? "not-allowed" : "pointer",
+          }}
+        >
+          削除する
         </button>
       </form>
     </main>

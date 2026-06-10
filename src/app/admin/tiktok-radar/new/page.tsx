@@ -77,6 +77,10 @@ export default function NewTikTokRadarPage() {
     return Number.isFinite(n) ? n : 0;
   }
 
+  function normalizeVideoUrl(value: string) {
+    return value.trim().split("?")[0].replace(/\/+$/, "");
+  }
+
   function handleAnalyze() {
     const result = analyzeTikTokRadarInput({
       category: form.category,
@@ -103,12 +107,32 @@ export default function NewTikTokRadarPage() {
     setSaving(true);
     setError("");
 
+    const normalizedVideoUrl = normalizeVideoUrl(form.video_url);
+
+    const { data: existingItems, error: duplicateCheckError } = await sofiaTikTokSupabase
+      .from("tiktok_market_research")
+      .select("id")
+      .eq("video_url", normalizedVideoUrl)
+      .limit(1);
+
+    if (duplicateCheckError) {
+      setError(duplicateCheckError.message);
+      setSaving(false);
+      return;
+    }
+
+    if ((existingItems ?? []).length > 0) {
+      setError("この動画URLはすでに登録されています。");
+      setSaving(false);
+      return;
+    }
+
     const payload = {
       category: form.category || null,
       keyword: form.keyword || null,
       account_name: form.account_name || null,
       account_url: form.account_url || null,
-      video_url: form.video_url,
+      video_url: normalizedVideoUrl,
       video_title: form.video_title || null,
       hook_text: form.hook_text || null,
       caption_text: form.caption_text || null,
