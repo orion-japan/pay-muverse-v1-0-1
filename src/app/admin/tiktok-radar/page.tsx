@@ -66,23 +66,44 @@ export default async function TikTokRadarPage({
           </p>
         </div>
 
-        <Link
-          href="/admin/tiktok-radar/new"
-          style={{
-            height: 44,
-            padding: "0 18px",
-            borderRadius: 10,
-            background: "#111",
-            color: "#fff",
-            textDecoration: "none",
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontWeight: 700,
-          }}
-        >
-          新規登録
-        </Link>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <Link
+            href="/admin/tiktok-radar/bulk"
+            style={{
+              height: 44,
+              padding: "0 18px",
+              borderRadius: 10,
+              background: "#fff",
+              color: "#111",
+              border: "1px solid #ddd",
+              textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: 700,
+            }}
+          >
+            URL一括登録
+          </Link>
+
+          <Link
+            href="/admin/tiktok-radar/new"
+            style={{
+              height: 44,
+              padding: "0 18px",
+              borderRadius: 10,
+              background: "#111",
+              color: "#fff",
+              textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: 700,
+            }}
+          >
+            新規登録
+          </Link>
+        </div>
       </div>
 
       <form
