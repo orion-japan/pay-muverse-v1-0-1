@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { sofiaTikTokSupabase } from "@/lib/sofia/tiktok-radar/supabase";
+import { analyzeTikTokRadarInput } from "@/lib/sofia/tiktok-radar/analyzer";
 
 const emptyForm = {
   category: "",
@@ -96,6 +97,27 @@ export default function EditTikTokRadarPage() {
   function toNumber(value: string) {
     const n = Number(value);
     return Number.isFinite(n) ? n : 0;
+  }
+
+  function handleAnalyze() {
+    const result = analyzeTikTokRadarInput({
+      category: form.category,
+      keyword: form.keyword,
+      hook_text: form.hook_text,
+      caption_text: form.caption_text,
+      top_comment: form.top_comment,
+    });
+
+    setForm((prev) => ({
+      ...prev,
+      reaction_words: result.reaction_words,
+      resonance_words: result.resonance_words,
+      why_known_score: result.why_known_score,
+      resonance_score: result.resonance_score,
+      save_intent_score: result.save_intent_score,
+      sofia_note: result.sofia_note,
+      status: result.status,
+    }));
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -196,6 +218,24 @@ export default function EditTikTokRadarPage() {
         </div>
 
         <Textarea label="Sofiaメモ" value={form.sofia_note} onChange={(v) => updateField("sofia_note", v)} />
+
+        <button
+          type="button"
+          onClick={handleAnalyze}
+          style={{
+            marginTop: 24,
+            marginRight: 12,
+            padding: "14px 24px",
+            borderRadius: 12,
+            border: "1px solid #111",
+            background: "#fff",
+            color: "#111",
+            fontWeight: 800,
+            cursor: "pointer",
+          }}
+        >
+          Sofia自動分析
+        </button>
 
         <button type="submit" disabled={saving || !form.video_url} style={submitStyle}>
           {saving ? "保存中..." : "更新する"}
