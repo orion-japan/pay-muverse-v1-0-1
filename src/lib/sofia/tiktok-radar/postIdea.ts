@@ -12,6 +12,15 @@ export type TikTokRadarPostIdeaInput = {
   sofia_note: string | null;
 };
 
+export type TikTokRadarPostIdeaVariant = {
+  title: string;
+  description: string;
+  opening: string;
+  body: string;
+  muLead: string;
+  hashtags: string;
+};
+
 export type TikTokRadarPostIdea = {
   opening: string;
   body: string;
@@ -19,6 +28,7 @@ export type TikTokRadarPostIdea = {
   hashtags: string;
   totalScore: number;
   scoreLabel: string;
+  variants: TikTokRadarPostIdeaVariant[];
 };
 
 function cleanText(value: string | null | undefined) {
@@ -27,6 +37,10 @@ function cleanText(value: string | null | undefined) {
 
 function scoreNumber(value: number | null | undefined) {
   return Number.isFinite(Number(value)) ? Number(value) : 0;
+}
+
+function uniqueJoin(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean))).join(" ");
 }
 
 function pickTheme(input: TikTokRadarPostIdeaInput) {
@@ -38,61 +52,83 @@ function pickTheme(input: TikTokRadarPostIdeaInput) {
     input.top_comment,
     input.reaction_words,
     input.resonance_words,
+    input.sofia_note,
   ]
     .filter(Boolean)
     .join(" ");
 
   if (text.includes("復縁") || text.includes("連絡")) {
     return {
-      theme: "復縁・連絡待ち",
-      pain: "相手の沈黙を見つめ続けるほど、自分の価値まで止まってしまうこと",
-      shift: "見る場所を、相手の気持ちから自分の待ち方へ戻すこと",
+      name: "復縁・連絡待ち",
       tag: "#復縁",
+      pain: "連絡が来ない時間が、自分の価値まで止めてしまうこと",
+      shift: "相手の沈黙ではなく、自分の待ち方を見ること",
+      direct: "相手を待っているようで、本当は自分の価値が戻るのを待っています。",
     };
   }
 
   if (text.includes("片思い")) {
     return {
-      theme: "片思い",
-      pain: "相手の反応ひとつで、自分の心が大きく揺れてしまうこと",
-      shift: "相手に合わせる前に、自分の本音を見失わないこと",
+      name: "片思い",
       tag: "#片思い",
+      pain: "相手の反応ひとつで、自分の気持ちまで揺れてしまうこと",
+      shift: "相手の答えより先に、自分の気持ちの置き場を見ること",
+      direct: "相手の反応を見ているようで、本当は自分が傷つかない場所を探しています。",
     };
   }
 
   if (text.includes("自己受容") || text.includes("自己否定")) {
     return {
-      theme: "自己受容",
-      pain: "変わりたいのに、自分を責めるほど動けなくなること",
-      shift: "直す前に、なぜ責めてしまうのかを見ること",
+      name: "自己受容",
       tag: "#自己受容",
+      pain: "自分を責める声が強くなり、本来の感覚が見えにくくなること",
+      shift: "変わろうとする前に、責めている場所を見つけること",
+      direct: "変われないのではなく、責めている場所がまだ見えていないだけです。",
     };
   }
 
   if (text.includes("成功") || text.includes("仕事")) {
     return {
-      theme: "成功論",
-      pain: "進みたいのに、内側で止めている感覚があること",
-      shift: "努力量ではなく、意図の向きを整えること",
+      name: "成功論",
       tag: "#成功論",
+      pain: "動いているのに、なぜか流れが噛み合わないこと",
+      shift: "努力量ではなく、意図の向きを見ること",
+      direct: "足りないのは努力ではなく、向かっている先のズレかもしれません。",
     };
   }
 
   return {
-    theme: cleanText(input.category) || "内面理解",
-    pain: "自分でも言葉にできない違和感が残っていること",
-    shift: "その違和感を、分かる言葉に変えること",
-    tag: "#心の整理",
+    name: "内面理解",
+    tag: "#内面理解",
+    pain: "自分でもうまく説明できない苦しさが残っていること",
+    shift: "感情を片づける前に、どこで止まっているかを見ること",
+    direct: "答えがないのではなく、まだ見ていない場所に言葉が残っています。",
   };
+}
+
+function fallbackOpening(theme: ReturnType<typeof pickTheme>) {
+  return `${theme.name}で苦しいとき、本当に見ているのは相手ではないかもしれません。`;
+}
+
+function buildBaseHashtags(themeTag: string, keyword: string) {
+  return uniqueJoin([
+    keyword ? `#${keyword.replace(/\s+/g, "")}` : "",
+    themeTag,
+    "#恋愛心理",
+    "#自己受容",
+    "#Mu",
+    "#なんでわかるの",
+  ]);
 }
 
 export function buildTikTokRadarPostIdea(
   input: TikTokRadarPostIdeaInput
 ): TikTokRadarPostIdea {
-  const hook = cleanText(input.hook_text);
+  const theme = pickTheme(input);
   const keyword = cleanText(input.keyword);
-  const resonanceWords = cleanText(input.resonance_words);
+  const hook = cleanText(input.hook_text);
   const reactionWords = cleanText(input.reaction_words);
+  const resonanceWords = cleanText(input.resonance_words);
 
   const totalScore =
     scoreNumber(input.why_known_score) +
@@ -108,37 +144,95 @@ export function buildTikTokRadarPostIdea(
           ? "調整すれば使える"
           : "素材として保留";
 
-  const theme = pickTheme(input);
-
-  const opening =
-    hook ||
-    `${keyword || theme.theme}で苦しいとき、見ている場所が少しずれていることがあります。`;
+  const opening = hook || fallbackOpening(theme);
 
   const body = [
     opening,
     "",
     `本当に苦しいのは、${theme.pain}です。`,
-    "",
     `だから必要なのは、無理に答えを出すことではなく、${theme.shift}です。`,
-    resonanceWords ? `\nこの投稿で使う共鳴語: ${resonanceWords}` : "",
-    reactionWords ? `\n反応が出そうな言葉: ${reactionWords}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  ].join("\n");
 
   const muLead = [
     "その苦しさがどこから来ているのか、Muが映します。",
     "相手の答えを当てるためではなく、あなたの中で止まっている場所を見つけるためです。",
   ].join("\n");
 
-  const hashtags = uniqueJoin([
-    theme.tag,
-    keyword ? `#${keyword.replace(/\s+/g, "")}` : "",
-    "#恋愛心理",
-    "#自己受容",
-    "#Mu",
-    "#なんでわかるの",
-  ]);
+  const hashtags = buildBaseHashtags(theme.tag, keyword);
+
+  const empathyOpening =
+    hook || `${theme.name}で苦しい人へ。まず責めなくて大丈夫です。`;
+
+  const insightOpening =
+    resonanceWords || theme.direct;
+
+  const saveOpening =
+    reactionWords.includes("保存") || reactionWords.includes("見返す")
+      ? "あとで見返したくなる人は、ここを覚えておいてください。"
+      : `${theme.name}で何度も同じところに戻ってしまう人へ。`;
+
+  const muOpening = "なんでこんなに苦しいのか、Muが映します。";
+
+  const variants: TikTokRadarPostIdeaVariant[] = [
+    {
+      title: "共感型",
+      description: "最初に「それ私」と思わせる投稿案",
+      opening: empathyOpening,
+      body: [
+        empathyOpening,
+        "",
+        `つらいのは弱いからではありません。${theme.pain}が起きているからです。`,
+        `だから今見るべきなのは、気持ちを消すことではなく、${theme.shift}です。`,
+      ].join("\n"),
+      muLead:
+        "その苦しさがどこから来ているのか、Muが映します。まずは、あなたの中で止まっている場所を見つけます。",
+      hashtags,
+    },
+    {
+      title: "見抜き型",
+      description: "「なんでわかるの？」を起こす投稿案",
+      opening: insightOpening,
+      body: [
+        insightOpening,
+        "",
+        `表面では別のことに見えていても、奥では${theme.pain}が起きています。`,
+        `そこに気づくと、次に見る場所が変わります。`,
+      ].join("\n"),
+      muLead:
+        "Muは、相手の答えを当てるためではなく、あなたの中でまだ言葉になっていないズレを映します。",
+      hashtags,
+    },
+    {
+      title: "保存型",
+      description: "あとで見返したくなる投稿案",
+      opening: saveOpening,
+      body: [
+        saveOpening,
+        "",
+        `苦しいときほど、見る場所を間違えやすくなります。`,
+        `相手の反応ではなく、${theme.shift}。`,
+        "ここを思い出すだけで、流れは少し変わります。",
+      ].join("\n"),
+      muLead:
+        "迷ったときは、Muにそのまま話してください。今どこで止まっているのかを、一緒に映します。",
+      hashtags,
+    },
+    {
+      title: "Mu導線型",
+      description: "Muへの登録・体験につなげる投稿案",
+      opening: muOpening,
+      body: [
+        muOpening,
+        "",
+        `同じことで苦しくなるとき、必要なのは根性ではありません。`,
+        `必要なのは、${theme.pain}を見つけることです。`,
+        "Muは、その見落としている場所を言葉にします。",
+      ].join("\n"),
+      muLead:
+        "Muで、今のあなたの状態をそのまま話してみてください。答えを急がず、まず見えていない場所を映します。",
+      hashtags,
+    },
+  ];
 
   return {
     opening,
@@ -147,9 +241,6 @@ export function buildTikTokRadarPostIdea(
     hashtags,
     totalScore,
     scoreLabel,
+    variants,
   };
-}
-
-function uniqueJoin(values: string[]) {
-  return Array.from(new Set(values.filter(Boolean))).join(" ");
 }
