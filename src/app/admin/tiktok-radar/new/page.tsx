@@ -1,39 +1,71 @@
-﻿"use client";
+"use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { sofiaTikTokSupabase } from "@/lib/sofia/tiktok-radar/supabase";
+
+const LAST_FORM_STORAGE_KEY = "sofia_tiktok_radar_last_form";
+
+const DEFAULT_FORM = {
+  category: "",
+  keyword: "",
+  account_name: "",
+  account_url: "",
+  video_url: "",
+  video_title: "",
+  hook_text: "",
+  caption_text: "",
+  views_count: "0",
+  likes_count: "0",
+  comments_count: "0",
+  shares_count: "0",
+  saves_count: "0",
+  followers_count: "0",
+  top_comment: "",
+  reaction_words: "",
+  resonance_words: "",
+  why_known_score: "0",
+  resonance_score: "0",
+  save_intent_score: "0",
+  sofia_note: "",
+  status: "draft",
+};
+
+type FormState = typeof DEFAULT_FORM;
 
 export default function NewTikTokRadarPage() {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const [form, setForm] = useState({
-    category: "",
-    keyword: "",
-    account_name: "",
-    account_url: "",
-    video_url: "",
-    video_title: "",
-    hook_text: "",
-    caption_text: "",
-    views_count: "0",
-    likes_count: "0",
-    comments_count: "0",
-    shares_count: "0",
-    saves_count: "0",
-    followers_count: "0",
-    top_comment: "",
-    reaction_words: "",
-    resonance_words: "",
-    why_known_score: "0",
-    resonance_score: "0",
-    save_intent_score: "0",
-    sofia_note: "",
-    status: "draft",
-  });
+  const [form, setForm] = useState<FormState>(DEFAULT_FORM);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem(LAST_FORM_STORAGE_KEY);
+
+    if (!saved) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(saved) as Partial<FormState>;
+
+      setForm((prev) => ({
+        ...prev,
+        category: parsed.category ?? prev.category,
+        keyword: parsed.keyword ?? prev.keyword,
+        account_name: parsed.account_name ?? prev.account_name,
+        account_url: parsed.account_url ?? prev.account_url,
+        why_known_score: parsed.why_known_score ?? prev.why_known_score,
+        resonance_score: parsed.resonance_score ?? prev.resonance_score,
+        save_intent_score: parsed.save_intent_score ?? prev.save_intent_score,
+        status: parsed.status ?? prev.status,
+      }));
+    } catch {
+      window.localStorage.removeItem(LAST_FORM_STORAGE_KEY);
+    }
+  }, []);
 
   function updateField(name: string, value: string) {
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -83,6 +115,20 @@ export default function NewTikTokRadarPage() {
       setSaving(false);
       return;
     }
+
+    window.localStorage.setItem(
+      LAST_FORM_STORAGE_KEY,
+      JSON.stringify({
+        category: form.category,
+        keyword: form.keyword,
+        account_name: form.account_name,
+        account_url: form.account_url,
+        why_known_score: form.why_known_score,
+        resonance_score: form.resonance_score,
+        save_intent_score: form.save_intent_score,
+        status: form.status,
+      })
+    );
 
     router.push("/admin/tiktok-radar");
     router.refresh();
