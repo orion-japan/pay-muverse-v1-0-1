@@ -205,7 +205,7 @@ export default async function TikTokRadarPage({
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "1.1fr 1.6fr 0.6fr 0.6fr 0.6fr 0.7fr 0.7fr",
+            gridTemplateColumns: "1fr 1.5fr 0.55fr 0.55fr 0.55fr 0.55fr 0.7fr 1fr",
             gap: 12,
             padding: "12px 14px",
             borderRadius: 10,
@@ -219,6 +219,7 @@ export default async function TikTokRadarPage({
           <div>なんで</div>
           <div>共鳴</div>
           <div>保存</div>
+          <div>合計</div>
           <div>状態</div>
           <div>操作</div>
         </div>
@@ -233,7 +234,7 @@ export default async function TikTokRadarPage({
               key={item.id}
               style={{
                 display: "grid",
-                gridTemplateColumns: "1.1fr 1.6fr 0.6fr 0.6fr 0.6fr 0.7fr 0.7fr",
+                gridTemplateColumns: "1fr 1.5fr 0.55fr 0.55fr 0.55fr 0.55fr 0.7fr 1fr",
                 gap: 12,
                 padding: "14px",
                 borderBottom: "1px solid #eee",
@@ -272,8 +273,32 @@ export default async function TikTokRadarPage({
               <div>{item.why_known_score ?? 0}</div>
               <div>{item.resonance_score ?? 0}</div>
               <div>{item.save_intent_score ?? 0}</div>
-              <div>{item.status || "draft"}</div>
               <div>
+                {(item.why_known_score ?? 0) +
+                  (item.resonance_score ?? 0) +
+                  (item.save_intent_score ?? 0)}
+              </div>
+              <div>{item.status || "draft"}</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Link
+                  href={`/admin/tiktok-radar/${item.id}/idea`}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    minHeight: 34,
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    background: "#2563eb",
+                    color: "#fff",
+                    textDecoration: "none",
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  投稿案
+                </Link>
+
                 <Link
                   href={`/admin/tiktok-radar/${item.id}/edit`}
                   style={{
