@@ -47,6 +47,26 @@ function resolvePlanStatus(clickType: string): string {
   return clickType;
 }
 
+function buildCompatibilityDateUpdates(params: {
+  clickType: string;
+  planValidUntil: string | null;
+  eventAt: string;
+}) {
+  const { clickType, planValidUntil, eventAt } = params;
+
+  if (clickType === 'free') {
+    return {
+      next_payment_date: null,
+      last_payment_date: eventAt,
+    };
+  }
+
+  return {
+    next_payment_date: planValidUntil,
+    last_payment_date: eventAt,
+  };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as ApplyBody;
@@ -57,6 +77,7 @@ export async function POST(req: NextRequest) {
     const source = String(body.source ?? 'system').trim() || 'system';
     const plan_valid_until = body.plan_valid_until ?? null;
     const payjp_subscription_id = body.payjp_subscription_id ?? null;
+    const eventAt = new Date().toISOString();
 
     if (!user_code || !new_click_type) {
       return NextResponse.json(
@@ -76,7 +97,7 @@ export async function POST(req: NextRequest) {
     const { data: beforeUser, error: beforeError } = await supabaseAdmin
       .from('users')
       .select(
-        'user_code, click_type, plan_status, sofia_credit, plan_valid_until, payjp_subscription_id',
+        'user_code, click_type, plan_status, sofia_credit, plan_valid_until, next_payment_date, last_payment_date, payjp_subscription_id',
       )
       .eq('user_code', user_code)
       .maybeSingle();
@@ -96,16 +117,30 @@ export async function POST(req: NextRequest) {
       p_sofia_credit: credit,
       p_valid_until: plan_valid_until,
       p_payjp_subscription_id: payjp_subscription_id,
-      p_event_at: new Date().toISOString(),
+      p_event_at: eventAt,
     });
 
     if (rpcError) throw rpcError;
+
+    // account-status currently reads users.next_payment_date as plan_valid_until.
+    // Keep the compatibility date columns in sync with the canonical plan_valid_until
+    // so PAY.JP renewals do not leave the app showing an expired subscription.
+    const { error: dateSyncError } = await supabaseAdmin
+      .from('users')
+      .update(buildCompatibilityDateUpdates({
+        clickType: new_click_type,
+        planValidUntil: plan_valid_until,
+        eventAt,
+      }))
+      .eq('user_code', user_code);
+
+    if (dateSyncError) throw dateSyncError;
 
     const historyRow = {
       user_code,
       plan_type: new_click_type,
       change_source: source,
-      effective_from: new Date().toISOString(),
+      effective_from: eventAt,
       notes: reason,
       note: {
         reason,
@@ -115,6 +150,8 @@ export async function POST(req: NextRequest) {
           plan_status: beforeUser.plan_status ?? null,
           sofia_credit: beforeUser.sofia_credit ?? null,
           plan_valid_until: beforeUser.plan_valid_until ?? null,
+          next_payment_date: beforeUser.next_payment_date ?? null,
+          last_payment_date: beforeUser.last_payment_date ?? null,
           payjp_subscription_id: beforeUser.payjp_subscription_id ?? null,
         },
         after: {
@@ -122,6 +159,8 @@ export async function POST(req: NextRequest) {
           plan_status: new_plan,
           sofia_credit: credit,
           plan_valid_until,
+          next_payment_date: new_click_type === 'free' ? null : plan_valid_until,
+          last_payment_date: eventAt,
           payjp_subscription_id,
         },
       },
@@ -139,7 +178,7 @@ export async function POST(req: NextRequest) {
     const { data: afterUser, error: afterError } = await supabaseAdmin
       .from('users')
       .select(
-        'user_code, click_type, plan_status, sofia_credit, plan_valid_until, payjp_subscription_id',
+        'user_code, click_type, plan_status, sofia_credit, plan_valid_until, next_payment_date, last_payment_date, payjp_subscription_id',
       )
       .eq('user_code', user_code)
       .maybeSingle();
@@ -154,6 +193,8 @@ export async function POST(req: NextRequest) {
         plan_status: afterUser?.plan_status ?? new_plan,
         sofia_credit: afterUser?.sofia_credit ?? credit,
         plan_valid_until: afterUser?.plan_valid_until ?? plan_valid_until,
+        next_payment_date: afterUser?.next_payment_date ?? (new_click_type === 'free' ? null : plan_valid_until),
+        last_payment_date: afterUser?.last_payment_date ?? eventAt,
         payjp_subscription_id: afterUser?.payjp_subscription_id ?? payjp_subscription_id,
       },
     });
