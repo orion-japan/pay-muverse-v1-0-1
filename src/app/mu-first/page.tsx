@@ -2,35 +2,113 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { authedFetch, useAuth } from "@/context/AuthContext";
+
+type DiagnosisResponse = {
+  ok?: boolean;
+  diagnosis?: string;
+  error?: string;
+  detail?: string;
+  credit_consumed?: boolean | null;
+  model?: string;
+};
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+      } else {
+        reject(new Error("invalid_file_result"));
+      }
+    };
+
+    reader.onerror = () => reject(reader.error || new Error("file_read_failed"));
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function MuFirstPage() {
+  const { user, loading } = useAuth();
+
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [imageName, setImageName] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
   const [diagnosis, setDiagnosis] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const canSubmit = useMemo(() => Boolean(previewUrl), [previewUrl]);
+  const canSubmit = useMemo(
+    () => Boolean(previewUrl && selectedFile && user && !loading && !submitting),
+    [previewUrl, selectedFile, user, loading, submitting],
+  );
 
   function handleImageChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
 
     if (!file) {
+      setSelectedFile(null);
       setImageName("");
       setPreviewUrl("");
       setDiagnosis("");
+      setError("");
       return;
     }
 
+    setSelectedFile(file);
     setImageName(file.name);
     setPreviewUrl(URL.createObjectURL(file));
     setDiagnosis("");
+    setError("");
   }
 
-  function handleSubmit() {
-    if (!canSubmit) return;
+  async function handleSubmit() {
+    if (!canSubmit || !selectedFile) return;
 
-    setDiagnosis(
-      "この画面では、まだ本診断APIには接続していません。次の実装で、スクリーンショットをMuの初回診断APIへ送り、診断結果をここに表示します。"
-    );
+    setSubmitting(true);
+    setDiagnosis("");
+    setError("");
+
+    try {
+      const imageDataUrl = await fileToDataUrl(selectedFile);
+
+      const res = await authedFetch("/api/mu/first-diagnosis", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          image_data_url: imageDataUrl,
+          source: "mu_first",
+        }),
+      });
+
+      const data = (await res.json().catch(() => ({}))) as DiagnosisResponse;
+
+      if (!res.ok || !data.ok) {
+        const message =
+          data.error === "no_screenshot_credit"
+            ? "スクショ診断クレジットがありません。"
+            : data.error === "invalid_image"
+              ? "画像を読み取れませんでした。別の画像でお試しください。"
+              : data.error === "missing_openai_api_key"
+                ? "OpenAI APIキーが未設定です。"
+                : data.error === "llm_failed"
+                  ? "診断生成でエラーが起きました。"
+                  : data.error || "診断に失敗しました。";
+
+        setError(message);
+        return;
+      }
+
+      setDiagnosis(data.diagnosis || "");
+    } catch (e: any) {
+      setError(e?.message || "診断に失敗しました。");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -99,6 +177,23 @@ export default function MuFirstPage() {
             Muがその状態を読み取り、最初の言葉にします。
           </p>
         </div>
+
+        {!loading && !user ? (
+          <div
+            style={{
+              borderRadius: 20,
+              background: "#fff4e8",
+              color: "#6d4b31",
+              padding: "14px 16px",
+              fontSize: 14,
+              lineHeight: 1.7,
+            }}
+          >
+            初回診断を使うにはログインが必要です。
+            <br />
+            先に登録またはログインしてください。
+          </div>
+        ) : null}
 
         <div
           style={{
@@ -203,8 +298,21 @@ export default function MuFirstPage() {
               cursor: canSubmit ? "pointer" : "not-allowed",
             }}
           >
-            Muに診断してもらう
+            {submitting ? "診断しています..." : "Muに診断してもらう"}
           </button>
+
+          {error ? (
+            <p
+              style={{
+                margin: "12px 0 0",
+                color: "#b3261e",
+                fontSize: 13,
+                lineHeight: 1.7,
+              }}
+            >
+              {error}
+            </p>
+          ) : null}
         </div>
 
         {diagnosis ? (
