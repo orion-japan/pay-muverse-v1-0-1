@@ -54,7 +54,9 @@ function isCronAuthorized(req: NextRequest): boolean {
   if (!cronSecret) return false;
 
   const authorization = req.headers.get('authorization') || req.headers.get('Authorization') || '';
-  return authorization === `Bearer ${cronSecret}`;
+  const urlSecret = new URL(req.url).searchParams.get('secret')?.trim() || '';
+
+  return authorization === `Bearer ${cronSecret}` || urlSecret === cronSecret;
 }
 
 async function isAdminAuthorized(req: NextRequest): Promise<boolean> {
@@ -230,4 +232,6 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   return handle(req);
 }
+
+
 
