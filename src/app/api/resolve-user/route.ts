@@ -4,24 +4,18 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
-import { supabaseAdmin } from '@/lib/supabaseAdmin'; // RLS回避のService Role
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { makeSignedParams } from '@/lib/signed';
+import { getUserJourneySummary } from '@/lib/userJourney';
 import { randomUUID } from 'crypto';
 
-/** =========================
- *  MU 専用設定
- *  - MU_UI_URL / MU_SHARED_ACCESS_SECRET を使用
- *  - SOFIA 系は参照しない
- * ========================= */
 const MU_UI_URL = (process.env.MU_UI_URL ?? 'https://m.muverse.jp').replace(/\/+$/, '');
 const MU_SHARED_ACCESS_SECRET = process.env.MU_SHARED_ACCESS_SECRET || '';
 
-/** user_code 生成（必要なら独自規則に変更可） */
 function genUserCode() {
   return 'uc-' + randomUUID().slice(0, 8);
 }
 
-/** idToken を Authorization / body / query の順で抽出（旧互換） */
 async function extractIdToken(req: NextRequest): Promise<string | null> {
   const authz = req.headers.get('authorization') || req.headers.get('Authorization');
   if (authz?.toLowerCase().startsWith('bearer ')) return authz.slice(7).trim();
@@ -53,19 +47,16 @@ async function handle(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'INVALID_TOKEN' }, { status: 400 });
     }
 
-    // Firebase 検証 → uid
     const decoded = await adminAuth.verifyIdToken(idToken, true);
     const firebase_uid = decoded.uid;
     console.log(`[resolve-user#${rid}] uid=`, firebase_uid);
 
-    // 1) 既存取得（必要列）
     let { data, error } = await supabaseAdmin
       .from('users')
-      .select('user_code, click_type, sofia_credit')
+      .select('user_code, click_type, sofia_credit, screenshot_credit_count')
       .eq('firebase_uid', firebase_uid)
       .maybeSingle();
 
-    // 2) 無ければ作成（unique衝突時は再取得）
     if (error || !data?.user_code) {
       console.warn(`[resolve-user#${rid}] provision user`);
       const user_code = genUserCode();
@@ -76,8 +67,9 @@ async function handle(req: NextRequest) {
           user_code,
           click_type: 'user',
           sofia_credit: 0,
+          screenshot_credit_count: 0,
         })
-        .select('user_code, click_type, sofia_credit')
+        .select('user_code, click_type, sofia_credit, screenshot_credit_count')
         .maybeSingle();
 
       if (ins.error) {
@@ -85,7 +77,7 @@ async function handle(req: NextRequest) {
           console.warn(`[resolve-user#${rid}] conflict → reselect`);
           const again = await supabaseAdmin
             .from('users')
-            .select('user_code, click_type, sofia_credit')
+            .select('user_code, click_type, sofia_credit, screenshot_credit_count')
             .eq('firebase_uid', firebase_uid)
             .maybeSingle();
           if (again.error || !again.data?.user_code) {
@@ -116,20 +108,31 @@ async function handle(req: NextRequest) {
       }
     }
 
-    // 3) MU 向け署名付き login_url を生成（from=pay 固定）
     const user_code = data!.user_code;
     const { ts, sig } = makeSignedParams(user_code, MU_SHARED_ACCESS_SECRET);
+    const journeySummary = await getUserJourneySummary(user_code).catch(() => null);
+
+    const reqUrl = new URL(req.url);
+    const journeySummaryUrl = `${reqUrl.origin}/api/mu/user-journey/summary`;
 
     const u = new URL(MU_UI_URL);
     u.searchParams.set('user', user_code);
     u.searchParams.set('ts', String(ts));
     u.searchParams.set('sig', sig);
-    u.searchParams.set('from', 'pay'); // MU 側からの起点を明示
-    u.searchParams.set('tenant', 'mu'); // 必要ならUIで利用
+    u.searchParams.set('from', 'pay');
+    u.searchParams.set('tenant', 'mu');
+    u.searchParams.set('journey_api', journeySummaryUrl);
+    u.searchParams.set(
+      'first_diag',
+      journeySummary?.first_screenshot_completed ? '1' : '0',
+    );
+    u.searchParams.set(
+      'screenshot_credit',
+      String(journeySummary?.screenshot_credit_count ?? data!.screenshot_credit_count ?? 0),
+    );
 
     const login_url = u.toString();
 
-    // 役割フラグ
     const click = String(data!.click_type ?? '').toLowerCase();
     const is_admin = click === 'admin';
     const is_master = click === 'master';
@@ -141,9 +144,12 @@ async function handle(req: NextRequest) {
       user_code,
       click_type: click,
       sofia_credit: Number(data!.sofia_credit ?? 0),
+      screenshot_credit_count: Number(data!.screenshot_credit_count ?? 0),
       is_admin,
       is_master,
-      login_url, // ← MU へのログインURL
+      journey_summary: journeySummary,
+      journey_summary_url: journeySummaryUrl,
+      login_url,
     });
   } catch (e: any) {
     console.error(`[resolve-user#${rid}] fatal:`, e);

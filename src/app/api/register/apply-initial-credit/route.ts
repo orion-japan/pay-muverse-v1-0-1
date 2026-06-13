@@ -1,5 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { recordUserJourneyEvent } from '@/lib/userJourney';
+
+const INITIAL_CHAT_CREDIT = 90;
+const INITIAL_SCREENSHOT_CREDIT = 1;
+const INITIAL_FIRST_FOLLOWUP_CREDIT = 3;
 
 /**
  * POST /api/register/apply-initial-credit
@@ -8,6 +13,8 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
  * - 通常は 90 クレジットを付与
  * - eve が指定され、invite_codes に一致すれば、その bonus_credit で上書き
  * - credit_ledger に entry_key='initial_signup' として upsert
+ * - スクショ診断クレジットを 1 回分付与
+ * - 初回診断後の追加相談クレジットを 3 回分付与
  */
 export async function POST(req: NextRequest) {
   try {
@@ -17,11 +24,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'missing user_code' }, { status: 400 });
     }
 
-    // デフォルト値
-    let creditToApply = 90;
-    let appliedBy = 'default';
+    let creditToApply = INITIAL_CHAT_CREDIT;
+    let appliedBy = 'default_90';
 
-    // eve があれば招待情報を確認
     if (eve) {
       const { data: invite, error } = await supabaseAdmin
         .from('invite_codes')
@@ -32,26 +37,30 @@ export async function POST(req: NextRequest) {
       if (error) throw error;
 
       if (invite && invite.campaign_type === 'bonus-credit') {
-        const v = Number(invite.bonus_credit ?? 90);
+        const v = Number(invite.bonus_credit ?? INITIAL_CHAT_CREDIT);
         if (!Number.isNaN(v) && v >= 0) {
-          creditToApply = v; // ← 上書き
+          creditToApply = v;
           appliedBy = `eve:${invite.code}`;
         }
       }
     }
 
-    // ledger に upsert（user_code + entry_key = unique）
     const row = {
       user_code,
-      entry_key: 'initial_signup', // ← これで「1ユーザー1レコード」に統一
+      entry_key: 'initial_signup',
       amount: creditToApply,
       reason: `initial signup (${appliedBy})`,
-      meta: { eve: eve || null },
+      meta: {
+        eve: eve || null,
+        initial_chat_credit: INITIAL_CHAT_CREDIT,
+        initial_screenshot_credit: INITIAL_SCREENSHOT_CREDIT,
+        initial_first_followup_credit: INITIAL_FIRST_FOLLOWUP_CREDIT,
+      },
     };
 
     const { data, error: upErr } = await supabaseAdmin
       .from('credit_ledger')
-      .upsert(row, { onConflict: 'user_code,entry_key' }) // ← 重複時は更新
+      .upsert(row, { onConflict: 'user_code,entry_key' })
       .select('*')
       .single();
 
@@ -65,7 +74,7 @@ export async function POST(req: NextRequest) {
         'grant_screenshot_credit',
         {
           p_user_code: user_code,
-          p_amount: 1,
+          p_amount: INITIAL_SCREENSHOT_CREDIT,
           p_reason: 'first_signup',
           p_campaign: 'first_signup',
         },
@@ -76,6 +85,19 @@ export async function POST(req: NextRequest) {
     } catch (screenshotErr: any) {
       screenshotCreditError = screenshotErr?.message || String(screenshotErr);
       console.warn('[apply-initial-credit] screenshot credit grant skipped:', screenshotCreditError);
+
+      const { data: userRow } = await supabaseAdmin
+        .from('users')
+        .select('screenshot_credit_count')
+        .eq('user_code', user_code)
+        .maybeSingle();
+
+      const current = Number((userRow as any)?.screenshot_credit_count ?? 0);
+
+      await supabaseAdmin
+        .from('users')
+        .update({ screenshot_credit_count: Math.max(current, INITIAL_SCREENSHOT_CREDIT) })
+        .eq('user_code', user_code);
     }
 
     let firstFollowupGranted: boolean | null = null;
@@ -86,7 +108,7 @@ export async function POST(req: NextRequest) {
         'grant_first_followup_credit',
         {
           p_user_code: user_code,
-          p_amount: 3,
+          p_amount: INITIAL_FIRST_FOLLOWUP_CREDIT,
           p_reason: 'first_signup',
           p_campaign: 'first_signup',
         },
@@ -99,14 +121,29 @@ export async function POST(req: NextRequest) {
       console.warn('[apply-initial-credit] first followup credit grant skipped:', firstFollowupCreditError);
     }
 
+    await recordUserJourneyEvent({
+      userCode: user_code,
+      eventName: 'initial_credit_granted',
+      source: 'register',
+      campaign: eve || null,
+      metadata: {
+        chatCredit: creditToApply,
+        screenshotCredit: INITIAL_SCREENSHOT_CREDIT,
+        firstFollowupCredit: INITIAL_FIRST_FOLLOWUP_CREDIT,
+        appliedBy,
+      },
+    });
+
     return NextResponse.json({
       ok: true,
       applied_credit: creditToApply,
-      applied_by: appliedBy,
+      screenshot_credit: INITIAL_SCREENSHOT_CREDIT,
       screenshot_credit_granted: screenshotGranted,
       screenshot_credit_error: screenshotCreditError,
+      first_followup_credit: INITIAL_FIRST_FOLLOWUP_CREDIT,
       first_followup_credit_granted: firstFollowupGranted,
       first_followup_credit_error: firstFollowupCreditError,
+      applied_by: appliedBy,
       ledger: data,
     });
   } catch (e: any) {
