@@ -8,8 +8,6 @@ export type UserJourneyEventInput = {
   source?: string;
   pagePath?: string | null;
   campaign?: string | null;
-  mauticContactId?: string | number | null;
-  mauticEmailId?: string | number | null;
   metadata?: Record<string, unknown> | null;
   occurredAt?: string | null;
 };
@@ -46,9 +44,6 @@ export async function recordUserJourneyEvent(input: UserJourneyEventInput) {
     source: input.source ?? 'app',
     page_path: input.pagePath ?? null,
     campaign: input.campaign ?? null,
-    mautic_contact_id:
-      input.mauticContactId == null ? null : String(input.mauticContactId),
-    mautic_email_id: input.mauticEmailId == null ? null : String(input.mauticEmailId),
     metadata: input.metadata ?? {},
     occurred_at: input.occurredAt ?? new Date().toISOString(),
   };
