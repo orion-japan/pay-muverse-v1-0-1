@@ -1,4 +1,4 @@
-// src/app/api/cron/monthly-partner-credits/route.ts
+﻿// src/app/api/cron/monthly-partner-credits/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -112,11 +112,11 @@ async function loadAlreadyGrantedUserCodes(grantMonth: string): Promise<Set<stri
 async function grantToPartner(userCode: string, grantMonth: string): Promise<GrantResult> {
   const opId = `${GRANT_TYPE}-${grantMonth}-${userCode}`;
 
-  const { error: rpcError } = await supabaseAdmin.rpc('grant_credit_by_user_code', {
+  const { error: rpcError } = await supabaseAdmin.rpc('grant_sofia_credit_by_user_code', {
     p_user_code: userCode,
     p_amount: MASTER_PARTNER_CREDIT_AMOUNT,
     p_reason: `${GRANT_TYPE}:${grantMonth}`,
-    p_op_id: opId,
+    p_idempotency_key: opId,
   });
 
   if (rpcError) {
@@ -230,3 +230,4 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   return handle(req);
 }
+
