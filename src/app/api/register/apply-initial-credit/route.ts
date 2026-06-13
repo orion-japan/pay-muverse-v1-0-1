@@ -78,12 +78,35 @@ export async function POST(req: NextRequest) {
       console.warn('[apply-initial-credit] screenshot credit grant skipped:', screenshotCreditError);
     }
 
+    let firstFollowupGranted: boolean | null = null;
+    let firstFollowupCreditError: string | null = null;
+
+    try {
+      const { data: granted, error: followupErr } = await supabaseAdmin.rpc(
+        'grant_first_followup_credit',
+        {
+          p_user_code: user_code,
+          p_amount: 3,
+          p_reason: 'first_signup',
+          p_campaign: 'first_signup',
+        },
+      );
+
+      if (followupErr) throw followupErr;
+      firstFollowupGranted = Boolean(granted);
+    } catch (followupErr: any) {
+      firstFollowupCreditError = followupErr?.message || String(followupErr);
+      console.warn('[apply-initial-credit] first followup credit grant skipped:', firstFollowupCreditError);
+    }
+
     return NextResponse.json({
       ok: true,
       applied_credit: creditToApply,
       applied_by: appliedBy,
       screenshot_credit_granted: screenshotGranted,
       screenshot_credit_error: screenshotCreditError,
+      first_followup_credit_granted: firstFollowupGranted,
+      first_followup_credit_error: firstFollowupCreditError,
       ledger: data,
     });
   } catch (e: any) {
