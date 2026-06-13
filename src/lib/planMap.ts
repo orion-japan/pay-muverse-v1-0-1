@@ -1,12 +1,28 @@
-export type ClickType = 'free' | 'pro' | 'master' | 'paused' | 'canceled' | 'trial' | string;
+export type ClickType =
+  | 'free'
+  | 'regular'
+  | 'premium'
+  | 'pro'
+  | 'master'
+  | 'partner'
+  | 'admin'
+  | 'paused'
+  | 'canceled'
+  | 'trial'
+  | string;
+
 export type PlanStatus = 'free' | 'pro' | 'master';
 
 export const PLAN_MAP: Record<string, PlanStatus> = {
   free: 'free',
-  trial: 'pro', // 運用に合わせて調整
+  trial: 'pro',
+  regular: 'pro',
+  premium: 'pro',
   pro: 'pro',
   master: 'master',
-  paused: 'free', // 一時停止はUI上free扱いにする場合
+  partner: 'master',
+  admin: 'master',
+  paused: 'free',
   canceled: 'free',
 };
 
