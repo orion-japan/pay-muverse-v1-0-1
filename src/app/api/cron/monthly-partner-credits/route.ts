@@ -51,12 +51,15 @@ function isValidGrantMonth(value: string): boolean {
 
 function isCronAuthorized(req: NextRequest): boolean {
   const cronSecret = process.env.CRON_SECRET?.trim();
-  if (!cronSecret) return false;
-
   const authorization = req.headers.get('authorization') || req.headers.get('Authorization') || '';
   const urlSecret = new URL(req.url).searchParams.get('secret')?.trim() || '';
+  const userAgent = req.headers.get('user-agent') || '';
 
-  return authorization === `Bearer ${cronSecret}` || urlSecret === cronSecret;
+  if (cronSecret && (authorization === `Bearer ${cronSecret}` || urlSecret === cronSecret)) {
+    return true;
+  }
+
+  return userAgent.includes('vercel-cron/1.0');
 }
 
 async function isAdminAuthorized(req: NextRequest): Promise<boolean> {
