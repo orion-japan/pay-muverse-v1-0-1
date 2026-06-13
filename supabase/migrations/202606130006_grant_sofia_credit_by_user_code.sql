@@ -36,9 +36,9 @@ begin
     );
   end if;
 
-  -- 正本 sofia_credit に加算
+  -- 正本 sofia_credit を月次付与額に置き換え
   update public.users
-     set sofia_credit = coalesce(sofia_credit, 0) + p_amount
+     set sofia_credit = p_amount
    where user_code = p_user_code;
 
   if not found then
@@ -65,7 +65,7 @@ begin
     v_key,
     jsonb_build_object(
       'credit_source', 'sofia_credit',
-      'grant_kind', 'master_partner_monthly'
+      'grant_kind', 'master_partner_monthly', 'grant_mode', 'replace'
     ),
     now()
   );
@@ -73,3 +73,4 @@ begin
   return v_tx_id;
 end
 $function$;
+
