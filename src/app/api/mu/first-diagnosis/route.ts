@@ -12,6 +12,17 @@ import {
 
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
+type DiagnosisSeed = {
+  mirror?: string;
+  position?: string;
+  user_reaction?: string;
+  partner_signal?: string;
+  i_layer?: string;
+  timing?: string;
+  risk?: string;
+  writer_directives?: string[];
+};
+
 function json(data: unknown, init?: number | ResponseInit) {
   const status =
     typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200);
@@ -30,6 +41,75 @@ function normalizeDataUrl(input: unknown): string | null {
   if (!v.includes(';base64,')) return null;
 
   return v;
+}
+
+function safeParseDiagnosis(raw: string): {
+  displayText: string;
+  seed: DiagnosisSeed | null;
+} {
+  const fallback = {
+    displayText: raw,
+    seed: null,
+  };
+
+  try {
+    const trimmed = raw.trim();
+    const parsed = JSON.parse(trimmed);
+
+    const displayText =
+      typeof parsed?.display_text === 'string' && parsed.display_text.trim()
+        ? parsed.display_text.trim()
+        : raw;
+
+    const seed =
+      parsed?.seed && typeof parsed.seed === 'object' && !Array.isArray(parsed.seed)
+        ? {
+            mirror:
+              typeof parsed.seed.mirror === 'string' ? parsed.seed.mirror : undefined,
+            position:
+              typeof parsed.seed.position === 'string' ? parsed.seed.position : undefined,
+            user_reaction:
+              typeof parsed.seed.user_reaction === 'string'
+                ? parsed.seed.user_reaction
+                : undefined,
+            partner_signal:
+              typeof parsed.seed.partner_signal === 'string'
+                ? parsed.seed.partner_signal
+                : undefined,
+            i_layer:
+              typeof parsed.seed.i_layer === 'string' ? parsed.seed.i_layer : undefined,
+            timing:
+              typeof parsed.seed.timing === 'string' ? parsed.seed.timing : undefined,
+            risk:
+              typeof parsed.seed.risk === 'string' ? parsed.seed.risk : undefined,
+            writer_directives: Array.isArray(parsed.seed.writer_directives)
+              ? [
+                  ...parsed.seed.writer_directives
+                    .filter((item: unknown) => typeof item === 'string')
+                    .slice(0, 12),
+                  'Mu文体で返す',
+                  '説明調にしない',
+                  '見出しや箇条書きを多用しない',
+                  '返信案は頼まれた時だけ出す',
+                  '相手の気持ちは断定しない',
+                ]
+              : [
+                  'Mu文体で返す',
+                  '説明調にしない',
+                  '見出しや箇条書きを多用しない',
+                  '返信案は頼まれた時だけ出す',
+                  '相手の気持ちは断定しない',
+                ],
+          }
+        : null;
+
+    return {
+      displayText,
+      seed,
+    };
+  } catch {
+    return fallback;
+  }
 }
 
 async function uidToUserCode(uid: string): Promise<string | null> {
@@ -75,6 +155,7 @@ async function logDiagnosis(params: {
   source: string;
   mediaCode: string | null;
   diagnosisText: string;
+  diagnosisSeedJson: DiagnosisSeed | null;
 }) {
   try {
     await sb.from('mu_screenshot_diagnosis_logs').insert({
@@ -84,6 +165,7 @@ async function logDiagnosis(params: {
       media_code: params.mediaCode,
       credit_used: 1,
       diagnosis_text: params.diagnosisText,
+      diagnosis_seed_json: params.diagnosisSeedJson,
     });
   } catch (e: any) {
     console.warn('[mu-first-diagnosis] log skipped:', e?.message || e);
@@ -145,15 +227,23 @@ export async function POST(req: NextRequest) {
       '既読、未読、返信間隔、スタンプ、絵文字、文量、語尾、敬語/タメ口、話題の継続、相手が質問しているか、会話を閉じているかを読み取ってください。',
       '画像から確認できないことは推測で断定しないでください。',
       '相手の状態だけでなく、ユーザー側の本音や反応している内面も読んでください。',
-      '「あなたの本音（I層語）」では、表面的な感情ではなく、ユーザーが本当は何を確認したいのか、何に反応しているのかを短く言葉にしてください。',
+      '内部では、MIRROR、POSITION、CONTINUITY、INTENTION、S/R/C/I/T 的な読み方を使ってください。',
+      '右側=ユーザー、左側=相手というPOSITIONをSeedに必ず残してください。不明な場合は不明と残してください。',
       '相手の個人情報、年齢、職業、顔、属性などは推定しないでください。',
-      '出力は日本語。',
-      '見出しは必ず「内容要約」「あなたの状態」「相手の共鳴状態」「あなたの本音（I層語）」「Muの状態分析」「次の一歩」の6つにしてください。',
-      '全体で700文字以内。',
+      '出力は必ずJSONのみ。Markdownや説明文を前後に付けないでください。',
+      'JSONは display_text と seed を持つオブジェクトにしてください。',
+      'display_text の見出しは必ず「内容要約」「あなたの状態」「相手の共鳴状態」「あなたの本音（I層語）」「Muの状態分析」「次の一歩」の6つにしてください。',
+      'display_text の「次の一歩」では、返信文や送る文章の例を出さないでください。見方、距離感、確認の仕方だけを短く書いてください。',
+      '返信案、送信文、文例、例文は、初回診断では出さないでください。',
+      'display_text は全体で700文字以内。',
+      'seed は、mirror, position, user_reaction, partner_signal, i_layer, timing, risk, writer_directives を持つJSONにしてください。',
+      'seed.partner_signal では相手の好意を断定しないでください。',
+      'seed.writer_directives には「Mu文体で返す」「説明調にしない」「見出しや箇条書きを多用しない」「返信案は頼まれた時だけ出す」「相手の気持ちは断定しない」を入れてください。',
     ].join('\n');
 
     const userText = [
       'このスクリーンショットから、初回診断として読めることを返してください。',
+      'ユーザーに見せる診断文 display_text と、診断後ミニ相談で使う内部Seed seed を同時に作ってください。',
       note ? `補足メモ：${note}` : '',
     ]
       .filter(Boolean)
@@ -167,6 +257,7 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify({
         model,
+        response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: system },
           {
@@ -192,10 +283,17 @@ export async function POST(req: NextRequest) {
     }
 
     const data = await llmRes.json().catch(() => ({}));
-    const diagnosis =
+    const rawDiagnosis =
       data?.choices?.[0]?.message?.content?.toString?.() ??
       data?.choices?.[0]?.message?.content ??
       '';
+
+    if (!rawDiagnosis) {
+      return json({ ok: false, error: 'empty_diagnosis' }, 502);
+    }
+
+    const parsedDiagnosis = safeParseDiagnosis(String(rawDiagnosis));
+    const diagnosis = parsedDiagnosis.displayText;
 
     if (!diagnosis) {
       return json({ ok: false, error: 'empty_diagnosis' }, 502);
@@ -207,6 +305,7 @@ export async function POST(req: NextRequest) {
       source: body.source || 'mu_first',
       mediaCode: body.media_code || null,
       diagnosisText: diagnosis,
+      diagnosisSeedJson: parsedDiagnosis.seed,
     });
 
     return json({

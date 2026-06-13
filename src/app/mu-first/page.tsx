@@ -13,6 +13,27 @@ type DiagnosisResponse = {
   model?: string;
 };
 
+type FollowupResponse = {
+  ok?: boolean;
+  question?: string;
+  answer?: string;
+  code?: string;
+  message?: string;
+};
+
+type FollowupMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+const FOLLOWUP_QUESTIONS = [
+  "この相手はどう思っていますか？",
+  "私はどう返せばいいですか？",
+  "今は待つべきですか？",
+  "返信文を作ってください。",
+  "既読無視されたらどうすればいいですか？",
+];
+
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -40,10 +61,37 @@ export default function MuFirstPage() {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const [followupInput, setFollowupInput] = useState("");
+  const [followupError, setFollowupError] = useState("");
+  const [followupSubmitting, setFollowupSubmitting] = useState(false);
+  const [followupMessages, setFollowupMessages] = useState<FollowupMessage[]>([]);
+  const [followupRemaining, setFollowupRemaining] = useState(3);
+
   const canSubmit = useMemo(
     () => Boolean(previewUrl && selectedFile && user && !loading && !submitting),
     [previewUrl, selectedFile, user, loading, submitting],
   );
+
+  const canAskFollowup = useMemo(
+    () =>
+      Boolean(
+        diagnosis &&
+          user &&
+          !loading &&
+          !followupSubmitting &&
+          followupInput.trim() &&
+          followupRemaining > 0,
+      ),
+    [diagnosis, user, loading, followupSubmitting, followupInput, followupRemaining],
+  );
+
+  function resetFollowup() {
+    setFollowupInput("");
+    setFollowupError("");
+    setFollowupSubmitting(false);
+    setFollowupMessages([]);
+    setFollowupRemaining(3);
+  }
 
   function handleImageChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -54,6 +102,7 @@ export default function MuFirstPage() {
       setPreviewUrl("");
       setDiagnosis("");
       setError("");
+      resetFollowup();
       return;
     }
 
@@ -62,6 +111,7 @@ export default function MuFirstPage() {
     setPreviewUrl(URL.createObjectURL(file));
     setDiagnosis("");
     setError("");
+    resetFollowup();
   }
 
   async function handleSubmit() {
@@ -70,6 +120,7 @@ export default function MuFirstPage() {
     setSubmitting(true);
     setDiagnosis("");
     setError("");
+    resetFollowup();
 
     try {
       const imageDataUrl = await fileToDataUrl(selectedFile);
@@ -108,6 +159,72 @@ export default function MuFirstPage() {
       setError(e?.message || "診断に失敗しました。");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleFollowupSubmit(message?: string) {
+    const question = (message || followupInput).trim();
+    if (!question || !diagnosis || followupSubmitting || followupRemaining <= 0) return;
+
+    setFollowupSubmitting(true);
+    setFollowupError("");
+
+    const nextUserMessage: FollowupMessage = {
+      role: "user",
+      content: question,
+    };
+
+    try {
+      const history = [...followupMessages, nextUserMessage];
+
+      setFollowupMessages(history);
+      setFollowupInput("");
+
+      const res = await authedFetch("/api/mu/first-followup", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: question,
+          history: followupMessages,
+        }),
+      });
+
+      const data = (await res.json().catch(() => ({}))) as FollowupResponse;
+
+      if (!res.ok || !data.ok) {
+        const messageText =
+          data.code === "no_first_followup_credit"
+            ? "診断後の相談回数が残っていません。"
+            : data.code === "missing_diagnosis"
+              ? "先にスクショ診断を行ってください。"
+              : data.message || "追加相談に失敗しました。";
+
+        setFollowupError(messageText);
+
+        if (data.code === "no_first_followup_credit") {
+          setFollowupRemaining(0);
+        }
+
+        setFollowupMessages(followupMessages);
+        return;
+      }
+
+      setFollowupMessages([
+        ...history,
+        {
+          role: "assistant",
+          content: data.answer || "",
+        },
+      ]);
+
+      setFollowupRemaining((current) => Math.max(0, current - 1));
+    } catch (e: any) {
+      setFollowupError(e?.message || "追加相談に失敗しました。");
+      setFollowupMessages(followupMessages);
+    } finally {
+      setFollowupSubmitting(false);
     }
   }
 
@@ -298,8 +415,22 @@ export default function MuFirstPage() {
               cursor: canSubmit ? "pointer" : "not-allowed",
             }}
           >
-            {submitting ? "診断しています..." : "Muに診断してもらう"}
+            {submitting ? "Muがスクショを読んでいます..." : "Muに診断してもらう"}
           </button>
+
+          {submitting ? (
+            <p
+              style={{
+                margin: "10px 0 0",
+                color: "#8b817b",
+                fontSize: 12,
+                lineHeight: 1.6,
+                textAlign: "center",
+              }}
+            >
+              10〜20秒ほどかかることがあります。
+            </p>
+          ) : null}
 
           {error ? (
             <p
@@ -348,8 +479,177 @@ export default function MuFirstPage() {
               {diagnosis}
             </p>
 
+            <div
+              style={{
+                marginTop: 22,
+                borderTop: "1px solid rgba(45,36,31,0.1)",
+                paddingTop: 18,
+              }}
+            >
+              <p
+                style={{
+                  margin: 0,
+                  color: "#2d241f",
+                  fontSize: 15,
+                  fontWeight: 700,
+                  lineHeight: 1.7,
+                }}
+              >
+                この診断について、Muに聞いてみる
+              </p>
+
+              <p
+                style={{
+                  margin: "6px 0 0",
+                  color: "#8b817b",
+                  fontSize: 12,
+                  lineHeight: 1.7,
+                }}
+              >
+                番号を選ぶか、自由に質問してください。診断後の相談はあと
+                {followupRemaining}回です。
+              </p>
+
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                  marginTop: 12,
+                }}
+              >
+                {FOLLOWUP_QUESTIONS.map((question, index) => (
+                  <button
+                    key={question}
+                    type="button"
+                    onClick={() => {
+                      setFollowupInput(String(index + 1));
+                    }}
+                    disabled={followupSubmitting || followupRemaining <= 0}
+                    style={{
+                      width: "100%",
+                      border: "1px solid rgba(45,36,31,0.12)",
+                      borderRadius: 14,
+                      padding: "10px 12px",
+                      background: "#fffaf5",
+                      color: "#2d241f",
+                      textAlign: "left",
+                      fontSize: 13,
+                      lineHeight: 1.6,
+                      cursor:
+                        followupSubmitting || followupRemaining <= 0
+                          ? "not-allowed"
+                          : "pointer",
+                    }}
+                  >
+                    {index + 1}. {question}
+                  </button>
+                ))}
+              </div>
+
+              {followupMessages.length ? (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                    marginTop: 16,
+                  }}
+                >
+                  {followupMessages.map((message, index) => (
+                    <div
+                      key={`${message.role}-${index}`}
+                      style={{
+                        alignSelf: message.role === "user" ? "flex-end" : "flex-start",
+                        maxWidth: "92%",
+                        borderRadius: 18,
+                        padding: "10px 12px",
+                        background:
+                          message.role === "user" ? "#2d241f" : "#f4eee8",
+                        color: message.role === "user" ? "#ffffff" : "#2d241f",
+                        fontSize: 13,
+                        lineHeight: 1.7,
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {message.content}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <textarea
+                value={followupInput}
+                onChange={(event) => setFollowupInput(event.target.value)}
+                placeholder="番号、または聞きたいことを入力"
+                rows={3}
+                disabled={followupSubmitting || followupRemaining <= 0}
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  marginTop: 14,
+                  borderRadius: 16,
+                  border: "1px solid rgba(45,36,31,0.16)",
+                  padding: "12px 13px",
+                  resize: "vertical",
+                  color: "#2d241f",
+                  background: followupRemaining <= 0 ? "#f1efed" : "#ffffff",
+                  fontSize: 14,
+                  lineHeight: 1.6,
+                  outline: "none",
+                }}
+              />
+
+              <button
+                type="button"
+                onClick={() => handleFollowupSubmit()}
+                disabled={!canAskFollowup}
+                style={{
+                  width: "100%",
+                  marginTop: 10,
+                  border: "none",
+                  borderRadius: 999,
+                  padding: "13px 16px",
+                  background: canAskFollowup ? "#2d241f" : "#d9d5d2",
+                  color: "#ffffff",
+                  fontSize: 15,
+                  fontWeight: 700,
+                  cursor: canAskFollowup ? "pointer" : "not-allowed",
+                }}
+              >
+                {followupSubmitting ? "Muが考えています..." : "Muに聞く"}
+              </button>
+
+              {followupError ? (
+                <p
+                  style={{
+                    margin: "10px 0 0",
+                    color: "#b3261e",
+                    fontSize: 13,
+                    lineHeight: 1.7,
+                  }}
+                >
+                  {followupError}
+                </p>
+              ) : null}
+
+              {followupRemaining <= 0 ? (
+                <p
+                  style={{
+                    margin: "12px 0 0",
+                    color: "#6d4b31",
+                    fontSize: 13,
+                    lineHeight: 1.7,
+                    textAlign: "center",
+                  }}
+                >
+                  診断後の相談はここまでです。もっと深く話す場合は、Mu本体で続けてください。
+                </p>
+              ) : null}
+            </div>
+
             <Link
-              href="/mu"
+              href="/"
               style={{
                 display: "block",
                 marginTop: 18,
@@ -363,7 +663,7 @@ export default function MuFirstPage() {
                 fontWeight: 700,
               }}
             >
-              Muと話す
+              もっと深くMuと話す
             </Link>
           </div>
         ) : null}

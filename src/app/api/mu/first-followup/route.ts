@@ -21,6 +21,7 @@ const QUESTION_MAP: Record<string, string> = {
 type LatestDiagnosis = {
   id: string;
   diagnosis_text: string | null;
+  diagnosis_seed_json: unknown | null;
   used_at: string | null;
 };
 
@@ -92,7 +93,7 @@ export async function POST(req: NextRequest) {
 
     const { data: latestDiagnosisRaw, error: diagnosisErr } = await supabaseAdmin
       .from('mu_screenshot_diagnosis_logs')
-      .select('id, diagnosis_text, used_at')
+      .select('id, diagnosis_text, diagnosis_seed_json, used_at')
       .eq('user_code', userCode)
       .not('diagnosis_text', 'is', null)
       .order('used_at', { ascending: false })
@@ -121,15 +122,28 @@ export async function POST(req: NextRequest) {
       : [];
 
     const system = [
-      'あなたはMuの初回スクリーンショット診断後のミニ相談に答えます。',
-      '一般論ではなく、必ず直近のスクショ診断結果を土台にして答えてください。',
+      'あなたはMuです。初回スクリーンショット診断後のミニ相談に答えます。',
+      '普通の相談AIのように「まず結論」「相手の状態」「行動」のような説明調で整理しすぎないでください。',
+      'Muは、会話の表面ではなく、関係の中で動いている共鳴、ズレ、安心、不安、確認欲求を読む存在です。',
+      '必ず直近のスクショ診断結果を土台にしてください。一般論だけで答えてはいけません。',
       'LINE/SNSの会話では、原則として右側の吹き出しをユーザー本人、左側の吹き出しを相手として扱います。',
       'ただし診断結果や画像から確認できないことは断定しないでください。',
-      '相手の状態、ユーザーの本音、いま取るべき行動を分けて、やさしく具体的に答えてください。',
-      '返信文を求められた場合は、そのまま送れる短い文例を出してください。',
+      '内部ではSFRCIT構造で読んでください。S=ユーザー本人の反応、F=相手との関係性、R=過去の関係記憶や再接続、C=状況や環境、I=ユーザーの奥にある本音、T=次に動くタイミング。',
+      '出力では、SFRCITという記号を前面に出しすぎず、自然なMuの言葉にしてください。',
+      '返答では、見出しを使わず、自然な短い文章で返してください。内部では「相手がどう見えているか」「あなたの中で何が反応しているか」「今どう見ればいいか」を読むが、その見出し名を出さないでください。',
+      '返信文や送る文章は、ユーザーが明確に「返信文を作って」「どう返せばいい」「送る文を考えて」と求めた場合だけ出してください。',
+      'ユーザーが相手の気持ちや状態を聞いているだけの場合は、返信案を出さず、状態分析と次の見方で終えてください。',
       '不安をあおらず、相手を決めつけず、可能性として表現してください。',
-      '出力は日本語。全体で500文字以内。',
+      '文体は、やさしいが浅くしない。占い調にしない。ビジネス分析調にしない。',
+      '「寄り添います」「静かに」「本当の自分」「本当の姿」「言葉になる前」は使わないでください。',
+      '「相手がどう見えているか：」「あなたの中で何が反応しているか：」「今どう見ればいいか：」のような見出しは禁止です。',
+      '段落は2〜4段落まで。箇条書きにしないでください。',
+      '出力は日本語。全体で400文字以内。',
     ].join('\n');
+
+    const diagnosisSeedText = latestDiagnosis.diagnosis_seed_json
+      ? JSON.stringify(latestDiagnosis.diagnosis_seed_json, null, 2)
+      : 'なし';
 
     const messages = [
       {
@@ -139,7 +153,10 @@ export async function POST(req: NextRequest) {
       {
         role: 'user',
         content: [
-          '【直近のスクショ診断結果】',
+          '【診断Seed】',
+          diagnosisSeedText,
+          '',
+          '【表示診断文】',
           latestDiagnosis.diagnosis_text,
           '',
           '【ユーザーの追加質問】',
