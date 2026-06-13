@@ -74,6 +74,7 @@ async function logDiagnosis(params: {
   model: string;
   source: string;
   mediaCode: string | null;
+  diagnosisText: string;
 }) {
   try {
     await sb.from('mu_screenshot_diagnosis_logs').insert({
@@ -82,6 +83,7 @@ async function logDiagnosis(params: {
       source: params.source,
       media_code: params.mediaCode,
       credit_used: 1,
+      diagnosis_text: params.diagnosisText,
     });
   } catch (e: any) {
     console.warn('[mu-first-diagnosis] log skipped:', e?.message || e);
@@ -199,6 +201,7 @@ export async function POST(req: NextRequest) {
       model,
       source: body.source || 'mu_first',
       mediaCode: body.media_code || null,
+      diagnosisText: diagnosis,
     });
 
     return json({
