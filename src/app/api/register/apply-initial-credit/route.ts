@@ -57,23 +57,33 @@ export async function POST(req: NextRequest) {
 
     if (upErr) throw upErr;
 
-    const { data: screenshotGranted, error: screenshotErr } = await supabaseAdmin.rpc(
-      'grant_screenshot_credit',
-      {
-        p_user_code: user_code,
-        p_amount: 1,
-        p_reason: 'first_signup',
-        p_campaign: 'first_signup',
-      },
-    );
+    let screenshotGranted: boolean | null = null;
+    let screenshotCreditError: string | null = null;
 
-    if (screenshotErr) throw screenshotErr;
+    try {
+      const { data: granted, error: screenshotErr } = await supabaseAdmin.rpc(
+        'grant_screenshot_credit',
+        {
+          p_user_code: user_code,
+          p_amount: 1,
+          p_reason: 'first_signup',
+          p_campaign: 'first_signup',
+        },
+      );
+
+      if (screenshotErr) throw screenshotErr;
+      screenshotGranted = Boolean(granted);
+    } catch (screenshotErr: any) {
+      screenshotCreditError = screenshotErr?.message || String(screenshotErr);
+      console.warn('[apply-initial-credit] screenshot credit grant skipped:', screenshotCreditError);
+    }
 
     return NextResponse.json({
       ok: true,
       applied_credit: creditToApply,
       applied_by: appliedBy,
       screenshot_credit_granted: screenshotGranted,
+      screenshot_credit_error: screenshotCreditError,
       ledger: data,
     });
   } catch (e: any) {
