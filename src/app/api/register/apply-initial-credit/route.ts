@@ -1,9 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { recordUserJourneyEvent } from '@/lib/userJourney';
 
 const INITIAL_CHAT_CREDIT = 90;
 const INITIAL_SCREENSHOT_CREDIT = 1;
+const INITIAL_FIRST_FOLLOWUP_CREDIT = 3;
 
 /**
  * POST /api/register/apply-initial-credit
@@ -13,6 +14,7 @@ const INITIAL_SCREENSHOT_CREDIT = 1;
  * - eve が指定され、invite_codes に一致すれば、その bonus_credit で上書き
  * - credit_ledger に entry_key='initial_signup' として upsert
  * - スクショ診断クレジットを 1 回分付与
+ * - 初回診断後の追加相談クレジットを 3 回分付与
  */
 export async function POST(req: NextRequest) {
   try {
@@ -48,7 +50,12 @@ export async function POST(req: NextRequest) {
       entry_key: 'initial_signup',
       amount: creditToApply,
       reason: `initial signup (${appliedBy})`,
-      meta: { eve: eve || null, initial_chat_credit: INITIAL_CHAT_CREDIT },
+      meta: {
+        eve: eve || null,
+        initial_chat_credit: INITIAL_CHAT_CREDIT,
+        initial_screenshot_credit: INITIAL_SCREENSHOT_CREDIT,
+        initial_first_followup_credit: INITIAL_FIRST_FOLLOWUP_CREDIT,
+      },
     };
 
     const { data, error: upErr } = await supabaseAdmin
@@ -59,15 +66,26 @@ export async function POST(req: NextRequest) {
 
     if (upErr) throw upErr;
 
-    const grant = await supabaseAdmin.rpc('grant_screenshot_credit', {
-      p_user_code: user_code,
-      p_amount: INITIAL_SCREENSHOT_CREDIT,
-      p_reason: 'first_signup',
-      p_campaign: 'first_signup',
-    });
+    let screenshotGranted: boolean | null = null;
+    let screenshotCreditError: string | null = null;
 
-    if (grant.error) {
-      console.warn('[apply-initial-credit] grant_screenshot_credit failed', grant.error.message);
+    try {
+      const { data: granted, error: screenshotErr } = await supabaseAdmin.rpc(
+        'grant_screenshot_credit',
+        {
+          p_user_code: user_code,
+          p_amount: INITIAL_SCREENSHOT_CREDIT,
+          p_reason: 'first_signup',
+          p_campaign: 'first_signup',
+        },
+      );
+
+      if (screenshotErr) throw screenshotErr;
+      screenshotGranted = Boolean(granted);
+    } catch (screenshotErr: any) {
+      screenshotCreditError = screenshotErr?.message || String(screenshotErr);
+      console.warn('[apply-initial-credit] screenshot credit grant skipped:', screenshotCreditError);
+
       const { data: userRow } = await supabaseAdmin
         .from('users')
         .select('screenshot_credit_count')
@@ -75,10 +93,32 @@ export async function POST(req: NextRequest) {
         .maybeSingle();
 
       const current = Number((userRow as any)?.screenshot_credit_count ?? 0);
+
       await supabaseAdmin
         .from('users')
         .update({ screenshot_credit_count: Math.max(current, INITIAL_SCREENSHOT_CREDIT) })
         .eq('user_code', user_code);
+    }
+
+    let firstFollowupGranted: boolean | null = null;
+    let firstFollowupCreditError: string | null = null;
+
+    try {
+      const { data: granted, error: followupErr } = await supabaseAdmin.rpc(
+        'grant_first_followup_credit',
+        {
+          p_user_code: user_code,
+          p_amount: INITIAL_FIRST_FOLLOWUP_CREDIT,
+          p_reason: 'first_signup',
+          p_campaign: 'first_signup',
+        },
+      );
+
+      if (followupErr) throw followupErr;
+      firstFollowupGranted = Boolean(granted);
+    } catch (followupErr: any) {
+      firstFollowupCreditError = followupErr?.message || String(followupErr);
+      console.warn('[apply-initial-credit] first followup credit grant skipped:', firstFollowupCreditError);
     }
 
     await recordUserJourneyEvent({
@@ -89,6 +129,7 @@ export async function POST(req: NextRequest) {
       metadata: {
         chatCredit: creditToApply,
         screenshotCredit: INITIAL_SCREENSHOT_CREDIT,
+        firstFollowupCredit: INITIAL_FIRST_FOLLOWUP_CREDIT,
         appliedBy,
       },
     });
@@ -97,6 +138,11 @@ export async function POST(req: NextRequest) {
       ok: true,
       applied_credit: creditToApply,
       screenshot_credit: INITIAL_SCREENSHOT_CREDIT,
+      screenshot_credit_granted: screenshotGranted,
+      screenshot_credit_error: screenshotCreditError,
+      first_followup_credit: INITIAL_FIRST_FOLLOWUP_CREDIT,
+      first_followup_credit_granted: firstFollowupGranted,
+      first_followup_credit_error: firstFollowupCreditError,
       applied_by: appliedBy,
       ledger: data,
     });
