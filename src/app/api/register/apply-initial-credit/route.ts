@@ -4,16 +4,17 @@ import { recordUserJourneyEvent } from '@/lib/userJourney';
 
 const INITIAL_CHAT_CREDIT = 90;
 const INITIAL_SCREENSHOT_CREDIT = 1;
+const INITIAL_FIRST_FOLLOWUP_CREDIT = 3;
 
 /**
  * POST /api/register/apply-initial-credit
  * Body: { user_code: string, eve?: string }
  *
- * - 通常は Mu 会話クレジット 90 を付与
+ * - 通常は 90 クレジットを付与
  * - eve が指定され、invite_codes に一致すれば、その bonus_credit で上書き
  * - credit_ledger に entry_key='initial_signup' として upsert
  * - スクショ診断クレジットを 1 回分付与
- * - v2仕様では、診断後の追加相談クレジットは付与しない
+ * - 初回診断後の追加相談クレジットを 3 回分付与
  */
 export async function POST(req: NextRequest) {
   try {
@@ -53,6 +54,7 @@ export async function POST(req: NextRequest) {
         eve: eve || null,
         initial_chat_credit: INITIAL_CHAT_CREDIT,
         initial_screenshot_credit: INITIAL_SCREENSHOT_CREDIT,
+        initial_first_followup_credit: INITIAL_FIRST_FOLLOWUP_CREDIT,
       },
     };
 
@@ -98,6 +100,27 @@ export async function POST(req: NextRequest) {
         .eq('user_code', user_code);
     }
 
+    let firstFollowupGranted: boolean | null = null;
+    let firstFollowupCreditError: string | null = null;
+
+    try {
+      const { data: granted, error: followupErr } = await supabaseAdmin.rpc(
+        'grant_first_followup_credit',
+        {
+          p_user_code: user_code,
+          p_amount: INITIAL_FIRST_FOLLOWUP_CREDIT,
+          p_reason: 'first_signup',
+          p_campaign: 'first_signup',
+        },
+      );
+
+      if (followupErr) throw followupErr;
+      firstFollowupGranted = Boolean(granted);
+    } catch (followupErr: any) {
+      firstFollowupCreditError = followupErr?.message || String(followupErr);
+      console.warn('[apply-initial-credit] first followup credit grant skipped:', firstFollowupCreditError);
+    }
+
     await recordUserJourneyEvent({
       userCode: user_code,
       eventName: 'initial_credit_granted',
@@ -106,6 +129,7 @@ export async function POST(req: NextRequest) {
       metadata: {
         chatCredit: creditToApply,
         screenshotCredit: INITIAL_SCREENSHOT_CREDIT,
+        firstFollowupCredit: INITIAL_FIRST_FOLLOWUP_CREDIT,
         appliedBy,
       },
     });
@@ -116,6 +140,9 @@ export async function POST(req: NextRequest) {
       screenshot_credit: INITIAL_SCREENSHOT_CREDIT,
       screenshot_credit_granted: screenshotGranted,
       screenshot_credit_error: screenshotCreditError,
+      first_followup_credit: INITIAL_FIRST_FOLLOWUP_CREDIT,
+      first_followup_credit_granted: firstFollowupGranted,
+      first_followup_credit_error: firstFollowupCreditError,
       applied_by: appliedBy,
       ledger: data,
     });
