@@ -20,8 +20,8 @@ export async function POST(req: NextRequest) {
       eve, // ★ 追加: イベントコード
     } = data;
 
-    // ✅ デフォルトは45
-    let creditToApply = 45;
+    // ✅ デフォルトは90
+    let creditToApply = 90;
     let appliedBy = 'default';
 
     // ✅ イベントコードがあれば invite_codes を確認
@@ -35,9 +35,9 @@ export async function POST(req: NextRequest) {
       if (error) throw error;
 
       if (invite && invite.campaign_type === 'bonus-credit') {
-        const v = Number(invite.bonus_credit ?? 45);
+        const v = Number(invite.bonus_credit ?? 90);
         if (!Number.isNaN(v) && v >= 0) {
-          creditToApply = v; // ← 45を上書き
+          creditToApply = v; // ← 90を上書き
           appliedBy = `eve:${invite.code}`;
         }
       }

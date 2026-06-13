@@ -5,7 +5,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
  * POST /api/register/apply-initial-credit
  * Body: { user_code: string, eve?: string }
  *
- * - 通常は 45 クレジットを付与
+ * - 通常は 90 クレジットを付与
  * - eve が指定され、invite_codes に一致すれば、その bonus_credit で上書き
  * - credit_ledger に entry_key='initial_signup' として upsert
  */
@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     }
 
     // デフォルト値
-    let creditToApply = 45;
+    let creditToApply = 90;
     let appliedBy = 'default';
 
     // eve があれば招待情報を確認
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
       if (error) throw error;
 
       if (invite && invite.campaign_type === 'bonus-credit') {
-        const v = Number(invite.bonus_credit ?? 45);
+        const v = Number(invite.bonus_credit ?? 90);
         if (!Number.isNaN(v) && v >= 0) {
           creditToApply = v; // ← 上書き
           appliedBy = `eve:${invite.code}`;
@@ -57,10 +57,23 @@ export async function POST(req: NextRequest) {
 
     if (upErr) throw upErr;
 
+    const { data: screenshotGranted, error: screenshotErr } = await supabaseAdmin.rpc(
+      'grant_screenshot_credit',
+      {
+        p_user_code: user_code,
+        p_amount: 1,
+        p_reason: 'first_signup',
+        p_campaign: 'first_signup',
+      },
+    );
+
+    if (screenshotErr) throw screenshotErr;
+
     return NextResponse.json({
       ok: true,
       applied_credit: creditToApply,
       applied_by: appliedBy,
+      screenshot_credit_granted: screenshotGranted,
       ledger: data,
     });
   } catch (e: any) {
