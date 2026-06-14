@@ -28,6 +28,12 @@ export type Profile = {
   prefecture?: string;
   city?: string;
 
+  // Mu が会話内で呼ぶ名前（表示名とは分離）
+  user_call_name?: string | null;
+  user_call_suffix?: string | null;
+  user_call_suffix_text?: string | null;
+  user_call_display_name?: string | null;
+
   // 名刺系（ProfileBasic.tsx が参照）
   headline?: string;
   organization?: string;
