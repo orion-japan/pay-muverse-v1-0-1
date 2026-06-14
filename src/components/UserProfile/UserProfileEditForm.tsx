@@ -17,6 +17,11 @@ type MyData = {
   Rcode?: string | null;
   REcode?: string | null;
 
+  // Mu 呼び名設定（iros_user_profile 側）
+  user_call_name?: string | null;
+  user_call_suffix?: string | null;
+  user_call_suffix_text?: string | null;
+
   // profiles 側
   avatar_url?: string | null;
   bio?: string | null;
@@ -35,6 +40,15 @@ type MyData = {
   visibility?: string | null;
 };
 
+const CALL_SUFFIX_OPTIONS = [
+  { value: 'san', label: 'さん', text: 'さん' },
+  { value: 'chan', label: 'ちゃん', text: 'ちゃん' },
+  { value: 'kun', label: 'くん', text: 'くん' },
+  { value: 'sama', label: 'さま', text: 'さま' },
+  { value: 'none', label: '呼び捨て', text: '' },
+  { value: 'custom', label: '自由入力', text: '' },
+] as const;
+
 function toCsv(v?: string[] | null) {
   return Array.isArray(v) ? v.join(', ') : '';
 }
@@ -45,11 +59,26 @@ function toArr(s: string): string[] {
     .filter(Boolean);
 }
 
+function buildCallNamePreview(data: MyData | null) {
+  if (!data) return '';
+  const name = String(data.user_call_name || data.name || '').trim();
+  if (!name) return '';
+
+  const suffix = String(data.user_call_suffix || 'san').trim();
+  if (suffix === 'custom') return `${name}${data.user_call_suffix_text || ''}`;
+  if (suffix === 'none') return name;
+
+  const option = CALL_SUFFIX_OPTIONS.find((item) => item.value === suffix);
+  return `${name}${option?.text ?? 'さん'}`;
+}
+
 export default function UserProfileEditForm() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [data, setData] = useState<MyData | null>(null);
+
+  const callNamePreview = useMemo(() => buildCallNamePreview(data), [data]);
 
   useEffect(() => {
     (async () => {
@@ -66,6 +95,9 @@ export default function UserProfileEditForm() {
           setData({
             ...me,
             name: me?.name || '',
+            user_call_name: me?.user_call_name || me?.name || '',
+            user_call_suffix: me?.user_call_suffix || 'san',
+            user_call_suffix_text: me?.user_call_suffix_text || '',
           });
         } else {
           setMsg('プロフィールが取得できませんでした');
@@ -85,14 +117,19 @@ export default function UserProfileEditForm() {
     try {
       const idToken = await (await import('../../lib/getIdToken')).default();
       const payload = {
-        // users 側
+        // users / profiles 側
         click_email: data.click_email ?? '',
         click_username: data.name ?? '',
+        name: data.name ?? '',
         headline: data.headline ?? '',
         mission: data.mission ?? '',
         looking_for: data.looking_for ?? '',
         position: data.position ?? '',
         organization: data.organization ?? '',
+        // Mu 呼び名設定
+        user_call_name: data.user_call_name ?? data.name ?? '',
+        user_call_suffix: data.user_call_suffix ?? 'san',
+        user_call_suffix_text: data.user_call_suffix_text ?? '',
         // profiles 側
         bio: data.bio ?? '',
         prefecture: data.prefecture ?? '',
@@ -168,6 +205,48 @@ export default function UserProfileEditForm() {
             ニックネーム（必須）
             <input type="text" maxLength={40} {...field('name')} placeholder="例：taro" />
           </label>
+          <label>
+            Muでの呼び名
+            <input
+              type="text"
+              maxLength={40}
+              {...field('user_call_name')}
+              placeholder="例：orion"
+            />
+          </label>
+          <label>
+            呼び方
+            <select
+              value={data.user_call_suffix || 'san'}
+              onChange={(e) =>
+                setData((d) => ({
+                  ...(d as MyData),
+                  user_call_suffix: e.target.value,
+                }))
+              }
+            >
+              {CALL_SUFFIX_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {data.user_call_suffix === 'custom' ? (
+            <label>
+              自由入力の敬称
+              <input
+                type="text"
+                maxLength={20}
+                {...field('user_call_suffix_text')}
+                placeholder="例：先生 / 殿 / たん"
+              />
+            </label>
+          ) : null}
+          <div className="readonly-chip">
+            <span>Muの呼び方プレビュー</span>
+            <strong>{callNamePreview || '—'}</strong>
+          </div>
           <label>
             ひとこと肩書き（headline）
             <input
