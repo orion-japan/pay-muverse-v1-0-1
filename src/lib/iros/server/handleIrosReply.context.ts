@@ -1,4 +1,4 @@
-﻿// file: src/lib/iros/server/handleIrosReply.context.ts
+// file: src/lib/iros/server/handleIrosReply.context.ts
 // iros - Turn context builder (minimal + frame plan)
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -27,6 +27,68 @@ import { ensureIrosConversationUuid } from './ensureIrosConversationUuid';
 function normOptString(v: unknown): string | undefined {
   const s = String(v ?? '').trim();
   return s.length > 0 ? s : undefined;
+}
+
+
+async function loadMuFirstOnboardingSeed(params: {
+  supabase: SupabaseClient;
+  userCode: string;
+}): Promise<{ seedText: string | null; diagnosisId: string | null }> {
+  const { supabase, userCode } = params;
+
+  const { data: userRow, error: userErr } = await supabase
+    .from('users')
+    .select('mu_first_onboarding_pending')
+    .eq('user_code', userCode)
+    .maybeSingle();
+
+  if (userErr || userRow?.mu_first_onboarding_pending !== true) {
+    return { seedText: null, diagnosisId: null };
+  }
+
+  const { data: diagnosis, error: diagErr } = await supabase
+    .from('mu_screenshot_diagnosis_logs')
+    .select('id, diagnosis_text, diagnosis_seed_json, created_at, used_at')
+    .eq('user_code', userCode)
+    .eq('source', 'mu_first')
+    .not('diagnosis_text', 'is', null)
+    .order('used_at', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (diagErr || !diagnosis?.id || !diagnosis?.diagnosis_text) {
+    return { seedText: null, diagnosisId: null };
+  }
+
+  const { data: followups } = await supabase
+    .from('mu_first_followup_logs')
+    .select('question, answer, created_at')
+    .eq('user_code', userCode)
+    .eq('diagnosis_log_id', diagnosis.id)
+    .order('created_at', { ascending: true })
+    .limit(3);
+
+  const followupLines = Array.isArray(followups)
+    ? followups.flatMap((item: any, index: number) => [
+        'FOLLOWUP_' + String(index + 1) + '_USER=' + String(item?.question || '').trim(),
+        'FOLLOWUP_' + String(index + 1) + '_MU=' + String(item?.answer || '').trim(),
+      ])
+    : [];
+
+  const seedText = [
+    'MU_FIRST_ONBOARDING_SEED (DO NOT OUTPUT):',
+    'rule=このユーザーは初回スクショ診断を完了して本線Muに入ってきた。最初の本線会話では、この診断Seedと3回ミニ相談履歴を前提文脈として自然に参照する。ただしユーザーが別の新規相談を始めた場合は押し付けない。',
+    'diagnosisLogId=' + diagnosis.id,
+    'diagnosisText:',
+    String(diagnosis.diagnosis_text || '').trim(),
+    'diagnosisSeedJson:',
+    JSON.stringify(diagnosis.diagnosis_seed_json || null),
+    'firstFollowupHistory:',
+    ...followupLines,
+  ].join('\n');
+
+  return { seedText, diagnosisId: String(diagnosis.id) };
 }
 
 function extractDiagnosisFollowupTargetLabel(text: string): string | null {
@@ -277,6 +339,77 @@ export async function buildTurnContext(
   const memoryState = (loaded as any)?.memoryState ?? (loaded as any)?.state ?? null;
 
   baseMetaForTurn = mergedBaseMeta ?? baseMetaForTurn;
+  // ✅ Mu first diagnosis onboarding bridge
+  // 初回診断後に本線へ入った最初の会話だけ、診断Seed + 3回ミニ相談履歴をIROS Writer seedへ接続する。
+  try {
+    if (isFirstTurn) {
+      const muFirst = await loadMuFirstOnboardingSeed({
+        supabase,
+        userCode,
+      });
+
+      if (muFirst.seedText) {
+        (baseMetaForTurn as any).extra =
+          (baseMetaForTurn as any).extra && typeof (baseMetaForTurn as any).extra === 'object'
+            ? (baseMetaForTurn as any).extra
+            : {};
+
+        (baseMetaForTurn as any).extra.ctxPack =
+          (baseMetaForTurn as any).extra.ctxPack &&
+          typeof (baseMetaForTurn as any).extra.ctxPack === 'object'
+            ? (baseMetaForTurn as any).extra.ctxPack
+            : {};
+
+        const prevMemorySeedText =
+          typeof (baseMetaForTurn as any).extra.memorySeedText === 'string'
+            ? (baseMetaForTurn as any).extra.memorySeedText
+            : '';
+
+        const mergedMemorySeedText = [prevMemorySeedText, muFirst.seedText]
+          .filter(Boolean)
+          .join('\n\n');
+
+        (baseMetaForTurn as any).extra.muFirstOnboarding = true;
+        (baseMetaForTurn as any).extra.muFirstDiagnosisLogId = muFirst.diagnosisId;
+        (baseMetaForTurn as any).extra.memorySeedText = mergedMemorySeedText;
+        (baseMetaForTurn as any).extra.memoryPreSeedText = mergedMemorySeedText;
+        (baseMetaForTurn as any).extra.situationSummary =
+          (baseMetaForTurn as any).extra.situationSummary ||
+          '初回スクショ診断後の本線初回会話';
+        (baseMetaForTurn as any).extra.situationTopic =
+          (baseMetaForTurn as any).extra.situationTopic ||
+          '初回スクショ診断';
+
+        (baseMetaForTurn as any).extra.ctxPack.muFirstOnboarding = true;
+        (baseMetaForTurn as any).extra.ctxPack.muFirstDiagnosisLogId = muFirst.diagnosisId;
+        (baseMetaForTurn as any).extra.ctxPack.memorySeedText = mergedMemorySeedText;
+        (baseMetaForTurn as any).extra.ctxPack.memoryPreSeedText = mergedMemorySeedText;
+        (baseMetaForTurn as any).extra.ctxPack.situationSummary =
+          (baseMetaForTurn as any).extra.situationSummary;
+        (baseMetaForTurn as any).extra.ctxPack.situationTopic =
+          (baseMetaForTurn as any).extra.situationTopic;
+
+        await supabase
+          .from('users')
+          .update({
+            mu_first_onboarding_pending: false,
+            mu_first_onboarding_consumed_at: new Date().toISOString(),
+          })
+          .eq('user_code', userCode);
+
+        console.log('[IROS/MU_FIRST_ONBOARDING_SEED_ATTACHED]', {
+          userCode,
+          diagnosisId: muFirst.diagnosisId,
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('[IROS/MU_FIRST_ONBOARDING_SEED_ATTACH_FAILED]', {
+      userCode,
+      error: String((e as any)?.message ?? e),
+    });
+  }
+
 
   // =========================================================
   // ✅ depth_stage を “必ず” baseMetaForTurn のトップに同期する

@@ -11,6 +11,7 @@ type DiagnosisResponse = {
   detail?: string;
   credit_consumed?: boolean | null;
   model?: string;
+  user_name_candidate?: string | null;
 };
 
 type FollowupResponse = {
@@ -66,6 +67,10 @@ export default function MuFirstPage() {
   const [followupSubmitting, setFollowupSubmitting] = useState(false);
   const [followupMessages, setFollowupMessages] = useState<FollowupMessage[]>([]);
   const [followupRemaining, setFollowupRemaining] = useState(3);
+  const [nameCandidate, setNameCandidate] = useState("");
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameSaved, setNameSaved] = useState(false);
+  const [mainStarting, setMainStarting] = useState(false);
 
   const canSubmit = useMemo(
     () => Boolean(previewUrl && selectedFile && user && !loading && !submitting),
@@ -155,10 +160,54 @@ export default function MuFirstPage() {
       }
 
       setDiagnosis(data.diagnosis || "");
+      setNameCandidate(data.user_name_candidate || "");
+      setNameSaved(false);
     } catch (e: any) {
       setError(e?.message || "診断に失敗しました。");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+
+  async function handleSaveName() {
+    const name = nameCandidate.trim();
+    if (!name || nameSaving) return;
+
+    setNameSaving(true);
+    try {
+      const res = await authedFetch("/api/mu/first-name", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        setFollowupError("名前の保存に失敗しました。");
+        return;
+      }
+
+      setNameSaved(true);
+    } catch {
+      setFollowupError("名前の保存に失敗しました。");
+    } finally {
+      setNameSaving(false);
+    }
+  }
+
+  async function handleGoMainMu() {
+    if (mainStarting) return;
+
+    setMainStarting(true);
+    try {
+      await authedFetch("/api/mu/first-onboarding/activate", {
+        method: "POST",
+      }).catch(() => null);
+    } finally {
+      window.location.href = "/mu";
     }
   }
 
@@ -680,7 +729,75 @@ export default function MuFirstPage() {
         >
           入口に戻る
         </Link>
+          {diagnosis && nameCandidate && (
+            <div
+              style={{
+                borderRadius: 18,
+                background: "#fff8ee",
+                padding: "14px 14px",
+                border: "1px solid rgba(154,107,69,0.22)",
+              }}
+            >
+              <div style={{ fontSize: 13, color: "#6f5848", lineHeight: 1.7 }}>
+                スクショ内では、あなたのお名前は「{nameCandidate}」のように見えます。
+                この名前でMuに登録しますか？
+              </div>
+
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <input
+                  value={nameCandidate}
+                  onChange={(event) => {
+                    setNameCandidate(event.target.value);
+                    setNameSaved(false);
+                  }}
+                  style={{
+                    flex: 1,
+                    borderRadius: 12,
+                    border: "1px solid rgba(0,0,0,0.12)",
+                    padding: "10px 12px",
+                    fontSize: 14,
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveName}
+                  disabled={nameSaving || !nameCandidate.trim()}
+                  style={{
+                    border: "none",
+                    borderRadius: 12,
+                    padding: "10px 12px",
+                    background: "#2d241f",
+                    color: "#fff",
+                    fontWeight: 700,
+                  }}
+                >
+                  {nameSaving ? "保存中" : nameSaved ? "保存済" : "登録"}
+                </button>
+              </div>
+            </div>
+          )}
+          {diagnosis && (
+            <button
+              type="button"
+              onClick={handleGoMainMu}
+              disabled={mainStarting}
+              style={{
+                width: "100%",
+                border: "none",
+                borderRadius: 18,
+                padding: "15px 16px",
+                background: "#2d241f",
+                color: "#ffffff",
+                fontSize: 15,
+                fontWeight: 800,
+                boxShadow: "0 12px 24px rgba(45,36,31,0.18)",
+              }}
+            >
+              {mainStarting ? "本線Muへ接続中…" : "初回診断を本線Muへつないで始める"}
+            </button>
+          )}
       </section>
     </main>
   );
 }
+

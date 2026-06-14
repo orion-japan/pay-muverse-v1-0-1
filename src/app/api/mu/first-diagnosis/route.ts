@@ -20,6 +20,7 @@ type DiagnosisSeed = {
   i_layer?: string;
   timing?: string;
   risk?: string;
+  user_name_candidate?: string;
   writer_directives?: string[];
 };
 
@@ -82,6 +83,10 @@ function safeParseDiagnosis(raw: string): {
               typeof parsed.seed.timing === 'string' ? parsed.seed.timing : undefined,
             risk:
               typeof parsed.seed.risk === 'string' ? parsed.seed.risk : undefined,
+            user_name_candidate:
+              typeof parsed.seed.user_name_candidate === 'string'
+                ? parsed.seed.user_name_candidate
+                : undefined,
             writer_directives: Array.isArray(parsed.seed.writer_directives)
               ? [
                   ...parsed.seed.writer_directives
@@ -236,8 +241,9 @@ export async function POST(req: NextRequest) {
       'display_text の「次の一歩」では、返信文や送る文章の例を出さないでください。見方、距離感、確認の仕方だけを短く書いてください。',
       '返信案、送信文、文例、例文は、初回診断では出さないでください。',
       'display_text は全体で700文字以内。',
-      'seed は、mirror, position, user_reaction, partner_signal, i_layer, timing, risk, writer_directives を持つJSONにしてください。',
+      'seed は、mirror, position, user_reaction, partner_signal, i_layer, timing, risk, user_name_candidate, writer_directives を持つJSONにしてください。',
       'seed.partner_signal では相手の好意を断定しないでください。',
+      'スクショ内で右側のユーザー名、プロフィール名、送信者名などからユーザー本人の名前らしき文字列が読める場合だけ、seed.user_name_candidate に入れてください。不明なら空文字にしてください。相手名を入れないでください。',
       'seed.writer_directives には「Mu文体で返す」「説明調にしない」「見出しや箇条書きを多用しない」「返信案は頼まれた時だけ出す」「相手の気持ちは断定しない」を入れてください。',
     ].join('\n');
 
@@ -312,6 +318,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       user_code: userCode,
       diagnosis,
+      user_name_candidate: parsedDiagnosis.seed?.user_name_candidate || null,
       credit_consumed: creditConsumed,
       model,
     });
