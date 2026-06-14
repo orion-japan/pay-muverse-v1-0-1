@@ -1272,3 +1272,244 @@ export async function loadIrDiagnosisDetailSnapshot(
   }
 }
 
+
+export type ScreenshotDiagnosisInventoryItem = {
+  id: string | null;
+  displayId: number | null;
+  mode: string | null;
+  diagnosisTextHead: string | null;
+  usedAt: string | null;
+  createdAt: string | null;
+};
+
+export type ScreenshotDiagnosisInventorySnapshot = {
+  totalCount: number;
+  recent: ScreenshotDiagnosisInventoryItem[];
+  hasMore: boolean;
+  error?: string | null;
+};
+
+// 🔶 loadScreenshotDiagnosisInventorySnapshot
+// 保存済みスクショ診断の「件数」と「直近リスト」を取得する。
+// ir診断と同じく、一覧表示用の正本。Writerには渡さず directReply 用に使う。
+export async function loadScreenshotDiagnosisInventorySnapshot(
+  supabase: any,
+  userCode: string,
+  limit = 10
+): Promise<ScreenshotDiagnosisInventorySnapshot> {
+  const ownerUserCode = String(userCode ?? '').trim();
+  const safeLimit = Math.max(1, Math.min(30, Number.isFinite(Number(limit)) ? Math.trunc(Number(limit)) : 10));
+
+  if (!ownerUserCode) {
+    return {
+      totalCount: 0,
+      recent: [],
+      hasMore: false,
+      error: 'missing_user_code',
+    };
+  }
+
+  try {
+    const { data, error, count } = await supabase
+      .from('mu_screenshot_diagnosis_logs')
+      .select(
+        'id, display_id, mode, diagnosis_text, used_at, created_at',
+        { count: 'exact' }
+      )
+      .eq('user_code', ownerUserCode)
+      .not('display_id', 'is', null)
+      .order('display_id', { ascending: false })
+      .limit(safeLimit);
+
+    if (error) {
+      console.warn('[IROS][loadScreenshotDiagnosisInventorySnapshot] query error', {
+        userCode: ownerUserCode,
+        limit: safeLimit,
+        error,
+      });
+
+      return {
+        totalCount: 0,
+        recent: [],
+        hasMore: false,
+        error: String(error?.message ?? error),
+      };
+    }
+
+    const rows = Array.isArray(data) ? data : [];
+    const totalCount = typeof count === 'number' ? count : rows.length;
+
+    const recent: ScreenshotDiagnosisInventoryItem[] = rows.map((row: any) => ({
+      id: typeof row?.id === 'string' ? row.id : null,
+      displayId: typeof row?.display_id === 'number' ? row.display_id : Number(row?.display_id) || null,
+      mode: typeof row?.mode === 'string' ? row.mode : null,
+      diagnosisTextHead:
+        typeof row?.diagnosis_text === 'string'
+          ? row.diagnosis_text.slice(0, 160)
+          : null,
+      usedAt: typeof row?.used_at === 'string' ? row.used_at : null,
+      createdAt: typeof row?.created_at === 'string' ? row.created_at : null,
+    }));
+
+    return {
+      totalCount,
+      recent,
+      hasMore: totalCount > recent.length,
+      error: null,
+    };
+  } catch (e) {
+    console.warn('[IROS][loadScreenshotDiagnosisInventorySnapshot] failed', e);
+
+    return {
+      totalCount: 0,
+      recent: [],
+      hasMore: false,
+      error: String((e as any)?.message ?? e),
+    };
+  }
+}
+
+export type ScreenshotDiagnosisDetailLookupArgs = {
+  displayId?: number | null;
+};
+
+export type ScreenshotDiagnosisDetailSnapshot = {
+  found: boolean;
+  id: string | null;
+  displayId: number | null;
+  mode: string | null;
+  diagnosisText: string | null;
+  diagnosisTextHead: string | null;
+  diagnosisSeedJson: any | null;
+  classificationJson: any | null;
+  usedAt: string | null;
+  createdAt: string | null;
+  error?: string | null;
+};
+
+// 🔶 loadScreenshotDiagnosisDetailSnapshot
+// display_id指定で、保存済みスクショ診断の本文とSeedを取得する。
+// 一覧・詳細表示では directReply、続き相談では diagnosisSeedJson をWriter注入に使う。
+export async function loadScreenshotDiagnosisDetailSnapshot(
+  supabase: any,
+  userCode: string,
+  lookup: ScreenshotDiagnosisDetailLookupArgs
+): Promise<ScreenshotDiagnosisDetailSnapshot> {
+  const ownerUserCode = String(userCode ?? '').trim();
+  const displayId = Number(lookup?.displayId ?? 0);
+
+  if (!ownerUserCode) {
+    return {
+      found: false,
+      id: null,
+      displayId: null,
+      mode: null,
+      diagnosisText: null,
+      diagnosisTextHead: null,
+      diagnosisSeedJson: null,
+      classificationJson: null,
+      usedAt: null,
+      createdAt: null,
+      error: 'missing_user_code',
+    };
+  }
+
+  if (!Number.isFinite(displayId) || displayId <= 0) {
+    return {
+      found: false,
+      id: null,
+      displayId: null,
+      mode: null,
+      diagnosisText: null,
+      diagnosisTextHead: null,
+      diagnosisSeedJson: null,
+      classificationJson: null,
+      usedAt: null,
+      createdAt: null,
+      error: 'missing_display_id',
+    };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('mu_screenshot_diagnosis_logs')
+      .select(
+        'id, display_id, mode, diagnosis_text, diagnosis_seed_json, classification_json, used_at, created_at'
+      )
+      .eq('user_code', ownerUserCode)
+      .eq('display_id', displayId)
+      .limit(1);
+
+    if (error) {
+      console.warn('[IROS][loadScreenshotDiagnosisDetailSnapshot] query error', {
+        userCode: ownerUserCode,
+        displayId,
+        error,
+      });
+
+      return {
+        found: false,
+        id: null,
+        displayId,
+        mode: null,
+        diagnosisText: null,
+        diagnosisTextHead: null,
+        diagnosisSeedJson: null,
+        classificationJson: null,
+        usedAt: null,
+        createdAt: null,
+        error: String(error?.message ?? error),
+      };
+    }
+
+    const row = Array.isArray(data) && data.length > 0 ? data[0] : null;
+
+    if (!row) {
+      return {
+        found: false,
+        id: null,
+        displayId,
+        mode: null,
+        diagnosisText: null,
+        diagnosisTextHead: null,
+        diagnosisSeedJson: null,
+        classificationJson: null,
+        usedAt: null,
+        createdAt: null,
+        error: null,
+      };
+    }
+
+    const diagnosisText = typeof row?.diagnosis_text === 'string' ? row.diagnosis_text : null;
+
+    return {
+      found: true,
+      id: typeof row?.id === 'string' ? row.id : null,
+      displayId: typeof row?.display_id === 'number' ? row.display_id : Number(row?.display_id) || displayId,
+      mode: typeof row?.mode === 'string' ? row.mode : null,
+      diagnosisText,
+      diagnosisTextHead: diagnosisText ? diagnosisText.slice(0, 200) : null,
+      diagnosisSeedJson: row?.diagnosis_seed_json ?? null,
+      classificationJson: row?.classification_json ?? null,
+      usedAt: typeof row?.used_at === 'string' ? row.used_at : null,
+      createdAt: typeof row?.created_at === 'string' ? row.created_at : null,
+      error: null,
+    };
+  } catch (e) {
+    console.warn('[IROS][loadScreenshotDiagnosisDetailSnapshot] failed', e);
+
+    return {
+      found: false,
+      id: null,
+      displayId,
+      mode: null,
+      diagnosisText: null,
+      diagnosisTextHead: null,
+      diagnosisSeedJson: null,
+      classificationJson: null,
+      usedAt: null,
+      createdAt: null,
+      error: String((e as any)?.message ?? e),
+    };
+  }
+}

@@ -172,9 +172,80 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
 
   // ✅ history 用：クロージャで古い messages を掴まないための ref
   const messagesRef = useRef<IrosMessage[]>([]);
+  const latestScreenshotDiagnosisRef = useRef<{
+    diagnosis: string;
+    diagnosis_seed: unknown;
+    at: string;
+  } | null>(null);
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handler = (event: Event) => {
+      const custom = event as CustomEvent<{
+        diagnosis?: string;
+        diagnosis_seed?: unknown;
+        image_data_url?: string;
+        local_image_id?: string | null;
+      }>;
+
+      const diagnosis = String(custom.detail?.diagnosis || '').trim();
+      const imageDataUrl = String(custom.detail?.image_data_url || '').trim();
+      const localImageId = String(custom.detail?.local_image_id || '').trim();
+      if (!diagnosis) return;
+
+      const now = new Date().toISOString();
+
+      latestScreenshotDiagnosisRef.current = {
+        diagnosis,
+        diagnosis_seed: custom.detail?.diagnosis_seed ?? null,
+        at: now,
+      };
+
+      setMessages((prev) => [
+        ...prev,
+        ...(imageDataUrl
+          ? [
+              {
+                id: 'screenshot-image-' + Date.now(),
+                role: 'user',
+                text: '📎 スクショ画像',
+                content: '📎 スクショ画像',
+                created_at: now,
+                ts: Date.now(),
+                meta: {
+                  kind: 'screenshot_image_preview',
+                  image_data_url: imageDataUrl,
+                  localImageId: localImageId || null,
+                  localOnly: true,
+                  fallbackText:
+                    'この画像は、この端末のブラウザ内にのみ保存されています。別の端末では表示できません。診断結果は下に保存されています。',
+                },
+              } as any,
+            ]
+          : []),
+        {
+          id: `screenshot-diagnosis-${Date.now()}`,
+          role: 'assistant',
+          text: `【スクショ診断結果】\n${diagnosis}`,
+          created_at: now,
+          meta: {
+            kind: 'screenshot_diagnosis',
+            diagnosis_seed: custom.detail?.diagnosis_seed ?? null,
+          },
+        } as any,
+      ]);
+    };
+
+    window.addEventListener('iros:screenshot-diagnosis-complete', handler as EventListener);
+    return () => {
+      window.removeEventListener('iros:screenshot-diagnosis-complete', handler as EventListener);
+    };
+  }, []);
+
+  
 
   /* ========== Style 初期ロード ========== */
 
@@ -263,7 +334,88 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
       return;
     }
 
-    const rows = normalizeMessages(rowsRaw);
+    const rowsBase = normalizeMessages(rowsRaw);
+
+    let screenshotLogs: any[] = [];
+    try {
+      const currentUser = auth.currentUser;
+      const idToken = currentUser ? await currentUser.getIdToken() : null;
+
+      if (idToken) {
+        const res = await fetch(
+          `/api/mu/screenshot-diagnosis?conversation_id=${encodeURIComponent(cid)}`,
+          {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${idToken}`,
+            },
+          },
+        );
+
+        const json = await res.json().catch(() => null);
+        if (res.ok && json?.ok && Array.isArray(json.items)) {
+          screenshotLogs = json.items;
+        }
+      }
+    } catch (e) {
+      devwarn('[IROS][client] screenshot diagnosis restore failed', {
+        cid,
+        error: String((e as any)?.message ?? e),
+      });
+    }
+
+    const screenshotMsgs: IrosMessage[] = screenshotLogs.flatMap((item: any) => {
+      const id = String(item?.id || '');
+      const diagnosisText = String(item?.diagnosis_text || '').trim();
+      const createdAt = item?.created_at || new Date().toISOString();
+
+      if (!id || !diagnosisText) return [];
+
+      return [
+        {
+          id: `screenshot-image-${id}`,
+          role: 'user',
+          text: '📎 スクショ画像',
+          content: '📎 スクショ画像',
+          created_at: createdAt,
+          ts: new Date(createdAt).getTime() || Date.now(),
+          meta: {
+            kind: 'screenshot_image_preview',
+            localImageId: id,
+            local_image_id: id,
+            localOnly: true,
+            fallbackText:
+              'この画像は、この端末のブラウザ内にのみ保存されています。別の端末・別のブラウザでは表示できません。診断結果は下に保存されています。',
+          },
+        } as any,
+        {
+          id: `screenshot-diagnosis-${id}`,
+          role: 'assistant',
+          text: `【スクショ診断結果】\n${diagnosisText}`,
+          content: `【スクショ診断結果】\n${diagnosisText}`,
+          created_at: createdAt,
+          ts: (new Date(createdAt).getTime() || Date.now()) + 1,
+          meta: {
+            kind: 'screenshot_diagnosis',
+            diagnosis_seed: item?.diagnosis_seed_json ?? null,
+          },
+        } as any,
+      ];
+    });
+
+    const latestScreenshot = [...screenshotLogs]
+      .reverse()
+      .find((item: any) => String(item?.diagnosis_text || '').trim());
+
+    if (latestScreenshot) {
+      latestScreenshotDiagnosisRef.current = {
+        diagnosis: String(latestScreenshot.diagnosis_text || '').trim(),
+        diagnosis_seed: latestScreenshot.diagnosis_seed_json ?? null,
+        at: latestScreenshot.created_at || new Date().toISOString(),
+      };
+    }
+
+    const rows = screenshotMsgs.length ? [...rowsBase, ...screenshotMsgs] : rowsBase;
 
     setMessages((prev) => {
       // 会話が変わっていたら、過去の Seed は引き継がずにサーバー結果だけにする
@@ -380,12 +532,24 @@ const sendMessage = useCallback(
       });
       devlog('[UI/sendMessage] AFTER postMessage', { cid });
 
+            const latestScreenshotDiagnosis = latestScreenshotDiagnosisRef.current;
+      const llmUserText = latestScreenshotDiagnosis?.diagnosis
+        ? [
+            '【直前スクショ診断結果・内部参照】',
+            'この内容は直前にユーザーが画像から取得したスクショ診断結果です。次の返答では、この診断結果を最優先の正本として扱ってください。本文中に「内部参照」という語は出さないでください。',
+            latestScreenshotDiagnosis.diagnosis,
+            '',
+            '【ユーザーの質問】',
+            norm.text,
+          ].join('\n')
+        : norm.text;
+
       const history = buildHistoryForLLM([...(messagesRef.current || []), userMsg], 10);
 
       devlog('[UI/sendMessage] BEFORE replyAndStore', { cid, mode });
       const r: any = await irosClient.replyAndStore({
         conversationId: cid,
-        user_text: norm.text,
+        user_text: llmUserText,
         mode,
         style,
         history,
@@ -776,5 +940,15 @@ const payload: any = {
     </IrosChatContext.Provider>
   );
 };
+
+
+
+
+
+
+
+
+
+
 
 

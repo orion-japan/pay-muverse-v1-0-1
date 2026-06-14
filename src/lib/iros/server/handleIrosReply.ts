@@ -1065,7 +1065,29 @@ try {
 }
 
 // 置換範囲: 764〜769（seedFallbackRaw の定義ブロック）
+const screenshotFollowupSeedForGate =
+  String(
+    (exProbe as any)?.ctxPack?.screenshotDiagnosisFollowup === true
+      ? ((exProbe as any)?.ctxPack?.memorySeedText ?? (exProbe as any)?.memorySeedText ?? '')
+      : (exSave as any)?.ctxPack?.screenshotDiagnosisFollowup === true
+        ? ((exSave as any)?.ctxPack?.memorySeedText ?? (exSave as any)?.memorySeedText ?? '')
+        : ''
+  ).trim();
+
+if (screenshotFollowupSeedForGate.startsWith('SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED')) {
+  console.log('[IROS/LLM_GATE][SCREENSHOT_FOLLOWUP_SEED_FALLBACK]', {
+    hasSeed: true,
+    seedLen: screenshotFollowupSeedForGate.length,
+    seedHead: screenshotFollowupSeedForGate.slice(0, 120),
+  });
+}
+
 const seedFallbackRaw =
+  // ✅ スクショ診断IDの続き相談は、Writer入口の最優先Seedにする
+  (screenshotFollowupSeedForGate.startsWith('SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED')
+    ? screenshotFollowupSeedForGate
+    : null) ??
+
   // 既存の seed 系（優先）
   exProbe?.slotPlanSeed ??
   exProbe?.llmRewriteSeed ??

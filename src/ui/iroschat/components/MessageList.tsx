@@ -9,6 +9,105 @@ import '../IrosChat.css';
 
 import ChatMarkdown from './ChatMarkdown';
 import IrosMetaBadge from './IrosMetaBadge';
+import { loadScreenshotImageLocal } from '@/lib/browser/screenshotImageStore';
+
+function ScreenshotImagePreview({ meta }: { meta: any }) {
+  const [src, setSrc] = React.useState<string>('');
+  const [loaded, setLoaded] = React.useState(false);
+
+  const inlineSrc =
+    typeof meta?.image_data_url === 'string' && meta.image_data_url.startsWith('data:image/')
+      ? meta.image_data_url
+      : '';
+
+  const localImageId = String(meta?.localImageId || meta?.local_image_id || '').trim();
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      if (inlineSrc) {
+        setSrc(inlineSrc);
+        setLoaded(true);
+        return;
+      }
+
+      if (!localImageId) {
+        setLoaded(true);
+        return;
+      }
+
+      const localSrc = await loadScreenshotImageLocal(localImageId).catch(() => null);
+      if (!cancelled) {
+        setSrc(localSrc || '');
+        setLoaded(true);
+      }
+    }
+
+    run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [inlineSrc, localImageId]);
+
+  if (src) {
+    return (
+      <div style={{ marginBottom: 10 }}>
+        <img
+          src={src}
+          alt="スクショ画像"
+          style={{
+            display: 'block',
+            maxWidth: '100%',
+            maxHeight: 360,
+            borderRadius: 14,
+            border: '1px solid rgba(148, 163, 184, 0.32)',
+            objectFit: 'contain',
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (!loaded) {
+    return (
+      <div
+        style={{
+          fontSize: 12,
+          lineHeight: 1.7,
+          opacity: 0.72,
+          padding: '8px 10px',
+          borderRadius: 12,
+          background: 'rgba(148, 163, 184, 0.10)',
+          marginBottom: 10,
+        }}
+      >
+        スクショ画像を読み込んでいます…
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        fontSize: 12,
+        lineHeight: 1.7,
+        opacity: 0.72,
+        padding: '8px 10px',
+        borderRadius: 12,
+        background: 'rgba(148, 163, 184, 0.10)',
+        marginBottom: 10,
+      }}
+    >
+      {String(
+        meta?.fallbackText ||
+          'この画像は、この端末のブラウザ内にのみ保存されています。別の端末・別のブラウザでは表示できません。診断結果は下に保存されています。',
+      )}
+    </div>
+  );
+}
+
 
 // メッセージ型
 type IrosMessage = {
@@ -840,6 +939,10 @@ const shouldShowDiagnosisNotice =
                     </div>
                   ) : (
                     <>
+                      {(m.meta as any)?.kind === 'screenshot_image_preview' && (
+                        <ScreenshotImagePreview meta={m.meta} />
+                      )}
+
                       <ChatMarkdown text={safeText} />
 
                       {!isUser && (
@@ -978,6 +1081,10 @@ const shouldShowDiagnosisNotice =
       </div>
     );
   }
+
+
+
+
 
 
 

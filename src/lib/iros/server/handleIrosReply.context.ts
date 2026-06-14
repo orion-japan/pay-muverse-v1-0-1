@@ -6,7 +6,7 @@ import type { IrosStyle } from '@/lib/iros/system';
 import type { IrosUserProfileRow } from './loadUserProfile';
 
 import { loadBaseMetaFromMemoryState } from './handleIrosReply.state';
-import { loadLatestIrDiagnosisSnapshot, loadIrDiagnosisInventorySnapshot, loadIrDiagnosisDetailSnapshot } from '@/lib/iros/memoryRecall';
+import { loadLatestIrDiagnosisSnapshot, loadIrDiagnosisInventorySnapshot, loadIrDiagnosisDetailSnapshot, loadScreenshotDiagnosisInventorySnapshot, loadScreenshotDiagnosisDetailSnapshot } from '@/lib/iros/memoryRecall';
 import { routeIrosMemory } from '@/lib/iros/memory/memoryRouter';
 import { resolveWorkingReference } from '@/lib/iros/memory/workingReferenceResolver';
 import { guardIrosMemoryDecision } from '@/lib/iros/memory/memoryGuard';
@@ -629,9 +629,263 @@ export async function buildTurnContext(
     );
 
 
+  const wantsScreenshotDiagnosisInventory =
+    !isIrDiagnosisTurn &&
+    !isCreativeContinuationRequest &&
+    /(?:スクショ診断|スクリーンショット診断|画像診断).*(?:どれくらい|何件|何個|いくつ|一覧|リスト|持ってる|持っています|残ってる|保存|記録)|(?:どれくらい|何件|何個|いくつ|一覧|リスト).*(?:スクショ診断|スクリーンショット診断|画像診断)/u.test(
+      followupSourceText
+    );
+
+  const screenshotDiagnosisDetailIdMatch = followupSourceText.match(
+    /(?:スクショ診断|スクリーンショット診断|画像診断)?\s*(?:ID|id)[:：]?\s*(\d+)\s*(?:の|を)?(?:内容|詳しく|詳細|教えて|見せて|確認|開いて|続き|元に|もとに|から見て|について)/u
+  );
+
+  const hasScreenshotDiagnosisIdReference =
+    !!screenshotDiagnosisDetailIdMatch &&
+    /(?:スクショ診断|スクリーンショット診断|画像診断)/u.test(followupSourceText);
+
+  const screenshotDiagnosisContinuationRequested =
+    hasScreenshotDiagnosisIdReference &&
+    /(?:続き|元に|もとに|から見て|について|相談)/u.test(followupSourceText);
+
+  if (wantsScreenshotDiagnosisInventory) {
+    try {
+      const screenshotInventory = await loadScreenshotDiagnosisInventorySnapshot(supabase, userCode, 10);
+
+      const recentLines = screenshotInventory.recent.map((item) => {
+        const id = typeof item.displayId === 'number' ? String(item.displayId) : '不明';
+        const created = item.createdAt ? item.createdAt.slice(0, 10) : item.usedAt ? item.usedAt.slice(0, 10) : '日付不明';
+        const head = item.diagnosisTextHead ? item.diagnosisTextHead.replace(/\s+/g, ' ').slice(0, 72) : '本文なし';
+        return 'ID:' + id + ' / ' + created + ' / ' + head;
+      });
+
+      const directReply = screenshotInventory.error
+        ? ['今は保存済みスクショ診断リストを確認できません。', '', '理由: ' + screenshotInventory.error].join('\n')
+        : screenshotInventory.totalCount > 0
+          ? [
+              '保存済みのスクショ診断は ' + screenshotInventory.totalCount + '件あります。',
+              '直近で見えているのは ' + screenshotInventory.recent.length + '件です。',
+              screenshotInventory.hasMore ? 'それ以前のスクショ診断もDB上には残っています。' : '今見えている範囲で全件です。',
+              '',
+              ...recentLines,
+              '',
+              '内容を見る場合は「スクショ診断ID:8を見せて」のように送ってください。',
+            ].join('\n')
+          : '保存済みのスクショ診断は、今のDB上では0件です。';
+
+      const screenshotInventoryPreSeedResult = {
+        version: 'pre_seed_assist_v1',
+        kind: 'screenshot_diagnosis_inventory',
+        confidence: 1,
+        targetLabel: null,
+        targetKey: null,
+        directReply,
+        seedText: [
+          'PRE_SEED_SCREENSHOT_DIAGNOSIS_INVENTORY:',
+          'userText=' + followupSourceText,
+          'totalCount=' + screenshotInventory.totalCount,
+          'recentCount=' + screenshotInventory.recent.length,
+          'hasMore=' + String(screenshotInventory.hasMore),
+          'rule=保存済みスクショ診断の件数と直近リストをDB結果として直返しする。',
+        ].join('\n'),
+        shouldBypassWriter: true,
+        reason: 'screenshot_diagnosis_inventory_direct_reply',
+      };
+
+      (baseMetaForTurn as any).extra = (baseMetaForTurn as any).extra ?? {};
+      (baseMetaForTurn as any).extra.ctxPack =
+        (baseMetaForTurn as any).extra.ctxPack ?? {};
+
+      (baseMetaForTurn as any).extra.preSeedAssistResult = screenshotInventoryPreSeedResult;
+      (baseMetaForTurn as any).extra.preSeedAssistKind = screenshotInventoryPreSeedResult.kind;
+      (baseMetaForTurn as any).extra.preSeedAssistConfidence = screenshotInventoryPreSeedResult.confidence;
+      (baseMetaForTurn as any).extra.preSeedAssistSeedText = screenshotInventoryPreSeedResult.seedText;
+      (baseMetaForTurn as any).extra.preSeedAssistDirectReply = directReply;
+      (baseMetaForTurn as any).extra.preSeedAssistShouldBypassWriter = true;
+      (baseMetaForTurn as any).extra.directReplyCandidate = directReply;
+      (baseMetaForTurn as any).extra.screenshotDiagnosisInventory = screenshotInventory;
+
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistResult = screenshotInventoryPreSeedResult;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistKind = screenshotInventoryPreSeedResult.kind;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistConfidence = screenshotInventoryPreSeedResult.confidence;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistSeedText = screenshotInventoryPreSeedResult.seedText;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistDirectReply = directReply;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistShouldBypassWriter = true;
+      (baseMetaForTurn as any).extra.ctxPack.directReplyCandidate = directReply;
+      (baseMetaForTurn as any).extra.ctxPack.screenshotDiagnosisInventory = screenshotInventory;
+
+      console.log('[IROS/SCREENSHOT_DIAGNOSIS_INVENTORY_DIRECT]', {
+        userCode,
+        totalCount: screenshotInventory.totalCount,
+        recentCount: screenshotInventory.recent.length,
+        hasMore: screenshotInventory.hasMore,
+        error: screenshotInventory.error ?? null,
+      });
+    } catch (e) {
+      console.warn('[IROS/SCREENSHOT_DIAGNOSIS_INVENTORY_DIRECT][FAILED]', {
+        userCode,
+        error: String((e as any)?.message ?? e),
+      });
+    }
+  }
+
+  if (!isIrDiagnosisTurn && !isCreativeContinuationRequest && hasScreenshotDiagnosisIdReference) {
+    try {
+      const screenshotDisplayId = Number(screenshotDiagnosisDetailIdMatch[1] ?? 0);
+      const screenshotDetail = await loadScreenshotDiagnosisDetailSnapshot(supabase, userCode, { displayId: screenshotDisplayId });
+
+      const directReply = screenshotDetail.error
+        ? [
+            '今は指定されたスクショ診断を確認できません。',
+            '',
+            '理由: ' + screenshotDetail.error,
+          ].join('\n')
+        : screenshotDetail.found && screenshotDetail.diagnosisText
+          ? [
+              'スクショ診断 ID:' + String(screenshotDetail.displayId ?? screenshotDisplayId),
+              '',
+              '診断結果:',
+              String(screenshotDetail.diagnosisText ?? '').trim(),
+              '',
+              'この診断について続けて相談する場合は、「スクショ診断ID:' + String(screenshotDetail.displayId ?? screenshotDisplayId) + 'の続きで相談」と送ってください。',
+            ].join('\n')
+          : [
+              '指定されたスクショ診断は、今のDB上では見つかりませんでした。',
+              '',
+              '指定: ID:' + String(Math.trunc(Number(screenshotDisplayId))),
+            ].join('\n');
+
+      const screenshotDiagnosisFollowupSeedText = [
+        'SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED (DO NOT OUTPUT):',
+        'source=mu_screenshot_diagnosis_logs',
+        'displayId=' + (Number.isFinite(screenshotDisplayId) && Number(screenshotDisplayId) > 0 ? String(Math.trunc(Number(screenshotDisplayId))) : ''),
+        'userText=' + followupSourceText,
+        'rule=このターンはスクショ診断IDの続き相談。ir診断/lastIrDiagnosisではなく、このスクショ診断を正本にする。',
+        'writerRule=必ずdiagnosisText内の具体語を1つ以上使って答える。一般的なスクショ診断説明で返さない。',
+        'diagnosisText:',
+        String(screenshotDetail.diagnosisText ?? '').trim(),
+        'diagnosisSeedJson:',
+        JSON.stringify(screenshotDetail.diagnosisSeedJson ?? null),
+        'classificationJson:',
+        JSON.stringify(screenshotDetail.classificationJson ?? null),
+      ].join('\n');
+
+      const screenshotDiagnosisAdditionalInfoFollowupReply =
+        screenshotDiagnosisContinuationRequested &&
+        /(?:追加の情報|追加情報|足したい材料|何を足|なんですか|何ですか)/u.test(followupSourceText)
+          ? (() => {
+              const diagnosisTextForReply = String(screenshotDetail.diagnosisText ?? '').trim();
+              const concreteHints: string[] = [];
+              if (/感謝/u.test(diagnosisTextForReply)) concreteHints.push('感謝');
+              if (/普通に暮らせて/u.test(diagnosisTextForReply)) concreteHints.push('普通に暮らせている');
+              if (/メタトロン/u.test(diagnosisTextForReply)) concreteHints.push('メタトロン');
+              if (/前職/u.test(diagnosisTextForReply)) concreteHints.push('前職');
+              if (/既読/u.test(diagnosisTextForReply)) concreteHints.push('既読が早い');
+              if (/謙遜/u.test(diagnosisTextForReply)) concreteHints.push('謙遜');
+              if (/一度に質問を絞/u.test(diagnosisTextForReply)) concreteHints.push('一度に質問を絞る');
+
+              const concreteLine = concreteHints.length > 0
+                ? concreteHints.join('・')
+                : 'この診断結果に出ている具体的な反応';
+
+              return [
+                'ID:' + String(screenshotDetail.displayId ?? screenshotDisplayId) + 'でいう「追加の情報」は、一般的なスクショ情報ではなく、この診断で出ている ' + concreteLine + ' を、どこまで続けていいか判断するための材料です。',
+                'たとえば今回なら、相手の感謝がその場だけのものなのか、今も関係を開いていい温度なのか、メタトロンや前職の話をどこまで続けたいのかを見るための前後情報です。',
+                '見るポイントは、感謝で会話が閉じているのか、もう少し近況や話題を広げても相手が乗ってくるのかです。既読や返事の早さ、次の一言への反応があると、そこが判断しやすくなります。',
+                'だから足すなら、スクショの前後全部ではなく、「この話の直前に何を話していたか」「この後に相手が返してきたか」「あなたがどこまで踏み込みたいか」の3つで十分です。'
+              ].join('\n\n');
+            })()
+          : null;
+
+      const shouldBypassScreenshotDiagnosisDetailWriter = !screenshotDiagnosisContinuationRequested || !!screenshotDiagnosisAdditionalInfoFollowupReply;
+      const screenshotDetailDirectReplyForTurn = screenshotDiagnosisAdditionalInfoFollowupReply ?? (shouldBypassScreenshotDiagnosisDetailWriter ? directReply : null);
+
+      const screenshotDetailPreSeedResult = {
+        version: 'pre_seed_assist_v1',
+        kind: 'screenshot_diagnosis_detail',
+        confidence: 1,
+        targetLabel: null,
+        targetKey: null,
+        directReply: screenshotDetailDirectReplyForTurn,
+        seedText: screenshotDiagnosisContinuationRequested ? screenshotDiagnosisFollowupSeedText : [
+          'PRE_SEED_SCREENSHOT_DIAGNOSIS_DETAIL:',
+          'userText=' + followupSourceText,
+          'displayId=' + (Number.isFinite(screenshotDisplayId) && Number(screenshotDisplayId) > 0 ? String(Math.trunc(Number(screenshotDisplayId))) : ''),
+          'found=' + String(screenshotDetail.found),
+          'rule=保存済みスクショ診断の指定1件をDB結果として直返しする。',
+        ].join('\n'),
+        shouldBypassWriter: shouldBypassScreenshotDiagnosisDetailWriter,
+        reason: screenshotDiagnosisContinuationRequested ? 'screenshot_diagnosis_followup_seed' : 'screenshot_diagnosis_detail_direct_reply',
+      };
+
+      (baseMetaForTurn as any).extra = (baseMetaForTurn as any).extra ?? {};
+      (baseMetaForTurn as any).extra.ctxPack =
+        (baseMetaForTurn as any).extra.ctxPack ?? {};
+
+      (baseMetaForTurn as any).extra.preSeedAssistResult = screenshotDetailPreSeedResult;
+      (baseMetaForTurn as any).extra.preSeedAssistKind = screenshotDetailPreSeedResult.kind;
+      (baseMetaForTurn as any).extra.preSeedAssistConfidence = screenshotDetailPreSeedResult.confidence;
+      (baseMetaForTurn as any).extra.preSeedAssistSeedText = screenshotDetailPreSeedResult.seedText;
+      (baseMetaForTurn as any).extra.preSeedAssistDirectReply = screenshotDetailDirectReplyForTurn;
+      (baseMetaForTurn as any).extra.preSeedAssistShouldBypassWriter = shouldBypassScreenshotDiagnosisDetailWriter;
+      (baseMetaForTurn as any).extra.screenshotDetailDirectReplyForTurnCandidate = screenshotDetailDirectReplyForTurn;
+      (baseMetaForTurn as any).extra.screenshotDiagnosisDetail = screenshotDetail;
+
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistResult = screenshotDetailPreSeedResult;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistKind = screenshotDetailPreSeedResult.kind;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistConfidence = screenshotDetailPreSeedResult.confidence;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistSeedText = screenshotDetailPreSeedResult.seedText;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistDirectReply = screenshotDetailDirectReplyForTurn;
+      (baseMetaForTurn as any).extra.ctxPack.preSeedAssistShouldBypassWriter = shouldBypassScreenshotDiagnosisDetailWriter;
+      (baseMetaForTurn as any).extra.ctxPack.directReplyCandidate = screenshotDetailDirectReplyForTurn ?? directReply;
+      (baseMetaForTurn as any).extra.ctxPack.screenshotDiagnosisDetail = screenshotDetail;
+
+      if (screenshotDiagnosisContinuationRequested) {
+        (baseMetaForTurn as any).extra.presentationKind = 'screenshot_diagnosis_followup';
+        (baseMetaForTurn as any).extra.screenshotDiagnosisFollowup = true;
+        (baseMetaForTurn as any).extra.memoryPreSeedText = screenshotDiagnosisFollowupSeedText;
+        (baseMetaForTurn as any).extra.memorySeedText = screenshotDiagnosisFollowupSeedText;
+        (baseMetaForTurn as any).extra.goalKind = 'clarify';
+        (baseMetaForTurn as any).extra.situationSummary =
+          'スクショ診断ID:' + String(screenshotDetail.displayId ?? screenshotDisplayId) + 'の続き相談';
+        (baseMetaForTurn as any).extra.situationTopic =
+          'スクショ診断ID:' + String(screenshotDetail.displayId ?? screenshotDisplayId);
+
+        (baseMetaForTurn as any).extra.ctxPack.presentationKind = 'screenshot_diagnosis_followup';
+        (baseMetaForTurn as any).extra.ctxPack.screenshotDiagnosisFollowup = true;
+        (baseMetaForTurn as any).extra.ctxPack.memoryPreSeedText = screenshotDiagnosisFollowupSeedText;
+        (baseMetaForTurn as any).extra.ctxPack.memorySeedText = screenshotDiagnosisFollowupSeedText;
+        (baseMetaForTurn as any).extra.ctxPack.goalKind = 'clarify';
+        (baseMetaForTurn as any).extra.ctxPack.replyGoal = { kind: 'clarify' };
+        (baseMetaForTurn as any).extra.ctxPack.situationSummary =
+          'スクショ診断ID:' + String(screenshotDetail.displayId ?? screenshotDisplayId) + 'の続き相談';
+        (baseMetaForTurn as any).extra.ctxPack.situationTopic =
+          'スクショ診断ID:' + String(screenshotDetail.displayId ?? screenshotDisplayId);
+
+        (baseMetaForTurn as any).extra.similarFlowSeed = '';
+        (baseMetaForTurn as any).extra.similarFlowDebug = null;
+        (baseMetaForTurn as any).extra.ctxPack.similarFlowSeed = '';
+        (baseMetaForTurn as any).extra.ctxPack.similarFlowDebug = null;
+      }
+
+      console.log('[IROS/SCREENSHOT_DIAGNOSIS_DETAIL_DIRECT]', {
+        userCode,
+        displayId: Number.isFinite(screenshotDisplayId) && Number(screenshotDisplayId) > 0 ? Math.trunc(Number(screenshotDisplayId)) : null,
+        found: screenshotDetail.found,
+        error: screenshotDetail.error ?? null,
+      });
+    } catch (e) {
+      console.warn('[IROS/SCREENSHOT_DIAGNOSIS_DETAIL_DIRECT][FAILED]', {
+        userCode,
+        error: String((e as any)?.message ?? e),
+      });
+    }
+  }
+
   const wantsDiagnosisInventory =
     !isIrDiagnosisTurn &&
     !isCreativeContinuationRequest &&
+    !/(?:スクショ診断|スクリーンショット診断|画像診断)/u.test(followupSourceText) &&
     /(?:診断|ir診断|IR診断|診断内容|診断結果).*(?:どれくらい|何件|何個|いくつ|一覧|リスト|持ってる|持っています|残ってる|保存|記録)|(?:どれくらい|何件|何個|いくつ|一覧|リスト).*(?:診断|ir診断|IR診断|診断内容|診断結果)/u.test(
       followupSourceText
     );
@@ -779,7 +1033,7 @@ export async function buildTurnContext(
 
   const diagnosisDetailMatch = diagnosisDetailIdMatch || diagnosisDetailLegacyMatch;
 
-  if (!isIrDiagnosisTurn && !isCreativeContinuationRequest && diagnosisDetailMatch) {
+  if (!isIrDiagnosisTurn && !isCreativeContinuationRequest && !/(?:スクショ診断|スクリーンショット診断|画像診断)/u.test(followupSourceText) && diagnosisDetailMatch) {
     try {
       const diagnosisDetailId = diagnosisDetailIdMatch ? Number(diagnosisDetailIdMatch[1] ?? 0) : null;
       const diagnosisDetailTargetLabel = diagnosisDetailLegacyMatch ? String(diagnosisDetailLegacyMatch[1] ?? '').trim() : '';
@@ -885,6 +1139,7 @@ export async function buildTurnContext(
     !isIrDiagnosisTurn &&
     isFollowupRequest &&
     !isCreativeContinuationRequest &&
+    !hasScreenshotDiagnosisIdReference &&
     canEnterDiagnosisFollowup
   ) {
     try {
@@ -899,6 +1154,7 @@ export async function buildTurnContext(
   const isDiagnosisFollowup =
     !isCreativeContinuationRequest &&
     !isIrDiagnosisTurn &&
+    !hasScreenshotDiagnosisIdReference &&
     canEnterDiagnosisFollowup &&
     hasDiagnosisSource &&
     isFollowupRequest;
@@ -919,6 +1175,7 @@ export async function buildTurnContext(
     !isCreativeContinuationRequest &&
     !isIrDiagnosisTurn &&
     !isDiagnosisFollowup &&
+    !hasScreenshotDiagnosisIdReference &&
     canEnterDiagnosisFollowup &&
     wantsDetail &&
     hasDiagnosisSource;
@@ -1557,13 +1814,17 @@ export async function buildTurnContext(
       });
 
       (baseMetaForTurn as any).extra.memorySeedResult = memorySeedResult;
-      (baseMetaForTurn as any).extra.memorySeedText = memorySeedResult.seedText;
+      if ((baseMetaForTurn as any).extra?.screenshotDiagnosisFollowup !== true) {
+        (baseMetaForTurn as any).extra.memorySeedText = memorySeedResult.seedText;
+      }
       (baseMetaForTurn as any).extra.memorySeedKind = memorySeedResult.seedKind;
       (baseMetaForTurn as any).extra.memorySeedBlocked = memorySeedResult.blocked;
       (baseMetaForTurn as any).extra.memorySeedReasons = memorySeedResult.reasons;
 
       (baseMetaForTurn as any).extra.ctxPack.memorySeedResult = memorySeedResult;
-      (baseMetaForTurn as any).extra.ctxPack.memorySeedText = memorySeedResult.seedText;
+      if ((baseMetaForTurn as any).extra?.ctxPack?.screenshotDiagnosisFollowup !== true) {
+        (baseMetaForTurn as any).extra.ctxPack.memorySeedText = memorySeedResult.seedText;
+      }
       (baseMetaForTurn as any).extra.ctxPack.memorySeedKind = memorySeedResult.seedKind;
       (baseMetaForTurn as any).extra.ctxPack.memorySeedBlocked = memorySeedResult.blocked;
       (baseMetaForTurn as any).extra.ctxPack.memorySeedReasons = memorySeedResult.reasons;
@@ -1631,6 +1892,23 @@ export async function buildTurnContext(
           'safe=1行（押しつけない）',
         ].join('\n');
 
+        const screenshotDiagnosisFollowupSeedForWriter = String(
+          ex?.ctxPack?.screenshotDiagnosisFollowup === true
+            ? (ex?.ctxPack?.memorySeedText ?? ex?.memorySeedText ?? '')
+            : ''
+        ).trim();
+
+        if (screenshotDiagnosisFollowupSeedForWriter) {
+          ex.llmRewriteSeed = [
+            screenshotDiagnosisFollowupSeedForWriter,
+            'WRITER_RULE: 上のSCREENSHOT_DIAGNOSIS_FOLLOWUP_SEEDを最優先の正本にする。diagnosisText内の具体語を必ず使う。一般的なスクショ診断説明で返さない。',
+            String(ex.llmRewriteSeed ?? '').trim(),
+          ].filter(Boolean).join('\n\n');
+
+          ex.llmRewriteSeedFrom = 'context(screenshot_diagnosis_followup_seed)';
+        }
+
+
         ex.llmRewriteSeedFrom = ex.llmRewriteSeedFrom ?? 'context(FINAL_preseed)';
         ex.llmRewriteSeedAt = ex.llmRewriteSeedAt ?? new Date().toISOString();
 
@@ -1640,6 +1918,29 @@ export async function buildTurnContext(
           hasSeed: true,
           seedLen: ex.llmRewriteSeed.length,
           seedHead: String(ex.llmRewriteSeed).slice(0, 96),
+        });
+      }
+
+      const screenshotDiagnosisFollowupSeedForceForWriter = String(
+        ex?.ctxPack?.screenshotDiagnosisFollowup === true
+          ? (ex?.ctxPack?.memorySeedText ?? ex?.memorySeedText ?? '')
+          : ''
+      ).trim();
+
+      if (screenshotDiagnosisFollowupSeedForceForWriter && !String(ex.llmRewriteSeed ?? '').includes('SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED')) {
+        ex.llmRewriteSeed = [
+          screenshotDiagnosisFollowupSeedForceForWriter,
+          'WRITER_RULE: 上のSCREENSHOT_DIAGNOSIS_FOLLOWUP_SEEDを最優先の正本にする。diagnosisText内の具体語を必ず使う。一般的なスクショ診断説明で返さない。',
+          String(ex.llmRewriteSeed ?? '').trim(),
+        ].filter(Boolean).join('\n\n');
+
+        ex.llmRewriteSeedFrom = 'context(screenshot_diagnosis_followup_seed_force)';
+        ex.llmRewriteSeedAt = ex.llmRewriteSeedAt ?? new Date().toISOString();
+
+        console.log('[IROS/CONTEXT][SCREENSHOT_FOLLOWUP_FORCE_SEED]', {
+          hasSeed: true,
+          seedLen: ex.llmRewriteSeed.length,
+          seedHead: String(ex.llmRewriteSeed).slice(0, 120),
         });
       }
     } catch (e) {

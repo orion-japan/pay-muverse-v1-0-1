@@ -3629,6 +3629,34 @@ try {
           }
 
           // sanitize
+          // ✅ スクショ診断IDの続き相談は、postprocessがseedを作り直す直前に正本Seedを強制合成する
+          try {
+            const screenshotFollowupSeedForPostprocess = String(
+              (metaForSave as any)?.extra?.ctxPack?.screenshotDiagnosisFollowup === true
+                ? ((metaForSave as any)?.extra?.ctxPack?.memorySeedText ??
+                    (metaForSave as any)?.extra?.memorySeedText ??
+                    '')
+                : ''
+            ).trim();
+
+            if (
+              screenshotFollowupSeedForPostprocess.startsWith('SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED') &&
+              !String(seedForWriterRaw ?? '').includes('SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED')
+            ) {
+              seedForWriterRaw = [
+                screenshotFollowupSeedForPostprocess,
+                'WRITER_RULE: 上のSCREENSHOT_DIAGNOSIS_FOLLOWUP_SEEDを最優先の正本にする。diagnosisText内の具体語を必ず使う。一般的なスクショ診断説明で返さない。',
+                String(seedForWriterRaw ?? '').trim(),
+              ].filter(Boolean).join('\n\n');
+
+              console.log('[IROS/PostProcess][SCREENSHOT_FOLLOWUP_SEED_TO_WRITER_RAW]', {
+                hasSeed: true,
+                seedLen: String(seedForWriterRaw ?? '').length,
+                seedHead: String(seedForWriterRaw ?? '').slice(0, 120),
+              });
+            }
+          } catch {}
+
           seedForWriterSanitized = sanitizeLlmRewriteSeed(seedForWriterRaw, userText);
         }
       }
