@@ -1,4 +1,4 @@
-// src/ui/iroschat/IrosChatShell.tsx
+﻿// src/ui/iroschat/IrosChatShell.tsx
 'use client';
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -11,6 +11,7 @@ import IrosHeader from './IrosHeader';
 import MessageList from './components/MessageList';
 import ChatInput from './components/ChatInput';
 import IrosMetaBadge from './components/IrosMetaBadge';
+import ScreenshotDiagnosisLauncher from '@/components/mu/ScreenshotDiagnosisLauncher';
 
 import './IrosChat.css';
 import { useIrosChat } from './IrosChatContext';
@@ -42,6 +43,8 @@ function IrosChatInner({ open }: Props) {
 
   const agentK = 'iros';
   const { loading: authLoading, userCode } = useAuth();
+  const irosChat = useIrosChat();
+  const currentConversationId = irosChat?.getActiveConversationId?.() ?? irosChat?.activeConversationId ?? null;
 
   // ★ 初期は必ず閉じた状態
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -380,6 +383,7 @@ function IrosChatInner({ open }: Props) {
             />
 
             <MessageList />
+            <ScreenshotDiagnosisLauncher conversationId={currentConversationId} userType={((uiUser as any)?.userType ?? (uiUser as any)?.role ?? (uiUser as any)?.plan ?? (uiUser as any)?.subscription ?? null)} />
 
             <div className="sof-compose-dock" ref={composeRef}>
               <ChatInput onMeta={setMeta} />
@@ -397,3 +401,8 @@ function IrosChatInner({ open }: Props) {
 export default function IrosChatShell(props: Props) {
   return <IrosChatInner {...props} />;
 }
+
+
+
+
+
