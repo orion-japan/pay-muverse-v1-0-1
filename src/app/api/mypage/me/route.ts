@@ -26,10 +26,42 @@ type ProfileRow = {
   // 将来追加してもここは壊れません
 };
 
+type IrosProfileRow = {
+  user_call_name?: string | null;
+  user_call_suffix?: string | null;
+  user_call_suffix_text?: string | null;
+  [key: string]: any;
+};
+
 function mustEnv(name: string) {
   const v = process.env[name];
   if (!v) throw new Error(`Missing env: ${name}`);
   return v;
+}
+
+function buildUserCallDisplayName(row: IrosProfileRow | null): string | null {
+  const name = typeof row?.user_call_name === 'string' ? row.user_call_name.trim() : '';
+  if (!name) return null;
+
+  const suffix = typeof row?.user_call_suffix === 'string' && row.user_call_suffix.trim()
+    ? row.user_call_suffix.trim()
+    : 'san';
+
+  if (suffix === 'custom') {
+    const custom = typeof row?.user_call_suffix_text === 'string' ? row.user_call_suffix_text.trim() : '';
+    return `${name}${custom}`;
+  }
+
+  if (suffix === 'none') return name;
+
+  const suffixMap: Record<string, string> = {
+    san: 'さん',
+    chan: 'ちゃん',
+    kun: 'くん',
+    sama: 'さま',
+  };
+
+  return `${name}${suffixMap[suffix] ?? 'さん'}`;
 }
 
 const SUPABASE_URL = mustEnv('NEXT_PUBLIC_SUPABASE_URL');
@@ -86,7 +118,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'user_code not found for this account' }, { status: 404 });
     }
 
-    // ====== 5) 直読み：users / profiles から組み立て ======
+    // ====== 5) 直読み：users / profiles / iros_user_profile から組み立て ======
     // 5.0) users から click_username
     let click_username: string | null = null;
     {
@@ -112,6 +144,22 @@ export async function POST(req: NextRequest) {
 
     const profile: ProfileRow | null = (profileData as any as ProfileRow) ?? null;
 
+    // 5.2) Mu 会話用プロフィール（呼び名・敬称）
+    let irosProfile: IrosProfileRow | null = null;
+    {
+      const { data, error } = await supabase
+        .from('iros_user_profile')
+        .select('*')
+        .eq('user_code', user_code)
+        .maybeSingle();
+
+      if (!error && data) {
+        irosProfile = data as IrosProfileRow;
+      } else if (error && (error as any).code !== 'PGRST116') {
+        console.warn('[mypage/me] iros_user_profile fetch skipped:', error.message);
+      }
+    }
+
     // 6) avatar_url のフルURL化
     const BASE = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
     let avatar_url: string | null = profile?.avatar_url ?? null;
@@ -122,12 +170,24 @@ export async function POST(req: NextRequest) {
       avatar_url = `${BASE}/storage/v1/object/public/avatars/${key}`;
     }
 
+    const user_call_name = irosProfile?.user_call_name ?? null;
+    const user_call_suffix = irosProfile?.user_call_suffix ?? 'san';
+    const user_call_suffix_text = irosProfile?.user_call_suffix_text ?? null;
+
     // 既存レスポンス構造を維持
     const meOut: Record<string, any> = {
       ...(profile ?? {}),
       click_username,
       avatar_url,
       user_code,
+      user_call_name,
+      user_call_suffix,
+      user_call_suffix_text,
+      user_call_display_name: buildUserCallDisplayName({
+        user_call_name,
+        user_call_suffix,
+        user_call_suffix_text,
+      }),
     };
 
     // 7) no-store でキャッシュ無効化
