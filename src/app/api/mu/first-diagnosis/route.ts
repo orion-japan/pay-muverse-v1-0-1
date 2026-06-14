@@ -60,8 +60,11 @@ function safeParseDiagnosis(raw: string): {
     const displayText =
       typeof parsed?.display_text === 'string' && parsed.display_text.trim()
         ? parsed.display_text.trim()
-        : raw;
-
+        : parsed?.display_text && typeof parsed.display_text === 'object'
+          ? Object.entries(parsed.display_text)
+              .map(([key, value]) => `【${key}】` + '\n' + String(value ?? '').trim())
+              .join('\n\n')
+          : raw;
     const seed =
       parsed?.seed && typeof parsed.seed === 'object' && !Array.isArray(parsed.seed)
         ? {
