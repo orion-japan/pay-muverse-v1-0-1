@@ -197,6 +197,27 @@ function coerceToTwoLines(raw: string): string | null {
   return clipped;
 }
 
+/**
+ * スクショ/画像の催促を止める保険。
+ * - 無料導線や端末差で画像添付できないユーザーがいるため、Microでは追加画像を求めない。
+ * - 既存履歴・similarFlowSeed に「スクショ追加」系の文が混ざっても、最終出力で安全な短文に戻す。
+ */
+function sanitizeScreenshotPrompt(raw: string, name: string): string {
+  const text = String(raw ?? '').trim();
+  if (!text) return '';
+
+  const hasMediaWord = /(スクショ|スクリーンショット|画像|写真|添付)/u.test(text);
+  const hasRequestLike =
+    /(送って|送る|送れ|貼って|貼る|添付|アップロード|追加|見せて|見せる|足りる|表示内容|もう一枚|もう1枚|ください|くれ)/u.test(text);
+
+  if (hasMediaWord && hasRequestLike) {
+    const prefix = name ? `${name}、` : '';
+    return `${prefix}いま見えている範囲で進めます。足りないところは、言葉で一つだけ補えば大丈夫です。`;
+  }
+
+  return text;
+}
+
 export async function runMicroWriter(
   generate: MicroWriterGenerate,
   input: MicroWriterInput,
@@ -239,6 +260,11 @@ export async function runMicroWriter(
 - 質問は${allowOneQuestion ? '最大1つ（最後に短く）' : '0（禁止）'}
 - 絵文字は 🪔 のみ可（最大1個）
 
+【スクショ催促禁止（厳守）】
+- スクショ、スクリーンショット、画像、写真、添付、アップロードを求めない
+- 「スクショを送って」「画像を貼って」「もう一枚」「表示内容で足りる？」のような確認も禁止
+- スクショ診断の文脈があっても、追加画像を催促しない
+- 足りない場合は、画像ではなく「言葉で一つだけ補えば大丈夫」という方向にする
 【テンプレ禁止（厳守）】
 - 「了解」「わかった」「承知」「OK」だけで終えない
 - 「大丈夫」「素晴らしい」「いいですね」「ワクワク」「きっと」などの応援テンプレを使わない
@@ -291,7 +317,7 @@ export async function runMicroWriter(
   const stripped = stripMicroLabels(two);
 
   const cleanedEmoji = sanitizeMicroEmoji(stripped);
-  const finalText = cleanedEmoji.trim();
+  const finalText = sanitizeScreenshotPrompt(cleanedEmoji, name).trim();
 
   if (!finalText) return { ok: false, reason: 'format_invalid' };
 
