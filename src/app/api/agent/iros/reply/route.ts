@@ -864,7 +864,86 @@ let extraSoT: Record<string, any> = {
     // 12) handle
     // -------------------------------------------------------
 
-    const irosResult: HandleIrosReplyOutput = await handleIrosReply({
+    // -------------------------------------------------------
+    // 11.95) Screenshot diagnosis context -> diagnosis followup ctx
+    // -------------------------------------------------------
+    {
+      const screenshotDiagnosisHintText =
+        typeof (extraSoT as any)?.screenshotDiagnosisHintText === 'string' &&
+        String((extraSoT as any).screenshotDiagnosisHintText).trim().length > 0
+          ? String((extraSoT as any).screenshotDiagnosisHintText).trim()
+          : typeof (reqMetaRaw as any)?.extra?.screenshotDiagnosisHintText === 'string' &&
+              String((reqMetaRaw as any).extra.screenshotDiagnosisHintText).trim().length > 0
+            ? String((reqMetaRaw as any).extra.screenshotDiagnosisHintText).trim()
+            : null;
+
+      if (screenshotDiagnosisHintText) {
+        const previousCtxPack =
+          extraSoT.ctxPack && typeof extraSoT.ctxPack === 'object'
+            ? extraSoT.ctxPack
+            : {};
+
+        const screenshotLastIrDiagnosis = {
+          source: 'mu_first_screenshot',
+          kind: 'screenshot_diagnosis',
+          targetLabel: 'スクショ診断',
+          diagnosisFollowupTargetLabel: 'スクショ診断',
+          diagnosisText: screenshotDiagnosisHintText,
+          text: screenshotDiagnosisHintText,
+          at: new Date().toISOString(),
+        };
+
+        extraSoT = {
+          ...extraSoT,
+          screenshotDiagnosisContext: true,
+          screenshotDiagnosisHintText,
+          diagnosisFollowup: true,
+          diagnosisFollowupTargetLabel: 'スクショ診断',
+          lastIrDiagnosis: screenshotLastIrDiagnosis,
+          ctxPack: {
+            ...previousCtxPack,
+            screenshotDiagnosisContext: true,
+            screenshotDiagnosisHintText,
+            diagnosisFollowup: true,
+            diagnosisFollowupTargetLabel: 'スクショ診断',
+            lastIrDiagnosis: screenshotLastIrDiagnosis,
+          },
+        };
+
+        console.log('[IROS/SCREENSHOT_DIAG_CTX_INJECTED]', {
+          traceId,
+          conversationId,
+          userCode,
+          hintLen: screenshotDiagnosisHintText.length,
+          hintHead: screenshotDiagnosisHintText.slice(0, 180),
+          hasLastIrDiagnosis: Boolean((extraSoT as any)?.lastIrDiagnosis),
+          hasCtxPackLastIrDiagnosis: Boolean((extraSoT as any)?.ctxPack?.lastIrDiagnosis),
+        });
+      }
+    }
+        // -------------------------------------------------------
+    // 11.96) Screenshot diagnosis should not use similar-flow memory
+    // -------------------------------------------------------
+    // スクショ診断の続きでは、今回のスクショ診断本文を正本にする。
+    // 過去の似た会話 seed が混ざると、別名・過去文体・古い診断が混入するため止める。
+    if (Boolean((extraSoT as any)?.screenshotDiagnosisContext)) {
+      try {
+        delete (extraSoT as any).similarFlowSeed;
+        delete (extraSoT as any).similarFlowDebug;
+
+        if ((extraSoT as any).ctxPack && typeof (extraSoT as any).ctxPack === 'object') {
+          delete (extraSoT as any).ctxPack.similarFlowSeed;
+          delete (extraSoT as any).ctxPack.similarFlowDebug;
+        }
+
+        console.log('[IROS/SCREENSHOT_DIAG_SIMILAR_FLOW_DISABLED]', {
+          traceId,
+          conversationId,
+          userCode,
+        });
+      } catch {}
+    }
+const irosResult: HandleIrosReplyOutput = await handleIrosReply({
       conversationId,
       text: userTextClean,
       hintText,
@@ -1438,6 +1517,11 @@ const shouldBlockForcedLongTermMemoryForMetaQuestion =
     compactUserTextForForcedLtmGate
   );
 
+const shouldBlockForcedLongTermMemoryForScreenshotDiagnosis =
+  Boolean((extraSoT as any)?.screenshotDiagnosisContext) ||
+  Boolean((extraSoT as any)?.ctxPack?.screenshotDiagnosisContext) ||
+  Boolean((reqMetaRaw as any)?.extra?.screenshotDiagnosisContext);
+
 let forcedLongTermMemory: string | null = null;
 
 try {
@@ -1490,7 +1574,7 @@ try {
         .trim();
 
       const isContaminatedForcedLongTermMemory =
-        /SOURCE_TEXT|PREVIOUS_EVENT_SOURCE|診断本文では|観測対象[:：]|二人の関係全体の状態として見る表現|ここで言う「?もう少しわかりやすく、詳しくして/u.test(
+        /SOURCE_TEXT|PREVIOUS_EVENT_SOURCE|診断本文では|観測対象[:：]|二人の関係全体の状態として見る表現|ここで言う「?もう少しわかりやすく、詳しくして|直前スクショ診断結果|内部参照|スクショ診断Seed|writer_directives|診断内容をそのまま貼らず|いま聞かれていること/u.test(
           sanitized
         );
 
@@ -1551,7 +1635,7 @@ try {
 } catch (e) {
   console.error('[IROS][RECALL_FAIL]', e);
 }
-if (shouldBlockForcedLongTermMemoryForMetaQuestion) {
+if (shouldBlockForcedLongTermMemoryForMetaQuestion || shouldBlockForcedLongTermMemoryForScreenshotDiagnosis) {
   forcedLongTermMemory = null;
   recallCandidates = [];
 
@@ -1572,6 +1656,7 @@ console.log(
     forcedLongTermMemory,
     memoryState_longTermNoteText: memoryStateForCtx?.longTermNoteText ?? null,
     shouldBlockForcedLongTermMemoryForMetaQuestion,
+    shouldBlockForcedLongTermMemoryForScreenshotDiagnosis,
     final_longTermMemoryNoteText: shouldBlockForcedLongTermMemoryForMetaQuestion
       ? null
       : forcedLongTermMemory ??
@@ -1658,7 +1743,9 @@ extraSoT = {
   memoryStateNoteText: memoryStateForCtx?.noteText ?? null,
 
   longTermMemoryNoteText:
-    shouldBlockForcedLongTermMemoryForMetaQuestion || shouldClearPastStateNoteForDiagnosisFollowup
+    shouldBlockForcedLongTermMemoryForMetaQuestion ||
+    shouldBlockForcedLongTermMemoryForScreenshotDiagnosis ||
+    shouldClearPastStateNoteForDiagnosisFollowup
       ? null
       : forcedLongTermMemory ??
         memoryStateForCtx?.longTermNoteText ??
@@ -2331,6 +2418,68 @@ return NextResponse.json({
             error: String(e ?? ''),
           });
         }
+
+        // ✅ Internal leak guard for screenshot diagnosis
+        // UI/DBへ返す直前に、内部Seed・JSON・内部見出しの露出を止める
+        try {
+          const leakPattern =
+            /【直前スクショ診断結果|【初回スクショ診断本文】|【スクショ診断Seed】|【スクショ診断継続指示】|【ユーザーの質問】|内部参照|writer_directives|diagnosisText|screenshotDiagnosisHintText|返答方針:|現在のユーザー質問:|スクショ診断の根拠:|診断の構造メモ:|返答の前提:|SCREENSHOT_CONTEXT_V1|evidence_start|evidence_end|writer_rule=|current_user_question=|直前のスクショ診断で見えている内容|内容要約|あなたの立ち位置|あなたのどう関わるか|相手の反応|共鳴診断|ついやってしまうこと|次に見たいところ|見えている流れ:|相手側の反応:|会話の向き:|奥にある欲求:|見落としやすい点:|次に起きやすい動き:|診断後の相談では|いま聞かれていること:|^\s*["{[]|"\s*:\s*"/m;
+
+          const hasScreenshotCtx =
+            Boolean((extraSoT as any)?.screenshotDiagnosisContext) ||
+            Boolean((metaForSave as any)?.extra?.screenshotDiagnosisContext) ||
+            Boolean((metaForSave as any)?.extra?.ctxPack?.screenshotDiagnosisContext);
+
+          if (hasScreenshotCtx && leakPattern.test(String(finalText ?? ''))) {
+            const screenshotHintForFallback =
+              String((extraSoT as any)?.screenshotDiagnosisHintText ?? '') ||
+              String((metaForSave as any)?.extra?.screenshotDiagnosisHintText ?? '') ||
+              String((metaForSave as any)?.extra?.ctxPack?.screenshotDiagnosisHintText ?? '');
+
+            const asksIfComes =
+              /来ます|来る|ちゃんと来|来てくれ|会え/.test(String(userTextClean ?? ''));
+
+            const hasArrival =
+              /18:30|到着|品川|予定|予約|会う方向|現地|移動/.test(screenshotHintForFallback);
+
+            if (asksIfComes && hasArrival) {
+              finalText = [
+                '来る流れに見えます。',
+                '',
+                '予約や到着時間など、具体的な予定の情報が出ています。',
+                'なので今のスクショ上では、「来ない流れ」より「会う方向に整っている流れ」です。',
+                '',
+                'ただ、相手の気持ちまでは断定しません。',
+                '見るところは、来るか来ないかだけではなく、相手が自分のペースで来られる余白が残っているかです。'
+              ].join('\n');
+            } else if (hasArrival) {
+              finalText = [
+                'このスクショでは、会う方向の段取りが少しずつ整っている流れが見えます。',
+                '',
+                '予約や到着時間、移動や予定に関する具体的な情報が出ているので、会話は切れているというより、必要な確認をしながら進んでいます。',
+                '',
+                'ただし、相手の気持ちまでは断定しません。',
+                '見るべきなのは、相手がどの温度で返しているかと、あなたがどこまで先に整えすぎているかです。'
+              ].join('\n');
+            } else {
+              finalText = [
+                'このスクショでは、相手の反応とあなたの返し方の流れが見えています。',
+                '',
+                '診断内容をそのまま貼るのではなく、見えている根拠だけで言うと、会話は切れているというより、必要な確認をしながら進んでいる状態です。',
+                '',
+                'ただし、相手の気持ちまでは断定しません。',
+                '見るべきなのは、相手がどの温度で返しているかと、あなたがどこまで先に整えすぎているかです。'
+              ].join('\n');
+            }
+
+            console.warn('[IROS/INTERNAL_LEAK_GUARD][SCREENSHOT_DIAG]', {
+              traceId,
+              conversationId,
+              userCode,
+              finalLen: finalText.length,
+            });
+          }
+        } catch {}
 
         // ✅ 正規化「後」の本文を UI正本へ反映（ここがないと persist が旧本文を拾う）
         (result as any).content = finalText;
@@ -3516,6 +3665,17 @@ if (!skipTraining) {
     );
   }
 }
+
+
+
+
+
+
+
+
+
+
+
 
 
 

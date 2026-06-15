@@ -1,4 +1,4 @@
-// src/ui/iroschat/lib/irosApiClient.ts
+﻿// src/ui/iroschat/lib/irosApiClient.ts
 'use client';
 
 import * as irosClientModule from './irosTransport';
@@ -27,6 +27,14 @@ export type IrosAPI = {
   createConversation(): Promise<{ conversationId: string }>;
   listConversations(): Promise<IrosConversation[]>;
   fetchMessages(conversationId: string): Promise<IrosMessage[]>;
+
+  bootstrapFirstOnboarding(): Promise<{
+    ok: boolean;
+    should_bootstrap?: boolean;
+    message?: string;
+    firstDiagnosisContext?: any;
+    error?: string;
+  }>;
   renameConversation(
     conversationId: string,
     title: string,
@@ -47,6 +55,7 @@ export type IrosAPI = {
   reply(args: {
     conversationId?: string;
     user_text: string;
+    hintText?: string;
     mode?: 'Light' | 'Deep' | 'Transcend' | 'Harmony' | string;
     model?: string;
     resonance?: ResonanceState;
@@ -75,6 +84,7 @@ export type IrosAPI = {
   replyAndStore(args: {
     conversationId: string;
     user_text: string;
+    hintText?: string;
     mode?: string;
     model?: string;
 
@@ -359,6 +369,14 @@ export const irosClient: IrosAPI = {
     })) as IrosConversation[];
   },
 
+  async bootstrapFirstOnboarding() {
+    dbg('bootstrapFirstOnboarding()');
+    const r = await authFetch('/api/mu/first-onboarding/bootstrap', {
+      method: 'GET',
+    });
+    return r.json();
+  },
+
   async fetchMessages(conversationId: string) {
     if (typeof _raw.fetchMessages === 'function') return _raw.fetchMessages(conversationId);
     dbg('fetchMessages() fallback', conversationId);
@@ -568,7 +586,7 @@ export const irosClient: IrosAPI = {
   },
 
   async reply(args) {
-    if (typeof _raw.reply === 'function') return _raw.reply(args);
+    // NOTE: reply は hintText を確実に通すため、この adapter 実装を正本にする。
 
     dbg('reply() fallback', {
       mode: args.mode,
@@ -597,9 +615,22 @@ export const irosClient: IrosAPI = {
 
         // ✅ 正規キー（サーバが確実に拾う）
         user_text: args.user_text,
+        hintText: args.hintText ?? undefined,
+        modeHintText: args.hintText ?? undefined,
         modeHint: args.mode ?? 'auto',
         styleHint: args.style ?? undefined,
         history: Array.isArray(args.history) ? args.history : undefined,
+
+        // ✅ スクショ診断などの内部文脈を Writer / 記憶注入側にも渡す
+        // user_text/text は短文のまま維持し、内部Seedは meta.extra 側に分離する
+        meta: args.hintText
+          ? {
+              extra: {
+                screenshotDiagnosisHintText: args.hintText,
+                screenshotDiagnosisContext: true,
+              },
+            }
+          : undefined,
 
         // ✅ 互換（残してOK）
         text: args.user_text,
@@ -621,13 +652,12 @@ export const irosClient: IrosAPI = {
 // replyAndStore()：client-side の assistant 保存を撤去（single-writer: /reply のみ）
 
 async replyAndStore(args) {
-  if (typeof _raw.replyAndStore === 'function') {
-    return _raw.replyAndStore(args);
-  }
+  // NOTE: replyAndStore は hintText を確実に通すため、この adapter 実装を正本にする。
 
   const r: any = await this.reply({
     conversationId: args.conversationId,
     user_text: args.user_text,
+    hintText: args.hintText,
     mode: args.mode ?? 'Light',
     model: args.model,
     style: args.style,
@@ -681,4 +711,10 @@ async getUserInfo() {
   };
 },
 };
+
+
+
+
+
+
 

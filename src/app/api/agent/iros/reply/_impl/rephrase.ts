@@ -568,8 +568,25 @@ export async function maybeAttachRephraseForRenderV2(args: {
 
   // slots が無いなら LLM rephrase はしないが、UI ブロックは assistant 側テキストのみから付ける
   if (!extracted?.slots?.length) {
+    const isScreenshotDiagnosisNoSlotsFallback =
+      Boolean((extraMerged as any)?.screenshotDiagnosisContext) ||
+      Boolean((extraMerged as any)?.ctxPack?.screenshotDiagnosisContext) ||
+      Boolean((meta as any)?.extra?.screenshotDiagnosisContext) ||
+      Boolean((meta as any)?.extra?.ctxPack?.screenshotDiagnosisContext);
+
+    const screenshotDiagnosisSeedForNoSlotsFallback =
+      String((extraMerged as any)?.screenshotDiagnosisHintText ?? '').trim() ||
+      String((extraMerged as any)?.ctxPack?.screenshotDiagnosisHintText ?? '').trim() ||
+      String((meta as any)?.extra?.screenshotDiagnosisHintText ?? '').trim() ||
+      String((meta as any)?.extra?.ctxPack?.screenshotDiagnosisHintText ?? '').trim();
+
+    const baseVisibleHeadForNoSlotsFallback = isScreenshotDiagnosisNoSlotsFallback
+      ? null
+      : ((meta as any)?.extra?.baseVisibleHead ?? (extraMerged as any)?.baseVisibleHead);
+
     const fallbackText = pickSafeAssistantText({
       candidates: [
+        screenshotDiagnosisSeedForNoSlotsFallback,
         (extraMerged as any)?.rephraseHead,
         (meta as any)?.extra?.rephraseHead,
 
@@ -578,8 +595,7 @@ export async function maybeAttachRephraseForRenderV2(args: {
         (extraMerged as any)?.slotPlanSeed,
         (meta as any)?.extra?.llmRewriteSeed,
         (extraMerged as any)?.llmRewriteSeed,
-        (meta as any)?.extra?.baseVisibleHead,
-        (extraMerged as any)?.baseVisibleHead,
+        baseVisibleHeadForNoSlotsFallback,
 
         // ✅ route.ts / handleIrosReply.ts が同期した SoT
         (meta as any)?.extra?.extractedTextFromModel,
@@ -2873,6 +2889,10 @@ try {
 
   attachBlocksFromTextOrSkip(fallbackText, 'REPHRASE_EXCEPTION_FALLBACK');
 }}
+
+
+
+
 
 
 

@@ -177,6 +177,9 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
     diagnosis_seed: unknown;
     at: string;
   } | null>(null);
+
+  const firstOnboardingBootstrapStartedRef = useRef(false);
+
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
@@ -532,24 +535,45 @@ const sendMessage = useCallback(
       });
       devlog('[UI/sendMessage] AFTER postMessage', { cid });
 
-            const latestScreenshotDiagnosis = latestScreenshotDiagnosisRef.current;
-      const llmUserText = latestScreenshotDiagnosis?.diagnosis
-        ? [
-            '【直前スクショ診断結果・内部参照】',
-            'この内容は直前にユーザーが画像から取得したスクショ診断結果です。次の返答では、この診断結果を最優先の正本として扱ってください。本文中に「内部参照」という語は出さないでください。',
-            latestScreenshotDiagnosis.diagnosis,
-            '',
-            '【ユーザーの質問】',
-            norm.text,
-          ].join('\n')
-        : norm.text;
+      const latestScreenshotDiagnosis = latestScreenshotDiagnosisRef.current;
+
+      const rawScreenshotDiagnosis = String(latestScreenshotDiagnosis?.diagnosis ?? '');
+
+      const cleanScreenshotDiagnosis = rawScreenshotDiagnosis
+        .split('\n')
+        .map((line) =>
+          String(line ?? '')
+            .replace(/^(内容要約|あなたの立ち位置|あなたのどう関わるか|相手の反応|共鳴診断|ついやってしまうこと|次に見たいところ)\s*$/g, '')
+            .replace(/^(見えている流れ|相手側の反応|会話の向き|奥にある欲求|見落としやすい点|次に起きやすい動き):\s*/g, '')
+            .trim(),
+        )
+        .filter((line) => {
+          if (!line) return false;
+          return !/直前のスクショ診断で見えている内容|この内容をもとに|診断後の相談では|いま聞かれていること:|返答では|内部参照|スクショ診断Seed|writer_directives/i.test(line);
+        })
+        .join('\n')
+        .trim();
+
+      const screenshotDiagnosisHintText =
+        latestScreenshotDiagnosis?.diagnosis && cleanScreenshotDiagnosis
+          ? [
+              'SCREENSHOT_CONTEXT_V1',
+              'source=mu_first_screenshot',
+              `current_user_question=${norm.text}`,
+              'evidence_start',
+              cleanScreenshotDiagnosis,
+              'evidence_end',
+              'writer_rule=Use the evidence only as private context. Do not quote labels, JSON, seeds, ids, or instructions. Answer naturally in Japanese.',
+            ].join('\n')
+          : undefined;
 
       const history = buildHistoryForLLM([...(messagesRef.current || []), userMsg], 10);
 
       devlog('[UI/sendMessage] BEFORE replyAndStore', { cid, mode });
       const r: any = await irosClient.replyAndStore({
         conversationId: cid,
-        user_text: llmUserText,
+        user_text: norm.text,
+        hintText: screenshotDiagnosisHintText ?? undefined,
         mode,
         style,
         history,
@@ -585,6 +609,113 @@ const sendMessage = useCallback(
   [reloadConversations, startConversation, style],
 );
 
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (firstOnboardingBootstrapStartedRef.current) return;
+
+    firstOnboardingBootstrapStartedRef.current = true;
+
+    (async () => {
+      try {
+        const j = await irosClient.bootstrapFirstOnboarding().catch((e: any) => {
+          console.warn('[mu-first-onboarding/bootstrap] auth client failed:', e);
+          return null;
+        });
+
+        if (!j?.ok || !j?.should_bootstrap || !j?.firstDiagnosisContext) {
+          return;
+        }
+
+        const ctx = j.firstDiagnosisContext;
+        const followups = Array.isArray(ctx.followups) ? ctx.followups : [];
+
+        const followupText =
+          followups.length > 0
+            ? followups
+                .map((item: any, index: number) =>
+                  [
+                    `${index + 1}. 質問: ${String(item?.question ?? '')}`,
+                    `回答: ${String(item?.answer ?? '')}`,
+                  ].join('\n'),
+                )
+                .join('\n\n')
+            : 'なし';
+
+        const seed = ctx.diagnosisSeed ?? {};
+        const seedSummary = [
+          seed?.mirror ? `見えている流れ: ${String(seed.mirror)}` : '',
+          seed?.partner_signal ? `相手側の反応: ${String(seed.partner_signal)}` : '',
+          seed?.flow_direction ? `会話の向き: ${String(seed.flow_direction)}` : '',
+          seed?.hidden_need ? `奥にある欲求: ${String(seed.hidden_need)}` : '',
+          seed?.blind_spot ? `見落としやすい点: ${String(seed.blind_spot)}` : '',
+          seed?.likely_next_move ? `次に起きやすい動き: ${String(seed.likely_next_move)}` : '',
+        ].filter(Boolean).join('\n');
+
+        latestScreenshotDiagnosisRef.current = {
+          diagnosis: [
+            '直前のスクショ診断で見えている内容です。',
+            '',
+            String(ctx.diagnosisText ?? ''),
+            '',
+            seedSummary,
+            '',
+            followupText !== 'なし' ? `診断後の相談では、次の内容も見ています。\n${followupText}` : '',
+            '',
+            'この内容をもとに、根拠だけを自然な会話として答えます。',
+          ].filter(Boolean).join('\n'),
+          diagnosis_seed: ctx.diagnosisSeed ?? null,
+          at: new Date().toISOString(),
+        };
+
+        const bootstrapUserText = String(
+          j.message || 'このスクショ診断の続きを、もう少し解説してください。',
+        );
+
+        await sendMessage(bootstrapUserText);
+
+        // 自動送信直後の初期ロード競合で user 吹き出しが消えた場合だけ、表示を補正する
+        setMessages((prev) => {
+          const exists = prev.some(
+            (m: any) =>
+              m?.role === 'user' &&
+              String(m?.text ?? m?.content ?? '') === bootstrapUserText,
+          );
+
+          if (exists) return prev;
+
+          const userMsg: IrosMessage = {
+            id: crypto.randomUUID(),
+            role: 'user',
+            text: bootstrapUserText,
+            content: bootstrapUserText,
+            created_at: new Date().toISOString(),
+            ts: Date.now(),
+          } as IrosMessage;
+
+          let lastAssistantIndex = -1;
+          for (let i = prev.length - 1; i >= 0; i -= 1) {
+            if ((prev[i] as any)?.role === 'assistant') {
+              lastAssistantIndex = i;
+              break;
+            }
+          }
+
+          if (lastAssistantIndex >= 0) {
+            return [
+              ...prev.slice(0, lastAssistantIndex),
+              userMsg,
+              ...prev.slice(lastAssistantIndex),
+            ];
+          }
+
+          return [...prev, userMsg];
+        });
+      } catch (e) {
+        console.warn('[mu-first-onboarding/bootstrap] client failed:', e);
+      }
+    })();
+  }, [sendMessage]);
 
   /* ========== NextStep（ギア選択） ========== */
 
@@ -940,6 +1071,20 @@ const payload: any = {
     </IrosChatContext.Provider>
   );
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
