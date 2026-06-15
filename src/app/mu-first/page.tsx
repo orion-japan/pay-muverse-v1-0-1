@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { authedFetch, useAuth } from "@/context/AuthContext";
 
 type DiagnosisResponse = {
@@ -12,6 +12,8 @@ type DiagnosisResponse = {
   credit_consumed?: boolean | null;
   model?: string;
   user_name_candidate?: string | null;
+  followup_remaining?: number;
+  followup_messages?: FollowupMessage[];
 };
 
 type FollowupResponse = {
@@ -28,11 +30,11 @@ type FollowupMessage = {
 };
 
 const FOLLOWUP_QUESTIONS = [
-  "この相手はどう思っていますか？",
-  "私はどう返せばいいですか？",
-  "今は待つべきですか？",
-  "返信文を作ってください。",
-  "既読無視されたらどうすればいいですか？",
+  "相手の反応から、今どんな流れが出ていますか？",
+  "私がついやってしまうことは何ですか？",
+  "ここで注意したいところはどこですか？",
+  "相手の本気度を見るなら、どこを見ればいいですか？",
+  "もっと深くMuに聞くと、どんなことがわかりますか？",
 ];
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -90,6 +92,68 @@ export default function MuFirstPage() {
     [diagnosis, user, loading, followupSubmitting, followupInput, followupRemaining],
   );
 
+
+  useEffect(() => {
+    if (loading || !user || diagnosis || submitting) return;
+
+    let cancelled = false;
+
+    async function restoreLatestDiagnosis() {
+      try {
+        const res = await authedFetch("/api/mu/first-diagnosis", {
+          method: "GET",
+        });
+
+        const data = (await res.json().catch(() => ({}))) as DiagnosisResponse;
+
+        if (cancelled || !res.ok || !data.ok || !data.diagnosis) return;
+
+        setDiagnosis(data.diagnosis || "");
+        setNameCandidate(data.user_name_candidate || "");
+
+        try {
+          const savedPreviewUrl = sessionStorage.getItem("mu_first_preview_url");
+          const savedImageName = sessionStorage.getItem("mu_first_image_name");
+
+          if (savedPreviewUrl) {
+            setPreviewUrl(savedPreviewUrl);
+          }
+
+          if (savedImageName) {
+            setImageName(savedImageName);
+          }
+        } catch {
+          // preview復元失敗時は無視
+        }
+        setNameSaved(false);
+        setError("");
+
+        if (Array.isArray(data.followup_messages)) {
+          setFollowupMessages(
+            data.followup_messages
+              .filter((item) => item.role === "user" || item.role === "assistant")
+              .map((item) => ({
+                role: item.role,
+                content: String(item.content || ""),
+              }))
+              .filter((item) => item.content),
+          );
+        }
+
+        if (typeof data.followup_remaining === "number") {
+          setFollowupRemaining(Math.max(0, data.followup_remaining));
+        }
+      } catch {
+        // 復元失敗時は新規診断画面のままにする
+      }
+    }
+
+    restoreLatestDiagnosis();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, user, diagnosis, submitting]);
   function resetFollowup() {
     setFollowupInput("");
     setFollowupError("");
@@ -98,13 +162,19 @@ export default function MuFirstPage() {
     setFollowupRemaining(3);
   }
 
-  function handleImageChange(event: React.ChangeEvent<HTMLInputElement>) {
+  async function handleImageChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
 
     if (!file) {
       setSelectedFile(null);
       setImageName("");
       setPreviewUrl("");
+      try {
+        sessionStorage.removeItem("mu_first_preview_url");
+        sessionStorage.removeItem("mu_first_image_name");
+      } catch {
+        // preview削除失敗時は無視
+      }
       setDiagnosis("");
       setError("");
       resetFollowup();
@@ -113,7 +183,16 @@ export default function MuFirstPage() {
 
     setSelectedFile(file);
     setImageName(file.name);
-    setPreviewUrl(URL.createObjectURL(file));
+
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      setPreviewUrl(dataUrl);
+      sessionStorage.setItem("mu_first_preview_url", dataUrl);
+      sessionStorage.setItem("mu_first_image_name", file.name);
+    } catch {
+      setPreviewUrl(URL.createObjectURL(file));
+    }
+
     setDiagnosis("");
     setError("");
     resetFollowup();
@@ -281,7 +360,7 @@ export default function MuFirstPage() {
     <main
       style={{
         minHeight: "100vh",
-        background: "#f7f7f8",
+        background: "linear-gradient(180deg, #f7f8ff 0%, #f4f1ff 48%, #ffffff 100%)",
         display: "flex",
         justifyContent: "center",
         padding: "24px 16px",
@@ -299,10 +378,10 @@ export default function MuFirstPage() {
         <div
           style={{
             borderRadius: 24,
-            background: "#ffffff",
+            background: "rgba(255,255,255,0.9)",
             padding: "24px 20px",
-            boxShadow: "0 16px 40px rgba(0,0,0,0.07)",
-            border: "1px solid rgba(0,0,0,0.06)",
+            boxShadow: "0 18px 48px rgba(126,112,255,0.12)",
+            border: "1px solid rgba(150,135,255,0.16)",
           }}
         >
           <p
@@ -348,8 +427,8 @@ export default function MuFirstPage() {
           <div
             style={{
               borderRadius: 20,
-              background: "#fff4e8",
-              color: "#6d4b31",
+              background: "rgba(246,242,255,0.96)",
+              color: "#4e4378",
               padding: "14px 16px",
               fontSize: 14,
               lineHeight: 1.7,
@@ -364,21 +443,21 @@ export default function MuFirstPage() {
         <div
           style={{
             borderRadius: 24,
-            background: "#ffffff",
+            background: "rgba(255,255,255,0.9)",
             padding: 18,
-            boxShadow: "0 12px 30px rgba(0,0,0,0.06)",
-            border: "1px solid rgba(0,0,0,0.06)",
+            boxShadow: "0 14px 36px rgba(126,112,255,0.10)",
+            border: "1px solid rgba(150,135,255,0.16)",
           }}
         >
           <label
             style={{
               display: "block",
-              border: "1.5px dashed rgba(45,36,31,0.26)",
+              border: "1.5px dashed rgba(150,135,255,0.30)",
               borderRadius: 20,
               padding: 18,
               textAlign: "center",
               cursor: "pointer",
-              background: "#fffaf5",
+              background: "rgba(250,248,255,0.96)",
             }}
           >
             <input
@@ -416,7 +495,7 @@ export default function MuFirstPage() {
             <p
               style={{
                 margin: "12px 0 0",
-                color: "#6d4b31",
+                color: "#4e4378",
                 fontSize: 13,
                 lineHeight: 1.6,
               }}
@@ -457,7 +536,7 @@ export default function MuFirstPage() {
               border: "none",
               borderRadius: 999,
               padding: "15px 18px",
-              background: canSubmit ? "#2d241f" : "#d9d5d2",
+              background: canSubmit ? "linear-gradient(135deg, #bfa7ff 0%, #7d8cff 100%)" : "#e5e1ef",
               color: "#ffffff",
               fontSize: 16,
               fontWeight: 700,
@@ -499,10 +578,10 @@ export default function MuFirstPage() {
           <div
             style={{
               borderRadius: 24,
-              background: "#ffffff",
+              background: "rgba(255,255,255,0.9)",
               padding: "20px 18px",
-              boxShadow: "0 12px 30px rgba(0,0,0,0.06)",
-              border: "1px solid rgba(0,0,0,0.06)",
+              boxShadow: "0 14px 36px rgba(126,112,255,0.10)",
+              border: "1px solid rgba(150,135,255,0.16)",
             }}
           >
             <p
@@ -577,10 +656,10 @@ export default function MuFirstPage() {
                     disabled={followupSubmitting || followupRemaining <= 0}
                     style={{
                       width: "100%",
-                      border: "1px solid rgba(45,36,31,0.12)",
+                      border: "1px solid rgba(150,135,255,0.20)",
                       borderRadius: 14,
                       padding: "10px 12px",
-                      background: "#fffaf5",
+                      background: "rgba(250,248,255,0.96)",
                       color: "#2d241f",
                       textAlign: "left",
                       fontSize: 13,
@@ -614,8 +693,8 @@ export default function MuFirstPage() {
                         borderRadius: 18,
                         padding: "10px 12px",
                         background:
-                          message.role === "user" ? "#2d241f" : "#f4eee8",
-                        color: message.role === "user" ? "#ffffff" : "#2d241f",
+                          message.role === "user" ? "rgba(246,242,255,0.98)" : "rgba(247,244,255,0.96)",
+                        color: "#32234f",
                         fontSize: 13,
                         lineHeight: 1.7,
                         whiteSpace: "pre-wrap",
@@ -638,7 +717,7 @@ export default function MuFirstPage() {
                   boxSizing: "border-box",
                   marginTop: 14,
                   borderRadius: 16,
-                  border: "1px solid rgba(45,36,31,0.16)",
+                  border: "1px solid rgba(150,135,255,0.24)",
                   padding: "12px 13px",
                   resize: "vertical",
                   color: "#2d241f",
@@ -659,7 +738,7 @@ export default function MuFirstPage() {
                   border: "none",
                   borderRadius: 999,
                   padding: "13px 16px",
-                  background: canAskFollowup ? "#2d241f" : "#d9d5d2",
+                  background: canAskFollowup ? "linear-gradient(135deg, #bfa7ff 0%, #7d8cff 100%)" : "#e5e1ef",
                   color: "#ffffff",
                   fontSize: 15,
                   fontWeight: 700,
@@ -686,7 +765,7 @@ export default function MuFirstPage() {
                 <p
                   style={{
                     margin: "12px 0 0",
-                    color: "#6d4b31",
+                    color: "#4e4378",
                     fontSize: 13,
                     lineHeight: 1.7,
                     textAlign: "center",
@@ -697,23 +776,6 @@ export default function MuFirstPage() {
               ) : null}
             </div>
 
-            <Link
-              href="/"
-              style={{
-                display: "block",
-                marginTop: 18,
-                textAlign: "center",
-                textDecoration: "none",
-                borderRadius: 999,
-                padding: "14px 18px",
-                background: "#2d241f",
-                color: "#ffffff",
-                fontSize: 15,
-                fontWeight: 700,
-              }}
-            >
-              もっと深くMuと話す
-            </Link>
           </div>
         ) : null}
 
@@ -733,9 +795,9 @@ export default function MuFirstPage() {
             <div
               style={{
                 borderRadius: 18,
-                background: "#fff8ee",
+                background: "rgba(247,244,255,0.95)",
                 padding: "14px 14px",
-                border: "1px solid rgba(154,107,69,0.22)",
+                border: "1px solid rgba(150,135,255,0.20)",
               }}
             >
               <div style={{ fontSize: 13, color: "#6f5848", lineHeight: 1.7 }}>
@@ -766,7 +828,7 @@ export default function MuFirstPage() {
                     border: "none",
                     borderRadius: 12,
                     padding: "10px 12px",
-                    background: "#2d241f",
+                    background: "linear-gradient(135deg, #c8a7ff 0%, #7d8cff 100%)",
                     color: "#fff",
                     fontWeight: 700,
                   }}
@@ -786,14 +848,14 @@ export default function MuFirstPage() {
                 border: "none",
                 borderRadius: 18,
                 padding: "15px 16px",
-                background: "#2d241f",
+                background: "linear-gradient(135deg, #c8a7ff 0%, #7d8cff 100%)",
                 color: "#ffffff",
                 fontSize: 15,
                 fontWeight: 800,
-                boxShadow: "0 12px 24px rgba(45,36,31,0.18)",
+                boxShadow: "0 14px 30px rgba(126,112,255,0.28)",
               }}
             >
-              {mainStarting ? "本線Muへ接続中…" : "初回診断を本線Muへつないで始める"}
+              {mainStarting ? "Muへ接続中…" : "もっと深くMuに"}
             </button>
           )}
       </section>
