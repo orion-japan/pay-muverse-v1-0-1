@@ -286,7 +286,7 @@ export default function MuFirstPage() {
         method: "POST",
       }).catch(() => null);
     } finally {
-      window.location.href = "/mu";
+      window.location.href = "/";
     }
   }
 
@@ -874,4 +874,3 @@ export default function MuFirstPage() {
     </main>
   );
 }
-
