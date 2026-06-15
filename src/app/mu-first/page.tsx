@@ -31,9 +31,9 @@ type FollowupMessage = {
 
 const FOLLOWUP_QUESTIONS = [
   "相手の反応から、今どんな流れが出ていますか？",
-  "私がついやってしまうことは何ですか？",
-  "ここで注意したいところはどこですか？",
-  "相手の本気度を見るなら、どこを見ればいいですか？",
+  "私がついやってしまう失敗やズレを見てください",
+  "今、どう返すのが自然ですか？",
+  "相手の本気度・向き合い方を見てください",
   "もっと深くMuに聞くと、どんなことがわかりますか？",
 ];
 
@@ -634,8 +634,7 @@ export default function MuFirstPage() {
                   lineHeight: 1.7,
                 }}
               >
-                番号を選ぶか、自由に質問してください。診断後の相談はあと
-                {followupRemaining}回です。
+                番号を選ぶか、自由に質問してください。
               </p>
 
               <div
@@ -705,6 +704,19 @@ export default function MuFirstPage() {
                   ))}
                 </div>
               ) : null}
+
+              <p
+                style={{
+                  margin: "14px 0 8px",
+                  color: followupRemaining <= 0 ? "#7b5f95" : "#6b5a80",
+                  fontSize: 12,
+                  lineHeight: 1.6,
+                  textAlign: "center",
+                  fontWeight: followupRemaining <= 0 ? 700 : 500,
+                }}
+              >
+                診断後の相談はあと{followupRemaining}回です。
+              </p>
 
               <textarea
                 value={followupInput}
