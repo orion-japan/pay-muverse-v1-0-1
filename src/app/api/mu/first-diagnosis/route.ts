@@ -1,4 +1,4 @@
-export const runtime = 'nodejs';
+﻿export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -192,6 +192,22 @@ async function consumeScreenshotCredit(userCode: string): Promise<boolean | null
   }
 }
 
+
+async function getNextScreenshotDiagnosisDisplayId(userCode: string): Promise<number> {
+  const { data, error } = await sb
+    .from('mu_screenshot_diagnosis_logs')
+    .select('display_id')
+    .eq('user_code', userCode)
+    .not('display_id', 'is', null)
+    .order('display_id', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const currentMax = Number(data?.display_id ?? 0);
+  return Number.isFinite(currentMax) && currentMax > 0 ? currentMax + 1 : 1;
+}
 async function logDiagnosis(params: {
   userCode: string;
   model: string;
@@ -201,11 +217,14 @@ async function logDiagnosis(params: {
   diagnosisSeedJson: DiagnosisSeed | null;
 }) {
   try {
+    const displayId = await getNextScreenshotDiagnosisDisplayId(params.userCode);
+
     await sb.from('mu_screenshot_diagnosis_logs').insert({
       user_code: params.userCode,
       model: params.model,
       source: params.source,
-      media_code: params.mediaCode,
+      media_code: params.mediaCode,
+      display_id: displayId,
       credit_used: 1,
       diagnosis_text: params.diagnosisText,
       diagnosis_seed_json: params.diagnosisSeedJson,
@@ -455,3 +474,4 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: 'internal_error' }, 500);
   }
 }
+

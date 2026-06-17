@@ -297,6 +297,22 @@ async function deleteMuScreenshotDiagnosisLog(id: string): Promise<void> {
     console.warn('[mu-screenshot-diagnosis] rollback log delete failed:', error.message);
   }
 }
+
+async function getNextScreenshotDiagnosisDisplayId(userCode: string): Promise<number> {
+  const { data, error } = await sb
+    .from('mu_screenshot_diagnosis_logs')
+    .select('display_id')
+    .eq('user_code', userCode)
+    .not('display_id', 'is', null)
+    .order('display_id', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const currentMax = Number(data?.display_id ?? 0);
+  return Number.isFinite(currentMax) && currentMax > 0 ? currentMax + 1 : 1;
+}
 async function logDiagnosis(params: {
   userCode: string;
   model: string;
@@ -307,6 +323,8 @@ async function logDiagnosis(params: {
   diagnosisSeedJson: DiagnosisSeed | null;
 }) {
   try {
+    const displayId = await getNextScreenshotDiagnosisDisplayId(params.userCode);
+
     const { data, error } = await sb
       .from('mu_screenshot_diagnosis_logs')
       .insert({
@@ -315,6 +333,7 @@ async function logDiagnosis(params: {
         source: params.source,
         media_code: params.mediaCode,
         conversation_id: params.conversationId,
+        display_id: displayId,
         mode: 'chat',
         credit_used: MU_SCREENSHOT_CREDIT_COST,
         credit_cost: MU_SCREENSHOT_CREDIT_COST,
@@ -571,35 +590,4 @@ export async function GET(req: NextRequest) {
     return json({ ok: false, error: 'internal_error' }, 500);
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
