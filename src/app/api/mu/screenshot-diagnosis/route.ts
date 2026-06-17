@@ -220,6 +220,58 @@ async function consumeMuScreenshotSofiaCredit(userCode: string): Promise<boolean
 }
 
 
+
+const MU_SCREENSHOT_DAILY_LIMITS: Record<string, number | null> = {
+  premium: 5,
+  master: 10,
+  partner: 10,
+  admin: null,
+};
+
+function getJstTodayStartIso(now = new Date()): string {
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+
+  const year = jst.getUTCFullYear();
+  const month = jst.getUTCMonth();
+  const date = jst.getUTCDate();
+
+  const jstStartUtcMs = Date.UTC(year, month, date, 0, 0, 0) - 9 * 60 * 60 * 1000;
+  return new Date(jstStartUtcMs).toISOString();
+}
+
+async function checkMuScreenshotDailyLimit(
+  userCode: string,
+  userType: string,
+): Promise<{ allowed: boolean; used: number; limit: number | null }> {
+  const normalizedType = String(userType || '').toLowerCase();
+  const limit = Object.prototype.hasOwnProperty.call(MU_SCREENSHOT_DAILY_LIMITS, normalizedType)
+    ? MU_SCREENSHOT_DAILY_LIMITS[normalizedType]
+    : 0;
+
+  if (limit === null) {
+    return { allowed: true, used: 0, limit: null };
+  }
+
+  if (limit <= 0) {
+    return { allowed: false, used: 0, limit };
+  }
+
+  const { count, error } = await sb
+    .from('mu_screenshot_diagnosis_logs')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_code', userCode)
+    .eq('mode', 'chat')
+    .gte('created_at', getJstTodayStartIso());
+
+  if (error) throw error;
+
+  const used = Number(count ?? 0);
+  return {
+    allowed: used < limit,
+    used,
+    limit,
+  };
+}
 async function hasEnoughMuScreenshotSofiaCredit(userCode: string): Promise<boolean> {
   const { data, error } = await sb
     .from('users')
@@ -321,6 +373,19 @@ export async function POST(req: NextRequest) {
     if (!canUseMuScreenshotDiagnosis(userType)) {
       return json({ ok: false, error: 'screenshot_diagnosis_plan_required' }, 403);
     }
+    const dailyLimit = await checkMuScreenshotDailyLimit(userCode, userType);
+    if (!dailyLimit.allowed) {
+      return json(
+        {
+          ok: false,
+          error: 'daily_limit_exceeded',
+          daily_used: dailyLimit.used,
+          daily_limit: dailyLimit.limit,
+        },
+        429,
+      );
+    }
+
     const hasCredit = await hasEnoughMuScreenshotSofiaCredit(userCode);
     if (!hasCredit) {
       return json({ ok: false, error: 'no_mu_screenshot_credit' }, 402);
@@ -506,6 +571,9 @@ export async function GET(req: NextRequest) {
     return json({ ok: false, error: 'internal_error' }, 500);
   }
 }
+
+
+
 
 
 
