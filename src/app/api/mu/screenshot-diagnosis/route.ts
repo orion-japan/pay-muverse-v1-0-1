@@ -214,11 +214,37 @@ async function consumeMuScreenshotSofiaCredit(userCode: string): Promise<boolean
     if (error) throw error;
     return Boolean(data);
   } catch (e: any) {
-    console.warn('[mu-screenshot-diagnosis] consume_mu_screenshot_sofia_credit skipped:', e?.message || e);
+    console.warn('[mu-screenshot-diagnosis] consume_mu_screenshot_sofia_credit failed:', e?.message || e);
     return null;
   }
 }
 
+
+async function hasEnoughMuScreenshotSofiaCredit(userCode: string): Promise<boolean> {
+  const { data, error } = await sb
+    .from('users')
+    .select('sofia_credit')
+    .eq('user_code', userCode)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const credit = Number(data?.sofia_credit ?? 0);
+  return Number.isFinite(credit) && credit >= MU_SCREENSHOT_CREDIT_COST;
+}
+
+async function deleteMuScreenshotDiagnosisLog(id: string): Promise<void> {
+  if (!id) return;
+
+  const { error } = await sb
+    .from('mu_screenshot_diagnosis_logs')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    console.warn('[mu-screenshot-diagnosis] rollback log delete failed:', error.message);
+  }
+}
 async function logDiagnosis(params: {
   userCode: string;
   model: string;
@@ -237,7 +263,9 @@ async function logDiagnosis(params: {
         source: params.source,
         media_code: params.mediaCode,
         conversation_id: params.conversationId,
+        mode: 'chat',
         credit_used: MU_SCREENSHOT_CREDIT_COST,
+        credit_cost: MU_SCREENSHOT_CREDIT_COST,
         diagnosis_text: params.diagnosisText,
         diagnosis_seed_json: params.diagnosisSeedJson,
       })
@@ -247,8 +275,8 @@ async function logDiagnosis(params: {
     if (error) throw error;
     return String(data?.id || '');
   } catch (e: any) {
-    console.warn('[mu-screenshot-diagnosis] log skipped:', e?.message || e);
-    return '';
+    console.error('[mu-screenshot-diagnosis] log failed:', e?.message || e);
+    throw e;
   }
 }
 
@@ -293,14 +321,9 @@ export async function POST(req: NextRequest) {
     if (!canUseMuScreenshotDiagnosis(userType)) {
       return json({ ok: false, error: 'screenshot_diagnosis_plan_required' }, 403);
     }
-
-    const creditConsumed = await consumeMuScreenshotSofiaCredit(userCode);
-    if (creditConsumed === false) {
+    const hasCredit = await hasEnoughMuScreenshotSofiaCredit(userCode);
+    if (!hasCredit) {
       return json({ ok: false, error: 'no_mu_screenshot_credit' }, 402);
-    }
-
-    if (creditConsumed === null) {
-      return json({ ok: false, error: 'credit_consume_failed' }, 500);
     }
 
     const model = process.env.MU_SCREENSHOT_DIAGNOSIS_MODEL || 'gpt-5-mini';
@@ -390,16 +413,32 @@ export async function POST(req: NextRequest) {
     if (!diagnosis) {
       return json({ ok: false, error: 'empty_diagnosis' }, 502);
     }
+    let diagnosisLogId = '';
 
-    const diagnosisLogId = await logDiagnosis({
-      userCode,
-      model,
-      source: body.source || 'mu_chat',
-      mediaCode: body.media_code || null,
-      conversationId: body.conversation_id || body.conversationId || null,
-      diagnosisText: diagnosis,
-      diagnosisSeedJson: parsedDiagnosis.seed,
-    });
+    try {
+      diagnosisLogId = await logDiagnosis({
+        userCode,
+        model,
+        source: body.source || 'mu_chat',
+        mediaCode: body.media_code || null,
+        conversationId: body.conversation_id || body.conversationId || null,
+        diagnosisText: diagnosis,
+        diagnosisSeedJson: parsedDiagnosis.seed,
+      });
+    } catch {
+      return json({ ok: false, error: 'log_failed' }, 500);
+    }
+
+    const creditConsumed = await consumeMuScreenshotSofiaCredit(userCode);
+    if (creditConsumed === false) {
+      await deleteMuScreenshotDiagnosisLog(diagnosisLogId);
+      return json({ ok: false, error: 'no_mu_screenshot_credit' }, 402);
+    }
+
+    if (creditConsumed === null) {
+      await deleteMuScreenshotDiagnosisLog(diagnosisLogId);
+      return json({ ok: false, error: 'credit_consume_failed' }, 500);
+    }
 
     return json({
       ok: true,
@@ -408,7 +447,7 @@ export async function POST(req: NextRequest) {
       diagnosis_seed: parsedDiagnosis.seed,
       diagnosis_log_id: diagnosisLogId || null,
       source: body.source || 'mu_chat',
-      credit_consumed: creditConsumed ? MU_SCREENSHOT_CREDIT_COST : null,
+      credit_consumed: MU_SCREENSHOT_CREDIT_COST,
       model,
     });
   } catch (e: any) {
@@ -467,6 +506,9 @@ export async function GET(req: NextRequest) {
     return json({ ok: false, error: 'internal_error' }, 500);
   }
 }
+
+
+
 
 
 
