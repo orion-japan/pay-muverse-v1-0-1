@@ -206,41 +206,15 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
         diagnosis_seed: custom.detail?.diagnosis_seed ?? null,
         at: now,
       };
+      console.info('[IROS_SCREENSHOT_DIAGNOSIS_COMPLETE_DISABLED]', {
+        hasDiagnosis: Boolean(diagnosis),
+        diagnosisLen: diagnosis.length,
+      });
 
-      setMessages((prev) => [
-        ...prev,
-        ...(imageDataUrl
-          ? [
-              {
-                id: 'screenshot-image-' + Date.now(),
-                role: 'user',
-                text: '📎 スクショ画像',
-                content: '📎 スクショ画像',
-                created_at: now,
-                ts: Date.now(),
-                meta: {
-                  kind: 'screenshot_image_preview',
-                  image_data_url: imageDataUrl,
-                  localImageId: localImageId || null,
-                  localOnly: true,
-                  fallbackText:
-                    'この画像は、この端末のブラウザ内にのみ保存されています。別の端末では表示できません。診断結果は下に保存されています。',
-                },
-              } as any,
-            ]
-          : []),
-        {
-          id: `screenshot-diagnosis-${Date.now()}`,
-          role: 'assistant',
-          text: `【スクショ診断結果】\n${diagnosis}`,
-          created_at: now,
-          meta: {
-            kind: 'screenshot_diagnosis',
-            diagnosis_seed: custom.detail?.diagnosis_seed ?? null,
-          },
-        } as any,
-      ]);
-    };
+      // スクショ診断結果は通常チャット履歴には混ぜない。
+      // 診断本文はDBに保存し、明示ID指定の続き相談時だけSeedとして読む。
+      return;
+};
 
     window.addEventListener('iros:screenshot-diagnosis-complete', handler as EventListener);
     return () => {
@@ -357,7 +331,13 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
 
         const json = await res.json().catch(() => null);
         if (res.ok && json?.ok && Array.isArray(json.items)) {
-          screenshotLogs = json.items;
+          console.info('[IROS_SCREENSHOT_DIAGNOSIS_RESTORE_DISABLED]', {
+            cid,
+            count: json.items.length,
+          });
+
+          // スクショ診断ログは通常チャット履歴には復元しない。
+          screenshotLogs = [];
         }
       }
     } catch (e) {
@@ -367,45 +347,10 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
       });
     }
 
-    const screenshotMsgs: IrosMessage[] = screenshotLogs.flatMap((item: any) => {
-      const id = String(item?.id || '');
-      const diagnosisText = String(item?.diagnosis_text || '').trim();
-      const createdAt = item?.created_at || new Date().toISOString();
+    const screenshotMsgs: IrosMessage[] = [];
 
-      if (!id || !diagnosisText) return [];
-
-      return [
-        {
-          id: `screenshot-image-${id}`,
-          role: 'user',
-          text: '📎 スクショ画像',
-          content: '📎 スクショ画像',
-          created_at: createdAt,
-          ts: new Date(createdAt).getTime() || Date.now(),
-          meta: {
-            kind: 'screenshot_image_preview',
-            localImageId: id,
-            local_image_id: id,
-            localOnly: true,
-            fallbackText:
-              'この画像は、この端末のブラウザ内にのみ保存されています。別の端末・別のブラウザでは表示できません。診断結果は下に保存されています。',
-          },
-        } as any,
-        {
-          id: `screenshot-diagnosis-${id}`,
-          role: 'assistant',
-          text: `【スクショ診断結果】\n${diagnosisText}`,
-          content: `【スクショ診断結果】\n${diagnosisText}`,
-          created_at: createdAt,
-          ts: (new Date(createdAt).getTime() || Date.now()) + 1,
-          meta: {
-            kind: 'screenshot_diagnosis',
-            diagnosis_seed: item?.diagnosis_seed_json ?? null,
-          },
-        } as any,
-      ];
-    });
-
+    // スクショ診断ログは通常チャット表示には混ぜない。
+    // latestScreenshotDiagnosisRef だけ必要なら別ルートでSeed参照する。
     const latestScreenshot = [...screenshotLogs]
       .reverse()
       .find((item: any) => String(item?.diagnosis_text || '').trim());
@@ -1071,6 +1016,10 @@ const payload: any = {
     </IrosChatContext.Provider>
   );
 };
+
+
+
+
 
 
 
