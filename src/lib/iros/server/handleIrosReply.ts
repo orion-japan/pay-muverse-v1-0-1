@@ -34,6 +34,7 @@ import {
   formatReferenceJudgeSeed,
 } from '@/lib/iros/judge/referenceJudge';
 import { resolveWorkingReference } from '@/lib/iros/memory/workingReferenceResolver';
+import { buildWorkingReferenceFromActiveContextFrame } from '@/lib/iros/context/contextThread';
 import { resolvePendingOfferFromUserText } from '@/lib/iros/memory/continuityOffer.extractor';
 import { buildBlockPlanWithDiag } from '@/lib/iros/blockPlan/blockPlanEngine';
 import { extractSlotsForRephrase, rephraseSlotsFinal } from '@/lib/iros/language/rephraseEngine';
@@ -1079,6 +1080,66 @@ if (screenshotFollowupSeedForGate.startsWith('SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED
     hasSeed: true,
     seedLen: screenshotFollowupSeedForGate.length,
     seedHead: screenshotFollowupSeedForGate.slice(0, 120),
+  });
+}
+
+if (screenshotFollowupSeedForGate.startsWith('SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED')) {
+  const promoteScreenshotSeedToStrongSeed = (container: any) => {
+    if (!container || typeof container !== 'object') return;
+
+    container.llmRewriteSeed = screenshotFollowupSeedForGate;
+    container.slotPlanSeed = screenshotFollowupSeedForGate;
+    container.llmRewriteSeedFrom = 'llmGate(screenshot_followup_seed_promoted)';
+    container.llmRewriteSeedAt = new Date().toISOString();
+
+    container.historyForWriter = [];
+    container.historyForWriterAt = new Date().toISOString();
+
+    container.ctxPack =
+      container.ctxPack && typeof container.ctxPack === 'object'
+        ? container.ctxPack
+        : {};
+
+    container.ctxPack.llmRewriteSeed = screenshotFollowupSeedForGate;
+    container.ctxPack.slotPlanSeed = screenshotFollowupSeedForGate;
+    container.ctxPack.memorySeedText = screenshotFollowupSeedForGate;
+    container.ctxPack.memoryPreSeedText = screenshotFollowupSeedForGate;
+    container.ctxPack.historyForWriter = [];
+    container.ctxPack.historyForWriterAt = new Date().toISOString();
+    container.ctxPack.screenshotDiagnosisFollowup = true;
+    container.ctxPack.presentationKind = 'screenshot_diagnosis_followup';
+    container.ctxPack.continuityKind = 'screenshot_diagnosis_followup';
+
+    container.contextMode = 'diagnosis_context';
+    container.contextAuthority = 'screenshot_diagnosis';
+    container.writerSourceAuthority = 'diagnosisText';
+    container.goalKind = 'clarify';
+    container.targetKind = 'clarify';
+    container.replyGoal = { kind: 'clarify', questionsMax: 0 };
+    container.question = null;
+    container.similarFlowSeed = '';
+    container.similarFlowDebug = null;
+
+    container.ctxPack.contextMode = 'diagnosis_context';
+    container.ctxPack.contextAuthority = 'screenshot_diagnosis';
+    container.ctxPack.writerSourceAuthority = 'diagnosisText';
+    container.ctxPack.goalKind = 'clarify';
+    container.ctxPack.targetKind = 'clarify';
+    container.ctxPack.replyGoal = { kind: 'clarify', questionsMax: 0 };
+    container.ctxPack.question = null;
+    container.ctxPack.similarFlowSeed = '';
+    container.ctxPack.similarFlowDebug = null;
+  };
+
+  promoteScreenshotSeedToStrongSeed(exProbe);
+  promoteScreenshotSeedToStrongSeed(exSave);
+
+  console.log('[IROS/LLM_GATE][SCREENSHOT_FOLLOWUP_SEED_PROMOTED]', {
+    hasSeed: true,
+    seedLen: screenshotFollowupSeedForGate.length,
+    seedHead: screenshotFollowupSeedForGate.slice(0, 120),
+    probeHead: String(exProbe?.llmRewriteSeed ?? '').slice(0, 64),
+    saveHead: String(exSave?.llmRewriteSeed ?? '').slice(0, 64),
   });
 }
 
@@ -5042,13 +5103,29 @@ function normForRecall(v: any): string {
                 '',
             ).trim() || null;
 
-      const resolvedAskForSeedAnchor = resolveWorkingReference({
-        currentQuestion: String(text ?? ''),
-        historyForTurn,
-        orchCtxPack,
-        orchExtra,
-        extraLocal,
-      });
+      const canonicalResolvedAskForSeedAnchor =
+        buildWorkingReferenceFromActiveContextFrame(
+          (orchCtxPack as any)?.activeContextFrame ??
+            (orchExtra as any)?.activeContextFrame ??
+            (orchExtra as any)?.ctxPack?.activeContextFrame ??
+            (extraLocal as any)?.activeContextFrame ??
+            (extraLocal as any)?.ctxPack?.activeContextFrame,
+          String(text ?? ''),
+          {
+            sourcePhrase: 'activeContextFrame',
+            confidence: 1,
+          }
+        );
+
+      const resolvedAskForSeedAnchor =
+        canonicalResolvedAskForSeedAnchor ??
+        resolveWorkingReference({
+          currentQuestion: String(text ?? ''),
+          historyForTurn,
+          orchCtxPack,
+          orchExtra,
+          extraLocal,
+        });
 
       if (resolvedAskForSeedAnchor) {
         (orchCtxPack as any).resolvedAsk = resolvedAskForSeedAnchor;
@@ -5258,6 +5335,15 @@ function normForRecall(v: any): string {
 
 
         historyLine: (() => {
+          const isDiagnosisContextForWriterPayload =
+            String(orchCtxPack?.contextMode ?? orchExtra?.contextMode ?? '').trim() === 'diagnosis_context' ||
+            String(orchCtxPack?.contextAuthority ?? orchExtra?.contextAuthority ?? '').trim() === 'screenshot_diagnosis' ||
+            orchCtxPack?.screenshotDiagnosisFollowup === true ||
+            orchExtra?.screenshotDiagnosisFollowup === true ||
+            orchCtxPack?.presentationKind === 'screenshot_diagnosis_followup' ||
+            orchExtra?.presentationKind === 'screenshot_diagnosis_followup';
+
+          if (isDiagnosisContextForWriterPayload) return null;
           if (previousReplyRephraseSeed) return null;
 
           const rawHistory = String(
@@ -5276,14 +5362,24 @@ function normForRecall(v: any): string {
           return rawHistory;
         })(),
 
-        memoryLine:
-          previousReplyRephraseSeed
-            ? null
-            : String(
-                orchCtxPack?.topicDigest ??
-                  orchExtra?.topicDigest ??
-                  '',
-              ).trim() || null,
+        memoryLine: (() => {
+          const isDiagnosisContextForWriterPayload =
+            String(orchCtxPack?.contextMode ?? orchExtra?.contextMode ?? '').trim() === 'diagnosis_context' ||
+            String(orchCtxPack?.contextAuthority ?? orchExtra?.contextAuthority ?? '').trim() === 'screenshot_diagnosis' ||
+            orchCtxPack?.screenshotDiagnosisFollowup === true ||
+            orchExtra?.screenshotDiagnosisFollowup === true ||
+            orchCtxPack?.presentationKind === 'screenshot_diagnosis_followup' ||
+            orchExtra?.presentationKind === 'screenshot_diagnosis_followup';
+
+          if (isDiagnosisContextForWriterPayload) return null;
+          if (previousReplyRephraseSeed) return null;
+
+          return String(
+            orchCtxPack?.topicDigest ??
+              orchExtra?.topicDigest ??
+              '',
+          ).trim() || null;
+        })(),
 
         meaningSkeleton:
           (orchExtra as any)?.meaningSkeleton ??
@@ -6592,16 +6688,62 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
             currentUserTextForTranscend,
           );
 
+        const isScreenshotDiagnosisFollowupForGoal =
+
+
+          cpAny?.screenshotDiagnosisFollowup === true ||
+
+
+          exAny?.screenshotDiagnosisFollowup === true ||
+
+
+          metaAny?.screenshotDiagnosisFollowup === true ||
+
+
+          cpAny?.presentationKind === 'screenshot_diagnosis_followup' ||
+
+
+          exAny?.presentationKind === 'screenshot_diagnosis_followup' ||
+
+
+          metaAny?.presentationKind === 'screenshot_diagnosis_followup';
+
+
+
         const chosenGoalKindRaw =
-          isMemoryRecallNoneTurnForGoal
+
+
+          isScreenshotDiagnosisFollowupForGoal
+
+
             ? 'clarify'
-            : isTranscendResonanceRequest
-              ? 'uncover'
-              : normalizedFinalGoalKind === 'resonate'
-                ? 'resonate'
-                : existingStrongGoalKind ??
-                  normalizedFinalGoalKind ??
-                  'uncover';
+
+
+            : isMemoryRecallNoneTurnForGoal
+
+
+              ? 'clarify'
+
+
+              : isTranscendResonanceRequest
+
+
+                ? 'uncover'
+
+
+                : normalizedFinalGoalKind === 'resonate'
+
+
+                  ? 'resonate'
+
+
+                  : existingStrongGoalKind ??
+
+
+                    normalizedFinalGoalKind ??
+
+
+                    'uncover';
 
         const seedTextForGoal = String(
           exAny?.slotPlanSeed ??
@@ -6629,12 +6771,30 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
                 : chosenGoalKindRaw;
 
         const chosenTargetKindRaw =
-          isMemoryRecallNoneTurnForGoal
+
+
+          isScreenshotDiagnosisFollowupForGoal
+
+
             ? 'clarify'
-            : normalizedFinalGoalKind === 'resonate'
-              ? 'resonate'
-              : existingStrongTargetKind ??
-                (chosenGoalKindRaw === 'commit' ? 'decide' : chosenGoalKindRaw);
+
+
+            : isMemoryRecallNoneTurnForGoal
+
+
+              ? 'clarify'
+
+
+              : normalizedFinalGoalKind === 'resonate'
+
+
+                ? 'resonate'
+
+
+                : existingStrongTargetKind ??
+
+
+                  (chosenGoalKindRaw === 'commit' ? 'decide' : chosenGoalKindRaw);
 
         const chosenTargetKind =
           chosenTargetKindRaw === 'commit'
@@ -13035,6 +13195,17 @@ return {
     };
   }
 }
+
+
+
+
+
+
+
+
+
+
+
 
 
 

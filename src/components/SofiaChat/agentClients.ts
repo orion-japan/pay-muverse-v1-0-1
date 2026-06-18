@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+﻿/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { fetchWithIdToken } from '@/lib/fetchWithIdToken';
 import type {
@@ -182,16 +182,20 @@ export async function fetchMessages(
 
   // iros
   const r = await fetchWithIdToken(
-    `/api/sofia?user_code=${encodeURIComponent(
-      _userCode
-    )}&conversation_code=${encodeURIComponent(convId)}`
+    `/api/agent/iros/messages?conversation_id=${encodeURIComponent(convId)}&include_meta=1`,
+    { cache: 'no-store' }
   );
   if (!r.ok) throw new Error(`messages ${r.status}`);
-  const js: SofiaGetMessages = await r.json().catch(() => ({} as any));
-  return (js.messages ?? []).map((m, i) => ({
-    id: `${i}-${m.role}-${m.content.slice(0, 8)}`,
+  const js: any = await r.json().catch(() => ({} as any));
+  const raw = Array.isArray(js?.messages) ? js.messages : [];
+
+  return raw.map((m: any, i: number) => ({
+    id: String(m.id ?? `${i}-${m.role}-${String(m.content ?? m.text ?? '').slice(0, 8)}`),
+    conversation_id: m.conversation_id ?? convId,
     role: (m.role as Role) ?? 'assistant',
-    content: m.content,
+    content: String(m.content ?? m.text ?? ''),
+    created_at: m.created_at ?? undefined,
+    meta: m.meta ?? undefined,
   })) as Message[];
 }
 
@@ -430,3 +434,4 @@ export async function deleteConversation(agent: Agent, id: string) {
     body: JSON.stringify({ conversation_code: id }),
   });
 }
+

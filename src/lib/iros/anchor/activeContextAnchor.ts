@@ -292,6 +292,84 @@ export function buildDiagnosisActiveContextFrame(args: {
   };
 }
 
+
+export function buildScreenshotDiagnosisActiveContextFrame(args: {
+  displayId?: unknown;
+  logId?: unknown;
+  diagnosisText?: unknown;
+  diagnosisSeedJson?: unknown;
+  classificationJson?: unknown;
+  userText?: unknown;
+  targetLabel?: unknown;
+  targetKey?: unknown;
+  relationId?: unknown;
+  createdAt?: unknown;
+}): ActiveContextFrame | null {
+  const diagnosisText = cleanString(args.diagnosisText);
+  const displayIdRaw = cleanString(args.displayId);
+  const displayId = displayIdRaw ? Number(displayIdRaw) : null;
+
+  if (!diagnosisText || !displayId || !Number.isFinite(displayId)) return null;
+
+  const targetLabel = pickString(args.targetLabel, '相手');
+  const targetKey = pickString(args.targetKey);
+  const relationId = pickString(args.relationId);
+  const diagnosisId = makeEntityId('diagnosis', `screenshot_${Math.trunc(displayId)}`, `スクショ診断ID:${Math.trunc(displayId)}`);
+  const personId = makeEntityId('person', targetKey ?? relationId ?? targetLabel, targetLabel);
+
+  const entities: ActiveContextEntity[] = [
+    {
+      id: diagnosisId,
+      kind: 'diagnosis',
+      label: `スクショ診断ID:${Math.trunc(displayId)}`,
+      key: `screenshot:${Math.trunc(displayId)}`,
+      sourceId: pickString(args.logId, displayIdRaw),
+      sourceText: diagnosisText,
+      meta: {
+        diagnosisType: 'screenshot',
+        source: 'mu_screenshot_diagnosis_logs',
+        sourceTable: 'mu_screenshot_diagnosis_logs',
+        displayId: Math.trunc(displayId),
+        logId: pickString(args.logId),
+        targetLabel,
+        targetKey,
+        relationId,
+        diagnosisSeedJson: args.diagnosisSeedJson ?? null,
+        classificationJson: args.classificationJson ?? null,
+      },
+    },
+    {
+      id: personId,
+      kind: 'person',
+      label: targetLabel,
+      key: targetKey ?? null,
+      sourceId: relationId ?? null,
+    },
+  ];
+
+  const edges: ActiveContextEdge[] = [
+    {
+      id: makeEdgeId('diagnosis_of', diagnosisId, personId),
+      kind: 'diagnosis_of',
+      from: diagnosisId,
+      to: personId,
+      label: '診断対象',
+      meta: {
+        diagnosisType: 'screenshot',
+      },
+    },
+  ];
+
+  return {
+    version: 'active_context_frame_v1',
+    primaryEntityId: diagnosisId,
+    entities: uniqueEntities(entities),
+    edges: uniqueEdges(edges),
+    lastAction: 'screenshot_diagnosis_followup',
+    followupRequest: cleanString(args.userText),
+    createdAt: pickString(args.createdAt) ?? new Date().toISOString(),
+  };
+}
 export function buildRelationshipActiveContextAnchor(args: {
   relationshipMemory?: unknown;
   targetLabel?: unknown;
@@ -592,3 +670,4 @@ export function isActiveContextFrame(value: unknown): value is ActiveContextFram
     Array.isArray(obj.edges)
   );
 }
+

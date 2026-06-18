@@ -1,4 +1,4 @@
-// file: src/lib/iros/server/handleIrosReply.context.ts
+﻿// file: src/lib/iros/server/handleIrosReply.context.ts
 // iros - Turn context builder (minimal + frame plan)
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -13,7 +13,16 @@ import { guardIrosMemoryDecision } from '@/lib/iros/memory/memoryGuard';
 import { buildMemorySeed } from '@/lib/iros/memory/memorySeedBuilder';
 import { runPreSeedAssist } from '@/lib/iros/memory/preSeedAssist';
 import { resolvePendingOfferFromUserText } from '@/lib/iros/memory/continuityOffer.extractor';
-import { buildDiagnosisActiveContextFrame } from '@/lib/iros/anchor/activeContextAnchor';
+import { buildDiagnosisActiveContextFrame, buildScreenshotDiagnosisActiveContextFrame } from '@/lib/iros/anchor/activeContextAnchor';
+import {
+  buildContextThreadFromDiagnosisContext,
+  buildDiagnosisFollowupSeedFromFrame,
+  buildWorkingReferenceFromActiveContextFrame,
+  getActiveContextFrameFromMeta,
+  getContextThreadFromMeta,
+  isExplicitContextExit,
+  shouldContinueContextThread,
+} from '@/lib/iros/context/contextThread';
 
 // ✅ FramePlan（器＋スロット）(Layer C/D)
 import { buildFramePlan, type InputKind, type IrosStateLite } from '@/lib/iros/language/frameSlots';
@@ -637,13 +646,86 @@ export async function buildTurnContext(
   // 🔥 診断 followup 判定
   const followupSourceText = detailSourceText.trim();
 
-  const workingReferenceForMemoryRouter = resolveWorkingReference({
-    currentQuestion: followupSourceText,
-    historyForTurn: (args as any)?.history,
-    orchCtxPack: (baseMetaForTurn as any)?.extra?.ctxPack,
-    orchExtra: (baseMetaForTurn as any)?.extra,
-    extraLocal: (baseMetaForTurn as any)?.extra,
-  });
+  const prevContextThreadForTurn = getContextThreadFromMeta((baseMetaForTurn as any)?.prevMeta);
+  const prevActiveContextFrameForTurn = getActiveContextFrameFromMeta((baseMetaForTurn as any)?.prevMeta);
+
+  const hasExplicitScreenshotDiagnosisContinuationHint =
+    /(?:スクショ診断|スクリーンショット診断|画像診断)\s*(?:ID|id)[:：]?\s*\d+/u.test(followupSourceText) &&
+    /(?:続き|元に|もとに|から見て|について|相談|もう少し|詳しく|深く|なぜ|どうして)/u.test(followupSourceText);
+
+  const shouldUsePrevContextThreadForTurn =
+    !!prevContextThreadForTurn &&
+    !!prevActiveContextFrameForTurn &&
+    shouldContinueContextThread(followupSourceText) &&
+    !isExplicitContextExit(followupSourceText);
+
+  const canonicalWorkingReferenceForMemoryRouter =
+    shouldUsePrevContextThreadForTurn
+      ? buildWorkingReferenceFromActiveContextFrame(prevActiveContextFrameForTurn, followupSourceText, {
+          sourcePhrase: 'contextThread',
+          confidence: 1,
+        })
+      : null;
+
+  if (canonicalWorkingReferenceForMemoryRouter && prevActiveContextFrameForTurn) {
+    (baseMetaForTurn as any).extra = (baseMetaForTurn as any).extra ?? {};
+    (baseMetaForTurn as any).extra.ctxPack =
+      (baseMetaForTurn as any).extra.ctxPack ?? {};
+
+    const contextThreadSeedText = buildDiagnosisFollowupSeedFromFrame(
+      prevActiveContextFrameForTurn,
+      followupSourceText
+    );
+
+    (baseMetaForTurn as any).extra.contextThread = prevContextThreadForTurn;
+    (baseMetaForTurn as any).extra.activeContextFrame = prevActiveContextFrameForTurn;
+    (baseMetaForTurn as any).extra.resolvedAsk = canonicalWorkingReferenceForMemoryRouter;
+    (baseMetaForTurn as any).extra.contextThreadFollowup = true;
+    (baseMetaForTurn as any).extra.continuityKind =
+      prevContextThreadForTurn?.type?.includes('diagnosis')
+        ? 'diagnosis_followup'
+        : 'context_thread_followup';
+
+    (baseMetaForTurn as any).extra.ctxPack.contextThread = prevContextThreadForTurn;
+    (baseMetaForTurn as any).extra.ctxPack.activeContextFrame = prevActiveContextFrameForTurn;
+    (baseMetaForTurn as any).extra.ctxPack.resolvedAsk = canonicalWorkingReferenceForMemoryRouter;
+    (baseMetaForTurn as any).extra.ctxPack.contextThreadFollowup = true;
+    (baseMetaForTurn as any).extra.ctxPack.continuityKind =
+      (baseMetaForTurn as any).extra.continuityKind;
+
+    if (contextThreadSeedText) {
+      (baseMetaForTurn as any).extra.memorySeedText = contextThreadSeedText;
+      (baseMetaForTurn as any).extra.memoryPreSeedText = contextThreadSeedText;
+      (baseMetaForTurn as any).extra.ctxPack.memorySeedText = contextThreadSeedText;
+      (baseMetaForTurn as any).extra.ctxPack.memoryPreSeedText = contextThreadSeedText;
+    }
+
+    console.log('[IROS/CONTEXT_THREAD][RESOLVE]', {
+      status: 'active',
+      code: prevContextThreadForTurn?.code ?? null,
+      type: prevContextThreadForTurn?.type ?? null,
+      targetLabel: prevContextThreadForTurn?.targetLabel ?? null,
+      targetKey: prevContextThreadForTurn?.targetKey ?? null,
+      relationId: prevContextThreadForTurn?.relationId ?? null,
+      source: 'prevMeta',
+      hasActiveContextFrame: true,
+      hasSeed: !!contextThreadSeedText,
+    });
+  }
+
+  const workingReferenceForMemoryRouter =
+    canonicalWorkingReferenceForMemoryRouter ??
+    (
+      hasExplicitScreenshotDiagnosisContinuationHint
+        ? null
+        : resolveWorkingReference({
+            currentQuestion: followupSourceText,
+            historyForTurn: (args as any)?.history,
+            orchCtxPack: (baseMetaForTurn as any)?.extra?.ctxPack,
+            orchExtra: (baseMetaForTurn as any)?.extra,
+            extraLocal: (baseMetaForTurn as any)?.extra,
+          })
+    );
 
   const memoryDecision = routeIrosMemory({
     userText: followupSourceText,
@@ -994,6 +1076,111 @@ export async function buildTurnContext(
           'スクショ診断ID:' + String(screenshotDetail.displayId ?? screenshotDisplayId) + 'の続き相談';
         (baseMetaForTurn as any).extra.ctxPack.situationTopic =
           'スクショ診断ID:' + String(screenshotDetail.displayId ?? screenshotDisplayId);
+
+        const screenshotActiveContextFrame = buildScreenshotDiagnosisActiveContextFrame({
+          displayId: screenshotDetail.displayId ?? screenshotDisplayId,
+          logId: (screenshotDetail as any)?.id ?? null,
+          diagnosisText: screenshotDetail.diagnosisText ?? '',
+          diagnosisSeedJson: screenshotDetail.diagnosisSeedJson ?? null,
+          classificationJson: screenshotDetail.classificationJson ?? null,
+          userText: followupSourceText,
+          targetLabel: '相手',
+          targetKey: null,
+          relationId: null,
+          createdAt: (screenshotDetail as any)?.createdAt ?? (screenshotDetail as any)?.created_at ?? null,
+        });
+
+        const screenshotContextThread = buildContextThreadFromDiagnosisContext({
+          userCode,
+          conversationId: (args as any)?.conversationId ?? (baseMetaForTurn as any)?.conversationId ?? null,
+          diagnosisType: 'screenshot',
+          source: 'mu_screenshot_diagnosis_logs',
+          id: String((screenshotDetail as any)?.id ?? screenshotDetail.displayId ?? screenshotDisplayId),
+          displayId: Number(screenshotDetail.displayId ?? screenshotDisplayId),
+          targetLabel: '相手',
+          targetKey: null,
+          relationId: null,
+          userText: followupSourceText,
+        });
+
+        const screenshotContextFrameSeed =
+          buildDiagnosisFollowupSeedFromFrame(screenshotActiveContextFrame, followupSourceText);
+
+        const screenshotContextSeedText = [
+          // LLM_GATE の既存判定 startsWith('SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED') を活かすため、必ず先頭に置く
+          screenshotDiagnosisFollowupSeedText,
+          screenshotContextFrameSeed,
+          [
+            'DIAGNOSIS_CONTEXT_CONTRACT (DO NOT OUTPUT):',
+            'contextMode=diagnosis_context',
+            'contextAuthority=screenshot_diagnosis',
+            'writerSourceAuthority=diagnosisText',
+            'mustAnswer=true',
+            'mustUseDiagnosisText=true',
+            'mustUseConcreteTermsFromDiagnosisText=2',
+            'questionsMax=0',
+            'doNotAskWhichPart=true',
+            'doNotEndWithContinuePrompt=true',
+            'doNotUseSimilarFlow=true',
+            'doNotUseHistoryForWriter=true',
+          ].join('\n'),
+        ].filter((v) => typeof v === 'string' && v.trim().length > 0).join('\n\n');
+
+        if (screenshotActiveContextFrame) {
+          (baseMetaForTurn as any).extra.activeContextFrame = screenshotActiveContextFrame;
+          (baseMetaForTurn as any).extra.ctxPack.activeContextFrame = screenshotActiveContextFrame;
+        }
+
+        (baseMetaForTurn as any).extra.contextThread = screenshotContextThread;
+        (baseMetaForTurn as any).extra.ctxPack.contextThread = screenshotContextThread;
+        (baseMetaForTurn as any).extra.continuityKind = 'screenshot_diagnosis_followup';
+        (baseMetaForTurn as any).extra.ctxPack.continuityKind = 'screenshot_diagnosis_followup';
+        (baseMetaForTurn as any).extra.diagnosisContextStatus = screenshotDetail.found ? 'FOUND' : 'NOT_FOUND';
+        (baseMetaForTurn as any).extra.ctxPack.diagnosisContextStatus = (baseMetaForTurn as any).extra.diagnosisContextStatus;
+
+        // 診断 followup を後段まで一本の制御線として通す
+        (baseMetaForTurn as any).extra.contextMode = 'diagnosis_context';
+        (baseMetaForTurn as any).extra.ctxPack.contextMode = 'diagnosis_context';
+        (baseMetaForTurn as any).extra.contextAuthority = 'screenshot_diagnosis';
+        (baseMetaForTurn as any).extra.ctxPack.contextAuthority = 'screenshot_diagnosis';
+        (baseMetaForTurn as any).extra.writerSourceAuthority = 'diagnosisText';
+        (baseMetaForTurn as any).extra.ctxPack.writerSourceAuthority = 'diagnosisText';
+
+        // 通常チャットの質問化・共鳴化へ戻さない
+        (baseMetaForTurn as any).extra.goalKind = 'clarify';
+        (baseMetaForTurn as any).extra.ctxPack.goalKind = 'clarify';
+        (baseMetaForTurn as any).extra.targetKind = 'clarify';
+        (baseMetaForTurn as any).extra.ctxPack.targetKind = 'clarify';
+        (baseMetaForTurn as any).extra.replyGoal = { kind: 'clarify', questionsMax: 0 };
+        (baseMetaForTurn as any).extra.ctxPack.replyGoal = { kind: 'clarify', questionsMax: 0 };
+        (baseMetaForTurn as any).extra.question = null;
+        (baseMetaForTurn as any).extra.ctxPack.question = null;
+
+        (baseMetaForTurn as any).extra.memoryPreSeedText = screenshotContextSeedText;
+        (baseMetaForTurn as any).extra.memorySeedText = screenshotContextSeedText;
+        (baseMetaForTurn as any).extra.ctxPack.memoryPreSeedText = screenshotContextSeedText;
+        (baseMetaForTurn as any).extra.ctxPack.memorySeedText = screenshotContextSeedText;
+
+        // スクショ診断followupでは、直前assistantテンプレをhistoryForWriterから拾わせない
+        (baseMetaForTurn as any).extra.historyForWriter = [];
+        (baseMetaForTurn as any).extra.historyForWriterAt = new Date().toISOString();
+        (baseMetaForTurn as any).extra.ctxPack.historyForWriter = [];
+        (baseMetaForTurn as any).extra.ctxPack.historyForWriterAt = new Date().toISOString();
+
+        // Writer入口で短いDIAGNOSIS_SEEDに負けないよう、強いSeedにも固定する
+        (baseMetaForTurn as any).extra.llmRewriteSeed = screenshotContextSeedText;
+        (baseMetaForTurn as any).extra.slotPlanSeed = screenshotContextSeedText;
+        (baseMetaForTurn as any).extra.ctxPack.llmRewriteSeed = screenshotContextSeedText;
+        (baseMetaForTurn as any).extra.ctxPack.slotPlanSeed = screenshotContextSeedText;
+
+        console.log('[IROS/ACTIVE_CONTEXT_FRAME][BUILD]', {
+          kind: 'diagnosis',
+          diagnosisType: 'screenshot',
+          displayId: Number(screenshotDetail.displayId ?? screenshotDisplayId),
+          hasFrame: !!screenshotActiveContextFrame,
+          contextThreadCode: screenshotContextThread.code,
+          hasSeed: !!screenshotContextSeedText,
+        });
 
         (baseMetaForTurn as any).extra.similarFlowSeed = '';
         (baseMetaForTurn as any).extra.similarFlowDebug = null;
@@ -1963,19 +2150,28 @@ export async function buildTurnContext(
       (baseMetaForTurn as any).extra.ctxPack.memorySeedReasons = memorySeedResult.reasons;
     }
 
-      (baseMetaForTurn as any).presentationKind = 'diagnosis';
+      if ((baseMetaForTurn as any).extra?.screenshotDiagnosisFollowup !== true) {
+        (baseMetaForTurn as any).presentationKind = 'diagnosis';
+      }
+
       if (isIrDiagnosisTurn) {
         (baseMetaForTurn as any).mode = 'diagnosis';
       }
     }
+  const isScreenshotDiagnosisFollowupTurn =
+    (baseMetaForTurn as any)?.extra?.screenshotDiagnosisFollowup === true ||
+    (baseMetaForTurn as any)?.extra?.ctxPack?.screenshotDiagnosisFollowup === true ||
+    (baseMetaForTurn as any)?.extra?.presentationKind === 'screenshot_diagnosis_followup' ||
+    (baseMetaForTurn as any)?.extra?.ctxPack?.presentationKind === 'screenshot_diagnosis_followup';
+
   const framePlan =
-    isIrDiagnosisTurn || isDiagnosisDetailTurn
+    isIrDiagnosisTurn || isDiagnosisDetailTurn || isScreenshotDiagnosisFollowupTurn
       ? null
       : buildFramePlan({ state: stateLite, inputKind });
 
   baseMetaForTurn.inputKind = inputKind;
 
-  if (!(isIrDiagnosisTurn || isDiagnosisDetailTurn) && framePlan) {
+  if (!(isIrDiagnosisTurn || isDiagnosisDetailTurn || isScreenshotDiagnosisFollowupTurn) && framePlan) {
     baseMetaForTurn.framePlan = framePlan;
   } else {
     delete (baseMetaForTurn as any).framePlan;
@@ -2957,3 +3153,12 @@ export async function buildTurnContext(
     },
   };
 }
+
+
+
+
+
+
+
+
+

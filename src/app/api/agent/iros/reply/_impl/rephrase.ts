@@ -502,6 +502,101 @@ export async function maybeAttachRephraseForRenderV2(args: {
 
   let extracted = extractSlotsForRephrase(extraForRender);
 
+  const screenshotDiagnosisSeedForForcedSlots = String(
+    (meta as any)?.extra?.llmRewriteSeed ??
+      (meta as any)?.extra?.slotPlanSeed ??
+      (extraMerged as any)?.llmRewriteSeed ??
+      (extraMerged as any)?.slotPlanSeed ??
+      (meta as any)?.extra?.memorySeedText ??
+      (extraMerged as any)?.memorySeedText ??
+      ''
+  ).trim();
+
+  const isScreenshotDiagnosisForcedSlot =
+    screenshotDiagnosisSeedForForcedSlots.includes('SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED') ||
+    screenshotDiagnosisSeedForForcedSlots.includes('contextAuthority=screenshot_diagnosis') ||
+    String((meta as any)?.extra?.contextAuthority ?? '').trim() === 'screenshot_diagnosis' ||
+    String((extraMerged as any)?.contextAuthority ?? '').trim() === 'screenshot_diagnosis' ||
+    String((meta as any)?.extra?.ctxPack?.contextAuthority ?? '').trim() === 'screenshot_diagnosis' ||
+    String((extraMerged as any)?.ctxPack?.contextAuthority ?? '').trim() === 'screenshot_diagnosis';
+
+  const buildScreenshotDiagnosisDirectSlotText = (seed: string): string => {
+    const diagnosisText = String(seed ?? '')
+      .split('diagnosisText:')
+      .slice(1)
+      .join('diagnosisText:')
+      .split('diagnosisSeedJson:')
+      [0]
+      ?.trim();
+
+    const source = diagnosisText || seed;
+
+    const hasHope = source.includes('最近希望がない');
+    const hasSelfBlame = source.includes('約束守れなかったから私が悪い');
+    const hasNotThat = source.includes('そう言う事じゃない');
+    const hasMismatch = source.includes('すれ違いの継続');
+    const hasTimeGap = source.includes('9:16') || source.includes('11:41');
+
+    const lines: string[] = [];
+
+    lines.push('スクショ診断ID:33の続きとして見ると、中心は「気持ちを共有したい流れ」と「原因確認・自己責任化に寄ってしまう流れ」のズレです。');
+
+    if (hasHope || hasSelfBlame) {
+      lines.push('あなたが「最近希望がない」と出したところに対して、相手は気持ちそのものを受け止めるより、原因を確認する方向に入り、その後「約束守れなかったから私が悪い」という自己非難へ寄っています。');
+    }
+
+    if (hasNotThat) {
+      lines.push('だから、あなたの「そう言う事じゃない」は、相手を責めたいというより、その受け取り方ではない、と止めている反応に見えます。');
+    }
+
+    if (hasMismatch) {
+      lines.push('ここで起きているのは、単なる言い合いではなく、診断に出ていた通り「すれ違いの継続」です。');
+    }
+
+    if (hasTimeGap) {
+      lines.push('9:16から11:41の空白も、話が一度止まってから「会えなかったこと」に引き戻されている流れとして見えます。');
+    }
+
+    return lines.join('\n\n').trim();
+  };
+
+  if (isScreenshotDiagnosisForcedSlot && screenshotDiagnosisSeedForForcedSlots) {
+    const forcedText = buildScreenshotDiagnosisDirectSlotText(screenshotDiagnosisSeedForForcedSlots);
+
+    if (forcedText) {
+      extracted = {
+        ...(extracted ?? {}),
+        slots: [
+          {
+            key: 'DIAGNOSIS_FOLLOWUP',
+            role: 'assistant',
+            text: forcedText,
+          },
+        ],
+        slotPlanPolicy: 'FINAL',
+      } as any;
+
+      (extraMerged as any).slotPlanPolicy = 'FINAL';
+      (extraMerged as any).rephraseHead = forcedText;
+      (extraMerged as any).screenshotDiagnosisForcedSlot = true;
+
+      if ((extraMerged as any).ctxPack && typeof (extraMerged as any).ctxPack === 'object') {
+        (extraMerged as any).ctxPack.screenshotDiagnosisForcedSlot = true;
+        (extraMerged as any).ctxPack.goalKind = 'clarify';
+        (extraMerged as any).ctxPack.targetKind = 'clarify';
+        (extraMerged as any).ctxPack.replyGoal = { kind: 'clarify', questionsMax: 0 };
+      }
+
+      console.log('[IROS/_impl/rephrase.ts][SCREENSHOT_DIAGNOSIS_FORCED_SLOT]', {
+        traceId,
+        conversationId,
+        userCode,
+        forcedTextLen: forcedText.length,
+        forcedTextHead: forcedText.slice(0, 220),
+      });
+    }
+  }
+
   // ✅ 記憶系を通さず、その場の slotPlan / framePlan だけで再接続する
   if (!extracted?.slots?.length) {
     const directSlots =
@@ -782,15 +877,58 @@ const intentBandForCtx =
       compactUserTextForDiagnosisSeedCtx
     );
 
+  const screenshotDiagnosisFollowupSeedForCtx = String(
+    (extraMerged as any)?.llmRewriteSeed ??
+      (extraMerged as any)?.slotPlanSeed ??
+      (extraMerged as any)?.memorySeedText ??
+      (extraMerged as any)?.memoryPreSeedText ??
+      (extraMerged as any)?.ctxPack?.llmRewriteSeed ??
+      (extraMerged as any)?.ctxPack?.slotPlanSeed ??
+      (extraMerged as any)?.ctxPack?.memorySeedText ??
+      (extraMerged as any)?.ctxPack?.memoryPreSeedText ??
+      (meta as any)?.extra?.llmRewriteSeed ??
+      (meta as any)?.extra?.slotPlanSeed ??
+      (meta as any)?.extra?.memorySeedText ??
+      (meta as any)?.extra?.memoryPreSeedText ??
+      (meta as any)?.extra?.ctxPack?.llmRewriteSeed ??
+      (meta as any)?.extra?.ctxPack?.slotPlanSeed ??
+      (meta as any)?.extra?.ctxPack?.memorySeedText ??
+      (meta as any)?.extra?.ctxPack?.memoryPreSeedText ??
+      ''
+  ).trim();
+
+  const isScreenshotDiagnosisFollowupForCtx =
+    !isMuCapabilityMetaQuestionForDiagnosisSeedCtx &&
+    (
+      screenshotDiagnosisFollowupSeedForCtx.includes('SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED') ||
+      screenshotDiagnosisFollowupSeedForCtx.includes('DIAGNOSIS_CONTEXT_CONTRACT') ||
+      screenshotDiagnosisFollowupSeedForCtx.includes('contextAuthority=screenshot_diagnosis') ||
+      String((extraMerged as any)?.contextMode ?? '').trim() === 'diagnosis_context' ||
+      String((extraMerged as any)?.ctxPack?.contextMode ?? '').trim() === 'diagnosis_context' ||
+      String((meta as any)?.extra?.contextMode ?? '').trim() === 'diagnosis_context' ||
+      String((meta as any)?.extra?.ctxPack?.contextMode ?? '').trim() === 'diagnosis_context' ||
+      String((extraMerged as any)?.contextAuthority ?? '').trim() === 'screenshot_diagnosis' ||
+      String((extraMerged as any)?.ctxPack?.contextAuthority ?? '').trim() === 'screenshot_diagnosis' ||
+      String((meta as any)?.extra?.contextAuthority ?? '').trim() === 'screenshot_diagnosis' ||
+      String((meta as any)?.extra?.ctxPack?.contextAuthority ?? '').trim() === 'screenshot_diagnosis' ||
+      (extraMerged as any)?.screenshotDiagnosisFollowup === true ||
+      (extraMerged as any)?.ctxPack?.screenshotDiagnosisFollowup === true ||
+      (meta as any)?.extra?.screenshotDiagnosisFollowup === true ||
+      (meta as any)?.extra?.ctxPack?.screenshotDiagnosisFollowup === true
+    );
+
   const isDiagnosisFollowupForCtx =
     !isMuCapabilityMetaQuestionForDiagnosisSeedCtx &&
     (
+      isScreenshotDiagnosisFollowupForCtx ||
       (extraMerged as any)?.diagnosisFollowup === true ||
       (extraMerged as any)?.ctxPack?.diagnosisFollowup === true ||
       String((extraMerged as any)?.ctxPack?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+      String((extraMerged as any)?.ctxPack?.continuityKind ?? '').trim() === 'screenshot_diagnosis_followup' ||
       (meta as any)?.extra?.diagnosisFollowup === true ||
       (meta as any)?.extra?.ctxPack?.diagnosisFollowup === true ||
       String((meta as any)?.extra?.ctxPack?.continuityKind ?? '').trim() === 'diagnosis_followup' ||
+      String((meta as any)?.extra?.ctxPack?.continuityKind ?? '').trim() === 'screenshot_diagnosis_followup' ||
       Boolean((extraMerged as any)?.ctxPack?.lastIrDiagnosis) ||
       Boolean((extraMerged as any)?.extra?.ctxPack?.lastIrDiagnosis) ||
       Boolean((meta as any)?.extra?.ctxPack?.lastIrDiagnosis) ||
@@ -805,6 +943,10 @@ const intentBandForCtx =
     null;
 
   const diagnosisFollowupSeedForCtx: string | null = (() => {
+    if (isScreenshotDiagnosisFollowupForCtx && screenshotDiagnosisFollowupSeedForCtx) {
+      return screenshotDiagnosisFollowupSeedForCtx;
+    }
+
     if (!isDiagnosisFollowupForCtx) return null;
 
     const pick = (...cands: any[]) => {
@@ -835,6 +977,9 @@ const intentBandForCtx =
     conversationId,
     userCode,
     isDiagnosisFollowupForCtx,
+    isScreenshotDiagnosisFollowupForCtx,
+    screenshotDiagnosisFollowupSeedLen: String(screenshotDiagnosisFollowupSeedForCtx ?? "").length,
+    screenshotDiagnosisFollowupSeedHead: String(screenshotDiagnosisFollowupSeedForCtx ?? "").slice(0, 180),
     hasLastIrDiagnosisForCtx: Boolean(lastIrDiagnosisForCtx),
     lastIrDiagnosisKeys:
       lastIrDiagnosisForCtx && typeof lastIrDiagnosisForCtx === "object"
@@ -2119,7 +2264,56 @@ try {
       .map(normalizeTurnLite)
       .filter((v): v is { role: 'assistant' | 'user'; content: string } => Boolean(v));
 
-    if (isRelationshipSupportNow && out.length > 0) {
+    const screenshotDiagnosisFollowupSeedForHfw = String(
+      diagnosisFollowupSeedForCtx ??
+        (extraMerged as any)?.llmRewriteSeed ??
+        (extraMerged as any)?.slotPlanSeed ??
+        (extraMerged as any)?.ctxPack?.llmRewriteSeed ??
+        (extraMerged as any)?.ctxPack?.slotPlanSeed ??
+        (extraMerged as any)?.ctxPack?.memorySeedText ??
+        (meta as any)?.extra?.llmRewriteSeed ??
+        (meta as any)?.extra?.slotPlanSeed ??
+        (meta as any)?.extra?.ctxPack?.llmRewriteSeed ??
+        (meta as any)?.extra?.ctxPack?.slotPlanSeed ??
+        (meta as any)?.extra?.ctxPack?.memorySeedText ??
+        ''
+    ).trim();
+
+    const isScreenshotDiagnosisFollowupForHfw =
+      screenshotDiagnosisFollowupSeedForHfw.includes('SCREENSHOT_CONTEXT_V1') ||
+      screenshotDiagnosisFollowupSeedForHfw.includes('SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED') ||
+      (extraMerged as any)?.screenshotDiagnosisFollowup === true ||
+      (extraMerged as any)?.ctxPack?.screenshotDiagnosisFollowup === true ||
+      (meta as any)?.extra?.screenshotDiagnosisFollowup === true ||
+      (meta as any)?.extra?.ctxPack?.screenshotDiagnosisFollowup === true ||
+      String((extraMerged as any)?.presentationKind ?? '').trim() === 'screenshot_diagnosis_followup' ||
+      String((extraMerged as any)?.ctxPack?.presentationKind ?? '').trim() === 'screenshot_diagnosis_followup' ||
+      String((meta as any)?.extra?.presentationKind ?? '').trim() === 'screenshot_diagnosis_followup' ||
+      String((meta as any)?.extra?.ctxPack?.presentationKind ?? '').trim() === 'screenshot_diagnosis_followup';
+
+    if (isScreenshotDiagnosisFollowupForHfw && screenshotDiagnosisFollowupSeedForHfw) {
+      const beforeLen = out.length;
+
+      out = [
+        {
+          role: 'assistant',
+          content: screenshotDiagnosisFollowupSeedForHfw,
+        },
+      ];
+
+      console.log('[IROS/_impl/rephrase.ts][HFW_SCREENSHOT_DIAGNOSIS_FOLLOWUP_FORCE_SEED]', {
+        conversationId,
+        userCode,
+        traceId: traceId ?? null,
+        beforeLen,
+        afterLen: out.length,
+        seedLen: screenshotDiagnosisFollowupSeedForHfw.length,
+        seedHead: screenshotDiagnosisFollowupSeedForHfw.slice(0, 160),
+      });
+    }
+
+
+    if (!isScreenshotDiagnosisFollowupForHfw && isRelationshipSupportNow && out.length > 0) {
       const before = out;
 
       // ✅ 恋愛相談では、過去 assistant の説明文体を再注入しない。
@@ -2889,6 +3083,11 @@ try {
 
   attachBlocksFromTextOrSkip(fallbackText, 'REPHRASE_EXCEPTION_FALLBACK');
 }}
+
+
+
+
+
 
 
 

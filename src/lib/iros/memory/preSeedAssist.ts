@@ -1,4 +1,4 @@
-import { chatComplete, type ChatMessage } from '@/lib/llm/chatComplete';
+﻿import { chatComplete, type ChatMessage } from '@/lib/llm/chatComplete';
 
 export type PreSeedAssistKind =
   | 'diagnosis_target_confirm'
@@ -180,7 +180,10 @@ export async function runPreSeedAssist(
     '- 「誰の診断を深めたのですか？」は、直前診断対象の確認です。',
     '- activeContextFrame に diagnosis_of があり、対象が self/自分なら directReply は「自分の診断です。さっきの「ir診断 自分」を受けて、その内容を少し深めていました。」です。',
     '- directReply を出す場合、shouldBypassWriter は true にします。',
-    '- 判断できない場合は kind="normal", confidence=0, shouldBypassWriter=false にします。',
+    '- activeContextFrame に diagnosis があり、userText が「それは？」「なぜ？」「どうしたら？」「もう少し」など診断の続きにも通常相談にも見える場合は、kind="diagnosis_target_confirm" とし、directReply で「これは、さっきの診断の続きとして見ますか？それとも、今の相談として新しく見ますか？」と確認します。',
+    '- activeContextFrame に diagnosis があり、userText が診断対象・診断本文・直前回答に含まれる具体語へ接続している場合は kind="diagnosis_followup" にします。',
+    '- 「別件です」「普通の相談に戻ります」「この診断はここまで」「通常チャット」など明示終了がある場合は kind="normal" にします。',
+    '- activeContextFrame がない、または診断との接続が明確にない場合は kind="normal", confidence=0, shouldBypassWriter=false にします。',
     '',
     '出力は JSON 1個のみ。説明文は出さない。',
     'JSON schema:',
@@ -269,3 +272,4 @@ export async function runPreSeedAssist(
     return buildFallbackResult(args, 'llm_failed');
   }
 }
+
