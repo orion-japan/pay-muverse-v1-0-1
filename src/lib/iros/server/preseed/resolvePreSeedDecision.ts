@@ -269,14 +269,91 @@ export async function resolvePreSeedDecision(
   });
 
   if (strength === 'exit') {
-    console.log('[IROS/PRE_SEED_ENGINE][SCREENSHOT_CONTEXT_EXIT_TO_NORMAL]', {
+    console.log('[IROS/PRE_SEED_ENGINE][SCREENSHOT_CONTEXT_RESET]', {
       traceId: args.traceId,
       conversationId: args.conversationId,
       userCode: args.userCode,
       userTextHead: userText.slice(0, 120),
+      reason: 'screenshot_context_exit_to_normal',
     });
 
-    return null;
+    return {
+      kind: 'normal_chat',
+      route: 'normal_writer',
+
+      confidence: 0.95,
+
+
+      sourceAuthority: 'user_text',
+      sourceKind: 'context_reset',
+      sourceId: null,
+      sourceText: userText,
+
+      seedText:
+        'CONTEXT_RESET_SEED (DO NOT OUTPUT):\n' +
+        'reason=screenshot_context_exit_to_normal\n' +
+        'rule=このターンは前のスクショ診断・IR診断・関係・人物文脈を引き継がない。\n' +
+        'rule=SimilarFlow / pastContext / relationship fallback を使わない。\n' +
+        'rule=ユーザーの現在入力を起点に通常チャットとして返す。\n' +
+        'currentUserText:\n' +
+        userText,
+
+      writerInput: null,
+
+      directReply: null,
+
+      shouldUsePreSeedWriter: false,
+      shouldBypassWriter: false,
+      shouldBypassRephrase: false,
+      shouldSuppressHistoryForWriter: true,
+      shouldSuppressSimilarFlow: true,
+      shouldSuppressSlotPlan: false,
+      shouldSuppressMemoryDelta: true,
+      shouldSuppressIntuitionCandidate: true,
+      shouldSuppressNormalResonance: false,
+
+      shouldOpenContextThread: false,
+      contextThreadCode: null,
+
+      ctxPackPatch: {
+        contextReset: true,
+        contextResetReason: 'screenshot_context_exit_to_normal',
+        shouldCloseContextThread: true,
+        shouldResetActiveTarget: true,
+        shouldSuppressPastContext: true,
+        shouldSuppressHistoryForWriter: true,
+        shouldSuppressSimilarFlow: true,
+        contextThread: null,
+        activeTarget: null,
+        pendingOffer: null,
+        resolvedTarget: null,
+        resolvedRelation: null,
+        historyForWriter: [],
+        similarFlowSeed: '',
+        similarFlowDebug: null,
+        relationship: null,
+        relationshipMemory: null,
+        relationshipMemoryNote: null,
+        memorySeedText: null,
+        memorySeedResult: null,
+        memorySeedKind: null,
+      },
+
+      metaPatch: {
+        contextReset: true,
+        contextResetReason: 'screenshot_context_exit_to_normal',
+        shouldCloseContextThread: true,
+        shouldResetActiveTarget: true,
+        shouldSuppressPastContext: true,
+        shouldSuppressHistoryForWriter: true,
+        shouldSuppressSimilarFlow: true,
+      },
+
+      debug: {
+        reason: 'screenshot_context_exit_to_normal_context_reset',
+        matchedPattern: 'getScreenshotDiagnosisFollowupStrength:exit',
+      },
+    };
   }
 
   if (historyDisplayId && strength === 'strong') {
@@ -432,6 +509,11 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
+
+
+
+
+
 
 
 

@@ -19,14 +19,87 @@ export async function resolveUniversalPreSeed(args: {
 
   if (!userText) return null;
 
-  if (detectExitToNormal(userText)) {
-    console.log('[IROS/PRE_SEED/UNIVERSAL][EXIT_TO_NORMAL]', {
+  const explicitContextReset =
+    detectExitToNormal(userText) ||
+    /^(別件です|別件です。|別件|新規です|新規です。|新規|これは別の相談|話を変えます|話を変えて|前の話は置いておいて|前の話はいったん置いて|診断ではなく|恋愛相談ではなく|コードの話に戻ります|コードの修正)/.test(userText.trim());
+
+  if (explicitContextReset) {
+    console.log('[IROS/PRE_SEED/UNIVERSAL][CONTEXT_RESET]', {
       traceId: args.traceId ?? null,
       conversationId: args.conversationId ?? null,
       userCode: args.userCode,
       userTextHead: userText.slice(0, 120),
+      reason: 'explicit_exit_to_normal',
     });
-    return null;
+
+    return {
+      kind: 'normal_chat',
+      memoryIntent: 'normal_chat',
+      memorySpace: 'normal',
+      route: 'normal_writer',
+
+      confidence: 0.95,
+
+      resolvedTarget: null,
+      resolvedRelation: null,
+
+      sourceAuthority: 'user_text',
+      sourceKind: 'context_reset',
+      sourceId: null,
+      sourceText: userText,
+
+      seedText:
+        'CONTEXT_RESET_SEED (DO NOT OUTPUT):\n' +
+        'reason=explicit_exit_to_normal\n' +
+        'rule=このターンは前の診断・関係・人物文脈を引き継がない。\n' +
+        'rule=SimilarFlow / pastContext / relationship fallback を使わない。\n' +
+        'rule=ユーザーの現在入力を起点に通常チャットとして返す。\n' +
+        'currentUserText:\n' +
+        userText,
+
+      writerInput: null,
+
+      directReply: null,
+
+      shouldUsePreSeedWriter: false,
+      shouldBypassNormalWriter: false,
+      shouldBypassRephrase: false,
+      shouldSuppressHistoryForWriter: true,
+      shouldSuppressSimilarFlow: true,
+      shouldSuppressSlotPlan: false,
+      shouldSuppressMemoryDelta: true,
+      shouldSuppressNormalResonance: false,
+
+      shouldOpenContextThread: false,
+      contextThreadCode: null,
+
+      ctxPackPatch: {
+        contextReset: true,
+        contextResetReason: 'explicit_exit_to_normal',
+        shouldCloseContextThread: true,
+        shouldResetActiveTarget: true,
+        shouldSuppressPastContext: true,
+        contextThread: null,
+        activeTarget: null,
+        pendingOffer: null,
+        resolvedTarget: null,
+        resolvedRelation: null,
+      },
+
+      metaPatch: {
+        contextReset: true,
+        contextResetReason: 'explicit_exit_to_normal',
+        shouldCloseContextThread: true,
+        shouldResetActiveTarget: true,
+        shouldSuppressPastContext: true,
+      },
+
+      debug: {
+        reason: 'explicit_exit_to_normal_context_reset',
+        matchedPattern: 'detectExitToNormal',
+        routeReason: 'context_reset_to_normal_writer',
+      },
+    };
   }
 
   const memoryIntent = classifyMemoryIntent(userText);
@@ -172,3 +245,5 @@ export async function resolveUniversalPreSeed(args: {
     },
   };
 }
+
+
