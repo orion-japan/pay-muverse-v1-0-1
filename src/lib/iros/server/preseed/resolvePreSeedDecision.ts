@@ -260,8 +260,11 @@ export async function resolvePreSeedDecision(
   const userText = String(args.userText ?? '').trim();
 
   const isMemoryTruthCheck =
-    /(覚えて|覚えてる|覚えていますか|覚えてますか|前に話した|以前話した|前話した|この前話した|あの話|その話|続き|記憶にありますか)/u.test(userText) &&
-    /(話|こと|件|覚えて|覚えてる|覚えていますか|覚えてますか|記憶)/u.test(userText);
+    (
+      /(覚えて|覚えてる|覚えていますか|覚えてますか|前に話した|以前話した|前話した|この前話した|あの話|その話|続き|記憶にありますか)/u.test(userText) &&
+      /(話|こと|件|覚えて|覚えてる|覚えていますか|覚えてますか|記憶)/u.test(userText)
+    ) ||
+    /[一-龯ぁ-んァ-ヶA-Za-z0-9_]{2,}(さん|様|くん|ちゃん)?(の)?(話|件|診断|記憶)?(は|って)?(ありますか|ある？|ある\?|残ってますか|残っていますか|記憶にありますか)/u.test(userText);
 
   if (isMemoryTruthCheck) {
     console.log('[IROS/PRE_SEED_ENGINE][MEMORY_TRUTH_CHECK_ENTER]', {
@@ -624,6 +627,7 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
+
 
 
 
