@@ -189,6 +189,114 @@ const IROS_MODEL = process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-5'
  */
 const enableGoalRecall = process.env.IROS_ENABLE_GOAL_RECALL === '1';
 
+function violatesMemoryRecallNotFoundReply(reply: string): boolean {
+  const s = String(reply ?? '').trim();
+  if (!s) return true;
+
+  return /(覚えてます|覚えています|覚えてる|前に話しました|以前の会話|残っています|残っている|つながっています|たしかに|あの感覚|もう一つの世界|触れた感覚|合図|意味がある)/u.test(s);
+}
+
+async function buildMemoryRecallNotFoundReplyWithLlm(args: {
+  userText: string;
+  topicLabel: string;
+  fallback: string;
+  traceId?: string | null;
+  conversationId?: string | null;
+  userCode?: string | null;
+  allowLLM?: boolean | null;
+}): Promise<string> {
+  const fallback = String(args.fallback ?? '').trim();
+
+  try {
+    if (args.allowLLM === false) {
+      console.log('[IROS/MEMORY_RECALL_NOT_FOUND_LLM][SKIP_POLICY]', {
+        traceId: args.traceId ?? null,
+        conversationId: args.conversationId ?? null,
+        userCode: args.userCode ?? null,
+      });
+      return fallback;
+    }
+
+    const userText = String(args.userText ?? '').trim();
+    const topicLabel = String(args.topicLabel ?? '').trim() || 'その話題';
+
+    const messages: ChatMessage[] = [
+      {
+        role: 'system',
+        content: [
+          'あなたは、記憶検索結果を自然な日本語に整えるだけの小さな整形器です。',
+          '検証済みの過去記憶は見つかっていません。',
+          '絶対に「覚えています」「覚えてます」「前に話しました」「残っています」と言ってはいけません。',
+          '似た意味づけ、共鳴、推測、作話は禁止です。',
+          'ユーザーの話題を詩的・象徴的に解釈しないでください。',
+          '返答は1〜2文にしてください。',
+          '検証済み記憶が見つからなかった事実だけを、自然な会話文で伝えてください。',
+          '毎回同じ型にしないでください。「〇〇については、検証済みの記憶は見つかりませんでした」という定型文は避けてください。',
+          '検索対象の話題名は、必要な場合だけ自然に入れてください。',
+          '別の言い方・場面・相手・一言の手がかりがあれば探し直せることを、押しつけずに添えてください。',
+          'やさしいですます調。ただし、機械的・事務的にしすぎないでください。',
+        ].join('\n'),
+      },
+      {
+        role: 'user',
+        content: [
+          'ユーザー入力: ' + userText,
+          '検索対象: ' + topicLabel,
+          '検索結果: verified memory は見つかっていない',
+          '',
+          'この事実だけを自然に返してください。',
+        ].join('\n'),
+      },
+    ];
+
+    console.log('[IROS/MEMORY_RECALL_NOT_FOUND_LLM][CALL]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode ?? null,
+      topicLabel,
+      userTextHead: userText.slice(0, 120),
+    });
+
+    const out = await chatComplete({
+      purpose: 'iros_memory_recall_not_found',
+      model: IROS_MODEL,
+      messages,
+      temperature: 0.2,
+    } as any);
+
+    const reply = String(out ?? '').trim();
+
+    if (!reply || violatesMemoryRecallNotFoundReply(reply)) {
+      console.warn('[IROS/MEMORY_RECALL_NOT_FOUND_LLM][FALLBACK]', {
+        traceId: args.traceId ?? null,
+        conversationId: args.conversationId ?? null,
+        userCode: args.userCode ?? null,
+        reason: !reply ? 'empty' : 'violates_memory_truth',
+        replyHead: reply.slice(0, 120),
+      });
+      return fallback;
+    }
+
+    console.log('[IROS/MEMORY_RECALL_NOT_FOUND_LLM][OK]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode ?? null,
+      replyLen: reply.length,
+      replyHead: reply.slice(0, 120),
+    });
+
+    return reply;
+  } catch (e) {
+    console.warn('[IROS/MEMORY_RECALL_NOT_FOUND_LLM][ERROR]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode ?? null,
+      error: e,
+    });
+    return fallback;
+  }
+}
+
 /* =========================
    Timing helpers
 ========================= */
@@ -3191,6 +3299,7 @@ function normForRecall(v: any): string {
         const raw = memoryRecallUserTextForDirectReply
           .replace(/[？?]/g, '')
           .replace(/\s+/g, ' ')
+          .replace(/[、。,.，．]+$/u, '')
           .trim();
 
         const cleaned = raw
@@ -3198,6 +3307,7 @@ function normForRecall(v: any): string {
           .replace(/(覚えてる|覚えていますか|覚えてますか|覚えています|覚えてます|覚えて)$/u, '')
           .replace(/(前に話した|以前話した|前話した|この前話した)$/u, '')
           .replace(/\s+/g, ' ')
+          .replace(/[、。,.，．]+$/u, '')
           .trim();
 
         if (!cleaned) return 'その話題';
@@ -3313,10 +3423,21 @@ function normForRecall(v: any): string {
       }
 
       if (isMemoryRecallCheckForDirectReply && !memoryRecallPreflightVerified) {
-        const memoryRecallNoMemoryDirectReply = [
-          'Muの記憶には、前に話した内容としては残っていません。',
+        const memoryRecallNoMemoryFallbackReply = [
+          '今の記憶検索では、その話を前に話した内容としては確認できませんでした。',
           '別の言い方や一言の手がかりがあれば、そこから探し直せます。',
         ].join('\n');
+
+        const memoryRecallNoMemoryDirectReply =
+          await buildMemoryRecallNotFoundReplyWithLlm({
+            userText: memoryRecallUserTextForDirectReply,
+            topicLabel: memoryRecallTopicLabelForDirectReply,
+            fallback: memoryRecallNoMemoryFallbackReply,
+            traceId,
+            conversationId,
+            userCode,
+            allowLLM: true,
+          });
 
         const memoryRecallNoMemorySeedText = [
           'MEMORY_SEED (DO NOT OUTPUT)',
@@ -3533,18 +3654,18 @@ function normForRecall(v: any): string {
         (extraLocal as any)?.activeContextClarification === true;
 
       const preSeedShouldBypassWriter =
-        !forceWriterForMemoryRecallNone &&
-        !shouldPreferActiveContextClarificationReply &&
-        Boolean(
-          preOrchCtxPack?.preSeedAssistShouldBypassWriter === true ||
-            preOrchCtxPack?.preSeedAssistResult?.shouldBypassWriter === true ||
-            histCtx?.preSeedAssistShouldBypassWriter === true ||
-            histCtx?.preSeedAssistResult?.shouldBypassWriter === true ||
-            (extraLocal as any)?.ctxPack?.preSeedAssistShouldBypassWriter === true ||
-            (extraLocal as any)?.ctxPack?.preSeedAssistResult?.shouldBypassWriter === true ||
-            (extraLocal as any)?.preSeedAssistShouldBypassWriter === true ||
-            (extraLocal as any)?.preSeedAssistResult?.shouldBypassWriter === true
-        );
+        (forceWriterForMemoryRecallNone && Boolean(preSeedDirectReplyCandidate)) ||
+        (!shouldPreferActiveContextClarificationReply &&
+          Boolean(
+            preOrchCtxPack?.preSeedAssistShouldBypassWriter === true ||
+              preOrchCtxPack?.preSeedAssistResult?.shouldBypassWriter === true ||
+              histCtx?.preSeedAssistShouldBypassWriter === true ||
+              histCtx?.preSeedAssistResult?.shouldBypassWriter === true ||
+              (extraLocal as any)?.ctxPack?.preSeedAssistShouldBypassWriter === true ||
+              (extraLocal as any)?.ctxPack?.preSeedAssistResult?.shouldBypassWriter === true ||
+              (extraLocal as any)?.preSeedAssistShouldBypassWriter === true ||
+              (extraLocal as any)?.preSeedAssistResult?.shouldBypassWriter === true
+          ));
 
       console.log('[IROS/PRE_SEED_DIRECT_REPLY][CHECK]', {
         userText: String(text ?? '').trim(),
@@ -13195,6 +13316,14 @@ return {
     };
   }
 }
+
+
+
+
+
+
+
+
 
 
 

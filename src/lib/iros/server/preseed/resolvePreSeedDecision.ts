@@ -258,6 +258,121 @@ export async function resolvePreSeedDecision(
   }
 
   const userText = String(args.userText ?? '').trim();
+
+  const isMemoryTruthCheck =
+    /(覚えて|覚えてる|覚えていますか|覚えてますか|前に話した|以前話した|前話した|この前話した|あの話|その話|続き|記憶にありますか)/u.test(userText) &&
+    /(話|こと|件|覚えて|覚えてる|覚えていますか|覚えてますか|記憶)/u.test(userText);
+
+  if (isMemoryTruthCheck) {
+    console.log('[IROS/PRE_SEED_ENGINE][MEMORY_TRUTH_CHECK_ENTER]', {
+      traceId: args.traceId,
+      conversationId: args.conversationId,
+      userCode: args.userCode,
+      userTextHead: userText.slice(0, 120),
+      reason: 'explicit_memory_truth_check',
+    });
+
+    const memoryTruthSeedText = [
+      'MEMORY_TRUTH_CHECK_SEED (DO NOT OUTPUT)',
+      'source=preseed_memory_truth_check',
+      'turnTask=memory_recall_check',
+      'sourcePolicy=verified_memory_only',
+      'rule=このターンは、ユーザーが過去記憶の有無を確認している。',
+      'rule=SimilarFlow は記憶証拠ではないため使わない。',
+      'rule=前のassistant発話も記憶証拠ではない。',
+      'rule=verified memory がない限り、「覚えています」「前に話しました」と言わない。',
+      'rule=実際の verified / none 判定は MEMORY_RECALL_PREFLIGHT に任せる。',
+      'currentUserText=' + userText,
+    ].join('\n');
+
+    const memoryTruthTurnContract = {
+      version: 'turn_contract_v1',
+      turnTask: 'memory_recall_check',
+      memoryStatus: 'preflight_required',
+      actualIntent: 'Muに過去記憶があるか確認している',
+      sourcePolicy: 'verified_memory_only',
+      writerAction: 'wait_for_memory_recall_preflight',
+      disable: {
+        resonance: true,
+        tcfRefocus: true,
+        normalResonanceMaterialize: true,
+        historyFalseRecall: true,
+        flowMeaningExpansion: true,
+        similarFlowAsMemory: true,
+      },
+      mustNotSay: [
+        '覚えています',
+        '覚えてるよ',
+        '前に話しました',
+        '以前の会話では',
+      ],
+      reason: 'PRE_SEED_MEMORY_TRUTH_CHECK',
+    };
+
+    return {
+      kind: 'normal_chat',
+      confidence: 0.98,
+
+      sourceAuthority: 'user_text',
+      sourceKind: 'memory_truth_check',
+      sourceId: null,
+      sourceText: userText,
+
+      route: 'normal_writer',
+
+      seedText: memoryTruthSeedText,
+      directReply: null,
+      writerInput: null,
+
+      shouldBypassWriter: false,
+      shouldBypassRephrase: false,
+      shouldUsePreSeedWriter: false,
+
+      shouldSuppressHistoryForWriter: true,
+      shouldSuppressSimilarFlow: true,
+      shouldSuppressSlotPlan: false,
+      shouldSuppressMemoryDelta: true,
+      shouldSuppressIntuitionCandidate: true,
+      shouldSuppressNormalResonance: true,
+
+      shouldOpenContextThread: false,
+      contextThreadCode: null,
+
+      ctxPackPatch: {
+        memoryTruthCheck: true,
+        memoryRecallCheck: true,
+        memoryCertainty: 'preflight_required',
+        memoryCertaintyGuardApplied: true,
+        turnContract: memoryTruthTurnContract,
+        turnUnderstanding: memoryTruthTurnContract,
+        memorySeedText: memoryTruthSeedText,
+        memorySeedKind: 'memory_truth_check',
+        shouldSuppressSimilarFlow: true,
+        shouldSuppressHistoryForWriter: true,
+        similarFlowSeed: '',
+        similarFlowDebug: null,
+      },
+
+      metaPatch: {
+        memoryTruthCheck: true,
+        memoryRecallCheck: true,
+        memoryCertainty: 'preflight_required',
+        memoryCertaintyGuardApplied: true,
+        turnContract: memoryTruthTurnContract,
+        turnUnderstanding: memoryTruthTurnContract,
+        shouldSuppressSimilarFlow: true,
+        shouldSuppressHistoryForWriter: true,
+      },
+
+      debug: {
+        reason: 'explicit_memory_truth_check',
+        matchedPattern: 'memory_truth_check_regex',
+        sourceTextHead: userText.slice(0, 120),
+        seedHead: memoryTruthSeedText.slice(0, 160),
+      },
+    };
+  }
+
   const historyForTurn = Array.isArray(args.historyForTurn)
     ? args.historyForTurn
     : [];
@@ -509,6 +624,7 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
+
 
 
 
