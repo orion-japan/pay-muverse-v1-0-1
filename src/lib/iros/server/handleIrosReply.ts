@@ -3538,6 +3538,7 @@ function normForRecall(v: any): string {
       let memoryRecallForcedContextFound = false;
       let memoryRecallForcedContextDirectReply = '';
       let memoryRecallForcedContextText = '';
+      let memoryRecallTargetlessClarify = false;
 
       const memoryRecallForcedContextTarget = (() => {
         const raw = String(memoryRecallUserTextForDirectReply ?? '')
@@ -3555,9 +3556,78 @@ function normForRecall(v: any): string {
           .trim();
       })();
 
+      const memoryRecallForcedContextTargetLooksTargetless =
+        /^(あの|その|この)?(話|件|こと|内容|続き)$/u.test(memoryRecallForcedContextTarget) ||
+        /^(前|以前|この前)(の)?(話|件|こと|内容|続き)$/u.test(memoryRecallForcedContextTarget) ||
+        /^(前に|以前|この前)(話した|話していた)?(話|件|こと|内容|続き)?$/u.test(memoryRecallForcedContextTarget) ||
+        (
+          /^(あの|その|この)(話|件|こと|内容|続き)/u.test(memoryRecallUserTextForDirectReply) &&
+          !/[一-龯ぁ-んァ-ヶA-Za-z0-9_]{2,30}(さん|様|くん|ちゃん)/u.test(memoryRecallUserTextForDirectReply)
+        );
+
       if (
         isMemoryRecallCheckForDirectReply &&
         !memoryRecallPreflightVerified &&
+        memoryRecallForcedContextTargetLooksTargetless
+      ) {
+        memoryRecallTargetlessClarify = true;
+
+        const memoryRecallTargetlessClarifyReply = [
+          'どの話かをもう少し特定したいです。',
+          '相手の名前や、話していた内容を一言だけ入れてもらえれば探せます。',
+        ].join('\n');
+
+        preOrchCtxPack.memoryCertainty = 'ambiguous';
+        preOrchCtxPack.memoryCertaintyGuardApplied = true;
+        preOrchCtxPack.preSeedAssistShouldBypassWriter = true;
+        preOrchCtxPack.preSeedAssistKind = 'memory_recall_clarify_targetless';
+        preOrchCtxPack.preSeedAssistConfidence = 1;
+        preOrchCtxPack.preSeedAssistDirectReply = memoryRecallTargetlessClarifyReply;
+        preOrchCtxPack.directReplyCandidate = memoryRecallTargetlessClarifyReply;
+        preOrchCtxPack.preSeedAssistResult = {
+          kind: 'memory_recall_clarify_targetless',
+          confidence: 1,
+          directReply: memoryRecallTargetlessClarifyReply,
+          shouldBypassWriter: true,
+          seedText: '',
+          reason: 'MEMORY_RECALL_TARGETLESS_CLARIFY',
+        };
+
+        (extraLocal as any).memoryCertainty = 'ambiguous';
+        (extraLocal as any).memoryCertaintyGuardApplied = true;
+        (extraLocal as any).preSeedAssistShouldBypassWriter = true;
+        (extraLocal as any).preSeedAssistKind = 'memory_recall_clarify_targetless';
+        (extraLocal as any).preSeedAssistConfidence = 1;
+        (extraLocal as any).preSeedAssistDirectReply = memoryRecallTargetlessClarifyReply;
+        (extraLocal as any).directReplyCandidate = memoryRecallTargetlessClarifyReply;
+
+        (extraLocal as any).ctxPack =
+          (extraLocal as any).ctxPack && typeof (extraLocal as any).ctxPack === 'object'
+            ? (extraLocal as any).ctxPack
+            : {};
+
+        (extraLocal as any).ctxPack.memoryCertainty = 'ambiguous';
+        (extraLocal as any).ctxPack.memoryCertaintyGuardApplied = true;
+        (extraLocal as any).ctxPack.preSeedAssistShouldBypassWriter = true;
+        (extraLocal as any).ctxPack.preSeedAssistKind = 'memory_recall_clarify_targetless';
+        (extraLocal as any).ctxPack.preSeedAssistConfidence = 1;
+        (extraLocal as any).ctxPack.preSeedAssistDirectReply = memoryRecallTargetlessClarifyReply;
+        (extraLocal as any).ctxPack.directReplyCandidate = memoryRecallTargetlessClarifyReply;
+
+        console.log('[IROS/MEMORY_RECALL_PREFLIGHT][TARGETLESS_CLARIFY]', {
+          conversationId,
+          userCode,
+          userTextHead: memoryRecallUserTextForDirectReply.slice(0, 120),
+          extractedTarget: memoryRecallForcedContextTarget,
+          shouldBypassWriter: true,
+          directReplyHead: memoryRecallTargetlessClarifyReply.slice(0, 120),
+        });
+      }
+
+      if (
+        isMemoryRecallCheckForDirectReply &&
+        !memoryRecallPreflightVerified &&
+        !memoryRecallTargetlessClarify &&
         memoryRecallForcedContextTarget.length >= 2
       ) {
         try {
@@ -3804,7 +3874,12 @@ function normForRecall(v: any): string {
         });
       }
 
-      if (isMemoryRecallCheckForDirectReply && !memoryRecallPreflightVerified && !memoryRecallForcedContextFound) {
+      if (
+        isMemoryRecallCheckForDirectReply &&
+        !memoryRecallPreflightVerified &&
+        !memoryRecallForcedContextFound &&
+        !memoryRecallTargetlessClarify
+      ) {
         const memoryRecallNoMemoryFallbackReply = [
           '今の記憶検索では、その話を前に話した内容としては確認できませんでした。',
           '別の言い方や一言の手がかりがあれば、そこから探し直せます。',
@@ -13698,6 +13773,8 @@ return {
     };
   }
 }
+
+
 
 
 
