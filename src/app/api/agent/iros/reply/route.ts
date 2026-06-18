@@ -794,97 +794,7 @@ let extraSoT: Record<string, any> = {
       });
     }
 
-    // -------------------------------------------------------
-    // 11.9) Similar Flow pre-writer seed（best-effort）
-    // -------------------------------------------------------
-    try {
-      const preSimilarFlowLookup = await loadSimilarFlowSnapshots({
-        supabase: supabase as any,
-        userCode,
-        conversationId,
-        sourceTypes: ['chat'],
-        situationTopic: userTextClean,
-        keywords: [userTextClean].filter((v): v is string => Boolean(String(v ?? '').trim())),
-        recentLimit: 80,
-        limit: 3,
-      });
 
-      const preSimilarFlowSeed = buildSimilarFlowSeed({
-        matches: preSimilarFlowLookup.matches,
-        currentState: {},
-        limit: 3,
-        maxChars: 1600,
-      });
-
-      const shouldDisableSimilarFlowForScreenshotDiagnosisPreWriter =
-        /スクショ診断\s*(?:ID|id)?[:：]?\s*\d*/u.test(String((reqMeta as any)?.userText ?? (reqMeta as any)?.text ?? (reqMeta as any)?.currentUserText ?? '')) ||
-        /スクリーンショット診断\s*(?:ID|id)?[:：]?\s*\d*/u.test(String((reqMeta as any)?.userText ?? (reqMeta as any)?.text ?? (reqMeta as any)?.currentUserText ?? '')) ||
-        String((reqMeta as any)?.screenshotDiagnosisContext ?? '').trim().length > 0 ||
-        String((reqMeta as any)?.screenshotDiagnosisHintText ?? '').trim().length > 0 ||
-        String((reqMeta as any)?.ctxPack?.screenshotDiagnosisContext ?? '').trim().length > 0 ||
-        String((reqMeta as any)?.ctxPack?.screenshotDiagnosisHintText ?? '').trim().length > 0 ||
-        String((reqMeta as any)?.ctxPack?.presentationKind ?? '').trim() === 'screenshot_diagnosis_followup' ||
-        String((reqMeta as any)?.ctxPack?.continuityKind ?? '').trim() === 'screenshot_diagnosis_followup';
-
-      if (shouldDisableSimilarFlowForScreenshotDiagnosisPreWriter) {
-        console.log('[IROS/SIMILAR_FLOW_PRE_WRITER][SKIP_SCREENSHOT_DIAGNOSIS]', {
-          conversationId,
-          userCode,
-          userTextHead: String((reqMeta as any)?.userText ?? (reqMeta as any)?.text ?? (reqMeta as any)?.currentUserText ?? '').slice(0, 120),
-          hasScreenshotContext: String((reqMeta as any)?.screenshotDiagnosisContext ?? '').trim().length > 0,
-          hasScreenshotHint: String((reqMeta as any)?.screenshotDiagnosisHintText ?? '').trim().length > 0,
-        });
-      }
-
-      if (preSimilarFlowSeed && !shouldDisableSimilarFlowForScreenshotDiagnosisPreWriter) {
-        const previousCtxPack =
-          extraSoT.ctxPack && typeof extraSoT.ctxPack === 'object'
-            ? extraSoT.ctxPack
-            : {};
-
-        const preSimilarFlowDebug = {
-          source: 'pre_writer',
-          lookupOk: preSimilarFlowLookup.ok,
-          matchesLen: preSimilarFlowLookup.matches.length,
-          hasSeed: true,
-          seedLen: String(preSimilarFlowSeed).length,
-          lookupError: preSimilarFlowLookup.ok ? null : String((preSimilarFlowLookup as any).error ?? ''),
-        };
-
-        extraSoT = {
-          ...extraSoT,
-          similarFlowSeed: preSimilarFlowSeed,
-          similarFlowDebug: preSimilarFlowDebug,
-          ctxPack: {
-            ...previousCtxPack,
-            similarFlowSeed: preSimilarFlowSeed,
-            similarFlowDebug: preSimilarFlowDebug,
-          },
-        };
-      }
-
-      console.log('[IROS/SIMILAR_FLOW_PRE_WRITER]', {
-        conversationId,
-        userCode,
-        lookupOk: preSimilarFlowLookup.ok,
-        matchesLen: preSimilarFlowLookup.matches.length,
-        hasSeed: Boolean(preSimilarFlowSeed),
-        seedLen: String(preSimilarFlowSeed ?? '').length,
-        similarFlowSeedHead: String(preSimilarFlowSeed ?? '').slice(0, 1200),
-        similarFlowSeedHasFalseRecall: /覚えています|もちろん、覚えています|残っています|受け取っています|沖縄の風|海の色|空気|景色|温度/.test(String(preSimilarFlowSeed ?? '')),
-        similarFlowSeedFalseRecallMatches: String(preSimilarFlowSeed ?? '').match(/覚えています|もちろん、覚えています|残っています|受け取っています|沖縄の風|海の色|空気|景色|温度/g) ?? [],
-      });
-    } catch (e) {
-      console.warn('[IROS/SIMILAR_FLOW_PRE_WRITER][FAILED]', {
-        conversationId,
-        userCode,
-        error: e,
-      });
-    }
-
-    // -------------------------------------------------------
-    // 12) handle
-    // -------------------------------------------------------
 
     // -------------------------------------------------------
     // 11.95) Screenshot diagnosis context -> diagnosis followup ctx
@@ -1274,6 +1184,119 @@ let extraSoT: Record<string, any> = {
       );
     }
 
+    // -------------------------------------------------------
+    // 11.9) Similar Flow pre-writer seed（best-effort）
+    // -------------------------------------------------------
+    try {
+      const shouldSkipSimilarFlowByPreSeed =
+        Boolean((preSeedDecision as any)?.shouldSuppressSimilarFlow) ||
+        Boolean((preSeedDecision as any)?.shouldUsePreSeedWriter) ||
+        Boolean((preSeedDecision as any)?.shouldBypassWriter) ||
+        Boolean((extraSoT as any)?.preSeedBypassWriter) ||
+        Boolean((extraSoT as any)?.screenshotDiagnosisContext);
+
+      if (shouldSkipSimilarFlowByPreSeed) {
+        console.log('[IROS/SIMILAR_FLOW_PRE_WRITER][SKIP_PRE_SEED]', {
+          traceId,
+          conversationId,
+          userCode,
+          preSeedKind: (preSeedDecision as any)?.kind ?? null,
+          preSeedRoute: (preSeedDecision as any)?.route ?? null,
+          shouldSuppressSimilarFlow: (preSeedDecision as any)?.shouldSuppressSimilarFlow ?? null,
+          shouldUsePreSeedWriter: (preSeedDecision as any)?.shouldUsePreSeedWriter ?? null,
+          shouldBypassWriter: (preSeedDecision as any)?.shouldBypassWriter ?? null,
+          hasScreenshotDiagnosisContext: Boolean((extraSoT as any)?.screenshotDiagnosisContext),
+        });
+      } else {
+      const preSimilarFlowLookup = await loadSimilarFlowSnapshots({
+        supabase: supabase as any,
+        userCode,
+        conversationId,
+        sourceTypes: ['chat'],
+        situationTopic: userTextClean,
+        keywords: [userTextClean].filter((v): v is string => Boolean(String(v ?? '').trim())),
+        recentLimit: 80,
+        limit: 3,
+      });
+
+      const preSimilarFlowSeed = buildSimilarFlowSeed({
+        matches: preSimilarFlowLookup.matches,
+        currentState: {},
+        limit: 3,
+        maxChars: 1600,
+      });
+
+      const shouldDisableSimilarFlowForScreenshotDiagnosisPreWriter =
+        /スクショ診断\s*(?:ID|id)?[:：]?\s*\d*/u.test(String((reqMeta as any)?.userText ?? (reqMeta as any)?.text ?? (reqMeta as any)?.currentUserText ?? '')) ||
+        /スクリーンショット診断\s*(?:ID|id)?[:：]?\s*\d*/u.test(String((reqMeta as any)?.userText ?? (reqMeta as any)?.text ?? (reqMeta as any)?.currentUserText ?? '')) ||
+        String((reqMeta as any)?.screenshotDiagnosisContext ?? '').trim().length > 0 ||
+        String((reqMeta as any)?.screenshotDiagnosisHintText ?? '').trim().length > 0 ||
+        String((reqMeta as any)?.ctxPack?.screenshotDiagnosisContext ?? '').trim().length > 0 ||
+        String((reqMeta as any)?.ctxPack?.screenshotDiagnosisHintText ?? '').trim().length > 0 ||
+        String((reqMeta as any)?.ctxPack?.presentationKind ?? '').trim() === 'screenshot_diagnosis_followup' ||
+        String((reqMeta as any)?.ctxPack?.continuityKind ?? '').trim() === 'screenshot_diagnosis_followup';
+
+      if (shouldDisableSimilarFlowForScreenshotDiagnosisPreWriter) {
+        console.log('[IROS/SIMILAR_FLOW_PRE_WRITER][SKIP_SCREENSHOT_DIAGNOSIS]', {
+          conversationId,
+          userCode,
+          userTextHead: String((reqMeta as any)?.userText ?? (reqMeta as any)?.text ?? (reqMeta as any)?.currentUserText ?? '').slice(0, 120),
+          hasScreenshotContext: String((reqMeta as any)?.screenshotDiagnosisContext ?? '').trim().length > 0,
+          hasScreenshotHint: String((reqMeta as any)?.screenshotDiagnosisHintText ?? '').trim().length > 0,
+        });
+      }
+
+      if (preSimilarFlowSeed && !shouldDisableSimilarFlowForScreenshotDiagnosisPreWriter) {
+        const previousCtxPack =
+          extraSoT.ctxPack && typeof extraSoT.ctxPack === 'object'
+            ? extraSoT.ctxPack
+            : {};
+
+        const preSimilarFlowDebug = {
+          source: 'pre_writer',
+          lookupOk: preSimilarFlowLookup.ok,
+          matchesLen: preSimilarFlowLookup.matches.length,
+          hasSeed: true,
+          seedLen: String(preSimilarFlowSeed).length,
+          lookupError: preSimilarFlowLookup.ok ? null : String((preSimilarFlowLookup as any).error ?? ''),
+        };
+
+        extraSoT = {
+          ...extraSoT,
+          similarFlowSeed: preSimilarFlowSeed,
+          similarFlowDebug: preSimilarFlowDebug,
+          ctxPack: {
+            ...previousCtxPack,
+            similarFlowSeed: preSimilarFlowSeed,
+            similarFlowDebug: preSimilarFlowDebug,
+          },
+        };
+      }
+
+      console.log('[IROS/SIMILAR_FLOW_PRE_WRITER]', {
+        conversationId,
+        userCode,
+        lookupOk: preSimilarFlowLookup.ok,
+        matchesLen: preSimilarFlowLookup.matches.length,
+        hasSeed: Boolean(preSimilarFlowSeed),
+        seedLen: String(preSimilarFlowSeed ?? '').length,
+        similarFlowSeedHead: String(preSimilarFlowSeed ?? '').slice(0, 1200),
+        similarFlowSeedHasFalseRecall: /覚えています|もちろん、覚えています|残っています|受け取っています|沖縄の風|海の色|空気|景色|温度/.test(String(preSimilarFlowSeed ?? '')),
+        similarFlowSeedFalseRecallMatches: String(preSimilarFlowSeed ?? '').match(/覚えています|もちろん、覚えています|残っています|受け取っています|沖縄の風|海の色|空気|景色|温度/g) ?? [],
+      });
+      }
+    } catch (e) {
+      console.warn('[IROS/SIMILAR_FLOW_PRE_WRITER][FAILED]', {
+        conversationId,
+        userCode,
+        error: e,
+      });
+    }
+
+
+    // -------------------------------------------------------
+    // 12) handle
+    // -------------------------------------------------------
 const irosResult: HandleIrosReplyOutput = await handleIrosReply({
       conversationId,
       text: userTextClean,
@@ -3996,6 +4019,7 @@ if (!skipTraining) {
     );
   }
 }
+
 
 
 
