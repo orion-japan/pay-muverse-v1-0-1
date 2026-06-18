@@ -196,6 +196,165 @@ function violatesMemoryRecallNotFoundReply(reply: string): boolean {
   return /(覚えてます|覚えています|覚えてる|前に話しました|以前の会話|残っています|残っている|つながっています|たしかに|あの感覚|もう一つの世界|触れた感覚|合図|意味がある)/u.test(s);
 }
 
+
+function cleanMemoryRecallForcedContextText(value: unknown): string {
+  let s = String(value ?? '').replace(/\s+/g, ' ').trim();
+
+  if (!s) return '';
+
+  const templateMarkers = [
+    /保存済みの検証記憶としては確認できませんでした。?\s*/gu,
+    /検証済みの記憶は見つかりませんでした。?\s*/gu,
+    /確認できる記憶は見つかりませんでした。?\s*/gu,
+    /ただ、(?:この会話文脈|過去の会話文脈)には[^。]*に関する内容が見つかっています。?\s*/gu,
+    /内容としては、?\s*/gu,
+  ];
+
+  for (let i = 0; i < 3; i += 1) {
+    const before = s;
+    for (const re of templateMarkers) {
+      s = s.replace(re, '');
+    }
+    s = s.replace(/\s+/g, ' ').trim();
+    if (s === before) break;
+  }
+
+  return s;
+}
+
+function takeForcedContextSummary(value: unknown, max = 210): string {
+  const s = cleanMemoryRecallForcedContextText(value);
+  if (!s) return '';
+
+  const parts = s
+    .split(/(?<=[。！？!?])/u)
+    .map((v) => v.trim())
+    .filter(Boolean);
+
+  const joined = (parts.length ? parts.slice(0, 2).join('') : s).trim();
+  return joined.length > max ? joined.slice(0, max).replace(/[、,][^、,]*$/u, '') : joined;
+}
+
+function violatesMemoryRecallForcedContextFoundReply(reply: string): boolean {
+  const s = String(reply ?? '').trim();
+  if (!s) return true;
+
+  return /保存済み|検証記憶|正式な記憶DB|MemoryRecall|forced_context_found|iros_messages|DB|ログ|覚えています|覚えてます|記憶しています|確認できませんでした|この会話文脈|過去の会話文脈|内容としては/u.test(s);
+}
+
+function buildMemoryRecallForcedContextFoundFallbackReply(args: {
+  targetLabel: string;
+  contextText: string;
+}): string {
+  const targetLabel = String(args.targetLabel ?? '').trim() || 'その話';
+  const summary = takeForcedContextSummary(args.contextText);
+
+  if (!summary) {
+    return `${targetLabel}については、この会話の中に内容が残っています。`;
+  }
+
+  return [
+    `${targetLabel}については、この会話の中に内容が残っています。`,
+    '',
+    `前に話していたのは、${summary}`,
+  ].join('\n');
+}
+
+async function buildMemoryRecallForcedContextFoundReplyWithLlm(args: {
+  userText: string;
+  targetLabel: string;
+  contextText: string;
+  scopeLabel?: string | null;
+  fallback: string;
+  traceId?: string | null;
+  conversationId?: string | null;
+  userCode?: string | null;
+  allowLLM?: boolean | null;
+}): Promise<string> {
+  const fallback = String(args.fallback ?? '').trim();
+  const userText = String(args.userText ?? '').trim();
+  const targetLabel = String(args.targetLabel ?? '').trim() || 'その話';
+  const contextText = cleanMemoryRecallForcedContextText(args.contextText);
+
+  try {
+    if (args.allowLLM === false || !contextText) {
+      return fallback;
+    }
+
+    const messages: ChatMessage[] = [
+      {
+        role: 'system',
+        content: [
+          'あなたは、会話履歴から見つかった内容を自然な日本語に整えるだけの小さな整形器です。',
+          'これは verified memory ではなく、会話履歴の中に見つかった補助文脈です。',
+          '返答は1〜3文、自然なですます調にしてください。',
+          'contextText を長く貼らず、要点だけを短く要約してください。',
+          '絶対に言わない語: 保存済み、検証記憶、正式な記憶DB、MemoryRecall、forced_context_found、iros_messages、DB、ログ、覚えています、覚えてます、記憶しています、確認できませんでした、この会話文脈、過去の会話文脈、内容としては。',
+          '言ってよい表現: この会話の中に内容が残っています。前に話していたのは〜です。〜という内容でした。',
+          'ユーザーに貼り直しを求めないでください。',
+        ].join('\n'),
+      },
+      {
+        role: 'user',
+        content: [
+          `ユーザー入力: ${userText}`,
+          `対象: ${targetLabel}`,
+          `会話履歴から見つかった本文: ${contextText}`,
+          '',
+          '上の本文を、自然な返答に整えてください。',
+        ].join('\n'),
+      },
+    ];
+
+    console.log('[IROS/MEMORY_RECALL_FORCED_CONTEXT_LLM][CALL]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode ?? null,
+      targetLabel,
+      contextLen: contextText.length,
+      userTextHead: userText.slice(0, 120),
+    });
+
+    const out = await chatComplete({
+      purpose: 'iros_memory_recall_forced_context_found',
+      model: IROS_MODEL,
+      messages,
+      temperature: 0.2,
+      max_tokens: 260,
+    } as any);
+
+    const reply = String(out ?? '').trim();
+
+    if (!reply || violatesMemoryRecallForcedContextFoundReply(reply)) {
+      console.warn('[IROS/MEMORY_RECALL_FORCED_CONTEXT_LLM][FALLBACK]', {
+        traceId: args.traceId ?? null,
+        conversationId: args.conversationId ?? null,
+        userCode: args.userCode ?? null,
+        reason: !reply ? 'empty' : 'violates_forced_context_policy',
+        replyHead: reply.slice(0, 120),
+      });
+      return fallback;
+    }
+
+    console.log('[IROS/MEMORY_RECALL_FORCED_CONTEXT_LLM][OK]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode ?? null,
+      replyLen: reply.length,
+      replyHead: reply.slice(0, 120),
+    });
+
+    return reply;
+  } catch (e) {
+    console.warn('[IROS/MEMORY_RECALL_FORCED_CONTEXT_LLM][ERROR]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode ?? null,
+      error: e,
+    });
+    return fallback;
+  }
+}
 async function buildMemoryRecallNotFoundReplyWithLlm(args: {
   userText: string;
   topicLabel: string;
@@ -3288,10 +3447,15 @@ function normForRecall(v: any): string {
       const memoryRecallUserTextForDirectReply = String(text ?? '').replace(/\s+/g, ' ').trim();
 
       const isMemoryRecallCheckForDirectReply =
-        /(覚えて|覚えてる|覚えていますか|覚えてますか|前に話した|以前話した|前話した|この前話した|あの話|その話|続き)/u.test(
-          memoryRecallUserTextForDirectReply
-        ) &&
-        /(話|こと|件|覚えて|覚えてる|覚えていますか|覚えてますか)/u.test(
+        (
+          /(覚えて|覚えてる|覚えていますか|覚えてますか|前に話した|以前話した|前話した|この前話した|あの話|その話|続き)/u.test(
+            memoryRecallUserTextForDirectReply
+          ) &&
+          /(話|こと|件|覚えて|覚えてる|覚えていますか|覚えてますか)/u.test(
+            memoryRecallUserTextForDirectReply
+          )
+        ) ||
+        /[一-龯ぁ-んァ-ヶA-Za-z0-9_]{2,}(さん|様|くん|ちゃん)?(の)?(話|件|診断|記憶)?(は|って)?(ありますか|ある？|ある\?|残ってますか|残っていますか|記憶にありますか)/u.test(
           memoryRecallUserTextForDirectReply
         );
 
@@ -3371,6 +3535,224 @@ function normForRecall(v: any): string {
         typeof memoryRecallPreflight?.keyword === 'string' &&
         memoryRecallPreflight.keyword.trim().length > 0;
 
+      let memoryRecallForcedContextFound = false;
+      let memoryRecallForcedContextDirectReply = '';
+      let memoryRecallForcedContextText = '';
+
+      const memoryRecallForcedContextTarget = (() => {
+        const raw = String(memoryRecallUserTextForDirectReply ?? '')
+          .replace(/\s+/g, ' ')
+          .replace(/[「」『』"']/g, '')
+          .trim();
+
+        const personMatch = raw.match(/([一-龯ぁ-んァ-ヶA-Za-z0-9_]{2,30})(さん|様|くん|ちゃん)/u);
+        if (personMatch?.[0]) return personMatch[0].trim();
+
+        return raw
+          .replace(/(覚えてますか|覚えていますか|覚えてる|覚えて|記憶にありますか).*$/u, '')
+          .replace(/(は|って)?(ありますか|ある？|ある\?|残ってますか|残っていますか).*$/u, '')
+          .replace(/[、。！？!?]+$/u, '')
+          .trim();
+      })();
+
+      if (
+        isMemoryRecallCheckForDirectReply &&
+        !memoryRecallPreflightVerified &&
+        memoryRecallForcedContextTarget.length >= 2
+      ) {
+        try {
+          const likeTarget = `%${memoryRecallForcedContextTarget}%`;
+
+          const { data: forcedContextRows } = await (supabase as any)
+            .from('iros_messages')
+            .select('conversation_id, role, content, text, created_at')
+            .eq('user_code', userCode)
+            .eq('role', 'assistant')
+            .or(`content.ilike.${likeTarget},text.ilike.${likeTarget}`)
+            .order('created_at', { ascending: false })
+            .limit(30);
+
+          const forcedContextHit = Array.isArray(forcedContextRows)
+            ? forcedContextRows.find((r: any) => {
+                const txt = String(r?.content ?? r?.text ?? '').replace(/\s+/g, ' ').trim();
+
+                if (!txt || !txt.includes(memoryRecallForcedContextTarget)) return false;
+
+                // Memory Truth Check / forced_context_found 自体の返答は証拠にしない
+                // これを除外しないと、前回の「見つかっています」返答を次回の記憶証拠として拾って自己参照する。
+                const isMemoryRecallMetaReply =
+                  /保存済みの検証記憶としては確認できませんでした/u.test(txt) ||
+                  /検証済みの記憶は見つかりませんでした/u.test(txt) ||
+                  /検証済みの記憶は見つかっていません/u.test(txt) ||
+                  /確認できる記憶は見つかりません/u.test(txt) ||
+                  /確認できた記憶の中には/u.test(txt) ||
+                  /見当たりませんでした/u.test(txt) ||
+                  /探し直せます/u.test(txt) ||
+                  /もう一度探せます/u.test(txt) ||
+                  /あらためて探せます/u.test(txt) ||
+                  /過去の会話文脈には.*に関する内容が見つかっています/u.test(txt) ||
+                  /この会話文脈には.*に関する内容が見つかっています/u.test(txt) ||
+                  /内容としては、保存済みの検証記憶としては確認できませんでした/u.test(txt) ||
+                  /この会話の中に.*残っています/u.test(txt) ||
+                  /前に話していたのは/u.test(txt);
+
+                if (isMemoryRecallMetaReply) {
+                  return false;
+                }
+
+                // 以前の誤作話っぽい「あります」返答も証拠にしない
+                if (/あります。?\s*ただ、ここで見えているのは/u.test(txt)) {
+                  return false;
+                }
+
+                return true;
+              })
+            : null;
+
+          if (forcedContextHit) {
+            const rawForcedContext = String(
+              forcedContextHit?.content ?? forcedContextHit?.text ?? ''
+            )
+              .replace(/\s+/g, ' ')
+              .trim();
+
+            memoryRecallForcedContextFound = true;
+            memoryRecallForcedContextText = rawForcedContext.slice(0, 420);
+
+            const forcedContextHead = (() => {
+              const s = memoryRecallForcedContextText
+                .replace(/\s+/g, ' ')
+                .replace(/^内容としては、?/u, '')
+                .trim();
+
+              const cut = s.slice(0, 220);
+              const lastPeriod = Math.max(
+                cut.lastIndexOf('。'),
+                cut.lastIndexOf('です。'),
+                cut.lastIndexOf('ます。')
+              );
+
+              if (lastPeriod >= 60) {
+                return cut.slice(0, lastPeriod + 1).trim();
+              }
+
+              return cut.trim();
+            })();
+
+            const forcedContextScope =
+              String(forcedContextHit?.conversation_id ?? '') === String(conversationId ?? '')
+                ? 'この会話文脈'
+                : '過去の会話文脈';
+
+            const cleanedForcedContextText = cleanMemoryRecallForcedContextText(
+              memoryRecallForcedContextText
+            );
+
+            const memoryRecallForcedContextFallbackReply =
+              buildMemoryRecallForcedContextFoundFallbackReply({
+                targetLabel: memoryRecallForcedContextTarget,
+                contextText: cleanedForcedContextText,
+              });
+
+            memoryRecallForcedContextDirectReply =
+              await buildMemoryRecallForcedContextFoundReplyWithLlm({
+                userText: memoryRecallUserTextForDirectReply,
+                targetLabel: memoryRecallForcedContextTarget,
+                contextText: cleanedForcedContextText,
+                scopeLabel: forcedContextScope,
+                fallback: memoryRecallForcedContextFallbackReply,
+                traceId,
+                conversationId,
+                userCode,
+                allowLLM: true,
+              });
+
+            preOrchCtxPack.memoryCertainty = 'forced_context_found';
+            preOrchCtxPack.memoryCertaintyGuardApplied = true;
+            preOrchCtxPack.pastStateNoteText = memoryRecallForcedContextText;
+            preOrchCtxPack.pastStateTriggerKind = 'forced_context_found';
+            preOrchCtxPack.pastStateKeyword = memoryRecallForcedContextTarget;
+            preOrchCtxPack.memoryRecallPreflight = {
+              hasNote: true,
+              triggerKind: 'forced_context_found',
+              keyword: memoryRecallForcedContextTarget,
+              matchedTerms: [memoryRecallForcedContextTarget],
+              certainty: 'forced_context_found',
+            };
+
+            preOrchCtxPack.preSeedAssistShouldBypassWriter = true;
+            preOrchCtxPack.preSeedAssistKind = 'memory_recall_forced_context_found';
+            preOrchCtxPack.preSeedAssistConfidence = 0.86;
+            preOrchCtxPack.preSeedAssistDirectReply = memoryRecallForcedContextDirectReply;
+            preOrchCtxPack.directReplyCandidate = memoryRecallForcedContextDirectReply;
+            preOrchCtxPack.preSeedAssistResult = {
+              kind: 'memory_recall_forced_context_found',
+              confidence: 0.86,
+              directReply: memoryRecallForcedContextDirectReply,
+              shouldBypassWriter: true,
+              seedText: memoryRecallForcedContextText,
+              reason: 'MEMORY_RECALL_FORCED_CONTEXT_FOUND',
+            };
+
+            (extraLocal as any).memoryCertainty = 'forced_context_found';
+            (extraLocal as any).memoryCertaintyGuardApplied = true;
+            (extraLocal as any).pastStateNoteText = memoryRecallForcedContextText;
+            (extraLocal as any).pastStateTriggerKind = 'forced_context_found';
+            (extraLocal as any).pastStateKeyword = memoryRecallForcedContextTarget;
+            (extraLocal as any).preSeedAssistShouldBypassWriter = true;
+            (extraLocal as any).preSeedAssistKind = 'memory_recall_forced_context_found';
+            (extraLocal as any).preSeedAssistConfidence = 0.86;
+            (extraLocal as any).preSeedAssistDirectReply = memoryRecallForcedContextDirectReply;
+            (extraLocal as any).directReplyCandidate = memoryRecallForcedContextDirectReply;
+
+            (extraLocal as any).ctxPack =
+              (extraLocal as any).ctxPack && typeof (extraLocal as any).ctxPack === 'object'
+                ? (extraLocal as any).ctxPack
+                : {};
+
+            (extraLocal as any).ctxPack.memoryCertainty = 'forced_context_found';
+            (extraLocal as any).ctxPack.memoryCertaintyGuardApplied = true;
+            (extraLocal as any).ctxPack.pastStateNoteText = memoryRecallForcedContextText;
+            (extraLocal as any).ctxPack.pastStateTriggerKind = 'forced_context_found';
+            (extraLocal as any).ctxPack.pastStateKeyword = memoryRecallForcedContextTarget;
+            (extraLocal as any).ctxPack.preSeedAssistShouldBypassWriter = true;
+            (extraLocal as any).ctxPack.preSeedAssistKind = 'memory_recall_forced_context_found';
+            (extraLocal as any).ctxPack.preSeedAssistConfidence = 0.86;
+            (extraLocal as any).ctxPack.preSeedAssistDirectReply =
+              memoryRecallForcedContextDirectReply;
+            (extraLocal as any).ctxPack.directReplyCandidate =
+              memoryRecallForcedContextDirectReply;
+
+            console.log('[IROS/MEMORY_RECALL_PREFLIGHT][FORCED_CONTEXT_FOUND]', {
+              conversationId,
+              userCode,
+              userTextHead: memoryRecallUserTextForDirectReply.slice(0, 120),
+              target: memoryRecallForcedContextTarget,
+              rowConversationId: forcedContextHit?.conversation_id ?? null,
+              noteLen: memoryRecallForcedContextText.length,
+              shouldBypassWriter: true,
+              directReplyHead: memoryRecallForcedContextDirectReply.slice(0, 120),
+            });
+          } else {
+            console.log('[IROS/MEMORY_RECALL_PREFLIGHT][FORCED_CONTEXT_NOT_FOUND]', {
+              conversationId,
+              userCode,
+              userTextHead: memoryRecallUserTextForDirectReply.slice(0, 120),
+              target: memoryRecallForcedContextTarget,
+              rowCount: Array.isArray(forcedContextRows) ? forcedContextRows.length : 0,
+            });
+          }
+        } catch (e) {
+          console.warn('[IROS/MEMORY_RECALL_PREFLIGHT][FORCED_CONTEXT_ERROR]', {
+            conversationId,
+            userCode,
+            userTextHead: memoryRecallUserTextForDirectReply.slice(0, 120),
+            target: memoryRecallForcedContextTarget,
+            error: e,
+          });
+        }
+      }
+
       if (isMemoryRecallCheckForDirectReply && memoryRecallPreflightVerified) {
         const verifiedNote = String(memoryRecallPreflight?.pastStateNoteText ?? '').trim();
 
@@ -3422,7 +3804,7 @@ function normForRecall(v: any): string {
         });
       }
 
-      if (isMemoryRecallCheckForDirectReply && !memoryRecallPreflightVerified) {
+      if (isMemoryRecallCheckForDirectReply && !memoryRecallPreflightVerified && !memoryRecallForcedContextFound) {
         const memoryRecallNoMemoryFallbackReply = [
           '今の記憶検索では、その話を前に話した内容としては確認できませんでした。',
           '別の言い方や一言の手がかりがあれば、そこから探し直せます。',
@@ -3627,7 +4009,7 @@ function normForRecall(v: any): string {
 
 
       const forceWriterForMemoryRecallNone =
-        isMemoryRecallCheckForDirectReply && !memoryRecallPreflightVerified;
+        isMemoryRecallCheckForDirectReply && !memoryRecallPreflightVerified && !memoryRecallForcedContextFound;
       const preSeedDirectReplyCandidate =
         [
           preOrchCtxPack?.directReplyCandidate,
@@ -13316,6 +13698,15 @@ return {
     };
   }
 }
+
+
+
+
+
+
+
+
+
 
 
 
