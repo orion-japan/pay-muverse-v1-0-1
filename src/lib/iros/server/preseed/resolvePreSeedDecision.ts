@@ -1,0 +1,440 @@
+﻿import { buildIrDiagnosisPreSeed } from './buildIrDiagnosisPreSeed';
+import { resolveUniversalPreSeed } from './universal';
+import type { PreSeedDecision, ResolvePreSeedDecisionArgs } from './types';
+import { detectPreSeedIntent } from './detectPreSeedIntent';
+import { buildScreenshotDiagnosisPreSeed } from './buildScreenshotDiagnosisPreSeed';
+
+function normalizeLite(v: any): string {
+  return String(v ?? '')
+    .trim()
+    .replace(/[ \t\r\n　]/g, '')
+    .toLowerCase();
+}
+
+function getTurnText(t: any): string {
+  return String(
+    t?.content ??
+      t?.text ??
+      t?.assistantText ??
+      t?.message ??
+      t?.body ??
+      ''
+  ).trim();
+}
+
+function extractLatestScreenshotDisplayIdFromHistory(historyForTurn: any[]): number | null {
+  const tail = Array.isArray(historyForTurn) ? historyForTurn.slice(-20).reverse() : [];
+
+  for (const t of tail) {
+    const s = getTurnText(t);
+    if (!s) continue;
+
+    const compact = s.replace(/[ \t\r\n　]/g, '');
+
+    const m =
+      compact.match(/スクショ診断ID[:：]?(\d+)/u) ??
+      compact.match(/スクショ診断(\d+)/u) ??
+      compact.match(/displayId[:：]?(\d+)/u);
+
+    const n = m?.[1] ? Number.parseInt(m[1], 10) : NaN;
+
+    if (Number.isFinite(n) && n > 0) {
+      return n;
+    }
+  }
+  return null;
+}
+
+function hasRecentScreenshotContext(historyForTurn: any[]): boolean {
+  const tail = Array.isArray(historyForTurn) ? historyForTurn.slice(-6) : [];
+
+  return tail.some((t: any) => {
+    const s = getTurnText(t);
+    const compact = s.replace(/[ \t\r\n　]/g, '');
+
+    return (
+      /スクショ診断ID[:：]?\d+/u.test(compact) ||
+      /screenshot_diagnosis/u.test(compact) ||
+      /SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED/u.test(s) ||
+      /診断本文.*正本/u.test(s) ||
+      /原因確認|自己責任|最近希望がない|約束守れなかった|そう言う事じゃない|すれ違いの継続/u.test(s)
+    );
+  });
+}
+
+function isExplicitScreenshotExit(userText: string): boolean {
+  const text = String(userText ?? '').trim();
+
+  if (!text) return false;
+
+  return /^(別件|話変わる|話を変える|ところで|関係ない話|通常チャット|別の相談|違う話|それは置いといて|一旦戻って)/u.test(
+    text
+  );
+}
+
+function looksLikeClearlyNormalChat(userText: string): boolean {
+  const text = String(userText ?? '').trim();
+
+  if (!text) return false;
+
+  // 挨拶・一般タスク・開発相談・画像/動画/コード系などは診断文脈から外す
+  return (
+    /^(おはよう|こんにちは|こんばんは|ありがとう|了解|OK|ok)$/iu.test(text) ||
+    /(コード|PowerShell|typecheck|npm|エラー|実装|修正|ファイル|route\.ts|typescript|ビルド|デプロイ|Git|コミット)/iu.test(text) ||
+    /(画像|動画|プロンプト|VEO|Seedance|Kling|花火|16:9|9:16)/iu.test(text) ||
+    /(Moodle|PAY\.JP|Supabase|Firebase|Cloudflare|Zoho|ドメイン)/iu.test(text)
+  );
+}
+
+function getScreenshotDiagnosisFollowupStrength(args: {
+  userText: string;
+  historyForTurn: any[];
+}): 'strong' | 'weak' | 'none' | 'exit' {
+  const userText = String(args.userText ?? '').trim();
+
+  if (!userText) return 'none';
+
+  if (isExplicitScreenshotExit(userText) || looksLikeClearlyNormalChat(userText)) {
+    return 'exit';
+  }
+
+  const compact = normalizeLite(userText);
+  const recentContext = hasRecentScreenshotContext(args.historyForTurn);
+
+  const strongKeyPhraseHit = [
+    'そう言う事じゃない',
+    'そういう事じゃない',
+    'そういうことじゃない',
+    '最近希望がない',
+    '約束守れなかった',
+    '私が悪い',
+    'すれ違い',
+    'すれ違いの継続',
+    '原因確認',
+    '原因探し',
+    '自己責任',
+    '自己非難',
+    '受け止め',
+    '会えなかった',
+    '9:16',
+    '11:41',
+  ].some((p) => compact.includes(normalizeLite(p)));
+
+  if (strongKeyPhraseHit) return 'strong';
+
+  const followupQuestionLike =
+    /(どういう|どういう事|どういうこと|なぜ|なんで|つまり|もう少し|詳しく|それは|これは|この言葉|この部分|意味|気持ち|本音|意図|どう返す|返し方|相手は|相手に|私はどう|どうしたら)/u.test(
+      userText
+    );
+
+  if (recentContext && followupQuestionLike) return 'weak';
+
+  return 'none';
+}
+
+function buildAmbiguousScreenshotClarifyDecision(args: {
+  userText: string;
+  userCode: string;
+  conversationId?: string | null;
+  traceId?: string | null;
+  displayId: number;
+}): PreSeedDecision {
+  const directReply =
+    `これはスクショ診断ID:${args.displayId}の続きとして見てもよさそうですが、通常の相談にも見えます。\n\n` +
+    `このまま診断ID:${args.displayId}の続きとして見ますか？\n` +
+    `それとも、別件として通常チャットで見ますか？`;
+
+  return {
+    kind: 'screenshot_diagnosis_followup',
+    confidence: 0.45,
+    sourceAuthority: 'screenshot_diagnosis_text',
+    sourceKind: 'mu_screenshot_diagnosis_logs',
+    sourceId: args.displayId,
+    sourceText: null,
+    route: 'clarify',
+    seedText: null,
+    directReply,
+    shouldBypassWriter: true,
+    shouldBypassRephrase: true,
+    shouldUsePreSeedWriter: false,
+    shouldSuppressHistoryForWriter: true,
+    shouldSuppressSimilarFlow: true,
+    shouldSuppressSlotPlan: true,
+    shouldSuppressMemoryDelta: true,
+    shouldSuppressIntuitionCandidate: true,
+    shouldSuppressNormalResonance: true,
+    shouldOpenContextThread: false,
+    contextThreadCode: null,
+    ctxPackPatch: {
+      contextMode: 'diagnosis_context_ambiguous',
+      contextAuthority: 'screenshot_diagnosis',
+      presentationKind: 'screenshot_diagnosis_ambiguous_followup',
+      screenshotDiagnosisFollowupAmbiguous: true,
+      question: {
+        type: 'choose_context',
+        displayId: args.displayId,
+      },
+    },
+    metaPatch: {
+      presentationKind: 'screenshot_diagnosis_ambiguous_followup',
+      screenshotDiagnosisFollowupAmbiguous: true,
+      contextMode: 'diagnosis_context_ambiguous',
+      contextAuthority: 'screenshot_diagnosis',
+    },
+    debug: {
+      reason: 'ambiguous_screenshot_diagnosis_followup',
+      matchedPattern: 'ambiguous_history_screenshot_context',
+      extractedId: args.displayId,
+    },
+  };
+}
+
+async function fetchLatestScreenshotDiagnosisForConversation(args: {
+  supabase: any;
+  userCode: string;
+  conversationId?: string | null;
+}): Promise<any | null> {
+  const { supabase, userCode } = args;
+  const conversationId = String(args.conversationId ?? '').trim();
+
+  if (!supabase?.from || !userCode) return null;
+
+  const select =
+    'id, display_id, user_code, conversation_id, source, mode, diagnosis_text, diagnosis_seed_json, used_at, created_at';
+
+  if (conversationId) {
+    const byConversation = await supabase
+      .from('mu_screenshot_diagnosis_logs')
+      .select(select)
+      .eq('user_code', userCode)
+      .eq('conversation_id', conversationId)
+      .not('diagnosis_text', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (byConversation?.data) return byConversation.data;
+
+    if (byConversation?.error) {
+      console.warn('[IROS/PRE_SEED_ENGINE][LATEST_SCREENSHOT_FETCH_BY_CONV_FAILED]', {
+        userCode,
+        conversationId,
+        error: byConversation.error?.message ?? byConversation.error,
+      });
+    }
+  }
+
+  const byUser = await supabase
+    .from('mu_screenshot_diagnosis_logs')
+    .select(select)
+    .eq('user_code', userCode)
+    .not('diagnosis_text', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (byUser?.error) {
+    console.warn('[IROS/PRE_SEED_ENGINE][LATEST_SCREENSHOT_FETCH_BY_USER_FAILED]', {
+      userCode,
+      conversationId,
+      error: byUser.error?.message ?? byUser.error,
+    });
+  }
+
+  return byUser?.data ?? null;
+}
+
+export async function resolvePreSeedDecision(
+  args: ResolvePreSeedDecisionArgs
+): Promise<PreSeedDecision | null> {
+  const detected = detectPreSeedIntent(args.userText);
+
+  if (detected.kind === 'screenshot_diagnosis_boot') {
+    return buildScreenshotDiagnosisPreSeed({
+      ...args,
+      displayId: detected.displayId,
+      matchedPattern: detected.matchedPattern,
+    });
+  }
+
+  const userText = String(args.userText ?? '').trim();
+  const historyForTurn = Array.isArray(args.historyForTurn)
+    ? args.historyForTurn
+    : [];
+
+  const historyDisplayId = extractLatestScreenshotDisplayIdFromHistory(historyForTurn);
+  const strength = getScreenshotDiagnosisFollowupStrength({
+    userText,
+    historyForTurn,
+  });
+
+  if (strength === 'exit') {
+    console.log('[IROS/PRE_SEED_ENGINE][SCREENSHOT_CONTEXT_EXIT_TO_NORMAL]', {
+      traceId: args.traceId,
+      conversationId: args.conversationId,
+      userCode: args.userCode,
+      userTextHead: userText.slice(0, 120),
+    });
+
+    return null;
+  }
+
+  if (historyDisplayId && strength === 'strong') {
+    console.log('[IROS/PRE_SEED_ENGINE][HISTORY_SCREENSHOT_CONTEXT_CONTINUE]', {
+      traceId: args.traceId,
+      conversationId: args.conversationId,
+      userCode: args.userCode,
+      displayId: historyDisplayId,
+      strength,
+      userTextHead: userText.slice(0, 120),
+    });
+
+    return buildScreenshotDiagnosisPreSeed({
+      ...args,
+      displayId: historyDisplayId,
+      matchedPattern: 'history_screenshot_diagnosis_context_followup_strong',
+    });
+  }
+
+  if (historyDisplayId && strength === 'weak') {
+    console.log('[IROS/PRE_SEED_ENGINE][HISTORY_SCREENSHOT_CONTEXT_AMBIGUOUS]', {
+      traceId: args.traceId,
+      conversationId: args.conversationId,
+      userCode: args.userCode,
+      displayId: historyDisplayId,
+      strength,
+      userTextHead: userText.slice(0, 120),
+    });
+
+    return buildAmbiguousScreenshotClarifyDecision({
+      userText,
+      userCode: args.userCode,
+      conversationId: args.conversationId,
+      traceId: args.traceId,
+      displayId: historyDisplayId,
+    });
+  }
+
+  const latest = await fetchLatestScreenshotDiagnosisForConversation({
+    supabase: args.supabase,
+    userCode: args.userCode,
+    conversationId: args.conversationId,
+  });
+
+  const latestDisplayId = Number(latest?.display_id ?? 0);
+
+  if (
+    Number.isFinite(latestDisplayId) &&
+    latestDisplayId > 0 &&
+    strength === 'strong'
+  ) {
+    console.log('[IROS/PRE_SEED_ENGINE][LATEST_SCREENSHOT_CONTEXT_CONTINUE]', {
+      traceId: args.traceId,
+      conversationId: args.conversationId,
+      userCode: args.userCode,
+      displayId: latestDisplayId,
+      strength,
+      userTextHead: userText.slice(0, 120),
+      diagnosisTextLen: String(latest?.diagnosis_text ?? '').length,
+    });
+
+    return buildScreenshotDiagnosisPreSeed({
+      ...args,
+      displayId: latestDisplayId,
+      matchedPattern: 'latest_screenshot_diagnosis_context_followup_strong',
+    });
+  }
+
+  if (
+    Number.isFinite(latestDisplayId) &&
+    latestDisplayId > 0 &&
+    strength === 'weak'
+  ) {
+    console.log('[IROS/PRE_SEED_ENGINE][LATEST_SCREENSHOT_CONTEXT_AMBIGUOUS]', {
+      traceId: args.traceId,
+      conversationId: args.conversationId,
+      userCode: args.userCode,
+      displayId: latestDisplayId,
+      strength,
+      userTextHead: userText.slice(0, 120),
+    });
+
+    return buildAmbiguousScreenshotClarifyDecision({
+      userText,
+      userCode: args.userCode,
+      conversationId: args.conversationId,
+      traceId: args.traceId,
+      displayId: latestDisplayId,
+    });
+  }
+  try {
+    const universalCandidate = await resolveUniversalPreSeed({
+      userText,
+      userCode: args.userCode,
+      conversationId: args.conversationId,
+      supabase: args.supabase,
+      meta: args.meta,
+      historyForTurn: args.historyForTurn,
+      traceId: args.traceId ?? null,
+    });
+
+    if (universalCandidate) {
+      console.log('[IROS/PRE_SEED_ENGINE][UNIVERSAL_CANDIDATE_ONLY]', {
+        traceId: args.traceId ?? null,
+        conversationId: args.conversationId,
+        userCode: args.userCode,
+        kind: universalCandidate.kind,
+        memoryIntent: universalCandidate.memoryIntent,
+        memorySpace: universalCandidate.memorySpace,
+        route: universalCandidate.route,
+        sourceAuthority: universalCandidate.sourceAuthority,
+        targetKey: universalCandidate.resolvedTarget?.targetKey ?? null,
+        relationId: universalCandidate.resolvedRelation?.relationId ?? null,
+        confidence: universalCandidate.confidence,
+      });
+
+      if (
+        universalCandidate.memoryIntent === 'ir_diagnosis_recall' &&
+        universalCandidate.resolvedTarget?.targetKey
+      ) {
+        const irDecision = await buildIrDiagnosisPreSeed({
+          ...args,
+          targetKey: universalCandidate.resolvedTarget.targetKey,
+          targetLabel: universalCandidate.resolvedTarget.label,
+          matchedPattern: 'universal_ir_diagnosis_recall',
+        } as any);
+
+        if (irDecision) {
+          console.log('[IROS/PRE_SEED_ENGINE][IR_DIAGNOSIS_DECISION_RETURN]', {
+            traceId: args.traceId ?? null,
+            conversationId: args.conversationId,
+            userCode: args.userCode,
+            targetKey: universalCandidate.resolvedTarget.targetKey,
+            targetLabel: universalCandidate.resolvedTarget.label,
+            route: irDecision.route,
+            sourceId: irDecision.sourceId ?? null,
+            sourceTextLen: String((irDecision as any).sourceText ?? '').length,
+            seedLen: String((irDecision as any).seedText ?? '').length,
+          });
+
+          return irDecision;
+        }
+      }
+    }
+  } catch (e: any) {
+    console.warn('[IROS/PRE_SEED_ENGINE][UNIVERSAL_CANDIDATE_FAILED]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId,
+      userCode: args.userCode,
+      error: e?.message ?? e,
+    });
+  }
+
+  return null;
+}
+
+
+
+
+
+
