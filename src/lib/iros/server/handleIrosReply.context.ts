@@ -831,8 +831,25 @@ export async function buildTurnContext(
     String((baseMetaForTurn as any)?.prevMeta?.extra?.ctxPack?.continuityKind ?? '').trim() ===
       'diagnosis_followup';
 
+  const hasProjectObservationContextForDiagnosisGuard =
+    /(導線|継続利用|課金|登録|ユーザー|拡散|SNS|投稿|分析|自動化|ステップメール|アプリ|サービス|事業|プロジェクト|品質|返信|返答|なんでわかるの|レベル)/u.test(
+      followupSourceText
+    );
+
+  const diagnosisMentionIsProjectEvidence =
+    /(?:スクショ診断|スクリーンショット診断|画像診断|診断)/u.test(followupSourceText) &&
+    /(?:できたおかげ|出来たおかげ|先が見え|確立|導線|継続利用|課金|品質|返信|返答|なんでわかるの|レベル)/u.test(
+      followupSourceText
+    );
+
+  const shouldBlockDiagnosisFollowupByObservationLock =
+    hasProjectObservationContextForDiagnosisGuard &&
+    diagnosisMentionIsProjectEvidence &&
+    !hasExplicitScreenshotDiagnosisContinuationHint;
+
   const canEnterDiagnosisFollowup =
-    hasExplicitDiagnosisReferenceForFollowup || previousTurnLooksDiagnosisForFollowup;
+    !shouldBlockDiagnosisFollowupByObservationLock &&
+    (hasExplicitDiagnosisReferenceForFollowup || previousTurnLooksDiagnosisForFollowup);
 
 
   // ✅ 創作・書き直し系の継続要求は、診断 followup に入れない。
@@ -1459,7 +1476,6 @@ export async function buildTurnContext(
     !isIrDiagnosisTurn &&
     isFollowupRequest &&
     !isCreativeContinuationRequest &&
-    !hasScreenshotDiagnosisIdReference &&
     canEnterDiagnosisFollowup
   ) {
     try {
@@ -1474,7 +1490,6 @@ export async function buildTurnContext(
   const isDiagnosisFollowup =
     !isCreativeContinuationRequest &&
     !isIrDiagnosisTurn &&
-    !hasScreenshotDiagnosisIdReference &&
     canEnterDiagnosisFollowup &&
     hasDiagnosisSource &&
     isFollowupRequest;
@@ -1495,7 +1510,6 @@ export async function buildTurnContext(
     !isCreativeContinuationRequest &&
     !isIrDiagnosisTurn &&
     !isDiagnosisFollowup &&
-    !hasScreenshotDiagnosisIdReference &&
     canEnterDiagnosisFollowup &&
     wantsDetail &&
     hasDiagnosisSource;
@@ -3153,6 +3167,8 @@ export async function buildTurnContext(
     },
   };
 }
+
+
 
 
 
