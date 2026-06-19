@@ -908,47 +908,13 @@ let extraSoT: Record<string, any> = {
     // - 保存済み診断IDなど、通常チャットに入れる前に正本・ルートを確定する
     // - v1: スクショ診断ID:n の続き相談は direct_reply で Writer/Rephrase を bypass
     // -------------------------------------------------------
-    console.log('[IROS/ROUTE][PRE_SEED_ENTER]', {
-      traceId,
-      conversationId,
-      userCode,
-      userTextClean,
-      userTextCleanHead: String(userTextClean ?? '').slice(0, 120),
-      hasSupabase: Boolean((supabase as any)?.from),
-    });
-
-    const preSeedDecision = await resolvePreSeedDecision({
-      userText: userTextClean,
-      userCode,
-      conversationId,
-      supabase: supabase as any,
-      meta: metaForIros,
-      historyForTurn: Array.isArray(chatHistory) ? chatHistory : [],
-      traceId,
-    });
-
-    console.log('[IROS/ROUTE][PRE_SEED_AFTER_RESOLVE]', {
-      traceId,
-      conversationId,
-      userCode,
-      hasDecision: Boolean(preSeedDecision),
-      kind: preSeedDecision?.kind ?? null,
-      route: preSeedDecision?.route ?? null,
-      shouldBypassWriter: preSeedDecision?.shouldBypassWriter ?? null,
-      directReplyLen: String(preSeedDecision?.directReply ?? '').length,
-      seedLen: String(preSeedDecision?.seedText ?? '').length,
-    });
-
-
-    // -------------------------------------------------------
     // 11.974) Relationship Context Capture Layer
     // - ユーザーが明示した関係性だけ保存する
     // - 質問・相談文は保存しない
     // - private relationship は通常の人物情報としては出さない
     // -------------------------------------------------------
-    if (!preSeedDecision) {
-      try {
-        const relationshipContextCapture = await captureRelationshipContextFromConversation({
+    try {
+      const relationshipContextCapture = await captureRelationshipContextFromConversation({
           supabase: supabase as any,
           userCode,
           conversationId,
@@ -1061,15 +1027,47 @@ let extraSoT: Record<string, any> = {
           userCode,
           reason: relationshipContextCapture?.reason ?? null,
         });
-      } catch (e: any) {
-        console.warn('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][FAILED]', {
-          traceId,
-          conversationId,
-          userCode,
-          error: e?.message ?? e,
-        });
-      }
+    } catch (e: any) {
+      console.warn('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][FAILED]', {
+        traceId,
+        conversationId,
+        userCode,
+        error: e?.message ?? e,
+      });
     }
+
+    // -------------------------------------------------------
+    console.log('[IROS/ROUTE][PRE_SEED_ENTER]', {
+      traceId,
+      conversationId,
+      userCode,
+      userTextClean,
+      userTextCleanHead: String(userTextClean ?? '').slice(0, 120),
+      hasSupabase: Boolean((supabase as any)?.from),
+    });
+
+    const preSeedDecision = await resolvePreSeedDecision({
+      userText: userTextClean,
+      userCode,
+      conversationId,
+      supabase: supabase as any,
+      meta: metaForIros,
+      historyForTurn: Array.isArray(chatHistory) ? chatHistory : [],
+      traceId,
+    });
+
+    console.log('[IROS/ROUTE][PRE_SEED_AFTER_RESOLVE]', {
+      traceId,
+      conversationId,
+      userCode,
+      hasDecision: Boolean(preSeedDecision),
+      kind: preSeedDecision?.kind ?? null,
+      route: preSeedDecision?.route ?? null,
+      shouldBypassWriter: preSeedDecision?.shouldBypassWriter ?? null,
+      directReplyLen: String(preSeedDecision?.directReply ?? '').length,
+      seedLen: String(preSeedDecision?.seedText ?? '').length,
+    });
+
 
     // -------------------------------------------------------
     // 11.975) Person Fact Capture Layer
