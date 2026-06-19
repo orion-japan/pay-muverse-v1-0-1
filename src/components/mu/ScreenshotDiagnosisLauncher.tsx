@@ -1,8 +1,9 @@
-﻿'use client';
+'use client';
 
 import { useRef, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { saveScreenshotImageLocal } from '@/lib/browser/screenshotImageStore';
+import { useIrosChat } from '@/ui/iroschat/IrosChatContext';
 
 type ScreenshotDiagnosisLauncherProps = {
   conversationId?: string | null;
@@ -29,6 +30,7 @@ function fileToDataUrl(file: File): Promise<string> {
 
 export default function ScreenshotDiagnosisLauncher({ conversationId = null, userType = null }: ScreenshotDiagnosisLauncherProps) {
   const { user } = useAuth();
+  const chat = useIrosChat();
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const [open, setOpen] = useState(false);
@@ -40,6 +42,24 @@ export default function ScreenshotDiagnosisLauncher({ conversationId = null, use
 
   const normalizedUserType = String(userType || '').toLowerCase();
   const canUseScreenshotDiagnosis = ['premium', 'master', 'partner', 'admin'].includes(normalizedUserType);
+
+  async function resolveConversationId(): Promise<string> {
+    const fromProp = String(conversationId || '').trim();
+    if (fromProp) return fromProp;
+
+    const fromRef = String(chat?.getActiveConversationId?.() || '').trim();
+    if (fromRef) return fromRef;
+
+    const fromState = String(chat?.activeConversationId || '').trim();
+    if (fromState) return fromState;
+
+    if (typeof chat?.startConversation === 'function') {
+      const created = String(await chat.startConversation()).trim();
+      if (created) return created;
+    }
+
+    throw new Error('会話の作成に失敗しました。もう一度お試しください。');
+  }
 
   async function runDiagnosis(file: File) {
     setOpen(true);
@@ -54,6 +74,7 @@ export default function ScreenshotDiagnosisLauncher({ conversationId = null, use
       if (!file.type.startsWith('image/')) throw new Error('画像ファイルを選択してください。');
       if (file.size > 8 * 1024 * 1024) throw new Error('画像サイズが大きすぎます。8MB以内にしてください。');
 
+      const resolvedConversationId = await resolveConversationId();
       const imageDataUrl = await fileToDataUrl(file);
       const idToken = await user.getIdToken(true);
 
@@ -67,18 +88,25 @@ export default function ScreenshotDiagnosisLauncher({ conversationId = null, use
           image_data_url: imageDataUrl,
           imageDataUrl,
           source: 'mu_chat',
-          conversation_id: conversationId,
+          conversation_id: resolvedConversationId,
+          conversationId: resolvedConversationId,
         }),
       });
 
       const json = (await res.json().catch(() => ({}))) as DiagnosisResponse;
-      console.log('[screenshot-diagnosis] response', json);
+      console.log('[screenshot-diagnosis] response', {
+        ok: json?.ok,
+        diagnosisLen: String(json?.diagnosis || '').length,
+        hasSeed: Boolean(json?.diagnosis_seed),
+        diagnosis_log_id: json?.diagnosis_log_id ?? null,
+        conversation_id: resolvedConversationId,
+      });
 
       if (!res.ok || !json?.ok) {
         throw new Error(json?.error || json?.detail || 'スクショ診断に失敗しました。');
       }
 
-            const diagnosisText = String(json.diagnosis || '').trim();
+      const diagnosisText = String(json.diagnosis || '').trim();
       const localImageId = String(json.diagnosis_log_id || '').trim();
 
       if (localImageId) {
@@ -89,6 +117,10 @@ export default function ScreenshotDiagnosisLauncher({ conversationId = null, use
           .catch((err) => {
             console.warn('[screenshot-image] save failed', { localImageId, err });
           });
+      } else {
+        console.warn('[screenshot-image] diagnosis_log_id missing; local image restore will be unavailable', {
+          conversation_id: resolvedConversationId,
+        });
       }
 
       setDiagnosis(diagnosisText);
@@ -101,9 +133,21 @@ export default function ScreenshotDiagnosisLauncher({ conversationId = null, use
               diagnosis_seed: json.diagnosis_seed ?? null,
               image_data_url: imageDataUrl,
               local_image_id: localImageId || null,
+              conversation_id: resolvedConversationId,
             },
           }),
         );
+      }
+
+      // イベント反映だけに依存すると、cid=new 直後や会話作成直後に本文へ出ないことがある。
+      // DB保存済みのスクショ診断ログを、確定済み conversationId で再取得して本文へ復元する。
+      if (typeof chat?.fetchMessages === 'function') {
+        await chat.fetchMessages(resolvedConversationId).catch((err: unknown) => {
+          console.warn('[screenshot-diagnosis] restore to chat failed', {
+            conversation_id: resolvedConversationId,
+            err,
+          });
+        });
       }
     } catch (e: any) {
       setError(e?.message || 'スクショ診断に失敗しました。');
@@ -158,7 +202,7 @@ export default function ScreenshotDiagnosisLauncher({ conversationId = null, use
           boxShadow: canUseScreenshotDiagnosis ? '0 10px 26px rgba(80, 70, 180, 0.22)' : 'none',
           backdropFilter: 'blur(10px)',
           cursor: busy ? 'default' : 'pointer',
-                    opacity: busy ? 0.4 : 0.8,
+          opacity: busy ? 0.4 : 0.8,
         }}
       >
         📎
@@ -295,18 +339,3 @@ export default function ScreenshotDiagnosisLauncher({ conversationId = null, use
     </>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
