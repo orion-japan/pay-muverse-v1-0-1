@@ -1,4 +1,19 @@
-﻿import type { MemoryIntent } from './types';
+import type { MemoryIntent } from './types';
+
+function isProjectOrNonPersonContext(text: string): boolean {
+  return /(
+    Muverse|Moodle|PAY\.JP|Supabase|Firebase|Cloudflare|Zoho|Git|GitHub|Next\.js|route\.ts|
+    コード|PowerShell|typecheck|npm|実装|修正|改修|エラー|ビルド|デプロイ|PR|コミット|API|SQL|ファイル|関数|
+    アプリ|サービス|事業|プロジェクト|プロダクト|サイト|LP|導線|課金|登録|ユーザー|継続利用|拡散|SNS|投稿|分析|自動化|ステップメール|マーケ|集客|リリース|ローンチ|完成度|品質|
+    仕様書|書類|資料|PDF|docx|文書|原稿|レポート|特許書類|
+    画像|動画|プロンプト|VEO|Seedance|Kling|花火|台本|デザイン
+  )/iux.test(text);
+}
+
+function isObservationFollowupToProject(text: string): boolean {
+  return /(?:それ|これ|この話|その話|先ほど|さっき|同じ|比較|つまり|なんで|なぜ|理由|根拠|詳しく|もう少し|品質|レベル)/u.test(text) &&
+    /(?:なんでわかるの|なぜわかる|返信|返答|品質|実務|タイミング|導線|課金|拡散|アプリ|Muverse|プロジェクト|事業)/iu.test(text);
+}
 
 export function classifyMemoryIntent(userText: string): MemoryIntent {
   const text = String(userText ?? '').trim();
@@ -13,8 +28,8 @@ export function classifyMemoryIntent(userText: string): MemoryIntent {
     return 'ir_diagnosis_recall';
   }
 
-  const projectLike =
-    /(Muverse|Moodle|PAY\.JP|Supabase|Firebase|Cloudflare|Zoho|Git|Next\.js|route\.ts|コード|PowerShell|typecheck|npm|実装|修正|エラー|ビルド|デプロイ)/iu.test(text);
+  const projectLike = isProjectOrNonPersonContext(text) || isObservationFollowupToProject(text);
+
   // 人物の確定事実確認
   // 例: 対象人物Aは何歳だったっけ？ / 対象人物Aの誕生日は？
   // ここでは答えず、Person Context 側で再検索してから判断する。
@@ -60,12 +75,18 @@ export function classifyMemoryIntent(userText: string): MemoryIntent {
     return 'person_state_recall';
   }
 
-  if (!personFactAssertionLike && /(関係|距離感|仲|相性|恋愛|彼|彼女|相手|夫|妻|母|父|子供|友達|クライアント|先生|弟子)/u.test(text)) {
+  // Observation Lock: プロジェクト・技術・文書・制作の話題では、
+  // 「関係」「状態」「進捗」などの一般語だけで Person/Relationship に飛ばさない。
+  if (!projectLike && !personFactAssertionLike && /(関係|距離感|仲|相性|恋愛|彼|彼女|相手|夫|妻|母|父|子供|友達|クライアント|先生|弟子)/u.test(text)) {
     return 'relationship_recall';
   }
 
-  if (!personFactAssertionLike && /(今どういう状態|現在地|どこにいる|状態|進捗|行き先|方向|ズレ|成長|移行中|定着)/u.test(text)) {
+  if (!projectLike && !personFactAssertionLike && /(今どういう状態|現在地|どこにいる|状態|進捗|行き先|方向|ズレ|成長|移行中|定着)/u.test(text)) {
     return 'person_state_recall';
+  }
+
+  if (projectLike) {
+    return 'project_context_recall';
   }
 
   if (/(前者|後者|一つ目|二つ目|1で|2で|それで|それを|お願いします|続けて|はい)/u.test(text) && text.length <= 30) {
@@ -76,20 +97,9 @@ export function classifyMemoryIntent(userText: string): MemoryIntent {
     return 'active_thread_followup';
   }
 
-  if (projectLike) {
-    return 'project_context_recall';
-  }
-
   if (/(前のルール|作業ルール|いつものルール|覚えて|設定|仕様|方針)/u.test(text)) {
     return 'working_rule_recall';
   }
 
   return 'normal_chat';
 }
-
-
-
-
-
-
-
