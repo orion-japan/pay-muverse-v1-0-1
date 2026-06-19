@@ -337,6 +337,8 @@ async function buildVisiblePersonContextReplyWithLlm(args: {
     args.personIntentNote ? `PERSON_STATE:\n${args.personIntentNote}` : '',
     args.relationshipNoteText ? `RELATIONSHIP_MEMORY:\n${args.relationshipNoteText}` : '',
     args.diagnosisText ? `DIAGNOSIS_CONTEXT:\n${args.diagnosisText}` : '',
+    args.conversationMentionNote ? `CONVERSATION_MENTIONS:\n${args.conversationMentionNote}` : '',
+    args.longTermNote ? `LONG_TERM_CONTEXT:\n${args.longTermNote}` : '',
   ].filter(Boolean).join('\n\n');
 
   if (!sourceText.trim()) return null;
@@ -349,11 +351,13 @@ async function buildVisiblePersonContextReplyWithLlm(args: {
   const system = [
     'あなたは Mu の人物文脈まとめ専用 writer です。',
     'DB文や診断seedをそのまま貼らず、自然な日本語で再構成してください。',
-    '内部語は絶対に出さないでください。DB、ログ、Pre-SEED、Memory、seed、targetKey、relationId、source、diagnosis snapshot などは禁止です。',
-    '「名前しか分からない」「情報が足りない」と言わないでください。渡された source に人物文脈がある前提でまとめてください。',
-    'ただし、sourceにない事実は足さないでください。',
-    '年齢、誕生日、生年月日などの事実質問では、source内に明示されている場合だけ答えてください。',
-    'source内に年齢や誕生日の明示がない場合は、推測せず「ここでは確認できません」と答えてください。',
+    '内部語は絶対に出さないでください。DB、ログ、Pre-SEED、Memory、seed、targetKey、relationId、source、diagnosis snapshot、材料、いただいた材料、この情報内、この範囲の情報、source内 などは禁止です。',
+    '「名前しか分からない」「情報が足りない」と言わないでください。渡された人物文脈がある前提でまとめてください。',
+    'ただし、人物文脈にない事実は足さないでください。',
+    '年齢、誕生日、生年月日、子供の有無、息子・娘、家族構成などの事実質問では、人物文脈に明示されている場合だけ答えてください。',
+    '質問された事実の明示がない場合は、内部情報や材料という言い方をせず、「今ここで確認できる範囲では、はっきりとは確認できません」と答えてください。',
+    'children.normalized=has_children がある場合は「子供がいる」と答えてください。children.count があれば人数も答えてください。children.kind=son なら息子、daughter なら娘として答えてください。children.name があれば名前も添えてください。',
+    'children.normalized=no_children がある場合は「子供はいない」と答えてください。',
     '事実質問では、性格分析や関係分析に逃げず、質問された事実にまず答えてください。',
     '年齢、病名、個人情報に近い内容は断定しすぎないでください。',
     '出力は、やさしく、読みやすく、Muらしい自然な文章にしてください。',
@@ -363,15 +367,15 @@ async function buildVisiblePersonContextReplyWithLlm(args: {
   ].join('\n');
 
   const isFactQuestion =
-    /(何歳|年齢|誕生日|生年月日|歳|いくつ|幾つ)/u.test(String(args.userText ?? ''));
+    /(何歳|年齢|誕生日|生年月日|歳|いくつ|幾つ|子供|子ども|お子さん|息子|娘|家族構成|何人)/u.test(String(args.userText ?? ''));
   const user = [
     `ユーザー入力: ${args.userText}`,
     `対象人物: ${args.targetLabel}`,
     `質問種別: ${isFactQuestion ? 'person_fact_question' : 'person_context_summary'}`,
     '',
     isFactQuestion
-      ? '以下のsourceを材料に、質問された事実だけを確認してください。明示情報がなければ、推測せず分からないと答えてください。'
-      : '以下のsourceを材料に、対象人物について自然にまとめてください。',
+      ? '以下の人物文脈を確認し、質問された事実だけに答えてください。明示情報がなければ、推測せず分からないと答えてください。'
+      : '以下の人物文脈をもとに、対象人物について自然にまとめてください。',
     '',
     sourceText,
   ].join('\n');
@@ -581,6 +585,16 @@ export async function buildPersonContextPreSeed(args: {
     userCode: args.userCode,
     aliases,
   });
+  console.log('[IROS/PRE_SEED_PERSON_CONTEXT][SOURCE_DEBUG]', {
+    traceId: args.traceId ?? null,
+    targetLabel,
+    targetKey,
+    personIntentNoteHead: String(personIntentNote ?? '').slice(0, 1000),
+    relationshipNoteHead: String(relationshipNoteText ?? '').slice(0, 600),
+    diagnosisTextHead: String(diagnosisText ?? '').slice(0, 600),
+    conversationMentionHead: String(conversationMentionNote ?? '').slice(0, 1600),
+    longTermHead: String(longTermNote ?? '').slice(0, 600),
+  });
   const directReply =
     (await buildVisiblePersonContextReplyWithLlm({
       userText: args.userText,
@@ -614,7 +628,7 @@ export async function buildPersonContextPreSeed(args: {
     hasLongTerm: Boolean(longTermNote),
     conversationMentionLen: String(conversationMentionNote ?? '').length,
     longTermLen: String(longTermNote ?? '').length,
-    isFactQuestion: /(何歳|年齢|誕生日|生年月日|歳|いくつ|幾つ)/u.test(String(args.userText ?? '')),
+    isFactQuestion: /(何歳|年齢|誕生日|生年月日|歳|いくつ|幾つ|子供|子ども|お子さん|息子|娘|家族構成|何人)/u.test(String(args.userText ?? '')),
     directReplyLen: directReply.length,
     seedLen: seedText.length,
   });
@@ -728,6 +742,13 @@ export async function buildPersonContextPreSeed(args: {
     },
   };
 }
+
+
+
+
+
+
+
 
 
 

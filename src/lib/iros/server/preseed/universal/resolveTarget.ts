@@ -8,7 +8,7 @@ function cleanLabel(v: string): string {
 }
 
 function isBadTargetLabel(label: string): boolean {
-  return /^(この|その|あの|コード|実装|修正|ファイル|エラー|Git|Next|Supabase|Firebase|Muverse|Moodle|PowerShell|typecheck|npm)$/iu.test(
+  return /^(この|その|あの|コード|実装|修正|ファイル|エラー|Git|Next|Supabase|Firebase|Muverse|Moodle|PowerShell|typecheck|npm|お子|お子さん|子供|子ども|こども|息子|息子さん|娘|娘さん|長男|長女|次男|次女|家族|家族構成)$/iu.test(
     label
   );
 }
@@ -17,12 +17,9 @@ function pickExplicitPersonName(userText: string): string | null {
   const text = String(userText ?? '').trim();
 
   const patterns = [
-    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})(さん|先生|様|くん|ちゃん|氏)の/u,
-    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})(さん|先生|様|くん|ちゃん|氏)と/u,
-    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})(さん|先生|様|くん|ちゃん|氏)は/u,
+    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})(さん|先生|様|くん|ちゃん|氏)(?:には|は|の|と)/u,
+    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})(さん|先生|様|くん|ちゃん|氏)?(?:には|は|の)(?:何歳|年齢|誕生日|生年月日|歳|いくつ|幾つ|子供|子ども|お子さん|息子|娘|家族構成|何人)/u,
     /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})の件/u,
-    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})の(?:情報|こと|状態|現在地|文脈|メモ|プロフィール|話|要点|流れ|背景)/u,
-    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})について/u,
   ];
 
   for (const p of patterns) {
@@ -128,3 +125,8 @@ export async function resolveTargetForPreSeed(args: {
     source: 'none',
   };
 }
+
+
+
+
+

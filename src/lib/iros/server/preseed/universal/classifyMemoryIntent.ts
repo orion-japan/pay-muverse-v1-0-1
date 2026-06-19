@@ -18,9 +18,34 @@ export function classifyMemoryIntent(userText: string): MemoryIntent {
   // 人物の確定事実確認
   // 例: 対象人物Aは何歳だったっけ？ / 対象人物Aの誕生日は？
   // ここでは答えず、Person Context 側で再検索してから判断する。
-  const personFactQuestionLike =
+  const personNameLike =
+    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,24})(さん|先生|様|くん|ちゃん|氏)?(?:は|には|の).*(何歳|年齢|誕生日|生年月日|歳|いくつ|幾つ|子供|子ども|お子さん|息子|娘|家族構成)/u.test(text);
+
+  const ageFactQuestionLike =
     /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,24})(さん|先生|様|くん|ちゃん|氏)?(?:は|の).*(何歳|年齢|誕生日|生年月日|歳|いくつ|幾つ)/u.test(text) ||
     /(何歳|年齢|誕生日|生年月日|歳|いくつ|幾つ).*(だったっけ|でしたっけ|だっけ|ですか|かな)/u.test(text);
+
+  const childrenFactQuestionLike =
+    /(子供|子ども|お子さん|息子|娘|家族構成).*(いますか|いる\?|いる？|いるの|何人|ありますか|ある\?|ある？|ですか|かな|だっけ|でしたっけ)/u.test(text) ||
+    /(いますか|いる\?|いる？|いるの|何人|ありますか|ある\?|ある？|ですか|かな|だっけ|でしたっけ).*(子供|子ども|お子さん|息子|娘|家族構成)/u.test(text);
+
+  const explicitQuestionLike =
+    /[?？]|(いますか|いるの|いる？|います？|ありますか|ある？|何人|何歳|だっけ|でしたっけ|ですか|でしょうか|かな)/u.test(text);
+
+  const personFactAssertionLike =
+    !explicitQuestionLike &&
+    (
+      /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,24})(さん|先生|様|くん|ちゃん|氏)?(?:は|には|の).*(子供|子ども|お子さん|息子|娘|長男|長女|次男|次女).*(いる|いて|います|です|だ|だった|名前は|名前が)/u.test(text) ||
+      /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,24})(さん|先生|様|くん|ちゃん|氏)?(?:は|には|の).*(この前の誕生日|誕生日で|歳になった|歳です|歳だ)/u.test(text)
+    );
+
+  const personFactQuestionLike =
+    !personFactAssertionLike &&
+    (
+      personNameLike ||
+      ageFactQuestionLike ||
+      childrenFactQuestionLike
+    );
 
   if (!projectLike && personFactQuestionLike) {
     return 'person_state_recall';
@@ -35,11 +60,11 @@ export function classifyMemoryIntent(userText: string): MemoryIntent {
     return 'person_state_recall';
   }
 
-  if (/(関係|距離感|仲|相性|恋愛|彼|彼女|相手|夫|妻|母|父|子供|友達|クライアント|先生|弟子)/u.test(text)) {
+  if (!personFactAssertionLike && /(関係|距離感|仲|相性|恋愛|彼|彼女|相手|夫|妻|母|父|子供|友達|クライアント|先生|弟子)/u.test(text)) {
     return 'relationship_recall';
   }
 
-  if (/(今どういう状態|現在地|どこにいる|状態|進捗|行き先|方向|ズレ|成長|移行中|定着)/u.test(text)) {
+  if (!personFactAssertionLike && /(今どういう状態|現在地|どこにいる|状態|進捗|行き先|方向|ズレ|成長|移行中|定着)/u.test(text)) {
     return 'person_state_recall';
   }
 
@@ -61,6 +86,10 @@ export function classifyMemoryIntent(userText: string): MemoryIntent {
 
   return 'normal_chat';
 }
+
+
+
+
 
 
 

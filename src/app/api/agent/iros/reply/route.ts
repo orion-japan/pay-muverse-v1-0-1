@@ -956,7 +956,7 @@ let extraSoT: Record<string, any> = {
           traceId,
         });
 
-        if (personFactCapture?.captured && personFactCapture.directReply) {
+        if ((personFactCapture?.captured || personFactCapture?.shouldAskConfirmation) && personFactCapture.directReply) {
           const directText = String(personFactCapture.directReply ?? '').trim();
 
           const metaForPersonFactCapture: any = {
@@ -976,6 +976,12 @@ let extraSoT: Record<string, any> = {
               personFactCaptureField: personFactCapture.field ?? null,
               personFactCaptureValueText: personFactCapture.valueText ?? null,
               personFactCaptureValueNumber: personFactCapture.valueNumber ?? null,
+              personFactCaptureValueNormalized: personFactCapture.valueNormalized ?? null,
+              personFactCaptureStatus: personFactCapture.status ?? null,
+              personFactCaptureConfidence: personFactCapture.confidence ?? null,
+              personFactCaptureSensitivity: personFactCapture.sensitivity ?? null,
+              personFactCaptureSource: personFactCapture.source ?? null,
+              personFactCaptureNeedsConfirmation: personFactCapture.shouldAskConfirmation ?? false,
 
               finalTextPolicy: 'FINAL_TEXT_SYNCED_PERSON_FACT_CAPTURE',
               resolvedText: directText,
@@ -4271,6 +4277,7 @@ if (!skipTraining) {
     );
   }
 }
+
 
 
 
