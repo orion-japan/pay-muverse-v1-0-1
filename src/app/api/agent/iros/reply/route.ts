@@ -27,6 +27,7 @@ import { extractPendingOfferFromAssistantText } from '@/lib/iros/memory/continui
 import { runNormalBase } from '@/lib/iros/conversation/normalBase';
 import { decideExpressionLane } from '@/lib/iros/expression/decideExpressionLane';
 import { normalizeIrosStyleFinal } from '@/lib/iros/language/normalizeIrosStyleFinal';
+import { chatComplete } from '@/lib/llm/chatComplete';
 
 import { loadIrosMemoryState } from '@/lib/iros/memoryState';
 import { applyRenderEngineIfEnabled } from './_impl/applyRenderEngineIfEnabled';
@@ -926,7 +927,83 @@ let extraSoT: Record<string, any> = {
           (relationshipContextCapture?.captured || relationshipContextCapture?.shouldAskConfirmation) &&
           relationshipContextCapture.directReply
         ) {
-          const directText = String(relationshipContextCapture.directReply ?? '').trim();
+          const fallbackDirectText = String(relationshipContextCapture.directReply ?? '').trim();
+          let directText = fallbackDirectText;
+
+          try {
+            const llmText = await chatComplete({
+              purpose: 'reply',
+              traceId,
+              conversationId,
+              userCode,
+              max_tokens: 180,
+              audit: {
+                slotPlanPolicy: 'FINAL',
+                mode,
+                qCode: 'Q3',
+                depthStage: 'S1',
+              },
+              messages: [
+                {
+                  role: 'system',
+                  content: [
+                    'あなたは Mu の保存確認文を自然に整える担当です。',
+                    '',
+                    '目的は、ユーザーが明示した関係性を保存したことを、短く自然に伝えることです。',
+                    '',
+                    '禁止:',
+                    '- 新しい診断を始めない',
+                    '- 相手の気持ちを推測しない',
+                    '- 関係の結論を出さない',
+                    '- 助言を増やさない',
+                    '- 箇条書きにしない',
+                    '- 「保存しました」「DB」「記録」などの機械語を出さない',
+                    '',
+                    '必須:',
+                    '- 1〜2文で返す',
+                    '- 保存された関係性だけを自然に言い換える',
+                    '- 普通の人物情報としては出さず、関係相談の時だけ使う前提を必要ならやわらかく添える',
+                    '- 呼び名は targetLabel を尊重する',
+                    '- 文体は、やさしく自然な Mu の本文にする',
+                  ].join('\\n'),
+                },
+                {
+                  role: 'user',
+                  content: [
+                    `元のユーザー入力: ${userTextClean}`,
+                    `対象人物: ${relationshipContextCapture.targetLabel ?? ''}`,
+                    `関係性: ${relationshipContextCapture.valueText ?? ''}`,
+                    `内部kind: ${relationshipContextCapture.kind ?? ''}`,
+                    `sensitivity: ${relationshipContextCapture.sensitivity ?? ''}`,
+                    '',
+                    'この保存確認文を、Muの自然な本文にしてください。',
+                    `テンプレ原文: ${fallbackDirectText}`,
+                  ].join('\\n'),
+                },
+              ],
+            });
+
+            const normalizedLlmText = String(llmText ?? '').trim();
+            if (normalizedLlmText) {
+              directText = normalizedLlmText;
+            }
+
+            console.log('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][LLM_NATURALIZED]', {
+              traceId,
+              conversationId,
+              userCode,
+              fallbackLen: fallbackDirectText.length,
+              llmLen: normalizedLlmText.length,
+              textHead: directText.slice(0, 160),
+            });
+          } catch (e: any) {
+            console.warn('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][LLM_NATURALIZE_FAILED]', {
+              traceId,
+              conversationId,
+              userCode,
+              error: e?.message ?? e,
+            });
+          }
 
           const metaForRelationshipContextCapture: any = {
             ...(metaForIros ?? {}),
