@@ -1,4 +1,4 @@
-﻿type CaptureArgs = {
+type CaptureArgs = {
   supabase: any;
   userCode: string;
   conversationId: string;
@@ -6,7 +6,14 @@
   traceId?: string | null;
 };
 
-type FactField = 'age' | 'children';
+type FactField =
+  | 'age'
+  | 'children'
+  | 'partner'
+  | 'family_members'
+  | 'role'
+  | 'trait'
+  | 'relationship_general';
 
 type FactStatus = 'confirmed_by_user' | 'needs_confirmation';
 
@@ -18,25 +25,22 @@ type TargetResolution = {
   confidence: FactConfidence;
 };
 
-type ExtractedFact =
-  | {
-      field: 'age';
-      valueText: string;
-      valueNumber: number;
-      valueNormalized: string;
-      sensitivity: 'age';
-      note: string;
-    }
-  | {
-      field: 'children';
-      valueText: string;
-      valueNumber: number | null;
-      valueNormalized: 'has_children' | 'no_children' | 'unknown';
-      childGender: 'son' | 'daughter' | 'child' | null;
-      childName: string | null;
-      sensitivity: 'family_structure';
-      note: string;
-    };
+type ExtractedFact = {
+  field: FactField;
+  valueText: string;
+  valueNumber: number | null;
+  valueNormalized: string;
+  sensitivity:
+    | 'age'
+    | 'family_structure'
+    | 'role_context'
+    | 'psychological_context'
+    | 'relationship_context';
+  note: string;
+  detailLines?: string[];
+  childGender?: 'son' | 'daughter' | 'child' | null;
+  childName?: string | null;
+};
 
 type CaptureResult = {
   captured: boolean;
@@ -55,28 +59,13 @@ type CaptureResult = {
   reason?: string;
 };
 
-const PERSON_ALIAS: Record<string, string> = {
-  'リナ': 'リナ',
-  'リナちゃん': 'リナ',
-  'りな': 'リナ',
-  'りなちゃん': 'リナ',
-  'Rina': 'リナ',
-  'rina': 'リナ',
-
-  'みゆ': 'みゆ',
-  'ミユ': 'みゆ',
-  'Miyu': 'みゆ',
-  'miyu': 'みゆ',
-
-  '浅野': '浅野',
-  '浅野さん': '浅野',
-
-  '畠山': '畠山',
-  '畠山さん': '畠山',
-};
-
 const PROJECT_LIKE_RE =
   /(Muverse|Moodle|PAY\.JP|Supabase|Firebase|Cloudflare|Zoho|Git|Next\.js|route\.ts|コード|PowerShell|typecheck|npm|実装|修正|エラー|ビルド|デプロイ|パッチ)/iu;
+
+const PERSON_SUFFIX_RE = /(さん|先生|様|くん|ちゃん|氏)$/u;
+
+const TARGET_TRAILING_RE =
+  /(の診断結果|の診断内容|の診断|の情報|のこと|の状態|の現在地|の文脈|のメモ|のプロフィール|の話|の要点|の流れ|の背景|の件|との関係|について)$/u;
 
 const GENERIC_NON_PERSON_LABELS = new Set([
   'お子',
@@ -93,10 +82,35 @@ const GENERIC_NON_PERSON_LABELS = new Set([
   '次男',
   '次女',
   '家族',
+  '家族構成',
+  '母',
+  '母親',
+  'お母さん',
+  '父',
+  '父親',
+  'お父さん',
+  '兄',
+  'お兄さん',
+  '姉',
+  'お姉さん',
+  '弟',
+  '妹',
+  '夫',
+  '妻',
+  '旦那',
+  '旦那さん',
+  '奥さん',
   '彼',
   '彼女',
   '相手',
   '相談者',
+  '友人',
+  '恋人',
+  '元恋人',
+  '先生',
+  'クライアント',
+  'スタッフ',
+  '弟子',
 ]);
 
 function isGenericNonPersonLabel(v: unknown): boolean {
@@ -105,7 +119,7 @@ function isGenericNonPersonLabel(v: unknown): boolean {
 }
 
 function isQuestionLike(text: string): boolean {
-  return /[?？]|(いますか|いるの|いる？|います？|ありますか|ある？|何人|何歳|だっけ|でしたっけ|ですか|でしょうか|かな)/u.test(text);
+  return /[?？]|(いますか|いるの|いる？|います？|ありますか|ある？|何人|何歳|だっけ|でしたっけ|ですか|でしょうか|かな|どう思|見て|占って|診断して)/u.test(text);
 }
 
 function norm(v: unknown): string {
@@ -117,22 +131,16 @@ function normalizePersonLabel(v: unknown): string | null {
     .replace(/[「」『』（）()【】\[\]]/g, '')
     .replace(/[ \t\r\n　]/g, '');
 
+  s = s.replace(TARGET_TRAILING_RE, '');
+  s = s.replace(PERSON_SUFFIX_RE, '');
+
   if (!s) return null;
   if (isGenericNonPersonLabel(s)) return null;
 
-  const direct = PERSON_ALIAS[s] ?? PERSON_ALIAS[s.toLowerCase()];
-  if (direct) return direct;
-
-  s = s.replace(/(さん|先生|様|くん|ちゃん|氏)$/u, '');
-  if (!s) return null;
-  if (isGenericNonPersonLabel(s)) return null;
-
-  return PERSON_ALIAS[s] ?? PERSON_ALIAS[s.toLowerCase()] ?? s;
+  return s;
 }
 
 function displayName(label: string): string {
-  if (label === 'リナ') return 'リナちゃん';
-  if (label === 'みゆ') return 'みゆ';
   return label;
 }
 
@@ -140,12 +148,15 @@ function extractPersonLabelFromText(text: string): string | null {
   const s = norm(text);
   if (!s) return null;
 
-  for (const alias of Object.keys(PERSON_ALIAS)) {
-    if (s.includes(alias)) return PERSON_ALIAS[alias];
-  }
+  const patterns = [
+    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,24})(さん|先生|様|くん|ちゃん|氏)(?:には|は|の|って|と|に|を|$)/u,
+    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,24})(さん|先生|様|くん|ちゃん|氏)?(?:には|は|の)(?:何歳|年齢|誕生日|生年月日|歳|いくつ|幾つ|子供|子ども|お子さん|息子|娘|家族構成|夫|妻|旦那|奥さん|独身|離婚|職業|仕事|先生|クライアント|スタッフ|弟子|経営者|性格|慎重|場面緘黙|感受性|友人|恋人|元恋人|仕事関係|家族)/u,
+    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,24})の件/u,
+  ];
 
-  const m = s.match(/([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,24})(さん|先生|様|くん|ちゃん|氏)(?:の|は|って|と|に|を|$)/u);
-  if (m?.[1]) {
+  for (const p of patterns) {
+    const m = s.match(p);
+    if (!m?.[1]) continue;
     const label = normalizePersonLabel(m[1]);
     if (label && !isGenericNonPersonLabel(label)) return label;
   }
@@ -191,7 +202,22 @@ function extractAgeFact(userText: string): ExtractedFact | null {
     valueNormalized: String(age),
     sensitivity: 'age',
     note: s,
+    detailLines: [`age.value=${age}`],
   };
+}
+
+function normalizeChildNameForDisplay(v: string | null | undefined): string | null {
+  let s = norm(v);
+  if (!s) return null;
+
+  s = s
+    .replace(/[「」『』（）()【】\[\]]/g, '')
+    .replace(/[ \t\r\n　]/g, '');
+
+  s = s.replace(/(です|でした|だよ|だ)$/u, '');
+  s = s.replace(/(さん|くん|ちゃん|君|様)$/u, '');
+
+  return s || null;
 }
 
 function extractChildName(userText: string): string | null {
@@ -222,6 +248,7 @@ function extractChildrenFact(userText: string): ExtractedFact | null {
       childName: null,
       sensitivity: 'family_structure',
       note: s,
+      detailLines: ['children.normalized=no_children', 'children.count=0'],
     };
   }
 
@@ -254,6 +281,13 @@ function extractChildrenFact(userText: string): ExtractedFact | null {
   if (childGender === 'daughter') parts.push('娘');
   if (childName) parts.push(`名前は${childName}くん`);
 
+  const detailLines = [
+    'children.normalized=has_children',
+    count != null ? `children.count=${count}` : '',
+    childGender ? `children.kind=${childGender}` : '',
+    childName ? `children.name=${childName}` : '',
+  ].filter(Boolean);
+
   return {
     field: 'children',
     valueText: parts.join('・'),
@@ -263,7 +297,175 @@ function extractChildrenFact(userText: string): ExtractedFact | null {
     childName,
     sensitivity: 'family_structure',
     note: s,
+    detailLines,
   };
+}
+
+function extractPartnerFact(userText: string): ExtractedFact | null {
+  const s = norm(userText);
+  if (!/(夫|妻|旦那|旦那さん|奥さん|独身|結婚|離婚|再婚|配偶者|パートナー|彼氏|彼女)/u.test(s)) return null;
+
+  const patterns: Array<[RegExp, string, string]> = [
+    [/(夫|旦那|旦那さん).{0,8}(いる|います|がいる|がいます)/u, 'married_husband', '夫がいる'],
+    [/(妻|奥さん).{0,8}(いる|います|がいる|がいます)/u, 'married_wife', '妻がいる'],
+    [/(結婚している|結婚してます|既婚)/u, 'married', '結婚している'],
+    [/(独身)/u, 'single', '独身'],
+    [/(離婚している|離婚しています|離婚した|バツイチ)/u, 'divorced', '離婚している'],
+    [/(再婚している|再婚しています|再婚した)/u, 'remarried', '再婚している'],
+    [/(パートナー).{0,8}(いる|います|がいる|がいます)/u, 'has_partner', 'パートナーがいる'],
+    [/(彼氏).{0,8}(いる|います|がいる|がいます)/u, 'has_boyfriend', '彼氏がいる'],
+    [/(彼女).{0,8}(いる|います|がいる|がいます)/u, 'has_girlfriend', '彼女がいる'],
+  ];
+
+  for (const [re, normalized, text] of patterns) {
+    if (!re.test(s)) continue;
+    return {
+      field: 'partner',
+      valueText: text,
+      valueNumber: null,
+      valueNormalized: normalized,
+      sensitivity: 'family_structure',
+      note: s,
+      detailLines: [`partner.normalized=${normalized}`],
+    };
+  }
+
+  return null;
+}
+
+function extractFamilyMemberFact(userText: string): ExtractedFact | null {
+  const s = norm(userText);
+  if (!/(母|母親|お母さん|父|父親|お父さん|兄|お兄さん|姉|お姉さん|弟|妹|兄弟|姉妹)/u.test(s)) return null;
+  if (!/(いる|います|がいる|がいます|です|だよ|だった|家族|兄弟|姉妹)/u.test(s)) return null;
+
+  const members: Array<[RegExp, string, string]> = [
+    [/(母|母親|お母さん)/u, 'mother', '母'],
+    [/(父|父親|お父さん)/u, 'father', '父'],
+    [/(兄|お兄さん)/u, 'older_brother', '兄'],
+    [/(姉|お姉さん)/u, 'older_sister', '姉'],
+    [/(弟)/u, 'younger_brother', '弟'],
+    [/(妹)/u, 'younger_sister', '妹'],
+  ];
+
+  const found = members.filter(([re]) => re.test(s));
+  if (found.length === 0) return null;
+
+  const normalized = found.map(([, key]) => key);
+  const labels = found.map(([, , label]) => label);
+
+  return {
+    field: 'family_members',
+    valueText: `${labels.join('・')}がいる`,
+    valueNumber: null,
+    valueNormalized: normalized.join(','),
+    sensitivity: 'family_structure',
+    note: s,
+    detailLines: [
+      `family.members=${normalized.join(',')}`,
+      `family.member_labels=${labels.join(',')}`,
+    ],
+  };
+}
+
+function extractRoleFact(userText: string): ExtractedFact | null {
+  const s = norm(userText);
+  if (!/(先生|クライアント|スタッフ|弟子|経営者|社長|カウンセラー|占い師|講師|生徒|上司|部下|同僚|仕事仲間)/u.test(s)) return null;
+
+  const roles: Array<[RegExp, string, string]> = [
+    [/(先生|講師)/u, 'teacher', '先生'],
+    [/(クライアント|顧客)/u, 'client', 'クライアント'],
+    [/(スタッフ)/u, 'staff', 'スタッフ'],
+    [/(弟子)/u, 'disciple', '弟子'],
+    [/(経営者|社長)/u, 'business_owner', '経営者'],
+    [/(カウンセラー)/u, 'counselor', 'カウンセラー'],
+    [/(占い師)/u, 'fortune_teller', '占い師'],
+    [/(生徒)/u, 'student', '生徒'],
+    [/(上司)/u, 'boss', '上司'],
+    [/(部下)/u, 'subordinate', '部下'],
+    [/(同僚|仕事仲間)/u, 'coworker', '同僚'],
+  ];
+
+  for (const [re, normalized, text] of roles) {
+    if (!re.test(s)) continue;
+    return {
+      field: 'role',
+      valueText: text,
+      valueNumber: null,
+      valueNormalized: normalized,
+      sensitivity: 'role_context',
+      note: s,
+      detailLines: [`role.kind=${normalized}`],
+    };
+  }
+
+  return null;
+}
+
+function extractTraitFact(userText: string): ExtractedFact | null {
+  const s = norm(userText);
+  if (!/(慎重|話しにくい|場面緘黙|感受性が強い|感受性|繊細|警戒心|優しい|頑固|責任感|受け身|自分から話さない)/u.test(s)) return null;
+
+  const traits: Array<[RegExp, string, string]> = [
+    [/(場面緘黙)/u, 'selective_mutism', '場面緘黙'],
+    [/(感受性が強い|感受性)/u, 'high_sensitivity', '感受性が強い'],
+    [/(慎重)/u, 'careful', '慎重'],
+    [/(話しにくい)/u, 'hard_to_talk', '話しにくい'],
+    [/(繊細)/u, 'sensitive', '繊細'],
+    [/(警戒心)/u, 'guarded', '警戒心が強い'],
+    [/(優しい)/u, 'kind', '優しい'],
+    [/(頑固)/u, 'stubborn', '頑固'],
+    [/(責任感)/u, 'responsible', '責任感が強い'],
+    [/(受け身|自分から話さない)/u, 'passive', '受け身'],
+  ];
+
+  for (const [re, normalized, text] of traits) {
+    if (!re.test(s)) continue;
+    return {
+      field: 'trait',
+      valueText: text,
+      valueNumber: null,
+      valueNormalized: normalized,
+      sensitivity: 'psychological_context',
+      note: s,
+      detailLines: [`trait.kind=${normalized}`],
+    };
+  }
+
+  return null;
+}
+
+function extractGeneralRelationshipFact(userText: string): ExtractedFact | null {
+  const s = norm(userText);
+  if (!/(友人|友達|恋人|元恋人|元カレ|元カノ|仕事関係|家族|知人|師弟|同僚)/u.test(s)) return null;
+
+  const relations: Array<[RegExp, string, string]> = [
+    [/(友人|友達)/u, 'friend', '友人'],
+    [/(元恋人|元カレ|元カノ)/u, 'ex_partner', '元恋人'],
+    [/(恋人)/u, 'romantic_partner', '恋人'],
+    [/(仕事関係)/u, 'work_relationship', '仕事関係'],
+    [/(家族)/u, 'family', '家族'],
+    [/(知人)/u, 'acquaintance', '知人'],
+    [/(師弟)/u, 'teacher_student', '師弟関係'],
+    [/(同僚)/u, 'coworker', '同僚'],
+  ];
+
+  for (const [re, normalized, text] of relations) {
+    if (!re.test(s)) continue;
+    return {
+      field: 'relationship_general',
+      valueText: text,
+      valueNumber: null,
+      valueNormalized: normalized,
+      sensitivity: 'relationship_context',
+      note: s,
+      detailLines: [
+        `relationship_general.kind=${normalized}`,
+        'relationship_general.reuse_policy=allowed_for_non_private_person_context',
+      ],
+    };
+  }
+
+  return null;
 }
 
 function extractSupportedFact(userText: string): ExtractedFact | null {
@@ -272,7 +474,7 @@ function extractSupportedFact(userText: string): ExtractedFact | null {
   if (PROJECT_LIKE_RE.test(s)) return null;
 
   // Person Fact Capture は「ユーザーが補足した事実」を保存する層。
-  // 質問文は保存しない。質問は Person Context Pre-SEED / 通常回答側で扱う。
+  // 質問文・相談文は保存しない。質問は Person Context Pre-SEED / 通常回答側で扱う。
   if (isQuestionLike(s)) return null;
 
   const age = extractAgeFact(s);
@@ -283,10 +485,14 @@ function extractSupportedFact(userText: string): ExtractedFact | null {
     return age;
   }
 
-  const children = extractChildrenFact(s);
-  if (children) return children;
-
-  return null;
+  return (
+    extractChildrenFact(s) ??
+    extractPartnerFact(s) ??
+    extractFamilyMemberFact(s) ??
+    extractRoleFact(s) ??
+    extractTraitFact(s) ??
+    extractGeneralRelationshipFact(s)
+  );
 }
 
 function pickMessageText(row: any): string {
@@ -392,66 +598,55 @@ function resolveTargetFromRecentContext(args: {
   return { targetLabel: null, source: null, confidence: 'low' };
 }
 
-function normalizeChildNameForDisplay(v: string | null | undefined): string | null {
-  let s = norm(v);
-  if (!s) return null;
-
-  s = s
-    .replace(/[「」『』（）()【】\[\]]/g, '')
-    .replace(/[ \t\r\n　]/g, '');
-
-  s = s.replace(/(です|でした|だよ|だ)$/u, '');
-  s = s.replace(/(さん|くん|ちゃん|君|様)$/u, '');
-
-  return s || null;
+function factTopicLabel(field: FactField): string {
+  switch (field) {
+    case 'age':
+      return '年齢';
+    case 'children':
+    case 'partner':
+    case 'family_members':
+      return '家族構成';
+    case 'role':
+      return '職業・立場';
+    case 'trait':
+      return '性格・傾向';
+    case 'relationship_general':
+      return '関係性';
+    default:
+      return '人物情報';
+  }
 }
+
 function buildGuidanceHint(args: {
   targetLabel: string;
   fact: ExtractedFact;
   previousGuidanceHint?: string | null;
 }): string {
   const dn = displayName(args.targetLabel);
+  const topic = factTopicLabel(args.fact.field);
 
-  let addition = '';
+  const lines = [
+    `ユーザー確認済み事実：${dn}の${topic}について、${args.fact.valueText}。`,
+    `status=confirmed_by_user / source=conversation / confidence=high / sensitivity=${args.fact.sensitivity}`,
+    `field=${args.fact.field}`,
+    `value.normalized=${args.fact.valueNormalized}`,
+    ...(args.fact.detailLines ?? []),
+    `心理的文脈：ユーザーが${dn}の${topic}を補足し、人物理解を具体的な生活背景・関係文脈まで広げている。`,
+  ].filter(Boolean);
 
-  if (args.fact.field === 'age') {
-    addition = [
-      `ユーザー確認済み事実：${dn}は、この前の誕生日で${args.fact.valueNumber}歳になった。`,
-      `status=confirmed_by_user / source=conversation / confidence=high / sensitivity=age`,
-      `心理的文脈：ユーザーがMuの不明情報を補足し、${dn}の人物理解を修正している。`,
-    ].join('\n');
-  } else {
-    const lines = [
-      `ユーザー確認済み事実：${dn}の家族構成について、${args.fact.valueText}。`,
-      `status=confirmed_by_user / source=conversation / confidence=high / sensitivity=family_structure`,
-      `children.normalized=${args.fact.valueNormalized}`,
-      args.fact.valueNumber != null ? `children.count=${args.fact.valueNumber}` : '',
-      args.fact.childGender ? `children.kind=${args.fact.childGender}` : '',
-      normalizeChildNameForDisplay(args.fact.childName) ? `children.name=${normalizeChildNameForDisplay(args.fact.childName)}` : '',
-      `心理的文脈：ユーザーが${dn}の家族構成を補足し、人物理解を生活背景まで広げている。`,
-    ].filter(Boolean);
-
-    addition = lines.join('\n');
-  }
-
+  const addition = lines.join('\n');
   const prev = norm(args.previousGuidanceHint);
   if (!prev) return addition;
 
-  if (args.fact.field === 'age' && prev.includes(dn) && prev.includes(`${args.fact.valueNumber}歳`)) {
-    return prev;
-  }
-
-  const childNameForDuplicateCheck =
-    args.fact.field === 'children'
-      ? normalizeChildNameForDisplay(args.fact.childName)
-      : null;
+  const duplicateNeedles = [
+    `field=${args.fact.field}`,
+    `value.normalized=${args.fact.valueNormalized}`,
+  ];
 
   if (
-    args.fact.field === 'children' &&
     prev.includes(dn) &&
-    prev.includes('家族構成') &&
-    !/(ですくん|くんです)/u.test(prev) &&
-    (!childNameForDuplicateCheck || prev.includes(childNameForDuplicateCheck))
+    duplicateNeedles.every((needle) => prev.includes(needle)) &&
+    !/(ですくん|くんです)/u.test(prev)
   ) {
     return prev;
   }
@@ -466,41 +661,39 @@ function buildSavedReply(targetLabel: string, fact: ExtractedFact): string {
     return `うん、${dn}は${fact.valueNumber}歳として見ていくね。`;
   }
 
-  if (fact.valueNormalized === 'no_children') {
-    return `うん、${dn}は子供はいない、という前提で見ていくね。`;
+  if (fact.field === 'children') {
+    if (fact.valueNormalized === 'no_children') {
+      return `うん、${dn}は子供はいない、という前提で見ていくね。`;
+    }
+
+    const countText = fact.valueNumber != null ? `${fact.valueNumber}人` : '';
+    const relationText =
+      fact.childGender === 'son'
+        ? '息子さん'
+        : fact.childGender === 'daughter'
+          ? '娘さん'
+          : 'お子さん';
+
+    const childName = normalizeChildNameForDisplay(fact.childName);
+
+    if (childName) {
+      return `うん、${dn}には${relationText}${countText ? `が${countText}` : 'が'}いて、名前は${childName}くんですね。これで見ていくね。`;
+    }
+
+    return `うん、${dn}には${countText ? `${countText}の` : ''}${relationText}がいる、という前提で見ていくね。`;
   }
 
-  const countText = fact.valueNumber != null ? `${fact.valueNumber}人` : '';
-  const relationText =
-    fact.childGender === 'son'
-      ? '息子さん'
-      : fact.childGender === 'daughter'
-        ? '娘さん'
-        : 'お子さん';
-
-  const childName = normalizeChildNameForDisplay(fact.childName);
-
-  if (childName) {
-    return `うん、${dn}には${relationText}${countText ? `が${countText}` : 'が'}いて、名前は${childName}くんですね。これで見ていくね。`;
-  }
-
-  return `うん、${dn}には${countText ? `${countText}の` : ''}${relationText}がいる、という前提で見ていくね。`;
+  return `うん、${dn}の${factTopicLabel(fact.field)}として「${fact.valueText}」を見ていくね。`;
 }
 
 function buildConfirmationReply(fact: ExtractedFact, targetLabel: string | null): string {
+  const topic = factTopicLabel(fact.field);
   if (targetLabel) {
     const dn = displayName(targetLabel);
-    if (fact.field === 'children') {
-      return `それは、${dn}の家族構成として見ておくね？`;
-    }
-    return `それは、${dn}の情報として見ておくね？`;
+    return `それは、${dn}の${topic}として見ておくね？`;
   }
 
-  if (fact.field === 'children') {
-    return 'その家族構成の情報は、誰の情報として見ておけばいいですか？';
-  }
-
-  return 'その情報は、誰の情報として見ておけばいいですか？';
+  return `その${topic}の情報は、誰の情報として見ておけばいいですか？`;
 }
 
 async function saveGuidanceHint(args: {
@@ -678,12 +871,3 @@ export async function capturePersonFactFromConversation(args: CaptureArgs): Prom
     directReply,
   };
 }
-
-
-
-
-
-
-
-
-
