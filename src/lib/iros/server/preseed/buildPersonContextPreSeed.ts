@@ -544,9 +544,14 @@ export async function buildPersonContextPreSeed(args: {
     ''
   );
 
+  const hasRelationshipContext =
+    Boolean(relationshipNoteText) ||
+    /relationship_context:/iu.test(String(personIntentNote ?? '')) ||
+    /relationship\.kind=/iu.test(String(personIntentNote ?? ''));
+
   const hasAnySource =
     Boolean(personIntentNote) ||
-    Boolean(relationshipNoteText) ||
+    hasRelationshipContext ||
     Boolean(diagnosisText);
 
   if (!hasAnySource) {
@@ -622,7 +627,7 @@ export async function buildPersonContextPreSeed(args: {
     aliases,
     relationId,
     hasPersonIntent: Boolean(personIntentNote),
-    hasRelationship: Boolean(relationshipNoteText),
+    hasRelationship: hasRelationshipContext,
     hasDiagnosis: Boolean(diagnosisText),
     hasConversationMentions: Boolean(conversationMentionNote),
     hasLongTerm: Boolean(longTermNote),
