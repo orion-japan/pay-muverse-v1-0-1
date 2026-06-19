@@ -3,6 +3,7 @@ import { resolveUniversalPreSeed } from './universal';
 import type { PreSeedDecision, ResolvePreSeedDecisionArgs } from './types';
 import { detectPreSeedIntent } from './detectPreSeedIntent';
 import { buildScreenshotDiagnosisPreSeed } from './buildScreenshotDiagnosisPreSeed';
+import { buildPersonContextPreSeed } from './buildPersonContextPreSeed';
 
 function normalizeLite(v: any): string {
   return String(v ?? '')
@@ -616,6 +617,39 @@ export async function resolvePreSeedDecision(
         }
       }
     }
+
+      if (
+        universalCandidate &&
+        (
+          universalCandidate.memoryIntent === 'person_state_recall' ||
+          universalCandidate.memoryIntent === 'person_reference' ||
+          universalCandidate.memoryIntent === 'relationship_recall'
+        ) &&
+        universalCandidate.resolvedTarget?.targetKey &&
+        universalCandidate.resolvedTarget?.label
+      ) {
+        const personDecision = await buildPersonContextPreSeed({
+          ...args,
+          targetKey: universalCandidate.resolvedTarget.targetKey,
+          targetLabel: universalCandidate.resolvedTarget.label,
+          traceId: args.traceId ?? null,
+        });
+
+        if (personDecision) {
+          console.log('[IROS/PRE_SEED_ENGINE][PERSON_CONTEXT_DECISION_RETURN]', {
+            traceId: args.traceId ?? null,
+            conversationId: args.conversationId,
+            userCode: args.userCode,
+            targetKey: universalCandidate.resolvedTarget.targetKey,
+            targetLabel: universalCandidate.resolvedTarget.label,
+            route: personDecision.route,
+            sourceId: personDecision.sourceId ?? null,
+            seedLen: String((personDecision as any).seedText ?? '').length,
+          });
+
+          return personDecision;
+        }
+      }
   } catch (e: any) {
     console.warn('[IROS/PRE_SEED_ENGINE][UNIVERSAL_CANDIDATE_FAILED]', {
       traceId: args.traceId ?? null,
@@ -627,6 +661,8 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
+
+
 
 
 

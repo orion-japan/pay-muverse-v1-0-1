@@ -1979,7 +1979,7 @@ export async function buildTurnContext(
             diagnosisSentences.find((x) => x !== reasonSentence) ??
             '';
 
-          const isRelationReason = /関係|連絡|約束|相手|二人|広げる|温度|みゆ/u.test(
+          const isRelationReason = /関係|連絡|約束|相手|二人|広げる|温度/u.test(
             reasonTargetPhrase + normalizedDiagnosisText
           );
 
@@ -3153,6 +3153,7 @@ export async function buildTurnContext(
     },
   };
 }
+
 
 
 

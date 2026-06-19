@@ -13,6 +13,28 @@ export function classifyMemoryIntent(userText: string): MemoryIntent {
     return 'ir_diagnosis_recall';
   }
 
+  const projectLike =
+    /(Muverse|Moodle|PAY\.JP|Supabase|Firebase|Cloudflare|Zoho|Git|Next\.js|route\.ts|コード|PowerShell|typecheck|npm|実装|修正|エラー|ビルド|デプロイ)/iu.test(text);
+  // 人物の確定事実確認
+  // 例: 対象人物Aは何歳だったっけ？ / 対象人物Aの誕生日は？
+  // ここでは答えず、Person Context 側で再検索してから判断する。
+  const personFactQuestionLike =
+    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,24})(さん|先生|様|くん|ちゃん|氏)?(?:は|の).*(何歳|年齢|誕生日|生年月日|歳|いくつ|幾つ)/u.test(text) ||
+    /(何歳|年齢|誕生日|生年月日|歳|いくつ|幾つ).*(だったっけ|でしたっけ|だっけ|ですか|かな)/u.test(text);
+
+  if (!projectLike && personFactQuestionLike) {
+    return 'person_state_recall';
+  }
+
+  // 人物名・ニックネーム + 情報整理
+  // 例: 対象人物Aの情報をまとめてください / 対象人物Aについて教えて
+  if (
+    !projectLike &&
+    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,24})(さん|先生|様|くん|ちゃん)?(?:の|について)(?:情報|こと|状態|現在地|文脈|メモ|プロフィール|話|要点|流れ|背景).*(まとめ|整理|教えて|確認|見せて|ありますか|あります)?/u.test(text)
+  ) {
+    return 'person_state_recall';
+  }
+
   if (/(関係|距離感|仲|相性|恋愛|彼|彼女|相手|夫|妻|母|父|子供|友達|クライアント|先生|弟子)/u.test(text)) {
     return 'relationship_recall';
   }
@@ -29,7 +51,7 @@ export function classifyMemoryIntent(userText: string): MemoryIntent {
     return 'active_thread_followup';
   }
 
-  if (/(Muverse|Moodle|PAY\.JP|Supabase|Firebase|Cloudflare|Zoho|Git|Next\.js|route\.ts|コード|PowerShell|typecheck|npm|実装|修正|エラー|ビルド|デプロイ)/iu.test(text)) {
+  if (projectLike) {
     return 'project_context_recall';
   }
 
@@ -39,3 +61,6 @@ export function classifyMemoryIntent(userText: string): MemoryIntent {
 
   return 'normal_chat';
 }
+
+
+

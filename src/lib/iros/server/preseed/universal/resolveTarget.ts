@@ -1,25 +1,36 @@
 ﻿import type { ResolvedTarget } from './types';
-import { normalizeTargetKey, getTurnText } from './normalize';
+import { normalizeTargetKey, normalizePersonLabel, getTurnText } from './normalize';
 
-const COMMON_PERSON_SUFFIX = /(さん|先生|様|くん|ちゃん)$/u;
+const COMMON_PERSON_SUFFIX = /(さん|先生|様|くん|ちゃん|氏)$/u;
 
 function cleanLabel(v: string): string {
-  return String(v ?? '').trim().replace(/[「」『』]/g, '');
+  return normalizePersonLabel(String(v ?? '').trim().replace(/[「」『』]/g, ''));
+}
+
+function isBadTargetLabel(label: string): boolean {
+  return /^(この|その|あの|コード|実装|修正|ファイル|エラー|Git|Next|Supabase|Firebase|Muverse|Moodle|PowerShell|typecheck|npm)$/iu.test(
+    label
+  );
 }
 
 function pickExplicitPersonName(userText: string): string | null {
   const text = String(userText ?? '').trim();
 
   const patterns = [
-    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})(さん|先生|様|くん|ちゃん)の/u,
-    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})(さん|先生|様|くん|ちゃん)と/u,
-    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})(さん|先生|様|くん|ちゃん)は/u,
+    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})(さん|先生|様|くん|ちゃん|氏)の/u,
+    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})(さん|先生|様|くん|ちゃん|氏)と/u,
+    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})(さん|先生|様|くん|ちゃん|氏)は/u,
     /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})の件/u,
+    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})の(?:情報|こと|状態|現在地|文脈|メモ|プロフィール|話|要点|流れ|背景)/u,
+    /([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})について/u,
   ];
 
   for (const p of patterns) {
     const m = text.match(p);
-    if (m?.[1]) return cleanLabel(m[1]);
+    if (!m?.[1]) continue;
+
+    const label = cleanLabel(m[1].replace(COMMON_PERSON_SUFFIX, ''));
+    if (label && !isBadTargetLabel(label)) return label;
   }
 
   return null;
@@ -35,7 +46,7 @@ function pickReferenceFromHistory(historyForTurn: any[]): string | null {
     const m =
       s.match(/targetLabel[:：]\s*([^\s,}]+)/u) ??
       s.match(/targetKey[:：]\s*([^\s,}]+)/u) ??
-      s.match(/([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})(さん|先生|様|くん|ちゃん)/u);
+      s.match(/([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,20})(さん|先生|様|くん|ちゃん|氏)/u);
 
     if (m?.[1]) return cleanLabel(m[1].replace(COMMON_PERSON_SUFFIX, ''));
   }
@@ -63,7 +74,7 @@ export async function resolveTargetForPreSeed(args: {
       aliases: [explicit],
       nicknameMatched: null,
       domain: 'person',
-      confidence: 0.85,
+      confidence: 0.88,
       source: 'explicit_user_text',
     };
   }

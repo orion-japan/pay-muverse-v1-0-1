@@ -91,7 +91,7 @@ export const buildIntuitionCandidate = (input: IntuitionInput): IntuitionCandida
     ? `変化点は、前回の話を説明する段階から、今回の意味づけや可能性を見に行く段階へ移ったことです。`
     : null;
 
-  const relationHint = /相手|関係|連絡|約束|二人|好き|興味|みゆ|浅野/u.test(
+  const relationHint = /相手|関係|連絡|約束|二人|好き|興味/u.test(
     [currentAsk, previousCore, changedPoint, stablePoint, topicDigest, conversationLine].join(' '),
   )
     ? '相手の本心は断定せず、関係に出ている温度差・動き方・止まり方として扱ってください。'
@@ -140,3 +140,4 @@ export const formatIntuitionSeed = (candidate: IntuitionCandidate | null): strin
 
   return lines.length > 2 ? lines.join('\n') : null;
 };
+

@@ -21,6 +21,7 @@ import { attachNextStepMeta, extractNextStepChoiceFromText, findNextStepOptionBy
 import { ensureIrosConversationUuid } from '@/lib/iros/server/ensureIrosConversationUuid';
 import { persistAssistantMessageToIrosMessages } from '@/lib/iros/server/persistAssistantMessageToIrosMessages';
 import { saveIrDiagnosisResult } from '@/lib/iros/memory/saveIrDiagnosisResult';
+import { capturePersonFactFromConversation } from '@/lib/iros/personFactCapture';
 import { extractPendingOfferFromAssistantText } from '@/lib/iros/memory/continuityOffer.extractor';
 import { runNormalBase } from '@/lib/iros/conversation/normalBase';
 import { decideExpressionLane } from '@/lib/iros/expression/decideExpressionLane';
@@ -936,6 +937,130 @@ let extraSoT: Record<string, any> = {
       directReplyLen: String(preSeedDecision?.directReply ?? '').length,
       seedLen: String(preSeedDecision?.seedText ?? '').length,
     });
+
+    // -------------------------------------------------------
+    // 11.975) Person Fact Capture Layer
+    // - 例:
+    //   user: 対象人物Aは、何歳だったっけ？
+    //   Mu  : ここでは確認できません。
+    //   user: この前の誕生日で、45歳っていってたよ
+    // - Pre-SEED が拾えない「人物名なし補足」を、直前文脈から人物事実として保存する
+    // -------------------------------------------------------
+    if (!preSeedDecision) {
+      try {
+        const personFactCapture = await capturePersonFactFromConversation({
+          supabase: supabase as any,
+          userCode,
+          conversationId,
+          userText: userTextClean,
+          traceId,
+        });
+
+        if (personFactCapture?.captured && personFactCapture.directReply) {
+          const directText = String(personFactCapture.directReply ?? '').trim();
+
+          const metaForPersonFactCapture: any = {
+            ...(metaForIros ?? {}),
+            mode,
+            q_code: 'Q3',
+            depth_stage: 'S1',
+            e_turn: 'e3',
+            extra: {
+              ...((metaForIros as any)?.extra ?? {}),
+              persistedByRoute: true,
+              persistPolicy: 'REPLY_SINGLE_WRITER',
+              persistAssistantMessage: false,
+
+              personFactCapture: true,
+              personFactCaptureTargetLabel: personFactCapture.targetLabel ?? null,
+              personFactCaptureField: personFactCapture.field ?? null,
+              personFactCaptureValueText: personFactCapture.valueText ?? null,
+              personFactCaptureValueNumber: personFactCapture.valueNumber ?? null,
+
+              finalTextPolicy: 'FINAL_TEXT_SYNCED_PERSON_FACT_CAPTURE',
+              resolvedText: directText,
+              finalAssistantText: directText,
+              rawTextFromModel: directText,
+              extractedTextFromModel: directText,
+            },
+          };
+
+          let personFactSaved: any = null;
+
+          try {
+            personFactSaved = await persistAssistantMessageToIrosMessages({
+              supabase,
+              conversationId,
+              userCode,
+              content: directText,
+              meta: metaForPersonFactCapture,
+            } as any);
+          } catch (e: any) {
+            console.warn('[IROS/ROUTE][PERSON_FACT_CAPTURE_PERSIST_FAILED]', {
+              traceId,
+              conversationId,
+              userCode,
+              error: e?.message ?? e,
+            });
+          }
+
+          console.log('[IROS/ROUTE][PERSON_FACT_CAPTURE_RETURN]', {
+            traceId,
+            conversationId,
+            userCode,
+            targetLabel: personFactCapture.targetLabel ?? null,
+            field: personFactCapture.field ?? null,
+            savedOk: personFactSaved?.ok ?? null,
+            savedInserted: personFactSaved?.inserted ?? null,
+            messageId: personFactSaved?.messageId ?? null,
+            textLen: directText.length,
+            textHead: directText.slice(0, 160),
+          });
+
+          return NextResponse.json(
+            {
+              ok: true,
+              result: {
+                text: directText,
+                content: directText,
+                assistantText: directText,
+                mode,
+                meta: metaForPersonFactCapture,
+              },
+              text: directText,
+              content: directText,
+              assistantText: directText,
+              assistantMessageId: personFactSaved?.messageId ?? null,
+              mode,
+              finalMode: mode,
+              meta: metaForPersonFactCapture,
+              metaForSave: metaForPersonFactCapture,
+              credit: {
+                ref: creditRef,
+                amount: CREDIT_AMOUNT,
+                authorize: authRes,
+                lowWarn,
+              },
+            },
+            { status: 200, headers: withTrace(CORS_HEADERS, traceId) },
+          );
+        }
+
+        console.info('[IROS/PERSON_FACT_CAPTURE][SKIP]', {
+          traceId,
+          conversationId,
+          userCode,
+          reason: personFactCapture?.reason ?? null,
+        });
+      } catch (e: any) {
+        console.warn('[IROS/PERSON_FACT_CAPTURE][FAILED]', {
+          traceId,
+          conversationId,
+          userCode,
+          error: e?.message ?? e,
+        });
+      }
+    }
 
     if (preSeedDecision) {
       const previousCtxPack =
@@ -1297,6 +1422,133 @@ let extraSoT: Record<string, any> = {
     // -------------------------------------------------------
     // 12) handle
     // -------------------------------------------------------
+
+    // -------------------------------------------------------
+    // 11.98) Person Context Pre-SEED writer persist
+    // - direct return ではなく、assistant message として保存して返す
+    // - handleIrosReply には入れない：slotPlan に負けるため
+    // - ただし persistAssistantMessageToIrosMessages を通すので履歴・created_at は残る
+    // -------------------------------------------------------
+    if (
+      preSeedDecision?.kind === 'person_reference' &&
+      preSeedDecision?.shouldBypassWriter === true &&
+      typeof preSeedDecision?.directReply === 'string' &&
+      preSeedDecision.directReply.trim().length > 0
+    ) {
+      const directText = preSeedDecision.directReply.trim();
+
+      const metaForPersonContext: any = {
+        ...(metaForIros ?? {}),
+        mode,
+        q_code: 'Q3',
+        depth_stage: 'S1',
+        e_turn: 'e3',
+        extra: {
+          ...((metaForIros as any)?.extra ?? {}),
+          ...((preSeedDecision as any)?.metaPatch ?? {}),
+          persistedByRoute: true,
+          persistPolicy: 'REPLY_SINGLE_WRITER',
+          persistAssistantMessage: false,
+
+          preSeedPersonContextWriter: true,
+          preSeedDirectReply: true,
+          preSeedKind: preSeedDecision.kind ?? null,
+          preSeedRoute: preSeedDecision.route ?? null,
+          sourceKind: (preSeedDecision as any).sourceKind ?? null,
+          sourceId: (preSeedDecision as any).sourceId ?? null,
+
+          finalTextPolicy: 'FINAL_TEXT_SYNCED_PERSON_CONTEXT_PRE_SEED',
+          resolvedText: directText,
+          finalAssistantText: directText,
+          rawTextFromModel: directText,
+          extractedTextFromModel: directText,
+
+          ctxPack: {
+            ...(((metaForIros as any)?.extra ?? {})?.ctxPack ?? {}),
+            ...((preSeedDecision as any)?.ctxPackPatch ?? {}),
+            preSeedDecision,
+            preSeedPersonContextWriter: true,
+            preSeedDirectReply: true,
+            directReplyCandidate: directText,
+            personContextSeedText: String((preSeedDecision as any).seedText ?? ''),
+            personContextSourceText: String((preSeedDecision as any).sourceText ?? ''),
+          },
+        },
+      };
+
+      let personContextSaved: any = null;
+
+      try {
+        personContextSaved = await persistAssistantMessageToIrosMessages({
+          supabase,
+          conversationId,
+          userCode,
+          content: directText,
+          meta: metaForPersonContext,
+        } as any);
+
+        console.log('[IROS/ROUTE][PRE_SEED_PERSON_CONTEXT_WRITER_PERSIST]', {
+          traceId,
+          conversationId,
+          userCode,
+          ok: personContextSaved?.ok ?? null,
+          inserted: personContextSaved?.inserted ?? null,
+          messageId: personContextSaved?.messageId ?? null,
+          error: personContextSaved?.error ?? null,
+          directReplyLen: directText.length,
+        });
+      } catch (e: any) {
+        console.warn('[IROS/ROUTE][PRE_SEED_PERSON_CONTEXT_WRITER_PERSIST_FAILED]', {
+          traceId,
+          conversationId,
+          userCode,
+          error: e?.message ?? e,
+          directReplyLen: directText.length,
+        });
+      }
+
+      console.log('[IROS/ROUTE][PRE_SEED_PERSON_CONTEXT_WRITER_RETURN]', {
+        traceId,
+        conversationId,
+        userCode,
+        kind: preSeedDecision.kind,
+        route: preSeedDecision.route,
+        sourceId: preSeedDecision.sourceId ?? null,
+        savedOk: personContextSaved?.ok ?? null,
+        savedInserted: personContextSaved?.inserted ?? null,
+        messageId: personContextSaved?.messageId ?? null,
+        textLen: directText.length,
+        textHead: directText.slice(0, 160),
+      });
+
+      return NextResponse.json(
+        {
+          ok: true,
+          result: {
+            text: directText,
+            content: directText,
+            assistantText: directText,
+            mode,
+            meta: metaForPersonContext,
+          },
+          text: directText,
+          content: directText,
+          assistantText: directText,
+          assistantMessageId: personContextSaved?.messageId ?? null,
+          mode,
+          finalMode: mode,
+          meta: metaForPersonContext,
+          metaForSave: metaForPersonContext,
+          credit: {
+            ref: creditRef,
+            amount: CREDIT_AMOUNT,
+            authorize: authRes,
+            lowWarn,
+          },
+        },
+        { status: 200, headers: withTrace(CORS_HEADERS, traceId) },
+      );
+    }
 const irosResult: HandleIrosReplyOutput = await handleIrosReply({
       conversationId,
       text: userTextClean,
@@ -4019,6 +4271,12 @@ if (!skipTraining) {
     );
   }
 }
+
+
+
+
+
+
 
 
 
