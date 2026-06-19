@@ -939,6 +939,138 @@ let extraSoT: Record<string, any> = {
       seedLen: String(preSeedDecision?.seedText ?? '').length,
     });
 
+
+    // -------------------------------------------------------
+    // 11.974) Relationship Context Capture Layer
+    // - ユーザーが明示した関係性だけ保存する
+    // - 質問・相談文は保存しない
+    // - private relationship は通常の人物情報としては出さない
+    // -------------------------------------------------------
+    if (!preSeedDecision) {
+      try {
+        const relationshipContextCapture = await captureRelationshipContextFromConversation({
+          supabase: supabase as any,
+          userCode,
+          conversationId,
+          userText: userTextClean,
+          traceId,
+        });
+
+        if (
+          (relationshipContextCapture?.captured || relationshipContextCapture?.shouldAskConfirmation) &&
+          relationshipContextCapture.directReply
+        ) {
+          const directText = String(relationshipContextCapture.directReply ?? '').trim();
+
+          const metaForRelationshipContextCapture: any = {
+            ...(metaForIros ?? {}),
+            mode,
+            q_code: 'Q3',
+            depth_stage: 'S1',
+            e_turn: 'e3',
+            extra: {
+              ...((metaForIros as any)?.extra ?? {}),
+              persistedByRoute: true,
+              persistPolicy: 'REPLY_SINGLE_WRITER',
+              persistAssistantMessage: false,
+
+              relationshipContextCapture: true,
+              relationshipContextCaptureTargetLabel: relationshipContextCapture.targetLabel ?? null,
+              relationshipContextCaptureKind: relationshipContextCapture.kind ?? null,
+              relationshipContextCaptureValueText: relationshipContextCapture.valueText ?? null,
+              relationshipContextCaptureValueNormalized: relationshipContextCapture.valueNormalized ?? null,
+              relationshipContextCaptureStatus: relationshipContextCapture.status ?? null,
+              relationshipContextCaptureConfidence: relationshipContextCapture.confidence ?? null,
+              relationshipContextCaptureSensitivity: relationshipContextCapture.sensitivity ?? null,
+              relationshipContextCaptureSource: relationshipContextCapture.source ?? null,
+              relationshipContextCaptureNeedsConfirmation: relationshipContextCapture.shouldAskConfirmation ?? false,
+
+              shouldSuppressSimilarFlow: true,
+              finalTextPolicy: 'FINAL_TEXT_SYNCED_RELATIONSHIP_CONTEXT_CAPTURE',
+              resolvedText: directText,
+              finalAssistantText: directText,
+              rawTextFromModel: directText,
+              extractedTextFromModel: directText,
+            },
+          };
+
+          let relationshipContextSaved: any = null;
+
+          try {
+            relationshipContextSaved = await persistAssistantMessageToIrosMessages({
+              supabase,
+              conversationId,
+              userCode,
+              content: directText,
+              meta: metaForRelationshipContextCapture,
+            } as any);
+          } catch (e: any) {
+            console.warn('[IROS/ROUTE][RELATIONSHIP_CONTEXT_CAPTURE_PERSIST_FAILED]', {
+              traceId,
+              conversationId,
+              userCode,
+              error: e?.message ?? e,
+            });
+          }
+
+          console.log('[IROS/ROUTE][RELATIONSHIP_CONTEXT_CAPTURE_RETURN]', {
+            traceId,
+            conversationId,
+            userCode,
+            targetLabel: relationshipContextCapture.targetLabel ?? null,
+            kind: relationshipContextCapture.kind ?? null,
+            savedOk: relationshipContextSaved?.ok ?? null,
+            savedInserted: relationshipContextSaved?.inserted ?? null,
+            messageId: relationshipContextSaved?.messageId ?? null,
+            textLen: directText.length,
+            textHead: directText.slice(0, 160),
+          });
+
+          return NextResponse.json(
+            {
+              ok: true,
+              result: {
+                text: directText,
+                content: directText,
+                assistantText: directText,
+                mode,
+                meta: metaForRelationshipContextCapture,
+              },
+              text: directText,
+              content: directText,
+              assistantText: directText,
+              assistantMessageId: relationshipContextSaved?.messageId ?? null,
+              mode,
+              finalMode: mode,
+              meta: metaForRelationshipContextCapture,
+              metaForSave: metaForRelationshipContextCapture,
+              credit: {
+                ref: creditRef,
+                amount: CREDIT_AMOUNT,
+                authorize: authRes,
+                lowWarn,
+              },
+            },
+            { status: 200, headers: withTrace(CORS_HEADERS, traceId) },
+          );
+        }
+
+        console.info('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][SKIP]', {
+          traceId,
+          conversationId,
+          userCode,
+          reason: relationshipContextCapture?.reason ?? null,
+        });
+      } catch (e: any) {
+        console.warn('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][FAILED]', {
+          traceId,
+          conversationId,
+          userCode,
+          error: e?.message ?? e,
+        });
+      }
+    }
+
     // -------------------------------------------------------
     // 11.975) Person Fact Capture Layer
     // - 例:
