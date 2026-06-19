@@ -1,13 +1,7 @@
 import type { MemoryIntent } from './types';
 
 function isProjectOrNonPersonContext(text: string): boolean {
-  return /(
-    Muverse|Moodle|PAY\.JP|Supabase|Firebase|Cloudflare|Zoho|Git|GitHub|Next\.js|route\.ts|
-    コード|PowerShell|typecheck|npm|実装|修正|改修|エラー|ビルド|デプロイ|PR|コミット|API|SQL|ファイル|関数|
-    アプリ|サービス|事業|プロジェクト|プロダクト|サイト|LP|導線|課金|登録|ユーザー|継続利用|拡散|SNS|投稿|分析|自動化|ステップメール|マーケ|集客|リリース|ローンチ|完成度|品質|
-    仕様書|書類|資料|PDF|docx|文書|原稿|レポート|特許書類|
-    画像|動画|プロンプト|VEO|Seedance|Kling|花火|台本|デザイン
-  )/iux.test(text);
+  return /(Muverse|Moodle|PAY\.JP|Supabase|Firebase|Cloudflare|Zoho|Git|GitHub|Next\.js|route\.ts|コード|PowerShell|typecheck|npm|実装|修正|改修|エラー|ビルド|デプロイ|PR|コミット|API|SQL|ファイル|関数|アプリ|サービス|事業|プロジェクト|プロダクト|サイト|LP|導線|課金|登録|ユーザー|継続利用|拡散|SNS|投稿|分析|自動化|ステップメール|マーケ|集客|リリース|ローンチ|完成度|品質|仕様書|書類|資料|PDF|docx|文書|原稿|レポート|特許書類|画像|動画|プロンプト|VEO|Seedance|Kling|花火|台本|デザイン)/iu.test(text);
 }
 
 function isObservationFollowupToProject(text: string): boolean {
