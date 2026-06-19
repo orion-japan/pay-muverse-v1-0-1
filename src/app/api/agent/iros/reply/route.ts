@@ -22,6 +22,7 @@ import { ensureIrosConversationUuid } from '@/lib/iros/server/ensureIrosConversa
 import { persistAssistantMessageToIrosMessages } from '@/lib/iros/server/persistAssistantMessageToIrosMessages';
 import { saveIrDiagnosisResult } from '@/lib/iros/memory/saveIrDiagnosisResult';
 import { capturePersonFactFromConversation } from '@/lib/iros/personFactCapture';
+import { captureRelationshipContextFromConversation } from '@/lib/iros/relationshipContextCapture';
 import { extractPendingOfferFromAssistantText } from '@/lib/iros/memory/continuityOffer.extractor';
 import { runNormalBase } from '@/lib/iros/conversation/normalBase';
 import { decideExpressionLane } from '@/lib/iros/expression/decideExpressionLane';
