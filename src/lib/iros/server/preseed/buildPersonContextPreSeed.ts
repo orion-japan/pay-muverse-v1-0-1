@@ -115,6 +115,62 @@ function stripInternalForVisibleReply(v: unknown): string {
     .trim();
 }
 
+
+function isPersonFactQuestionText(v: unknown): boolean {
+  return /(何歳|年齢|誕生日|生年月日|歳|いくつ|幾つ|子供|子ども|お子さん|息子|娘|家族構成|何人|夫|妻|旦那|奥さん|配偶者|結婚|独身|離婚|母|父|兄|姉|弟|妹|職業|仕事|会社|肩書き|立場)/u.test(String(v ?? ''));
+}
+
+function isRelationshipConsultationText(v: unknown): boolean {
+  const s = String(v ?? '');
+  return /(関係|恋愛|片思い|両思い|好き|気持ち|どう思|脈|距離感|不倫|浮気|三角関係|秘密の関係|恋人|元恋人|付き合|別れ|復縁|相談|見て)/u.test(s);
+}
+
+function shouldExposeRelationshipContextInPreSeed(userText: unknown): boolean {
+  const isFactQuestion = isPersonFactQuestionText(userText);
+  const isRelationshipConsultation = isRelationshipConsultationText(userText);
+  return isRelationshipConsultation && !isFactQuestion;
+}
+
+function stripRelationshipContextFromPersonIntentNote(v: string | null): string | null {
+  if (!v) return null;
+
+  const lines = String(v).split(/\r?\n/u);
+  const out: string[] = [];
+  let skippingRelationshipBlock = false;
+
+  for (const line of lines) {
+    const s = String(line ?? '');
+
+    if (/^\s*guidanceHint=.*relationship_context:/iu.test(s)) {
+      const before = s.replace(/relationship_context:[\s\S]*$/iu, '').trimEnd();
+      if (before && before !== 'guidanceHint=') out.push(before);
+      skippingRelationshipBlock = true;
+      continue;
+    }
+
+    if (/^\s*relationship_context:/iu.test(s)) {
+      skippingRelationshipBlock = true;
+      continue;
+    }
+
+    if (skippingRelationshipBlock) {
+      if (/^\s*(relationship\.|心理的文脈|ユーザー確認済み関係性)/u.test(s)) {
+        continue;
+      }
+      skippingRelationshipBlock = false;
+    }
+
+    if (/^\s*relationship\./iu.test(s)) continue;
+    if (/^\s*心理的文脈：/u.test(s)) continue;
+    if (/^\s*ユーザー確認済み関係性：/u.test(s)) continue;
+
+    out.push(s);
+  }
+
+  const cleaned = out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return cleaned || null;
+}
+
 function buildVisiblePersonContextReply(args: {
   targetLabel: string;
   personIntentNote: string | null;
@@ -432,6 +488,13 @@ function buildPersonContextSeed(args: {
   diagnosisText: string | null;
 }): string {
   const lines: string[] = [];
+  const exposeRelationshipContext = shouldExposeRelationshipContextInPreSeed(args.userText);
+  const personIntentNoteForSeed = exposeRelationshipContext
+    ? args.personIntentNote
+    : stripRelationshipContextFromPersonIntentNote(args.personIntentNote);
+  const relationshipNoteTextForSeed = exposeRelationshipContext
+    ? args.relationshipNoteText
+    : null;
 
   lines.push('PERSON_CONTEXT_PRE_SEED (DO NOT OUTPUT)');
   lines.push('source=preseed_person_context');
@@ -459,14 +522,20 @@ function buildPersonContextSeed(args: {
   lines.push('- 「覚えています」は verified memory truth check 以外では使わない。');
   lines.push('');
 
-  if (args.personIntentNote) {
-    lines.push(args.personIntentNote);
+  if (personIntentNoteForSeed) {
+    lines.push(personIntentNoteForSeed);
     lines.push('');
   }
 
-  if (args.relationshipNoteText) {
+  if (relationshipNoteTextForSeed) {
     lines.push('relationship_context:');
-    lines.push(args.relationshipNoteText);
+    lines.push(relationshipNoteTextForSeed);
+    lines.push('');
+  }
+
+  if (!exposeRelationshipContext) {
+    lines.push('relationship_context_guard:');
+    lines.push('relationship_context is withheld in this turn because the current user text is not a relationship consultation.');
     lines.push('');
   }
 
@@ -544,10 +613,13 @@ export async function buildPersonContextPreSeed(args: {
     ''
   );
 
+  const exposeRelationshipContext = shouldExposeRelationshipContextInPreSeed(args.userText);
+
   const hasRelationshipContext =
-    Boolean(relationshipNoteText) ||
-    /relationship_context:/iu.test(String(personIntentNote ?? '')) ||
-    /relationship\.kind=/iu.test(String(personIntentNote ?? ''));
+    exposeRelationshipContext &&
+    (Boolean(relationshipNoteText) ||
+      /relationship_context:/iu.test(String(personIntentNote ?? '')) ||
+      /relationship\.kind=/iu.test(String(personIntentNote ?? '')));
 
   const hasAnySource =
     Boolean(personIntentNote) ||
@@ -605,16 +677,20 @@ export async function buildPersonContextPreSeed(args: {
       userText: args.userText,
       targetLabel,
       seedText,
-      personIntentNote,
-      relationshipNoteText,
+      personIntentNote: exposeRelationshipContext
+        ? personIntentNote
+        : stripRelationshipContextFromPersonIntentNote(personIntentNote),
+      relationshipNoteText: exposeRelationshipContext ? relationshipNoteText : null,
       diagnosisText: diagnosisText || null,
       conversationMentionNote,
       longTermNote,
     })) ??
     buildVisiblePersonContextReply({
       targetLabel,
-      personIntentNote,
-      relationshipNoteText,
+      personIntentNote: exposeRelationshipContext
+        ? personIntentNote
+        : stripRelationshipContextFromPersonIntentNote(personIntentNote),
+      relationshipNoteText: exposeRelationshipContext ? relationshipNoteText : null,
       diagnosisText: diagnosisText || null,
     });
 
@@ -633,7 +709,8 @@ export async function buildPersonContextPreSeed(args: {
     hasLongTerm: Boolean(longTermNote),
     conversationMentionLen: String(conversationMentionNote ?? '').length,
     longTermLen: String(longTermNote ?? '').length,
-    isFactQuestion: /(何歳|年齢|誕生日|生年月日|歳|いくつ|幾つ|子供|子ども|お子さん|息子|娘|家族構成|何人)/u.test(String(args.userText ?? '')),
+    isFactQuestion: isPersonFactQuestionText(args.userText),
+    exposeRelationshipContext,
     directReplyLen: directReply.length,
     seedLen: seedText.length,
   });
