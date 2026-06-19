@@ -653,11 +653,28 @@ export async function buildTurnContext(
     /(?:スクショ診断|スクリーンショット診断|画像診断)\s*(?:ID|id)[:：]?\s*\d+/u.test(followupSourceText) &&
     /(?:続き|元に|もとに|から見て|について|相談|もう少し|詳しく|深く|なぜ|どうして)/u.test(followupSourceText);
 
+  const hasProjectObservationContextForContextThreadGuard =
+    /(導線|継続利用|課金|登録|ユーザー|拡散|SNS|投稿|分析|自動化|ステップメール|アプリ|サービス|事業|プロジェクト|品質|返信|返答|なんでわかるの|レベル)/u.test(
+      followupSourceText
+    );
+
+  const diagnosisMentionIsProjectEvidenceForContextThreadGuard =
+    /(?:スクショ診断|スクリーンショット診断|画像診断|診断)/u.test(followupSourceText) &&
+    /(?:できたおかげ|出来たおかげ|先が見え|確立|導線|継続利用|課金|品質|返信|返答|なんでわかるの|レベル)/u.test(
+      followupSourceText
+    );
+
+  const shouldBlockPrevDiagnosisContextThreadByProjectObservation =
+    hasProjectObservationContextForContextThreadGuard &&
+    diagnosisMentionIsProjectEvidenceForContextThreadGuard &&
+    !hasExplicitScreenshotDiagnosisContinuationHint;
+
   const shouldUsePrevContextThreadForTurn =
     !!prevContextThreadForTurn &&
     !!prevActiveContextFrameForTurn &&
     shouldContinueContextThread(followupSourceText) &&
-    !isExplicitContextExit(followupSourceText);
+    !isExplicitContextExit(followupSourceText) &&
+    !shouldBlockPrevDiagnosisContextThreadByProjectObservation;
 
   const canonicalWorkingReferenceForMemoryRouter =
     shouldUsePrevContextThreadForTurn
@@ -3167,6 +3184,7 @@ export async function buildTurnContext(
     },
   };
 }
+
 
 
 
