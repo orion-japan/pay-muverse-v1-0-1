@@ -1,4 +1,6 @@
-﻿import { buildIrDiagnosisPreSeed } from './buildIrDiagnosisPreSeed';
+﻿import { buildCognitionMap } from '../../cognition/buildCognitionMap';
+import { cognitionMapToSeedText, type CognitionMap } from '../../cognition/cognitionMap';
+import { buildIrDiagnosisPreSeed } from './buildIrDiagnosisPreSeed';
 import { resolveUniversalPreSeed } from './universal';
 import type { PreSeedDecision, ResolvePreSeedDecisionArgs } from './types';
 import { detectPreSeedIntent } from './detectPreSeedIntent';
@@ -228,6 +230,37 @@ function resolveFastPathDirectReply(userTextRaw: string): PreSeedDecision | null
 
   return null;
 }
+
+function attachCognitionMapToDecision(
+  decision: PreSeedDecision,
+  cognitionMap: CognitionMap,
+): PreSeedDecision {
+  const cognitionMapSeedText = cognitionMapToSeedText(cognitionMap);
+
+  return {
+    ...decision,
+    ctxPackPatch: {
+      ...(decision.ctxPackPatch ?? {}),
+      cognitionMap,
+      cognitionMapSeedText,
+      cognitionMapApplied: true,
+    },
+    metaPatch: {
+      ...(decision.metaPatch ?? {}),
+      cognitionMap,
+      cognitionMapSeedText,
+      cognitionMapApplied: true,
+    },
+    debug: ({
+      ...(decision.debug ?? {}),
+      cognitionMapApplied: true,
+      cognitionMapRelationCode: cognitionMap.relationCode,
+      cognitionMapProgress: cognitionMap.progress,
+      cognitionMapTriggerKind: cognitionMap.trigger.kind,
+      cognitionMapGapState: cognitionMap.gap.state,
+    } as any),
+  };
+}
 function getScreenshotDiagnosisFollowupStrength(args: {
   userText: string;
   historyForTurn: any[];
@@ -401,6 +434,31 @@ export async function resolvePreSeedDecision(
 
   const userText = String(args.userText ?? '').trim();
 
+  const cognitionMap = buildCognitionMap({
+    userText,
+    sourceKind: 'preseed',
+    sourceText: userText,
+    debug: {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode ?? null,
+    },
+  });
+
+  console.log('[IROS/PRE_SEED_ENGINE][COGNITION_MAP_BUILT]', {
+    traceId: args.traceId ?? null,
+    conversationId: args.conversationId ?? null,
+    userCode: args.userCode ?? null,
+    relationCode: cognitionMap.relationCode,
+    relationDomain: cognitionMap.relationDomain,
+    progress: cognitionMap.progress,
+    gapState: cognitionMap.gap.state,
+    triggerKind: cognitionMap.trigger.kind,
+    godai: cognitionMap.worldTags.godai,
+    sanmitsu: cognitionMap.worldTags.sanmitsu,
+    confidence: cognitionMap.confidence,
+  });
+
   const fastPathDirectReply = resolveFastPathDirectReply(userText);
   if (fastPathDirectReply) {
     console.log('[IROS/PRE_SEED_ENGINE][FAST_PATH_DIRECT_REPLY]', {
@@ -412,7 +470,7 @@ export async function resolvePreSeedDecision(
       directReplyHead: String(fastPathDirectReply.directReply ?? '').slice(0, 120),
     });
 
-    return fastPathDirectReply;
+    return attachCognitionMapToDecision(fastPathDirectReply, cognitionMap);
   }
 
   const isMemoryTruthCheck =
@@ -816,6 +874,9 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
+
+
+
 
 
 
