@@ -28,6 +28,10 @@ export type TikTokRadarPostIdea = {
   hashtags: string;
   totalScore: number;
   scoreLabel: string;
+  muLeadScore: number;
+  viralFormatScore: number;
+  recommendedAction: string;
+  sofiaStrategyNote: string;
   variants: TikTokRadarPostIdeaVariant[];
 };
 
@@ -39,12 +43,16 @@ function scoreNumber(value: number | null | undefined) {
   return Number.isFinite(Number(value)) ? Number(value) : 0;
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
 function uniqueJoin(values: string[]) {
   return Array.from(new Set(values.filter(Boolean))).join(" ");
 }
 
-function pickTheme(input: TikTokRadarPostIdeaInput) {
-  const text = [
+function buildSearchText(input: TikTokRadarPostIdeaInput) {
+  return [
     input.category,
     input.keyword,
     input.hook_text,
@@ -56,6 +64,10 @@ function pickTheme(input: TikTokRadarPostIdeaInput) {
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function pickTheme(input: TikTokRadarPostIdeaInput) {
+  const text = buildSearchText(input);
 
   if (text.includes("復縁") || text.includes("連絡")) {
     return {
@@ -121,6 +133,93 @@ function buildBaseHashtags(themeTag: string, keyword: string) {
   ]);
 }
 
+function calculateMuLeadScore(input: TikTokRadarPostIdeaInput, totalScore: number) {
+  const text = buildSearchText(input);
+  const hasMirrorHook =
+    text.includes("なんで") ||
+    text.includes("見抜") ||
+    text.includes("本当は") ||
+    text.includes("実は") ||
+    text.includes("気づいて");
+  const hasMuFit =
+    text.includes("相手の気持ち") ||
+    text.includes("自己否定") ||
+    text.includes("自分の価値") ||
+    text.includes("苦しい") ||
+    text.includes("不安");
+  const hasSaveSignal = text.includes("保存") || text.includes("見返す");
+
+  return clamp(totalScore + (hasMirrorHook ? 3 : 0) + (hasMuFit ? 3 : 0) + (hasSaveSignal ? 2 : 0), 0, 20);
+}
+
+function calculateViralFormatScore(input: TikTokRadarPostIdeaInput) {
+  const hook = cleanText(input.hook_text);
+  const caption = cleanText(input.caption_text);
+  const topComment = cleanText(input.top_comment);
+  const text = `${hook} ${caption} ${topComment}`;
+
+  const conciseHook = hook.length > 0 && hook.length <= 48;
+  const hasQuestion = /[？?]/.test(hook) || text.includes("なぜ") || text.includes("なんで");
+  const hasCommentSignal = topComment.length > 0;
+  const hasRepeatableFrame =
+    text.includes("特徴") ||
+    text.includes("サイン") ||
+    text.includes("理由") ||
+    text.includes("共通点") ||
+    text.includes("チェック");
+
+  return clamp(
+    2 +
+      (conciseHook ? 1 : 0) +
+      (hasQuestion ? 1 : 0) +
+      (hasCommentSignal ? 1 : 0) +
+      (hasRepeatableFrame ? 1 : 0),
+    0,
+    5
+  );
+}
+
+function pickRecommendedAction(muLeadScore: number, viralFormatScore: number, totalScore: number) {
+  if (muLeadScore >= 16 && viralFormatScore >= 4) {
+    return "今日の投稿候補。Mu導線型か見抜き型でそのまま台本化できます。";
+  }
+
+  if (muLeadScore >= 14) {
+    return "Mu導線向き。冒頭を短くして、最後にMu体験への一文を入れると使いやすいです。";
+  }
+
+  if (viralFormatScore >= 4 && totalScore >= 10) {
+    return "TikTok形式向き。保存型か共感型として調整すると使えます。";
+  }
+
+  if (totalScore >= 8) {
+    return "素材として保留。共鳴語を増やしてから投稿案化してください。";
+  }
+
+  return "市場メモとして保存。投稿化は急がず、似た素材を追加して比較してください。";
+}
+
+function buildSofiaStrategyNote({
+  themeName,
+  muLeadScore,
+  viralFormatScore,
+  totalScore,
+  recommendedAction,
+}: {
+  themeName: string;
+  muLeadScore: number;
+  viralFormatScore: number;
+  totalScore: number;
+  recommendedAction: string;
+}) {
+  return [
+    `Sofia戦略メモ: ${themeName}の素材です。`,
+    `共鳴合計 ${totalScore} / Mu導線 ${muLeadScore} / TikTok形式 ${viralFormatScore}。`,
+    recommendedAction,
+    "外向きのバズだけでなく、『これ私のことだ』『Muに聞きたい』へつながる言葉を優先してください。",
+  ].join("\n");
+}
+
 export function buildTikTokRadarPostIdea(
   input: TikTokRadarPostIdeaInput
 ): TikTokRadarPostIdea {
@@ -134,6 +233,17 @@ export function buildTikTokRadarPostIdea(
     scoreNumber(input.why_known_score) +
     scoreNumber(input.resonance_score) +
     scoreNumber(input.save_intent_score);
+
+  const muLeadScore = calculateMuLeadScore(input, totalScore);
+  const viralFormatScore = calculateViralFormatScore(input);
+  const recommendedAction = pickRecommendedAction(muLeadScore, viralFormatScore, totalScore);
+  const sofiaStrategyNote = buildSofiaStrategyNote({
+    themeName: theme.name,
+    muLeadScore,
+    viralFormatScore,
+    totalScore,
+    recommendedAction,
+  });
 
   const scoreLabel =
     totalScore >= 13
@@ -241,6 +351,10 @@ export function buildTikTokRadarPostIdea(
     hashtags,
     totalScore,
     scoreLabel,
+    muLeadScore,
+    viralFormatScore,
+    recommendedAction,
+    sofiaStrategyNote,
     variants,
   };
 }
