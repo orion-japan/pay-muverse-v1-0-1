@@ -3302,6 +3302,22 @@ if (similarFlowSeedForWriter && memoryRecallNotFoundForSimilarFlow) {
 
 // Memory certainty guard
 // Do not let similar-flow memory become exact recalled memory.
+const screenshotFollowupSeedForPostprocess = [
+  (metaForSave as any)?.extra?.ctxPack?.memorySeedText,
+  (metaForSave as any)?.extra?.memorySeedText,
+  (metaForSave as any)?.extra?.ctxPack?.preSeedAssistSeedText,
+  (metaForSave as any)?.extra?.preSeedAssistSeedText,
+]
+  .map((v) => String(v ?? '').trim())
+  .find((v) => v.startsWith('SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED')) ?? '';
+
+const isScreenshotDiagnosisFollowupForPostprocess =
+  screenshotFollowupSeedForPostprocess.startsWith('SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED') ||
+  (metaForSave as any)?.extra?.ctxPack?.screenshotDiagnosisFollowup === true ||
+  (metaForSave as any)?.extra?.screenshotDiagnosisFollowup === true ||
+  (metaForSave as any)?.extra?.ctxPack?.presentationKind === 'screenshot_diagnosis_followup' ||
+  (metaForSave as any)?.extra?.presentationKind === 'screenshot_diagnosis_followup';
+
 const userTextForMemoryCertaintyGuard = String(userText ?? '').replace(/\s+/g, ' ').trim();
 const asksPastMemoryRecall =
   /(覚えて|覚えていますか|前に|以前|前回|こないだ|前話した|以前話した|話した.*覚えて|あの話|続き)/u.test(
@@ -3314,7 +3330,7 @@ const exactPastStateNoteForWriter = String(
     '',
 ).trim();
 
-if (asksPastMemoryRecall && !exactPastStateNoteForWriter) {
+if (asksPastMemoryRecall && !exactPastStateNoteForWriter && !isScreenshotDiagnosisFollowupForPostprocess) {
   const memoryRecallNotFoundTurnContract = {
     version: 'turn_contract_v1',
     turnTask: 'memory_recall_check',
@@ -3429,6 +3445,15 @@ try {
       userTextNowForPrevRephrase,
     );
 
+  const isScreenshotDiagnosisFollowupTurnForPrevRephrase =
+    (metaForSave as any)?.extra?.ctxPack?.screenshotDiagnosisFollowup === true ||
+    (metaForSave as any)?.extra?.screenshotDiagnosisFollowup === true ||
+    (metaForSave as any)?.extra?.ctxPack?.diagnosisFollowup === true ||
+    (metaForSave as any)?.extra?.diagnosisFollowup === true ||
+    (metaForSave as any)?.extra?.ctxPack?.presentationKind === 'screenshot_diagnosis_followup' ||
+    (metaForSave as any)?.extra?.presentationKind === 'screenshot_diagnosis_followup' ||
+    String((metaForSave as any)?.extra?.ctxPack?.memorySeedText ?? '').startsWith('SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED') ||
+    String((metaForSave as any)?.extra?.memorySeedText ?? '').startsWith('SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED');
     const historyForPreviousReplyCandidates = [
       Array.isArray((args as any)?.history) ? ((args as any).history as any[]) : [],
       Array.isArray((metaForSave as any)?.extra?.ctxPack?.historyForWriter)
@@ -3496,7 +3521,7 @@ try {
         })),
         previousAssistantTextHead: previousAssistantText.slice(0, 120),
       });
-  if (!microNow && wantsPreviousReplyRephrase && !asksRealTranslation && previousAssistantText) {
+  if (!microNow && wantsPreviousReplyRephrase && !asksRealTranslation && !isScreenshotDiagnosisFollowupTurnForPrevRephrase && previousAssistantText) {
     const previousPlain = previousAssistantText
       .replace(/\s+/g, ' ')
       .replace(/[🌀🪔]/g, '')
@@ -3570,10 +3595,31 @@ try {
       // }
 
 
+      // ✅ スクショ診断IDの続き相談は、ir診断/記憶確認/通常flowより前に正本Seedを固定する
+      if (
+        isScreenshotDiagnosisFollowupForPostprocess &&
+        screenshotFollowupSeedForPostprocess &&
+        !String(seedForWriterRaw ?? '').includes('SCREENSHOT_DIAGNOSIS_FOLLOWUP_SEED')
+      ) {
+        seedForWriterRaw = [
+          screenshotFollowupSeedForPostprocess,
+          'WRITER_RULE: 上のSCREENSHOT_DIAGNOSIS_FOLLOWUP_SEEDを最優先の正本にする。diagnosisText内の具体語を必ず使う。一般的なスクショ診断説明で返さない。',
+          String(seedForWriterRaw ?? '').trim(),
+        ].filter(Boolean).join('\n\n');
+
+        console.log('[IROS/PostProcess][SCREENSHOT_FOLLOWUP_SEED_FORCE_BEFORE_DIAG]', {
+          hasSeed: true,
+          seedLen: String(seedForWriterRaw ?? '').length,
+          seedHead: String(seedForWriterRaw ?? '').slice(0, 120),
+        });
+      }
       // ✅ ir診断は重いseedを通さない
       const isIrDiagnosis =
-        (metaForSave?.extra?.isIrDiagnosisTurn === true) ||
-        (metaForSave?.extra?.presentationKind === 'diagnosis');
+        !isScreenshotDiagnosisFollowupForPostprocess &&
+        (
+          (metaForSave?.extra?.isIrDiagnosisTurn === true) ||
+          (metaForSave?.extra?.presentationKind === 'diagnosis')
+        );
 
       let seedForWriterSanitized = '';
 
@@ -3768,8 +3814,11 @@ try {
 
       const seedTextNow = String(baseVisible ?? '');
       const isIrDiagnosis =
-      (metaForSave?.extra?.isIrDiagnosisTurn === true) ||
-      (metaForSave?.extra?.presentationKind === 'diagnosis');
+        !isScreenshotDiagnosisFollowupForPostprocess &&
+        (
+          (metaForSave?.extra?.isIrDiagnosisTurn === true) ||
+          (metaForSave?.extra?.presentationKind === 'diagnosis')
+        );
 
     const isDecideLike =
       isIrDiagnosis || // ← 🔥これ追加（最重要）
@@ -4042,4 +4091,12 @@ const finalPhaseForUnified =
 
   return { assistantText: finalAssistantText, metaForSave };
 }
+
+
+
+
+
+
+
+
 

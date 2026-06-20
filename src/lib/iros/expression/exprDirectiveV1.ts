@@ -48,7 +48,7 @@ export function buildExprDirectiveV1(input: ExprDirectiveInput): string | null {
 
   // RETURNが続く時：つなぎを厚くし、詰問を避ける
   if (ret && streak >= 1) {
-    lines.push('会話接続：RETURN傾向。断定や詰問を避け、いまの場に残っているものを静かに言い換えて返す。質問は禁止。身体感覚や時間経過への誘導はしない。場の変化・残っている余韻・空気のほどけ方に焦点を示す。');
+    lines.push('会話接続：RETURN傾向。他者の本心断定や詰問は避ける。ただし、ユーザーの問いの核心は短く言い切る。観測結果を説明で終わらせず、現実の場面や行動に置き換えて返す。質問は禁止。');
   }
 
   // e_turn別：文章構成の重み
@@ -58,7 +58,7 @@ export function buildExprDirectiveV1(input: ExprDirectiveInput): string | null {
       break;
 
     case 'e2':
-      lines.push('構成：圧を上げない。「言いたいけど言えてない/選びたくないけど選んだ」など“選べる言い換え”で返してから本文へ。');
+      lines.push('構成：圧を上げない。ただし安全に薄めない。最初に問いの核心を短く置き、その後で現実の場面に置き換える。');
       break;
 
     case 'e3':
@@ -75,7 +75,7 @@ export function buildExprDirectiveV1(input: ExprDirectiveInput): string | null {
   }
 
   // polarity補正（軽く）
-  if (pol === 'yin') lines.push('トーン：yin寄り。落ち着き・余白・保護。断言より受容。');
+  if (pol === 'yin') lines.push('トーン：yin寄り。落ち着きは保つが、弱くぼかさない。事実断定より受容。ただし見立ての芯は短く言い切る。');
   if (pol === 'yang') lines.push('トーン：yang寄り。前進の芯は出すが、押し切らない。');
 
   // mild（自信が低い）なら、強い演出を抑制

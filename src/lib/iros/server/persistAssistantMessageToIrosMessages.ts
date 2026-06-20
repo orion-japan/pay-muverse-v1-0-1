@@ -1,5 +1,6 @@
 // src/lib/iros/server/persistAssistantMessageToIrosMessages.ts
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { detectWriterDeviation } from './preseed/writerDeviationCheck';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -303,6 +304,46 @@ export async function persistAssistantMessageToIrosMessages(args: {
       }
     }
 
+    // =========================
+    // ✅ Writer Deviation Check
+    // - 保存直前に、Writer が Pre-SEED / CognitionMap / TCF から逸れていないかを監査する。
+    // - v1 では自動修正しない。ログと meta.extra への記録のみ。
+    // =========================
+    try {
+      const ex3: any = m.extra && typeof m.extra === 'object' ? m.extra : {};
+      const deviation = detectWriterDeviation({
+        text: String(content ?? ''),
+        meta: m,
+      });
+
+      ex3.writerDeviationCheck = {
+        shouldWarn: deviation.shouldWarn,
+        shouldRewrite: deviation.shouldRewrite,
+        reasons: deviation.reasons,
+        flags: deviation.flags,
+        checkedAt: Date.now(),
+        version: 'writer_deviation_check_v1',
+      };
+
+      m.extra = ex3;
+
+      if (deviation.shouldWarn) {
+        console.warn('[IROS/WRITER_DEVIATION_CHECK]', {
+          conversationId: conversationUuid,
+          userCode,
+          traceId: ex3.traceId ?? m.traceId ?? null,
+          reasons: deviation.reasons,
+          flags: deviation.flags,
+          textHead: String(content ?? '').slice(0, 160),
+        });
+      }
+    } catch (e) {
+      console.warn('[IROS/WRITER_DEVIATION_CHECK][FAILED]', {
+        conversationId: conversationUuid,
+        userCode,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
     finalMeta = sanitizeForJsonb(m);
   } catch (e) {
     console.warn('[IROS/persist] meta sync failed', e);
@@ -944,4 +985,5 @@ const messageId =
           : null;
 
 return { ok: true, inserted: true, blocked: false, messageId };}
+
 

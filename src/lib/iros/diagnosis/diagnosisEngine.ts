@@ -1,4 +1,4 @@
-// src/lib/iros/diagnosis/diagnosisEngine.ts
+﻿// src/lib/iros/diagnosis/diagnosisEngine.ts
 
 import { buildDiagnosisText } from './buildDiagnosisText';
 import { chatComplete } from '@/lib/iros/openai';
@@ -173,7 +173,7 @@ function classifyTargetScopeForDiagnosis(targetLabel: string): TargetScopeForDia
   }
 
   // ✅ 人名らしいもの
-  // 「まーちゃん」「田中さん」など、明確な物事ではない短い固有名は相手側に寄せる。
+  // 「対象人物A」「対象人物B」など、明確な物事ではない短い固有名は相手側に寄せる。
   if (
     /(さん|様|先生|くん|ちゃん)$/u.test(raw) ||
     (/^[ぁ-んァ-ヶ一-龠々ー・A-Za-z]{2,12}$/u.test(normalized) &&
@@ -776,3 +776,4 @@ ${relationshipMemoryMaterial}
     },
   };
 }
+

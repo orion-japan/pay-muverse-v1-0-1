@@ -206,41 +206,52 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
         diagnosis_seed: custom.detail?.diagnosis_seed ?? null,
         at: now,
       };
+      console.info('[IROS_SCREENSHOT_DIAGNOSIS_COMPLETE]', {
+        hasDiagnosis: Boolean(diagnosis),
+        diagnosisLen: diagnosis.length,
+        hasImageDataUrl: Boolean(imageDataUrl),
+        localImageId: localImageId || null,
+      });
 
-      setMessages((prev) => [
-        ...prev,
-        ...(imageDataUrl
-          ? [
-              {
-                id: 'screenshot-image-' + Date.now(),
-                role: 'user',
-                text: '📎 スクショ画像',
-                content: '📎 スクショ画像',
-                created_at: now,
-                ts: Date.now(),
-                meta: {
-                  kind: 'screenshot_image_preview',
-                  image_data_url: imageDataUrl,
-                  localImageId: localImageId || null,
-                  localOnly: true,
-                  fallbackText:
-                    'この画像は、この端末のブラウザ内にのみ保存されています。別の端末では表示できません。診断結果は下に保存されています。',
-                },
-              } as any,
-            ]
-          : []),
-        {
-          id: `screenshot-diagnosis-${Date.now()}`,
-          role: 'assistant',
-          text: `【スクショ診断結果】\n${diagnosis}`,
-          created_at: now,
-          meta: {
-            kind: 'screenshot_diagnosis',
-            diagnosis_seed: custom.detail?.diagnosis_seed ?? null,
-          },
-        } as any,
-      ]);
-    };
+      const diagnosisText = `【スクショ診断結果】` + "\n" + diagnosis;
+
+      const imageMsg: IrosMessage | null =
+        imageDataUrl || localImageId
+          ? ({
+              id: `screenshot-image-${Date.now()}`,
+              role: 'user',
+              text: '📎 スクショ画像',
+              content: '📎 スクショ画像',
+              created_at: now,
+              ts: Date.now(),
+              meta: {
+                kind: 'screenshot_image_preview',
+                image_data_url: imageDataUrl || undefined,
+                localImageId: localImageId || null,
+                local_image_id: localImageId || null,
+                localOnly: true,
+              },
+            } as IrosMessage)
+          : null;
+
+      const diagnosisMsg: IrosMessage = {
+        id: `screenshot-diagnosis-${Date.now()}`,
+        role: 'assistant',
+        text: diagnosisText,
+        content: diagnosisText,
+        created_at: now,
+        ts: Date.now() + 1,
+        meta: {
+          kind: 'screenshot_diagnosis',
+          diagnosis_seed: custom.detail?.diagnosis_seed ?? null,
+        },
+      } as IrosMessage;
+
+      setMessages((prev) => {
+        const next = imageMsg ? [imageMsg, diagnosisMsg] : [diagnosisMsg];
+        return [...(prev || []), ...next];
+      });
+};
 
     window.addEventListener('iros:screenshot-diagnosis-complete', handler as EventListener);
     return () => {
@@ -357,6 +368,11 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
 
         const json = await res.json().catch(() => null);
         if (res.ok && json?.ok && Array.isArray(json.items)) {
+          console.info('[IROS_SCREENSHOT_DIAGNOSIS_RESTORE]', {
+            cid,
+            count: json.items.length,
+          });
+
           screenshotLogs = json.items;
         }
       }
@@ -367,12 +383,18 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
       });
     }
 
-    const screenshotMsgs: IrosMessage[] = screenshotLogs.flatMap((item: any) => {
-      const id = String(item?.id || '');
-      const diagnosisText = String(item?.diagnosis_text || '').trim();
-      const createdAt = item?.created_at || new Date().toISOString();
+    const screenshotMsgs: IrosMessage[] = (screenshotLogs || []).flatMap((item: any) => {
+      const rawId = String(item?.id || item?.diagnosis_log_id || item?.created_at || '').trim();
+      const id = rawId || crypto.randomUUID();
+      const diagnosis = String(item?.diagnosis_text || '').trim();
 
-      if (!id || !diagnosisText) return [];
+      if (!diagnosis) return [];
+
+      const createdAt = String(item?.created_at || new Date().toISOString());
+      const ts = Date.parse(createdAt) || Date.now();
+      const localImageId = rawId;
+
+      const diagnosisText = `【スクショ診断結果】` + "\n" + diagnosis;
 
       return [
         {
@@ -381,31 +403,30 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
           text: '📎 スクショ画像',
           content: '📎 スクショ画像',
           created_at: createdAt,
-          ts: new Date(createdAt).getTime() || Date.now(),
+          ts,
           meta: {
             kind: 'screenshot_image_preview',
-            localImageId: id,
-            local_image_id: id,
+            localImageId: localImageId || null,
+            local_image_id: localImageId || null,
             localOnly: true,
             fallbackText:
-              'この画像は、この端末のブラウザ内にのみ保存されています。別の端末・別のブラウザでは表示できません。診断結果は下に保存されています。',
+              'この画像は、この端末のブラウザ内にのみ保存されています。診断結果は下に保存されています。',
           },
-        } as any,
+        } as IrosMessage,
         {
           id: `screenshot-diagnosis-${id}`,
           role: 'assistant',
-          text: `【スクショ診断結果】\n${diagnosisText}`,
-          content: `【スクショ診断結果】\n${diagnosisText}`,
+          text: diagnosisText,
+          content: diagnosisText,
           created_at: createdAt,
-          ts: (new Date(createdAt).getTime() || Date.now()) + 1,
+          ts: ts + 1,
           meta: {
             kind: 'screenshot_diagnosis',
             diagnosis_seed: item?.diagnosis_seed_json ?? null,
           },
-        } as any,
+        } as IrosMessage,
       ];
     });
-
     const latestScreenshot = [...screenshotLogs]
       .reverse()
       .find((item: any) => String(item?.diagnosis_text || '').trim());
@@ -418,7 +439,13 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
       };
     }
 
-    const rows = screenshotMsgs.length ? [...rowsBase, ...screenshotMsgs] : rowsBase;
+    const rows = (screenshotMsgs.length ? [...rowsBase, ...screenshotMsgs] : rowsBase)
+      .slice()
+      .sort((a: any, b: any) => {
+        const at = Number(a?.ts ?? Date.parse(String(a?.created_at ?? '')) ?? 0);
+        const bt = Number(b?.ts ?? Date.parse(String(b?.created_at ?? '')) ?? 0);
+        return at - bt;
+      });
 
     setMessages((prev) => {
       // 会話が変わっていたら、過去の Seed は引き継がずにサーバー結果だけにする
@@ -1071,6 +1098,12 @@ const payload: any = {
     </IrosChatContext.Provider>
   );
 };
+
+
+
+
+
+
 
 
 

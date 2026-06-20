@@ -103,6 +103,47 @@ function looksLikeDecisionAxisFollowup(text: string): boolean {
 
   return keywords.some((word) => text.includes(word));
 }
+
+function looksLikeDeepReadingRequest(text: string): boolean {
+  if (!text) return false;
+
+  const keywords = [
+    '今の僕の状態',
+    '今の私の状態',
+    '今の状態',
+    '状態見て',
+    '状態を見て',
+    '状態分析',
+    '仕事の話として',
+    '仕事として見る',
+    '実務的',
+    'タイミング',
+    'どういう意味',
+    'どんな意味',
+    'なぜそう',
+    'なんでそう',
+    '理由',
+    '根拠',
+    'どこが止まって',
+    '何が止まって',
+    '何を見れば',
+    'どこを見れば',
+    '躊躇',
+    '迷って',
+    '進めない',
+    '広げたい',
+    '拡散',
+    '導線',
+    '継続利用',
+    '課金',
+    'なんでわかるの',
+    '返信品質',
+    '深く見て',
+    '構造で見て',
+  ];
+
+  return keywords.some((word) => text.includes(word));
+}
 function looksLikeDeclarationResonance(text: string): boolean {
   if (!text) return false;
 
@@ -155,7 +196,9 @@ export function selectSlotPattern(input: SelectSlotPatternInput): PatternKey {
     looksLikeDetailFollowup(normalizeLite(followupText)) ||
     looksLikeDetailFollowup(normalizeLite(userText)) ||
     looksLikeDecisionAxisFollowup(normalizeLite(followupText)) ||
-    looksLikeDecisionAxisFollowup(normalizeLite(userText));
+    looksLikeDecisionAxisFollowup(normalizeLite(userText)) ||
+    looksLikeDeepReadingRequest(followupText) ||
+    looksLikeDeepReadingRequest(userText);
 
   const declarationLike = looksLikeDeclarationResonance(followupText || userText);
 

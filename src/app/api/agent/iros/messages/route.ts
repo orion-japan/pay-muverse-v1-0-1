@@ -1,4 +1,4 @@
-// src/app/api/agent/iros/messages/route.ts
+﻿// src/app/api/agent/iros/messages/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -550,12 +550,21 @@ export async function GET(req: NextRequest) {
       .slice(-llmLimit)
       .map((m) => ({ role: m.role, content: m.content }));
 
+      console.log('[IROS/messages][GET_RETURN]', {
+        cid,
+        convUuid,
+        userCode,
+        rawLen: Array.isArray((res as any).data) ? (res as any).data.length : null,
+        filteredLen: filtered.length,
+        messagesLen: messages.length,
+        first: messages[0] ? { id: messages[0].id, role: messages[0].role, head: String(messages[0].content ?? '').slice(0, 60), created_at: messages[0].created_at } : null,
+        last: messages[messages.length - 1] ? { id: messages[messages.length - 1].id, role: messages[messages.length - 1].role, head: String(messages[messages.length - 1].content ?? '').slice(0, 60), created_at: messages[messages.length - 1].created_at } : null,
+      });
+
       return json({
         ok: true,
-        messages: messages.map(m => ({
-          role: m.role,
-          content: m.content,
-        })),
+        messages,
+        llm_messages,
       }, 200);
 
   } catch (e: any) {
@@ -978,3 +987,6 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+
+

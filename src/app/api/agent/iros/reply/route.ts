@@ -1,4 +1,6 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
+import { resolvePreSeedDecision } from '@/lib/iros/server/preseed';
+import { callPreSeedDiagnosisWriter } from '@/lib/iros/server/preseed/callPreSeedDiagnosisWriter';
 import { createClient } from '@supabase/supabase-js';
 
 import { verifyFirebaseAndAuthorize } from '@/lib/authz';
@@ -19,10 +21,13 @@ import { attachNextStepMeta, extractNextStepChoiceFromText, findNextStepOptionBy
 import { ensureIrosConversationUuid } from '@/lib/iros/server/ensureIrosConversationUuid';
 import { persistAssistantMessageToIrosMessages } from '@/lib/iros/server/persistAssistantMessageToIrosMessages';
 import { saveIrDiagnosisResult } from '@/lib/iros/memory/saveIrDiagnosisResult';
+import { capturePersonFactFromConversation } from '@/lib/iros/personFactCapture';
+import { captureRelationshipContextFromConversation } from '@/lib/iros/relationshipContextCapture';
 import { extractPendingOfferFromAssistantText } from '@/lib/iros/memory/continuityOffer.extractor';
 import { runNormalBase } from '@/lib/iros/conversation/normalBase';
 import { decideExpressionLane } from '@/lib/iros/expression/decideExpressionLane';
 import { normalizeIrosStyleFinal } from '@/lib/iros/language/normalizeIrosStyleFinal';
+import { chatComplete } from '@/lib/llm/chatComplete';
 
 import { loadIrosMemoryState } from '@/lib/iros/memoryState';
 import { applyRenderEngineIfEnabled } from './_impl/applyRenderEngineIfEnabled';
@@ -792,77 +797,7 @@ let extraSoT: Record<string, any> = {
       });
     }
 
-    // -------------------------------------------------------
-    // 11.9) Similar Flow pre-writer seed（best-effort）
-    // -------------------------------------------------------
-    try {
-      const preSimilarFlowLookup = await loadSimilarFlowSnapshots({
-        supabase: supabase as any,
-        userCode,
-        conversationId,
-        sourceTypes: ['chat'],
-        situationTopic: userTextClean,
-        keywords: [userTextClean].filter((v): v is string => Boolean(String(v ?? '').trim())),
-        recentLimit: 80,
-        limit: 3,
-      });
 
-      const preSimilarFlowSeed = buildSimilarFlowSeed({
-        matches: preSimilarFlowLookup.matches,
-        currentState: {},
-        limit: 3,
-        maxChars: 1600,
-      });
-
-      if (preSimilarFlowSeed) {
-        const previousCtxPack =
-          extraSoT.ctxPack && typeof extraSoT.ctxPack === 'object'
-            ? extraSoT.ctxPack
-            : {};
-
-        const preSimilarFlowDebug = {
-          source: 'pre_writer',
-          lookupOk: preSimilarFlowLookup.ok,
-          matchesLen: preSimilarFlowLookup.matches.length,
-          hasSeed: true,
-          seedLen: String(preSimilarFlowSeed).length,
-          lookupError: preSimilarFlowLookup.ok ? null : String((preSimilarFlowLookup as any).error ?? ''),
-        };
-
-        extraSoT = {
-          ...extraSoT,
-          similarFlowSeed: preSimilarFlowSeed,
-          similarFlowDebug: preSimilarFlowDebug,
-          ctxPack: {
-            ...previousCtxPack,
-            similarFlowSeed: preSimilarFlowSeed,
-            similarFlowDebug: preSimilarFlowDebug,
-          },
-        };
-      }
-
-      console.log('[IROS/SIMILAR_FLOW_PRE_WRITER]', {
-        conversationId,
-        userCode,
-        lookupOk: preSimilarFlowLookup.ok,
-        matchesLen: preSimilarFlowLookup.matches.length,
-        hasSeed: Boolean(preSimilarFlowSeed),
-        seedLen: String(preSimilarFlowSeed ?? '').length,
-        similarFlowSeedHead: String(preSimilarFlowSeed ?? '').slice(0, 1200),
-        similarFlowSeedHasFalseRecall: /覚えています|もちろん、覚えています|残っています|受け取っています|沖縄の風|海の色|空気|景色|温度/.test(String(preSimilarFlowSeed ?? '')),
-        similarFlowSeedFalseRecallMatches: String(preSimilarFlowSeed ?? '').match(/覚えています|もちろん、覚えています|残っています|受け取っています|沖縄の風|海の色|空気|景色|温度/g) ?? [],
-      });
-    } catch (e) {
-      console.warn('[IROS/SIMILAR_FLOW_PRE_WRITER][FAILED]', {
-        conversationId,
-        userCode,
-        error: e,
-      });
-    }
-
-    // -------------------------------------------------------
-    // 12) handle
-    // -------------------------------------------------------
 
     // -------------------------------------------------------
     // 11.95) Screenshot diagnosis context -> diagnosis followup ctx
@@ -877,7 +812,58 @@ let extraSoT: Record<string, any> = {
             ? String((reqMetaRaw as any).extra.screenshotDiagnosisHintText).trim()
             : null;
 
-      if (screenshotDiagnosisHintText) {
+      const currentUserTextForScreenshotContextGate = String(
+        (body as any)?.text ??
+          (body as any)?.content ??
+          (body as any)?.message ??
+          (reqMetaRaw as any)?.userText ??
+          (reqMetaRaw as any)?.text ??
+          (reqMetaRaw as any)?.currentUserText ??
+          (reqMetaRaw as any)?.extra?.userText ??
+          (reqMetaRaw as any)?.extra?.text ??
+          ''
+      ).trim();
+
+      const hasExplicitScreenshotDiagnosisIdForContextGate =
+        /スクショ診断\s*(?:ID|id)?[:：]?\s*\d+/u.test(currentUserTextForScreenshotContextGate) ||
+        /スクリーンショット診断\s*(?:ID|id)?[:：]?\s*\d+/u.test(currentUserTextForScreenshotContextGate);
+
+      const hasNearbyScreenshotDiagnosisReferenceForContextGate =
+        /(?:この|今の|上の|さっきの|直前の|前の)\s*(?:スクショ診断|スクリーンショット診断|画像診断|診断結果|診断|結果)/u.test(
+          currentUserTextForScreenshotContextGate
+        ) ||
+        /(?:スクショ|スクリーンショット|画像).*(?:診断|結果|続き|深め|詳しく|相手|気持ち)/u.test(
+          currentUserTextForScreenshotContextGate
+        ) ||
+        /(?:診断結果|診断|結果).*(?:続き|深め|詳しく|相手|気持ち|読み解|見て|教えて)/u.test(
+          currentUserTextForScreenshotContextGate
+        );
+
+      const hasTopicSwitchForScreenshotContextGate =
+        /(?:ところで|話(?:を)?変える|話変わる|別件|それとは別|関係ない|実装|コード|GitHub|github|プッシュ|コミット|ブランチ|typecheck|npm|PC|パソコン|課金|料金|Muverse)/u.test(
+          currentUserTextForScreenshotContextGate
+        );
+
+      const isExplicitScreenshotDiagnosisTurnForContextGate =
+        hasExplicitScreenshotDiagnosisIdForContextGate ||
+        (Boolean(screenshotDiagnosisHintText) &&
+          hasNearbyScreenshotDiagnosisReferenceForContextGate &&
+          !hasTopicSwitchForScreenshotContextGate);
+
+      if (!isExplicitScreenshotDiagnosisTurnForContextGate && screenshotDiagnosisHintText) {
+        console.log('[IROS/SCREENSHOT_DIAG_CTX_SKIPPED_NON_EXPLICIT]', {
+          traceId,
+          conversationId,
+          userCode,
+          userTextHead: currentUserTextForScreenshotContextGate.slice(0, 120),
+          hintLen: screenshotDiagnosisHintText.length,
+          hasExplicitScreenshotDiagnosisId: hasExplicitScreenshotDiagnosisIdForContextGate,
+          hasNearbyReference: hasNearbyScreenshotDiagnosisReferenceForContextGate,
+          hasTopicSwitch: hasTopicSwitchForScreenshotContextGate,
+        });
+      }
+
+      if (screenshotDiagnosisHintText && isExplicitScreenshotDiagnosisTurnForContextGate) {
         const previousCtxPack =
           extraSoT.ctxPack && typeof extraSoT.ctxPack === 'object'
             ? extraSoT.ctxPack
@@ -918,6 +904,7 @@ let extraSoT: Record<string, any> = {
           hintHead: screenshotDiagnosisHintText.slice(0, 180),
           hasLastIrDiagnosis: Boolean((extraSoT as any)?.lastIrDiagnosis),
           hasCtxPackLastIrDiagnosis: Boolean((extraSoT as any)?.ctxPack?.lastIrDiagnosis),
+          resolvedBy: hasExplicitScreenshotDiagnosisIdForContextGate ? 'explicit_id' : 'nearby_reference',
         });
       }
     }
@@ -942,6 +929,960 @@ let extraSoT: Record<string, any> = {
           userCode,
         });
       } catch {}
+    }
+    // -------------------------------------------------------
+    // 11.97) Pre-SEED Engine
+    // - 保存済み診断IDなど、通常チャットに入れる前に正本・ルートを確定する
+    // - v1: スクショ診断ID:n の続き相談は direct_reply で Writer/Rephrase を bypass
+    // -------------------------------------------------------
+    // 11.974) Relationship Context Capture Layer
+    // - ユーザーが明示した関係性だけ保存する
+    // - 質問・相談文は保存しない
+    // - private relationship は通常の人物情報としては出さない
+    // -------------------------------------------------------
+    try {
+      const relationshipContextCapture = await captureRelationshipContextFromConversation({
+          supabase: supabase as any,
+          userCode,
+          conversationId,
+          userText: userTextClean,
+          traceId,
+        });
+
+        if (
+          (relationshipContextCapture?.captured || relationshipContextCapture?.shouldAskConfirmation) &&
+          relationshipContextCapture.directReply
+        ) {
+          const fallbackDirectText = String(relationshipContextCapture.directReply ?? '').trim();
+          let directText = fallbackDirectText;
+
+          try {
+            const llmText = await chatComplete({
+              purpose: 'reply',
+              traceId,
+              conversationId,
+              userCode,
+              max_tokens: 180,
+              audit: {
+                slotPlanPolicy: 'FINAL',
+                mode,
+                qCode: 'Q3',
+                depthStage: 'S1',
+              },
+              messages: [
+                {
+                  role: 'system',
+                  content: [
+                    'あなたは Mu の保存確認文を自然に整える担当です。',
+                    '',
+                    '目的は、ユーザーが明示した関係性を保存したことを、短く自然に伝えることです。',
+                    '',
+                    '禁止:',
+                    '- 新しい診断を始めない',
+                    '- 相手の気持ちを推測しない',
+                    '- 関係の結論を出さない',
+                    '- 助言を増やさない',
+                    '- 箇条書きにしない',
+                    '- 「保存しました」「DB」「記録」などの機械語を出さない',
+                    '',
+                    '必須:',
+                    '- 1〜2文で返す',
+                    '- 保存された関係性だけを自然に言い換える',
+                    '- 普通の人物情報としては出さず、関係相談の時だけ使う前提を必要ならやわらかく添える',
+                    '- 呼び名は targetLabel を尊重する',
+                    '- 文体は、やさしく自然な Mu の本文にする',
+                  ].join('\\n'),
+                },
+                {
+                  role: 'user',
+                  content: [
+                    `元のユーザー入力: ${userTextClean}`,
+                    `対象人物: ${relationshipContextCapture.targetLabel ?? ''}`,
+                    `関係性: ${relationshipContextCapture.valueText ?? ''}`,
+                    `内部kind: ${relationshipContextCapture.kind ?? ''}`,
+                    `sensitivity: ${relationshipContextCapture.sensitivity ?? ''}`,
+                    '',
+                    'この保存確認文を、Muの自然な本文にしてください。',
+                    `テンプレ原文: ${fallbackDirectText}`,
+                  ].join('\\n'),
+                },
+              ],
+            });
+
+            const normalizedLlmText = String(llmText ?? '').trim();
+            if (normalizedLlmText) {
+              directText = normalizedLlmText;
+            }
+
+            console.log('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][LLM_NATURALIZED]', {
+              traceId,
+              conversationId,
+              userCode,
+              fallbackLen: fallbackDirectText.length,
+              llmLen: normalizedLlmText.length,
+              textHead: directText.slice(0, 160),
+            });
+          } catch (e: any) {
+            console.warn('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][LLM_NATURALIZE_FAILED]', {
+              traceId,
+              conversationId,
+              userCode,
+              error: e?.message ?? e,
+            });
+          }
+
+          const metaForRelationshipContextCapture: any = {
+            ...(metaForIros ?? {}),
+            mode,
+            q_code: 'Q3',
+            depth_stage: 'S1',
+            e_turn: 'e3',
+            extra: {
+              ...((metaForIros as any)?.extra ?? {}),
+              persistedByRoute: true,
+              persistPolicy: 'REPLY_SINGLE_WRITER',
+              persistAssistantMessage: false,
+
+              relationshipContextCapture: true,
+              relationshipContextCaptureTargetLabel: relationshipContextCapture.targetLabel ?? null,
+              relationshipContextCaptureKind: relationshipContextCapture.kind ?? null,
+              relationshipContextCaptureValueText: relationshipContextCapture.valueText ?? null,
+              relationshipContextCaptureValueNormalized: relationshipContextCapture.valueNormalized ?? null,
+              relationshipContextCaptureStatus: relationshipContextCapture.status ?? null,
+              relationshipContextCaptureConfidence: relationshipContextCapture.confidence ?? null,
+              relationshipContextCaptureSensitivity: relationshipContextCapture.sensitivity ?? null,
+              relationshipContextCaptureSource: relationshipContextCapture.source ?? null,
+              relationshipContextCaptureNeedsConfirmation: relationshipContextCapture.shouldAskConfirmation ?? false,
+
+              shouldSuppressSimilarFlow: true,
+              finalTextPolicy: 'FINAL_TEXT_SYNCED_RELATIONSHIP_CONTEXT_CAPTURE',
+              resolvedText: directText,
+              finalAssistantText: directText,
+              rawTextFromModel: directText,
+              extractedTextFromModel: directText,
+            },
+          };
+
+          let relationshipContextSaved: any = null;
+
+          try {
+            relationshipContextSaved = await persistAssistantMessageToIrosMessages({
+              supabase,
+              conversationId,
+              userCode,
+              content: directText,
+              meta: metaForRelationshipContextCapture,
+            } as any);
+          } catch (e: any) {
+            console.warn('[IROS/ROUTE][RELATIONSHIP_CONTEXT_CAPTURE_PERSIST_FAILED]', {
+              traceId,
+              conversationId,
+              userCode,
+              error: e?.message ?? e,
+            });
+          }
+
+          console.log('[IROS/ROUTE][RELATIONSHIP_CONTEXT_CAPTURE_RETURN]', {
+            traceId,
+            conversationId,
+            userCode,
+            targetLabel: relationshipContextCapture.targetLabel ?? null,
+            kind: relationshipContextCapture.kind ?? null,
+            savedOk: relationshipContextSaved?.ok ?? null,
+            savedInserted: relationshipContextSaved?.inserted ?? null,
+            messageId: relationshipContextSaved?.messageId ?? null,
+            textLen: directText.length,
+            textHead: directText.slice(0, 160),
+          });
+
+          return NextResponse.json(
+            {
+              ok: true,
+              result: {
+                text: directText,
+                content: directText,
+                assistantText: directText,
+                mode,
+                meta: metaForRelationshipContextCapture,
+              },
+              text: directText,
+              content: directText,
+              assistantText: directText,
+              assistantMessageId: relationshipContextSaved?.messageId ?? null,
+              mode,
+              finalMode: mode,
+              meta: metaForRelationshipContextCapture,
+              metaForSave: metaForRelationshipContextCapture,
+              credit: {
+                ref: creditRef,
+                amount: CREDIT_AMOUNT,
+                authorize: authRes,
+                lowWarn,
+              },
+            },
+            { status: 200, headers: withTrace(CORS_HEADERS, traceId) },
+          );
+        }
+
+        console.info('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][SKIP]', {
+          traceId,
+          conversationId,
+          userCode,
+          reason: relationshipContextCapture?.reason ?? null,
+        });
+    } catch (e: any) {
+      console.warn('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][FAILED]', {
+        traceId,
+        conversationId,
+        userCode,
+        error: e?.message ?? e,
+      });
+    }
+
+    // -------------------------------------------------------
+    console.log('[IROS/ROUTE][PRE_SEED_ENTER]', {
+      traceId,
+      conversationId,
+      userCode,
+      userTextClean,
+      userTextCleanHead: String(userTextClean ?? '').slice(0, 120),
+      hasSupabase: Boolean((supabase as any)?.from),
+    });
+
+    const preSeedMeta: any = {
+      ...(metaForIros ?? {}),
+      ...(extraSoT ?? {}),
+      extra: {
+        ...((metaForIros as any)?.extra ?? {}),
+        ...(extraSoT ?? {}),
+        ctxPack: {
+          ...(((metaForIros as any)?.extra ?? {})?.ctxPack ?? {}),
+          ...(((extraSoT as any)?.ctxPack ?? {})),
+        },
+      },
+      ctxPack: {
+        ...((metaForIros as any)?.ctxPack ?? {}),
+        ...(((extraSoT as any)?.ctxPack ?? {})),
+      },
+    };
+
+    const preSeedDecision = await resolvePreSeedDecision({
+      userText: userTextClean,
+      userCode,
+      conversationId,
+      supabase: supabase as any,
+      meta: preSeedMeta,
+      historyForTurn: Array.isArray(chatHistory) ? chatHistory : [],
+      traceId,
+    });
+
+    console.log('[IROS/ROUTE][PRE_SEED_AFTER_RESOLVE]', {
+      traceId,
+      conversationId,
+      userCode,
+      hasDecision: Boolean(preSeedDecision),
+      kind: preSeedDecision?.kind ?? null,
+      route: preSeedDecision?.route ?? null,
+      shouldBypassWriter: preSeedDecision?.shouldBypassWriter ?? null,
+      directReplyLen: String(preSeedDecision?.directReply ?? '').length,
+      seedLen: String(preSeedDecision?.seedText ?? '').length,
+    });
+
+
+
+    // -------------------------------------------------------
+    // 11.975) Person Fact Capture Layer
+    // - 例:
+    //   user: 対象人物Aは、何歳だったっけ？
+    //   Mu  : ここでは確認できません。
+    //   user: この前の誕生日で、45歳っていってたよ
+    // - Pre-SEED が拾えない「人物名なし補足」を、直前文脈から人物事実として保存する
+    // -------------------------------------------------------
+    if (!preSeedDecision) {
+      try {
+        const personFactCapture = await capturePersonFactFromConversation({
+          supabase: supabase as any,
+          userCode,
+          conversationId,
+          userText: userTextClean,
+          traceId,
+        });
+
+        if ((personFactCapture?.captured || personFactCapture?.shouldAskConfirmation) && personFactCapture.directReply) {
+          const directText = String(personFactCapture.directReply ?? '').trim();
+
+          const metaForPersonFactCapture: any = {
+            ...(metaForIros ?? {}),
+            mode,
+            q_code: 'Q3',
+            depth_stage: 'S1',
+            e_turn: 'e3',
+            extra: {
+              ...((metaForIros as any)?.extra ?? {}),
+              persistedByRoute: true,
+              persistPolicy: 'REPLY_SINGLE_WRITER',
+              persistAssistantMessage: false,
+
+              personFactCapture: true,
+              personFactCaptureTargetLabel: personFactCapture.targetLabel ?? null,
+              personFactCaptureField: personFactCapture.field ?? null,
+              personFactCaptureValueText: personFactCapture.valueText ?? null,
+              personFactCaptureValueNumber: personFactCapture.valueNumber ?? null,
+              personFactCaptureValueNormalized: personFactCapture.valueNormalized ?? null,
+              personFactCaptureStatus: personFactCapture.status ?? null,
+              personFactCaptureConfidence: personFactCapture.confidence ?? null,
+              personFactCaptureSensitivity: personFactCapture.sensitivity ?? null,
+              personFactCaptureSource: personFactCapture.source ?? null,
+              personFactCaptureNeedsConfirmation: personFactCapture.shouldAskConfirmation ?? false,
+
+              finalTextPolicy: 'FINAL_TEXT_SYNCED_PERSON_FACT_CAPTURE',
+              resolvedText: directText,
+              finalAssistantText: directText,
+              rawTextFromModel: directText,
+              extractedTextFromModel: directText,
+            },
+          };
+
+          let personFactSaved: any = null;
+
+          try {
+            personFactSaved = await persistAssistantMessageToIrosMessages({
+              supabase,
+              conversationId,
+              userCode,
+              content: directText,
+              meta: metaForPersonFactCapture,
+            } as any);
+          } catch (e: any) {
+            console.warn('[IROS/ROUTE][PERSON_FACT_CAPTURE_PERSIST_FAILED]', {
+              traceId,
+              conversationId,
+              userCode,
+              error: e?.message ?? e,
+            });
+          }
+
+          console.log('[IROS/ROUTE][PERSON_FACT_CAPTURE_RETURN]', {
+            traceId,
+            conversationId,
+            userCode,
+            targetLabel: personFactCapture.targetLabel ?? null,
+            field: personFactCapture.field ?? null,
+            savedOk: personFactSaved?.ok ?? null,
+            savedInserted: personFactSaved?.inserted ?? null,
+            messageId: personFactSaved?.messageId ?? null,
+            textLen: directText.length,
+            textHead: directText.slice(0, 160),
+          });
+
+          return NextResponse.json(
+            {
+              ok: true,
+              result: {
+                text: directText,
+                content: directText,
+                assistantText: directText,
+                mode,
+                meta: metaForPersonFactCapture,
+              },
+              text: directText,
+              content: directText,
+              assistantText: directText,
+              assistantMessageId: personFactSaved?.messageId ?? null,
+              mode,
+              finalMode: mode,
+              meta: metaForPersonFactCapture,
+              metaForSave: metaForPersonFactCapture,
+              credit: {
+                ref: creditRef,
+                amount: CREDIT_AMOUNT,
+                authorize: authRes,
+                lowWarn,
+              },
+            },
+            { status: 200, headers: withTrace(CORS_HEADERS, traceId) },
+          );
+        }
+
+        console.info('[IROS/PERSON_FACT_CAPTURE][SKIP]', {
+          traceId,
+          conversationId,
+          userCode,
+          reason: personFactCapture?.reason ?? null,
+        });
+      } catch (e: any) {
+        console.warn('[IROS/PERSON_FACT_CAPTURE][FAILED]', {
+          traceId,
+          conversationId,
+          userCode,
+          error: e?.message ?? e,
+        });
+      }
+    }
+
+    if (preSeedDecision) {
+      const previousCtxPack =
+        extraSoT.ctxPack && typeof extraSoT.ctxPack === 'object'
+          ? extraSoT.ctxPack
+          : {};
+
+      extraSoT = {
+        ...extraSoT,
+        ...(preSeedDecision.metaPatch ?? {}),
+        preSeedDecision,
+        preSeedDecisionKind: preSeedDecision.kind,
+        preSeedDecisionRoute: preSeedDecision.route,
+        preSeedBypassWriter: preSeedDecision.shouldBypassWriter,
+        preSeedBypassRephrase: preSeedDecision.shouldBypassRephrase,
+        ctxPack: {
+          ...previousCtxPack,
+          ...(preSeedDecision.ctxPackPatch ?? {}),
+          preSeedDecision,
+        },
+      };
+
+      if (preSeedDecision.shouldSuppressHistoryForWriter) {
+        (extraSoT as any).historyForWriter = [];
+        if ((extraSoT as any).ctxPack && typeof (extraSoT as any).ctxPack === 'object') {
+          (extraSoT as any).ctxPack.historyForWriter = [];
+        }
+      }
+
+      if (preSeedDecision.shouldSuppressSimilarFlow) {
+        delete (extraSoT as any).similarFlowSeed;
+        delete (extraSoT as any).similarFlowDebug;
+        if ((extraSoT as any).ctxPack && typeof (extraSoT as any).ctxPack === 'object') {
+          delete (extraSoT as any).ctxPack.similarFlowSeed;
+          delete (extraSoT as any).ctxPack.similarFlowDebug;
+        }
+      }
+
+      console.log('[IROS/ROUTE][PRE_SEED_DECISION_APPLIED]', {
+        traceId,
+        conversationId,
+        userCode,
+        kind: preSeedDecision.kind,
+        route: preSeedDecision.route,
+        shouldBypassWriter: preSeedDecision.shouldBypassWriter,
+        shouldBypassRephrase: preSeedDecision.shouldBypassRephrase,
+        directReplyLen: String(preSeedDecision.directReply ?? '').length,
+        seedLen: String(preSeedDecision.seedText ?? '').length,
+        sourceTextLen: String(preSeedDecision.sourceText ?? '').length,
+      });
+    }
+
+    if (
+      preSeedDecision?.route === 'diagnosis_writer' &&
+      (preSeedDecision as any).shouldUsePreSeedWriter &&
+      (preSeedDecision as any).writerInput
+    ) {
+      const writerInput = {
+        ...((preSeedDecision as any).writerInput ?? {}),
+        traceId,
+        conversationId,
+        userCode,
+      };
+
+      const writerText = await callPreSeedDiagnosisWriter(writerInput as any);
+      const fallbackText = String(preSeedDecision.directReply ?? '').trim();
+      const directText = String(writerText || fallbackText || '').trim();
+
+      if (directText) {
+        const metaForPreSeedWriter: any = {
+          ...(metaForIros ?? {}),
+          extra: {
+            ...((metaForIros as any)?.extra ?? {}),
+            ...((preSeedDecision as any)?.metaPatch ?? {}),
+            preSeedDecision,
+            preSeedBypassWriter: true,
+            preSeedBypassRephrase: preSeedDecision.shouldBypassRephrase,
+            preSeedWriter: true,
+            preSeedWriterKind: 'diagnosis_writer',
+            ctxPack: {
+              ...(((metaForIros as any)?.extra ?? {})?.ctxPack ?? {}),
+              ...((preSeedDecision as any)?.ctxPackPatch ?? {}),
+              preSeedDecision,
+              preSeedWriter: true,
+              preSeedWriterKind: 'diagnosis_writer',
+            },
+          },
+        };
+
+        let preSeedSaved: any = null;
+
+        try {
+          const metaForPreSeedPersist: any = {
+            ...metaForPreSeedWriter,
+            extra: {
+              ...((metaForPreSeedWriter as any)?.extra ?? {}),
+              persistedByRoute: true,
+              persistPolicy: 'REPLY_SINGLE_WRITER',
+              persistAssistantMessage: false,
+              preSeedWriter: true,
+              preSeedWriterKind: 'diagnosis_writer',
+              preSeedDiagnosisWriterPersist: true,
+              finalTextPolicy: 'FINAL_TEXT_SYNCED_PRE_SEED',
+              resolvedText: directText,
+              finalAssistantText: directText,
+              rawTextFromModel: directText,
+              extractedTextFromModel: directText,
+            },
+          };
+
+          preSeedSaved = await persistAssistantMessageToIrosMessages({
+            supabase,
+            conversationId,
+            userCode,
+            content: directText,
+            meta: metaForPreSeedPersist,
+          } as any);
+
+          console.log('[IROS/ROUTE][PRE_SEED_DIAGNOSIS_WRITER_PERSIST]', {
+            traceId,
+            conversationId,
+            userCode,
+            ok: preSeedSaved?.ok ?? null,
+            inserted: preSeedSaved?.inserted ?? null,
+            messageId: preSeedSaved?.messageId ?? null,
+            error: preSeedSaved?.error ?? null,
+          });
+        } catch (e: any) {
+          console.warn('[IROS/ROUTE][PRE_SEED_DIAGNOSIS_WRITER_PERSIST_FAILED]', {
+            traceId,
+            conversationId,
+            userCode,
+            error: e?.message ?? e,
+          });
+        }
+
+        const preSeedTcfStarterForDiagnosisWriter =
+          (preSeedDecision as any)?.tcfStarter ??
+          (preSeedDecision as any)?.ctxPackPatch?.tcfStarter ??
+          (preSeedDecision as any)?.metaPatch?.tcfStarter ??
+          (preSeedDecision as any)?.writerInput?.tcfStarter ??
+          null;
+
+        console.log('[IROS/TCF_ROTATION_SEED][PRE_SEED_BRIDGE]', {
+          traceId,
+          conversationId,
+          userCode,
+          source: 'preseed_tcf_starter',
+          route: preSeedDecision.route,
+          kind: preSeedDecision.kind,
+          sourceId: preSeedDecision.sourceId ?? null,
+          applied: Boolean(preSeedTcfStarterForDiagnosisWriter),
+          cDirection: preSeedTcfStarterForDiagnosisWriter?.cDirection ?? null,
+          userReaction: preSeedTcfStarterForDiagnosisWriter?.userReaction ?? null,
+          convergence: preSeedTcfStarterForDiagnosisWriter?.convergence ?? null,
+          currentFocus: preSeedTcfStarterForDiagnosisWriter?.currentFocus ?? null,
+          nextFocus: preSeedTcfStarterForDiagnosisWriter?.nextFocus ?? null,
+          cognitionMapRelationCode:
+            (preSeedDecision as any)?.cognitionMap?.relationCode ??
+            (preSeedDecision as any)?.ctxPackPatch?.cognitionMap?.relationCode ??
+            (preSeedDecision as any)?.metaPatch?.cognitionMap?.relationCode ??
+            null,
+          cognitionMapProgress:
+            (preSeedDecision as any)?.cognitionMap?.progress ??
+            (preSeedDecision as any)?.ctxPackPatch?.cognitionMap?.progress ??
+            (preSeedDecision as any)?.metaPatch?.cognitionMap?.progress ??
+            null,
+        });
+        console.log('[IROS/ROUTE][PRE_SEED_DIAGNOSIS_WRITER_RETURN]', {
+          traceId,
+          conversationId,
+          userCode,
+          kind: preSeedDecision.kind,
+          route: preSeedDecision.route,
+          sourceId: preSeedDecision.sourceId ?? null,
+          usedFallback: !writerText,
+          savedOk: preSeedSaved?.ok ?? null,
+          savedInserted: preSeedSaved?.inserted ?? null,
+          textLen: directText.length,
+          textHead: directText.slice(0, 160),
+        });
+
+        return NextResponse.json(
+          {
+            ok: true,
+            result: {
+              text: directText,
+              content: directText,
+              assistantText: directText,
+              mode,
+              meta: metaForPreSeedWriter,
+            },
+            text: directText,
+            content: directText,
+            assistantText: directText,
+            mode,
+            finalMode: mode,
+            meta: metaForPreSeedWriter,
+            metaForSave: metaForPreSeedWriter,
+            credit: {
+              ref: creditRef,
+              amount: CREDIT_AMOUNT,
+              authorize: authRes,
+              lowWarn,
+            },
+          },
+          { status: 200, headers: withTrace(CORS_HEADERS, traceId) },
+        );
+      }
+
+      console.warn('[IROS/ROUTE][PRE_SEED_DIAGNOSIS_WRITER_EMPTY]', {
+        traceId,
+        conversationId,
+        userCode,
+        kind: preSeedDecision.kind,
+        route: preSeedDecision.route,
+        sourceId: preSeedDecision.sourceId ?? null,
+      });
+    }
+    if (
+      (preSeedDecision?.route === 'direct_reply' || preSeedDecision?.route === 'clarify') &&
+      preSeedDecision.shouldBypassWriter &&
+      preSeedDecision.directReply
+    ) {
+      const directText = String(preSeedDecision.directReply ?? '').trim();
+
+      const metaForDirectReply: any = {
+        ...(metaForIros ?? {}),
+        extra: {
+          ...((metaForIros as any)?.extra ?? {}),
+          ...((preSeedDecision as any)?.metaPatch ?? {}),
+          preSeedDecision,
+          preSeedBypassWriter: true,
+          preSeedBypassRephrase: preSeedDecision.shouldBypassRephrase,
+          ctxPack: {
+            ...(((metaForIros as any)?.extra ?? {})?.ctxPack ?? {}),
+            ...((preSeedDecision as any)?.ctxPackPatch ?? {}),
+            preSeedDecision,
+          },
+        },
+      };
+
+      let preSeedDirectSaved: any = null;
+
+      try {
+        const metaForPreSeedDirectPersist: any = {
+          ...metaForDirectReply,
+          extra: {
+            ...((metaForDirectReply as any)?.extra ?? {}),
+            persistedByRoute: true,
+            persistPolicy: 'REPLY_SINGLE_WRITER',
+            persistAssistantMessage: false,
+            preSeedDirectReplyPersist: true,
+            finalTextPolicy: 'FINAL_TEXT_SYNCED_PRE_SEED_DIRECT_REPLY',
+            resolvedText: directText,
+            finalAssistantText: directText,
+            rawTextFromModel: directText,
+            extractedTextFromModel: directText,
+          },
+        };
+
+        preSeedDirectSaved = await persistAssistantMessageToIrosMessages({
+          supabase,
+          conversationId,
+          userCode,
+          content: directText,
+          meta: metaForPreSeedDirectPersist,
+        } as any);
+
+        console.log('[IROS/ROUTE][PRE_SEED_DIRECT_REPLY_PERSIST]', {
+          traceId,
+          conversationId,
+          userCode,
+          ok: preSeedDirectSaved?.ok ?? null,
+          inserted: preSeedDirectSaved?.inserted ?? null,
+          messageId: preSeedDirectSaved?.messageId ?? null,
+          error: preSeedDirectSaved?.error ?? null,
+        });
+      } catch (e: any) {
+        console.warn('[IROS/ROUTE][PRE_SEED_DIRECT_REPLY_PERSIST_FAILED]', {
+          traceId,
+          conversationId,
+          userCode,
+          error: e?.message ?? e,
+        });
+      }
+
+      console.log('[IROS/ROUTE][PRE_SEED_DIRECT_REPLY_RETURN]', {
+        traceId,
+        conversationId,
+        userCode,
+        kind: preSeedDecision.kind,
+        sourceId: preSeedDecision.sourceId ?? null,
+        directReplyLen: directText.length,
+        directReplyHead: directText.slice(0, 160),
+      });
+
+      return NextResponse.json(
+        {
+          ok: true,
+          result: {
+            text: directText,
+            content: directText,
+            assistantText: directText,
+            mode,
+            meta: metaForDirectReply,
+          },
+          text: directText,
+          content: directText,
+          assistantText: directText,
+          mode,
+          finalMode: mode,
+          meta: metaForDirectReply,
+          metaForSave: metaForDirectReply,
+          credit: {
+            ref: creditRef,
+            amount: CREDIT_AMOUNT,
+            authorize: authRes,
+            lowWarn,
+          },
+        },
+        { status: 200, headers: withTrace(CORS_HEADERS, traceId) },
+      );
+    }
+
+    // -------------------------------------------------------
+    // 11.9) Similar Flow pre-writer seed（best-effort）
+    // -------------------------------------------------------
+    try {
+      const shouldSkipSimilarFlowByPreSeed =
+        Boolean((preSeedDecision as any)?.shouldSuppressSimilarFlow) ||
+        Boolean((preSeedDecision as any)?.shouldUsePreSeedWriter) ||
+        Boolean((preSeedDecision as any)?.shouldBypassWriter) ||
+        Boolean((extraSoT as any)?.preSeedBypassWriter) ||
+        Boolean((extraSoT as any)?.screenshotDiagnosisContext);
+
+      if (shouldSkipSimilarFlowByPreSeed) {
+        console.log('[IROS/SIMILAR_FLOW_PRE_WRITER][SKIP_PRE_SEED]', {
+          traceId,
+          conversationId,
+          userCode,
+          preSeedKind: (preSeedDecision as any)?.kind ?? null,
+          preSeedRoute: (preSeedDecision as any)?.route ?? null,
+          shouldSuppressSimilarFlow: (preSeedDecision as any)?.shouldSuppressSimilarFlow ?? null,
+          shouldUsePreSeedWriter: (preSeedDecision as any)?.shouldUsePreSeedWriter ?? null,
+          shouldBypassWriter: (preSeedDecision as any)?.shouldBypassWriter ?? null,
+          hasScreenshotDiagnosisContext: Boolean((extraSoT as any)?.screenshotDiagnosisContext),
+        });
+      } else {
+      const preSimilarFlowLookup = await loadSimilarFlowSnapshots({
+        supabase: supabase as any,
+        userCode,
+        conversationId,
+        sourceTypes: ['chat'],
+        situationTopic: userTextClean,
+        keywords: [userTextClean].filter((v): v is string => Boolean(String(v ?? '').trim())),
+        recentLimit: 80,
+        limit: 3,
+      });
+
+      const preSimilarFlowSeed = buildSimilarFlowSeed({
+        matches: preSimilarFlowLookup.matches,
+        currentState: {},
+        limit: 3,
+        maxChars: 1600,
+      });
+
+      const shouldDisableSimilarFlowForScreenshotDiagnosisPreWriter =
+        /スクショ診断\s*(?:ID|id)?[:：]?\s*\d*/u.test(String((reqMeta as any)?.userText ?? (reqMeta as any)?.text ?? (reqMeta as any)?.currentUserText ?? '')) ||
+        /スクリーンショット診断\s*(?:ID|id)?[:：]?\s*\d*/u.test(String((reqMeta as any)?.userText ?? (reqMeta as any)?.text ?? (reqMeta as any)?.currentUserText ?? '')) ||
+        String((reqMeta as any)?.screenshotDiagnosisContext ?? '').trim().length > 0 ||
+        String((reqMeta as any)?.screenshotDiagnosisHintText ?? '').trim().length > 0 ||
+        String((reqMeta as any)?.ctxPack?.screenshotDiagnosisContext ?? '').trim().length > 0 ||
+        String((reqMeta as any)?.ctxPack?.screenshotDiagnosisHintText ?? '').trim().length > 0 ||
+        String((reqMeta as any)?.ctxPack?.presentationKind ?? '').trim() === 'screenshot_diagnosis_followup' ||
+        String((reqMeta as any)?.ctxPack?.continuityKind ?? '').trim() === 'screenshot_diagnosis_followup';
+
+      if (shouldDisableSimilarFlowForScreenshotDiagnosisPreWriter) {
+        console.log('[IROS/SIMILAR_FLOW_PRE_WRITER][SKIP_SCREENSHOT_DIAGNOSIS]', {
+          conversationId,
+          userCode,
+          userTextHead: String((reqMeta as any)?.userText ?? (reqMeta as any)?.text ?? (reqMeta as any)?.currentUserText ?? '').slice(0, 120),
+          hasScreenshotContext: String((reqMeta as any)?.screenshotDiagnosisContext ?? '').trim().length > 0,
+          hasScreenshotHint: String((reqMeta as any)?.screenshotDiagnosisHintText ?? '').trim().length > 0,
+        });
+      }
+
+      if (preSimilarFlowSeed && !shouldDisableSimilarFlowForScreenshotDiagnosisPreWriter) {
+        const previousCtxPack =
+          extraSoT.ctxPack && typeof extraSoT.ctxPack === 'object'
+            ? extraSoT.ctxPack
+            : {};
+
+        const preSimilarFlowDebug = {
+          source: 'pre_writer',
+          lookupOk: preSimilarFlowLookup.ok,
+          matchesLen: preSimilarFlowLookup.matches.length,
+          hasSeed: true,
+          seedLen: String(preSimilarFlowSeed).length,
+          lookupError: preSimilarFlowLookup.ok ? null : String((preSimilarFlowLookup as any).error ?? ''),
+        };
+
+        extraSoT = {
+          ...extraSoT,
+          similarFlowSeed: preSimilarFlowSeed,
+          similarFlowDebug: preSimilarFlowDebug,
+          ctxPack: {
+            ...previousCtxPack,
+            similarFlowSeed: preSimilarFlowSeed,
+            similarFlowDebug: preSimilarFlowDebug,
+          },
+        };
+      }
+
+      console.log('[IROS/SIMILAR_FLOW_PRE_WRITER]', {
+        conversationId,
+        userCode,
+        lookupOk: preSimilarFlowLookup.ok,
+        matchesLen: preSimilarFlowLookup.matches.length,
+        hasSeed: Boolean(preSimilarFlowSeed),
+        seedLen: String(preSimilarFlowSeed ?? '').length,
+        similarFlowSeedHead: String(preSimilarFlowSeed ?? '').slice(0, 1200),
+        similarFlowSeedHasFalseRecall: /覚えています|もちろん、覚えています|残っています|受け取っています|沖縄の風|海の色|空気|景色|温度/.test(String(preSimilarFlowSeed ?? '')),
+        similarFlowSeedFalseRecallMatches: String(preSimilarFlowSeed ?? '').match(/覚えています|もちろん、覚えています|残っています|受け取っています|沖縄の風|海の色|空気|景色|温度/g) ?? [],
+      });
+      }
+    } catch (e) {
+      console.warn('[IROS/SIMILAR_FLOW_PRE_WRITER][FAILED]', {
+        conversationId,
+        userCode,
+        error: e,
+      });
+    }
+
+
+    // -------------------------------------------------------
+    // 12) handle
+    // -------------------------------------------------------
+
+    // -------------------------------------------------------
+    // 11.98) Person Context Pre-SEED writer persist
+    // - direct return ではなく、assistant message として保存して返す
+    // - handleIrosReply には入れない：slotPlan に負けるため
+    // - ただし persistAssistantMessageToIrosMessages を通すので履歴・created_at は残る
+    // -------------------------------------------------------
+    if (
+      preSeedDecision?.kind === 'person_reference' &&
+      preSeedDecision?.shouldBypassWriter === true &&
+      typeof preSeedDecision?.directReply === 'string' &&
+      preSeedDecision.directReply.trim().length > 0
+    ) {
+      const directText = preSeedDecision.directReply.trim();
+
+      const metaForPersonContext: any = {
+        ...(metaForIros ?? {}),
+        mode,
+        q_code: 'Q3',
+        depth_stage: 'S1',
+        e_turn: 'e3',
+        extra: {
+          ...((metaForIros as any)?.extra ?? {}),
+          ...((preSeedDecision as any)?.metaPatch ?? {}),
+          persistedByRoute: true,
+          persistPolicy: 'REPLY_SINGLE_WRITER',
+          persistAssistantMessage: false,
+
+          preSeedPersonContextWriter: true,
+          preSeedDirectReply: true,
+          preSeedKind: preSeedDecision.kind ?? null,
+          preSeedRoute: preSeedDecision.route ?? null,
+          sourceKind: (preSeedDecision as any).sourceKind ?? null,
+          sourceId: (preSeedDecision as any).sourceId ?? null,
+
+          finalTextPolicy: 'FINAL_TEXT_SYNCED_PERSON_CONTEXT_PRE_SEED',
+          resolvedText: directText,
+          finalAssistantText: directText,
+          rawTextFromModel: directText,
+          extractedTextFromModel: directText,
+
+          ctxPack: {
+            ...(((metaForIros as any)?.extra ?? {})?.ctxPack ?? {}),
+            ...((preSeedDecision as any)?.ctxPackPatch ?? {}),
+            preSeedDecision,
+            preSeedPersonContextWriter: true,
+            preSeedDirectReply: true,
+            directReplyCandidate: directText,
+            personContextSeedText: String((preSeedDecision as any).seedText ?? ''),
+            personContextSourceText: String((preSeedDecision as any).sourceText ?? ''),
+          },
+        },
+      };
+
+      let personContextSaved: any = null;
+
+      try {
+        personContextSaved = await persistAssistantMessageToIrosMessages({
+          supabase,
+          conversationId,
+          userCode,
+          content: directText,
+          meta: metaForPersonContext,
+        } as any);
+
+        console.log('[IROS/ROUTE][PRE_SEED_PERSON_CONTEXT_WRITER_PERSIST]', {
+          traceId,
+          conversationId,
+          userCode,
+          ok: personContextSaved?.ok ?? null,
+          inserted: personContextSaved?.inserted ?? null,
+          messageId: personContextSaved?.messageId ?? null,
+          error: personContextSaved?.error ?? null,
+          directReplyLen: directText.length,
+        });
+      } catch (e: any) {
+        console.warn('[IROS/ROUTE][PRE_SEED_PERSON_CONTEXT_WRITER_PERSIST_FAILED]', {
+          traceId,
+          conversationId,
+          userCode,
+          error: e?.message ?? e,
+          directReplyLen: directText.length,
+        });
+      }
+
+      console.log('[IROS/ROUTE][PRE_SEED_PERSON_CONTEXT_WRITER_RETURN]', {
+        traceId,
+        conversationId,
+        userCode,
+        kind: preSeedDecision.kind,
+        route: preSeedDecision.route,
+        sourceId: preSeedDecision.sourceId ?? null,
+        savedOk: personContextSaved?.ok ?? null,
+        savedInserted: personContextSaved?.inserted ?? null,
+        messageId: personContextSaved?.messageId ?? null,
+        textLen: directText.length,
+        textHead: directText.slice(0, 160),
+      });
+
+      return NextResponse.json(
+        {
+          ok: true,
+          result: {
+            text: directText,
+            content: directText,
+            assistantText: directText,
+            mode,
+            meta: metaForPersonContext,
+          },
+          text: directText,
+          content: directText,
+          assistantText: directText,
+          assistantMessageId: personContextSaved?.messageId ?? null,
+          mode,
+          finalMode: mode,
+          meta: metaForPersonContext,
+          metaForSave: metaForPersonContext,
+          credit: {
+            ref: creditRef,
+            amount: CREDIT_AMOUNT,
+            authorize: authRes,
+            lowWarn,
+          },
+        },
+        { status: 200, headers: withTrace(CORS_HEADERS, traceId) },
+      );
     }
 const irosResult: HandleIrosReplyOutput = await handleIrosReply({
       conversationId,
@@ -1845,7 +2786,7 @@ const persistMeta = {
     ...baseDiagExtra,
     persistedByRoute: true,
     persistPolicy: 'REPLY_SINGLE_WRITER',
-    persistAssistantMessage: true,
+    persistAssistantMessage: false,
     isIrDiagnosisTurn: true,
     presentationKind: 'diagnosis',
     mode: 'diagnosis',
@@ -2449,7 +3390,7 @@ return NextResponse.json({
                 '予約や到着時間など、具体的な予定の情報が出ています。',
                 'なので今のスクショ上では、「来ない流れ」より「会う方向に整っている流れ」です。',
                 '',
-                'ただ、相手の気持ちまでは断定しません。',
+                'この流れでは、相手側にも「予定を流したくない」「早く整えたい」という温度が出ています。',
                 '見るところは、来るか来ないかだけではなく、相手が自分のペースで来られる余白が残っているかです。'
               ].join('\n');
             } else if (hasArrival) {
@@ -2458,8 +3399,8 @@ return NextResponse.json({
                 '',
                 '予約や到着時間、移動や予定に関する具体的な情報が出ているので、会話は切れているというより、必要な確認をしながら進んでいます。',
                 '',
-                'ただし、相手の気持ちまでは断定しません。',
-                '見るべきなのは、相手がどの温度で返しているかと、あなたがどこまで先に整えすぎているかです。'
+                'この流れでは、相手側にも「予定を流したくない」「早く整えたい」という温度が出ています。',
+                '見るべきなのは、相手が確認を急いだ理由と、こちらの確定報告を受けて安心できる流れになっているかです。'
               ].join('\n');
             } else {
               finalText = [
@@ -2467,8 +3408,8 @@ return NextResponse.json({
                 '',
                 '診断内容をそのまま貼るのではなく、見えている根拠だけで言うと、会話は切れているというより、必要な確認をしながら進んでいる状態です。',
                 '',
-                'ただし、相手の気持ちまでは断定しません。',
-                '見るべきなのは、相手がどの温度で返しているかと、あなたがどこまで先に整えすぎているかです。'
+                'この流れでは、相手側にも「予定を流したくない」「早く整えたい」という温度が出ています。',
+                '見るべきなのは、相手が確認を急いだ理由と、こちらの確定報告を受けて安心できる流れになっているかです。'
               ].join('\n');
             }
 
@@ -2609,16 +3550,30 @@ const fromResultObj = stripInternalLines(resultObjFinalRaw);
       ? mfsExtra.ctxPack
       : null;
 
-  const isPreSeedDirectReplyPrePersist = Boolean(
-    resultAny?.gate === 'pre_seed_direct_reply' ||
-      resultAny?.result?.gate === 'pre_seed_direct_reply' ||
-      resultAny?.meta?.extra?.preSeedDirectReply === true ||
-      resultAny?.metaForSave?.extra?.preSeedDirectReply === true ||
-      mfsExtra?.preSeedDirectReply === true ||
-      ctxPackAny?.preSeedDirectReply === true ||
-      mfsExtra?.preSeedAssistKind === 'diagnosis_detail' ||
-      ctxPackAny?.preSeedAssistKind === 'diagnosis_detail'
-  );
+  const preSeedAssistKindForDirectLock = String(
+    mfsExtra?.preSeedAssistKind ??
+      ctxPackAny?.preSeedAssistKind ??
+      resultAny?.meta?.extra?.preSeedAssistKind ??
+      resultAny?.metaForSave?.extra?.preSeedAssistKind ??
+      ''
+  ).trim();
+
+  const shouldForceWriterForPreSeedAssist =
+    preSeedAssistKindForDirectLock === 'diagnosis_followup' ||
+    preSeedAssistKindForDirectLock === 'relationship_followup';
+
+  const isPreSeedDirectReplyPrePersist =
+    !shouldForceWriterForPreSeedAssist &&
+    Boolean(
+      resultAny?.gate === 'pre_seed_direct_reply' ||
+        resultAny?.result?.gate === 'pre_seed_direct_reply' ||
+        resultAny?.meta?.extra?.preSeedDirectReply === true ||
+        resultAny?.metaForSave?.extra?.preSeedDirectReply === true ||
+        mfsExtra?.preSeedDirectReply === true ||
+        ctxPackAny?.preSeedDirectReply === true ||
+        mfsExtra?.preSeedAssistKind === 'diagnosis_detail' ||
+        ctxPackAny?.preSeedAssistKind === 'diagnosis_detail'
+    );
 
   const directReplyPrePersist =
     [
@@ -3014,7 +3969,21 @@ meta.extra = {
   },
 };
 
-const isPreSeedDirectReplyForPostProcessing = Boolean(
+const preSeedAssistKindForFinalLock = String(
+  (result as any)?.meta?.extra?.preSeedAssistKind ??
+    (result as any)?.metaForSave?.extra?.preSeedAssistKind ??
+    (metaForSave as any)?.extra?.preSeedAssistKind ??
+    (metaForSave as any)?.extra?.ctxPack?.preSeedAssistKind ??
+    ''
+).trim();
+
+const shouldForceWriterForFinalLock =
+  preSeedAssistKindForFinalLock === 'diagnosis_followup' ||
+  preSeedAssistKindForFinalLock === 'relationship_followup';
+
+const isPreSeedDirectReplyForPostProcessing =
+  !shouldForceWriterForFinalLock &&
+  Boolean(
   (result as any)?.gate === 'pre_seed_direct_reply' ||
     (result as any)?.result?.gate === 'pre_seed_direct_reply' ||
     (result as any)?.meta?.extra?.preSeedDirectReply === true ||
@@ -3026,7 +3995,6 @@ const isPreSeedDirectReplyForPostProcessing = Boolean(
     String((metaForSave as any)?.extra?.preSeedAssistKind ?? '').trim() === 'memory_recall_preflight_none' ||
     String((metaForSave as any)?.extra?.ctxPack?.preSeedAssistKind ?? '').trim() === 'memory_recall_preflight_none'
 );
-
 if (isPreSeedDirectReplyForPostProcessing && metaForSave && typeof metaForSave === 'object') {
   (metaForSave as any).skipTraining = true;
   (metaForSave as any).skip_training = true;
@@ -3665,6 +4633,33 @@ if (!skipTraining) {
     );
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

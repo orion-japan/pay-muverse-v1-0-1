@@ -237,11 +237,27 @@ const extraForRender: any = {
   userText: typeof userText === 'string' ? userText : null,
 };
 
+const patternKey = String(
+  (meta as any)?.framePlan?.patternKey ??
+    (meta as any)?.framePlan?.pattern ??
+    (meta as any)?.slotPatternKey ??
+    (meta as any)?.patternKey ??
+    (meta as any)?.extra?.patternKey ??
+    (meta as any)?.extra?.slotPatternKey ??
+    (extraForHandle as any)?.patternKey ??
+    (extraForHandle as any)?.slotPatternKey ??
+    ''
+).trim();
+
+const isNormalDetail = patternKey === 'NORMAL_DETAIL_V1';
+
 const maxLines =
   Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)) &&
   Number(process.env.IROS_RENDER_DEFAULT_MAXLINES) > 0
     ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)
-    : 8;
+    : isNormalDetail
+      ? 12
+      : 8;
 
 const baseText = String(
   (resultObj as any)?.assistantText ?? (resultObj as any)?.content ?? (resultObj as any)?.text ?? '',
@@ -345,6 +361,9 @@ if (attachRes && typeof attachRes === 'object') {
     }
     console.warn('[IROS/renderV2][BEFORE_RENDERGW]', {
       traceId: String((meta as any)?.extra?.traceId ?? (meta as any)?.traceId ?? '').trim() || null,
+      patternKey,
+      isNormalDetail,
+      maxLines,
       baseTextLen: String(baseText ?? '').length,
       sot_rbLen: Array.isArray(extraSoT?.rephraseBlocks) ? extraSoT.rephraseBlocks.length : 0,
       render_rbLen: Array.isArray(extraForRender?.rephraseBlocks) ? extraForRender.rephraseBlocks.length : 0,
@@ -387,3 +406,4 @@ if (attachRes && typeof attachRes === 'object') {
     return { meta, extraForHandle };
   }
 }
+
