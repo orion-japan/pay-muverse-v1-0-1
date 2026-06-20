@@ -794,13 +794,55 @@ export async function buildTurnContext(
     (activeDiagnosisFramePrimaryEntityId.startsWith('diagnosis:')
       ? activeDiagnosisFramePrimaryEntityId.replace(/^diagnosis:/u, '').trim()
       : null);
+  const historyForDiagnosisFollowup = Array.isArray((args as any)?.history)
+    ? (args as any).history
+    : [];
+
+  const recentAssistantDiagnosisForFollowup = [...historyForDiagnosisFollowup]
+    .reverse()
+    .find((item: any) => {
+      const role = String(item?.role ?? '').trim();
+      const content = String(item?.content ?? item?.text ?? '').trim();
+      return role === 'assistant' && /観測対象[:：]/u.test(content);
+    });
+
+  const historyDiagnosisFollowupTargetLabel = (() => {
+    const content = String(
+      recentAssistantDiagnosisForFollowup?.content ??
+        recentAssistantDiagnosisForFollowup?.text ??
+        ''
+    );
+
+    const match = content.match(/観測対象[:：]\s*([^\n\r]+)/u);
+    const raw = String(match?.[1] ?? '').trim();
+
+    return raw
+      ? raw
+          .replace(/^#+\s*/u, '')
+          .replace(/[。．.、，,].*$/u, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+      : null;
+  })();
+
+  const hasHistoryDiagnosisFrameForFollowup = !!historyDiagnosisFollowupTargetLabel;
+
+  const hasContextThreadDiagnosisForFollowup =
+    String((prevContextThreadForTurn as any)?.type ?? '').includes('diagnosis');
+
+  const contextThreadDiagnosisTargetLabel =
+    String((prevContextThreadForTurn as any)?.targetLabel ?? '').trim() ||
+    String((prevContextThreadForTurn as any)?.label ?? '').trim() ||
+    null;
 
   const diagnosisFollowupTargetLabel =
     (memoryDecision.memoryIntent === 'diagnosis_recall'
       ? memoryDecision.targetLabel
       : null) ||
     extractDiagnosisFollowupTargetLabel(followupSourceText) ||
-    activeDiagnosisFrameTargetLabel;
+    activeDiagnosisFrameTargetLabel ||
+    contextThreadDiagnosisTargetLabel ||
+    historyDiagnosisFollowupTargetLabel;
 
 
   if (memoryDecision.memoryIntent === 'reference_check') {
@@ -1594,6 +1636,10 @@ export async function buildTurnContext(
       hasActiveDiagnosisFrameForFollowup,
       activeDiagnosisFramePrimaryEntityId: activeDiagnosisFramePrimaryEntityId || null,
       activeDiagnosisFrameTargetLabel: activeDiagnosisFrameTargetLabel || null,
+      hasContextThreadDiagnosisForFollowup,
+      contextThreadDiagnosisTargetLabel: contextThreadDiagnosisTargetLabel || null,
+      hasHistoryDiagnosisFrameForFollowup,
+      historyDiagnosisFollowupTargetLabel: historyDiagnosisFollowupTargetLabel || null,
       diagnosisFollowupKind,
       diagnosisFollowupTargetLabel,
       followupSourceText,
@@ -3235,6 +3281,7 @@ export async function buildTurnContext(
     },
   };
 }
+
 
 
 
