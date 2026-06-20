@@ -38,9 +38,14 @@ export default async function TikTokRadarIdeaPage({
           <p style={subTextStyle}>市場データからTikTok投稿の入口を生成します。</p>
         </div>
 
-        <Link href="/admin/tiktok-radar" style={linkStyle}>
-          一覧へ戻る
-        </Link>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <Link href={`/admin/tiktok-radar/${id}/edit`} style={secondaryLinkStyle}>
+            元データを編集
+          </Link>
+          <Link href="/admin/tiktok-radar" style={linkStyle}>
+            一覧へ戻る
+          </Link>
+        </div>
       </div>
 
       <section style={summaryStyle}>
@@ -53,11 +58,27 @@ export default async function TikTokRadarIdeaPage({
           <div style={valueStyle}>{data.keyword || "-"}</div>
         </div>
         <div>
-          <div style={labelStyle}>合計スコア</div>
+          <div style={labelStyle}>共鳴合計</div>
           <div style={valueStyle}>
             {idea.totalScore}点 / {idea.scoreLabel}
           </div>
         </div>
+        <div>
+          <div style={labelStyle}>Mu導線</div>
+          <div style={valueStyle}>{idea.muLeadScore} / 20</div>
+        </div>
+        <div>
+          <div style={labelStyle}>TikTok形式</div>
+          <div style={valueStyle}>{idea.viralFormatScore} / 5</div>
+        </div>
+      </section>
+
+      <section style={strategyStyle}>
+        <div>
+          <div style={strategyLabelStyle}>Sofia 推奨アクション</div>
+          <p style={strategyTextStyle}>{idea.recommendedAction}</p>
+        </div>
+        <IdeaBlock title="Sofia戦略メモ" text={idea.sofiaStrategyNote} compact />
       </section>
 
       <section style={sectionStyle}>
@@ -152,6 +173,13 @@ const linkStyle: CSSProperties = {
   fontWeight: 700,
 };
 
+const secondaryLinkStyle: CSSProperties = {
+  ...linkStyle,
+  background: "#fff",
+  color: "#111",
+  border: "1px solid #ddd",
+};
+
 const errorStyle: CSSProperties = {
   color: "#b00020",
   fontWeight: 700,
@@ -159,7 +187,7 @@ const errorStyle: CSSProperties = {
 
 const summaryStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
   gap: 16,
   padding: 20,
   borderRadius: 18,
@@ -177,6 +205,28 @@ const labelStyle: CSSProperties = {
 const valueStyle: CSSProperties = {
   fontSize: 18,
   fontWeight: 900,
+};
+
+const strategyStyle: CSSProperties = {
+  padding: 20,
+  borderRadius: 18,
+  background: "#111",
+  color: "#fff",
+  marginBottom: 24,
+};
+
+const strategyLabelStyle: CSSProperties = {
+  color: "#d8c39b",
+  fontSize: 13,
+  fontWeight: 900,
+  marginBottom: 8,
+};
+
+const strategyTextStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 18,
+  fontWeight: 900,
+  lineHeight: 1.7,
 };
 
 const sectionStyle: CSSProperties = {
