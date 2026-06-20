@@ -458,6 +458,167 @@ function isScreenshotLikeDiagnosisCandidate(candidate: any): boolean {
   );
 }
 
+function extractLatestIrDiagnosisFromHistory(historyForTurnRaw: any[]): {
+  targetKey: string;
+  targetLabel: string;
+  diagnosisText: string;
+} | null {
+  const history = Array.isArray(historyForTurnRaw) ? historyForTurnRaw : [];
+  const tail = history.slice(-10).reverse();
+
+  for (const message of tail) {
+    const role = String(message?.role ?? message?.speaker ?? '').toLowerCase();
+    const content = String(
+      message?.content ??
+        message?.text ??
+        message?.body ??
+        message?.message ??
+        ''
+    ).trim();
+
+    if (!content) continue;
+    if (role && role !== 'assistant') continue;
+
+    const looksIrDiagnosis =
+      /観測対象[:：]/u.test(content) &&
+      /現状[:：]/u.test(content) &&
+      /(ポイント|意識の向かう先|メッセージ)[:：]/u.test(content);
+
+    if (!looksIrDiagnosis) continue;
+
+    const targetMatch = content.match(/観測対象[:：]\s*([^\n\r]+)/u);
+    const targetLabel = String(targetMatch?.[1] ?? 'ir診断').trim();
+
+    return {
+      targetKey: targetLabel,
+      targetLabel,
+      diagnosisText: content,
+    };
+  }
+
+  for (const message of tail) {
+    const role = String(message?.role ?? message?.speaker ?? '').toLowerCase();
+    const content = String(
+      message?.content ??
+        message?.text ??
+        message?.body ??
+        message?.message ??
+        ''
+    ).trim();
+
+    if (!content) continue;
+    if (role && role !== 'user') continue;
+
+    const m = content.match(/^(?:ir|ｉｒ)診断[　\s]+(.+)$/iu);
+    if (!m?.[1]) continue;
+
+    const targetLabel = String(m[1]).trim();
+
+    return {
+      targetKey: targetLabel,
+      targetLabel,
+      diagnosisText: '',
+    };
+  }
+
+  return null;
+}
+
+function buildHistoryIrDiagnosisFollowupDecision(args: {
+  userText: string;
+  userCode: string;
+  conversationId?: string | null;
+  traceId?: string | null;
+  historyIr: {
+    targetKey: string;
+    targetLabel: string;
+    diagnosisText: string;
+  };
+}): PreSeedDecision {
+  const seedText = [
+    'IR_DIAGNOSIS_FOLLOWUP_SEED (DO NOT OUTPUT)',
+    'source=history_ir_diagnosis',
+    `targetLabel=${args.historyIr.targetLabel}`,
+    `targetKey=${args.historyIr.targetKey}`,
+    'rule=このターンは直前のir診断結果の続き相談。',
+    'rule=スクショ診断として扱わない。',
+    'rule=新しい診断を作り直さず、下のir診断本文を正本として深める。',
+    'rule=SimilarFlowや通常履歴に引っ張られない。',
+    '',
+    'USER_FOLLOWUP:',
+    args.userText,
+    '',
+    'IR_DIAGNOSIS_TEXT:',
+    args.historyIr.diagnosisText,
+  ].join('\n');
+
+  return {
+    kind: 'ir_diagnosis_followup',
+    confidence: 0.9,
+    sourceAuthority: 'ir_diagnosis_text',
+    sourceKind: 'history_ir_diagnosis',
+    sourceId: null,
+    sourceText: args.historyIr.diagnosisText,
+    route: 'diagnosis_writer',
+    seedText,
+    directReply: null,
+    writerInput: seedText,
+    shouldBypassWriter: false,
+    shouldBypassRephrase: false,
+    shouldUsePreSeedWriter: true,
+    shouldSuppressHistoryForWriter: true,
+    shouldSuppressSimilarFlow: true,
+    shouldSuppressSlotPlan: false,
+    shouldSuppressMemoryDelta: true,
+    shouldSuppressIntuitionCandidate: true,
+    shouldSuppressNormalResonance: true,
+    shouldOpenContextThread: false,
+    contextThreadCode: null,
+    ctxPackPatch: {
+      preSeedIrDiagnosis: true,
+      diagnosisFollowup: true,
+      presentationKind: 'diagnosis_followup',
+      memoryIntent: 'ir_diagnosis_followup',
+      memorySpace: 'ir_diagnosis',
+      memoryTargetLabel: args.historyIr.targetLabel,
+      memoryTargetKey: args.historyIr.targetKey,
+      lastIrDiagnosis: {
+        kind: 'ir_diagnosis',
+        source: 'history_ir_diagnosis',
+        targetKey: args.historyIr.targetKey,
+        targetLabel: args.historyIr.targetLabel,
+        diagnosisText: args.historyIr.diagnosisText,
+      },
+      shouldSuppressSimilarFlow: true,
+      shouldSuppressHistoryForWriter: true,
+    },
+    metaPatch: {
+      preSeedIrDiagnosis: true,
+      diagnosisFollowup: true,
+      presentationKind: 'diagnosis_followup',
+      memoryIntent: 'ir_diagnosis_followup',
+      memorySpace: 'ir_diagnosis',
+      sourceAuthority: 'ir_diagnosis_text',
+      targetKey: args.historyIr.targetKey,
+      targetLabel: args.historyIr.targetLabel,
+      lastIrDiagnosis: {
+        kind: 'ir_diagnosis',
+        source: 'history_ir_diagnosis',
+        targetKey: args.historyIr.targetKey,
+        targetLabel: args.historyIr.targetLabel,
+        diagnosisText: args.historyIr.diagnosisText,
+      },
+      shouldSuppressSimilarFlow: true,
+      shouldSuppressHistoryForWriter: true,
+    },
+    debug: {
+      reason: 'history_ir_diagnosis_followup',
+      matchedPattern: 'latest_assistant_ir_diagnosis_format',
+      targetKey: args.historyIr.targetKey,
+      targetLabel: args.historyIr.targetLabel,
+    },
+  } as any;
+}
 function pickActiveIrDiagnosisContext(metaRaw: any): {
   targetKey: string;
   targetLabel: string | null;
@@ -902,6 +1063,30 @@ export async function resolvePreSeedDecision(
     }));
   }
 
+  const historyIrDiagnosis = extractLatestIrDiagnosisFromHistory(historyForTurn);
+
+  if (
+    historyIrDiagnosis?.diagnosisText &&
+    (diagnosisContextKind === 'ir' || diagnosisContextKind === 'ambiguous')
+  ) {
+    console.log('[IROS/PRE_SEED_ENGINE][HISTORY_IR_DIAGNOSIS_CONTEXT_CONTINUE]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode,
+      targetKey: historyIrDiagnosis.targetKey,
+      targetLabel: historyIrDiagnosis.targetLabel,
+      sourceTextLen: String(historyIrDiagnosis.diagnosisText ?? '').length,
+      userTextHead: userText.slice(0, 120),
+    });
+
+    return withCognitionMap(buildHistoryIrDiagnosisFollowupDecision({
+      userText,
+      userCode: args.userCode,
+      conversationId: args.conversationId,
+      traceId: args.traceId,
+      historyIr: historyIrDiagnosis,
+    }));
+  }
   if (diagnosisContextKind === 'ir') {
     const activeIr = pickActiveIrDiagnosisContext(args.meta);
 
@@ -1145,6 +1330,8 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
+
+
 
 
 
