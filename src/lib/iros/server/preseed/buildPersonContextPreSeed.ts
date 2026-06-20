@@ -179,6 +179,8 @@ function buildVisiblePersonContextReply(args: {
   personIntentNote: string | null;
   relationshipNoteText: string | null;
   diagnosisText: string | null;
+  conversationMentionNote?: string | null;
+  longTermNote?: string | null;
 }): string {
   const source =
     args.personIntentNote ||
@@ -489,6 +491,8 @@ function buildPersonContextSeed(args: {
   personIntentNote: string | null;
   relationshipNoteText: string | null;
   diagnosisText: string | null;
+  conversationMentionNote?: string | null;
+  longTermNote?: string | null;
 }): string {
   const lines: string[] = [];
   const exposeRelationshipContext = shouldExposeRelationshipContextInPreSeed(args.userText);
@@ -624,10 +628,25 @@ export async function buildPersonContextPreSeed(args: {
       /relationship_context:/iu.test(String(personIntentNote ?? '')) ||
       /relationship\.kind=/iu.test(String(personIntentNote ?? '')));
 
+  const conversationMentionNote = await loadPersonMentionConversationContext({
+    supabase: (args as any).supabase,
+    userCode: args.userCode,
+    aliases,
+    currentConversationId: args.conversationId ?? null,
+  });
+
+  const longTermNote = await loadPersonLongTermContext({
+    supabase: (args as any).supabase,
+    userCode: args.userCode,
+    aliases,
+  });
+
   const hasAnySource =
     Boolean(personIntentNote) ||
     hasRelationshipContext ||
-    Boolean(diagnosisText);
+    Boolean(diagnosisText) ||
+    Boolean(conversationMentionNote) ||
+    Boolean(longTermNote);
 
   if (!hasAnySource) {
     console.log('[IROS/PRE_SEED_PERSON_CONTEXT][NO_SOURCE]', {
@@ -637,6 +656,8 @@ export async function buildPersonContextPreSeed(args: {
       targetLabel,
       targetKey,
       aliases,
+      hasConversationMentions: Boolean(conversationMentionNote),
+      hasLongTerm: Boolean(longTermNote),
     });
 
     return null;
@@ -651,19 +672,8 @@ export async function buildPersonContextPreSeed(args: {
     personIntentNote,
     relationshipNoteText,
     diagnosisText: diagnosisText || null,
-  });
-
-  const conversationMentionNote = await loadPersonMentionConversationContext({
-    supabase: (args as any).supabase,
-    userCode: args.userCode,
-    aliases,
-    currentConversationId: args.conversationId ?? null,
-  });
-
-  const longTermNote = await loadPersonLongTermContext({
-    supabase: (args as any).supabase,
-    userCode: args.userCode,
-    aliases,
+    conversationMentionNote,
+    longTermNote,
   });
   const cognitionMapSourceKind =
     hasRelationshipContext && !personIntentNote ? 'relationship_memory' : 'person_context';
@@ -864,6 +874,7 @@ export async function buildPersonContextPreSeed(args: {
     },
   };
 }
+
 
 
 

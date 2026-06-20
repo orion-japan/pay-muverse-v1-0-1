@@ -1508,7 +1508,38 @@ export async function resolvePreSeedDecision(
         confidence: universalCandidate.confidence,
       });
 
+      
+      const explicitPersonFollowupTarget = extractExplicitPersonFollowupTarget(userText);
+
       if (
+        universalCandidate?.memoryIntent === 'active_thread_followup' &&
+        explicitPersonFollowupTarget?.targetKey &&
+        explicitPersonFollowupTarget?.targetLabel
+      ) {
+        const personDecision = await buildPersonContextPreSeed({
+          ...args,
+          targetKey: explicitPersonFollowupTarget.targetKey,
+          targetLabel: explicitPersonFollowupTarget.targetLabel,
+          traceId: args.traceId ?? null,
+        });
+
+        if (personDecision) {
+          console.log('[IROS/PRE_SEED_ENGINE][ACTIVE_THREAD_PERSON_REFERENCE_PROMOTED]', {
+            traceId: args.traceId ?? null,
+            conversationId: args.conversationId,
+            userCode: args.userCode,
+            fromMemoryIntent: universalCandidate.memoryIntent,
+            targetKey: explicitPersonFollowupTarget.targetKey,
+            targetLabel: explicitPersonFollowupTarget.targetLabel,
+            route: personDecision.route,
+            sourceId: personDecision.sourceId ?? null,
+            seedLen: String((personDecision as any).seedText ?? '').length,
+          });
+
+          return withCognitionMap(personDecision);
+        }
+      }
+if (
         universalCandidate.memoryIntent === 'ir_diagnosis_recall' &&
         universalCandidate.resolvedTarget?.targetKey
       ) {
@@ -1580,6 +1611,7 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
+
 
 
 
