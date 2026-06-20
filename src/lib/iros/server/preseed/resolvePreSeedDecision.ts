@@ -364,6 +364,105 @@ function buildAmbiguousScreenshotClarifyDecision(args: {
   };
 }
 
+function buildAmbiguousDiagnosisKindClarifyDecision(args: {
+  userText: string;
+  userCode: string;
+  conversationId?: string | null;
+  traceId?: string | null;
+  irTargetLabel?: string | null;
+  screenshotDisplayId?: number | null;
+}): PreSeedDecision {
+  const irLabel = String(args.irTargetLabel ?? 'ir診断').trim() || 'ir診断';
+  const screenshotLabel =
+    args.screenshotDisplayId && args.screenshotDisplayId > 0
+      ? `スクショ診断ID:${args.screenshotDisplayId}`
+      : 'スクショ診断';
+
+  const directReply =
+    `「診断の内容」は、どちらの続きとして見ますか？\n\n` +
+    `1. ${irLabel}のir診断\n` +
+    `2. ${screenshotLabel}\n\n` +
+    `番号か、「ir診断」「スクショ診断」で指定してください。`;
+
+  return {
+    kind: 'diagnosis_context_clarify',
+    confidence: 0.5,
+    sourceAuthority: 'user_text',
+    sourceKind: 'ambiguous_diagnosis_context',
+    sourceId: args.screenshotDisplayId ?? null,
+    sourceText: args.userText,
+    route: 'clarify',
+    seedText: null,
+    directReply,
+    shouldBypassWriter: true,
+    shouldBypassRephrase: true,
+    shouldUsePreSeedWriter: false,
+    shouldSuppressHistoryForWriter: true,
+    shouldSuppressSimilarFlow: true,
+    shouldSuppressSlotPlan: true,
+    shouldSuppressMemoryDelta: true,
+    shouldSuppressIntuitionCandidate: true,
+    shouldSuppressNormalResonance: true,
+    shouldOpenContextThread: false,
+    contextThreadCode: null,
+    ctxPackPatch: {
+      contextMode: 'diagnosis_context_ambiguous',
+      contextAuthority: 'diagnosis_context',
+      presentationKind: 'diagnosis_kind_clarify',
+      diagnosisKindClarify: true,
+      irTargetLabel: irLabel,
+      screenshotDisplayId: args.screenshotDisplayId ?? null,
+    },
+    metaPatch: {
+      presentationKind: 'diagnosis_kind_clarify',
+      diagnosisKindClarify: true,
+      contextMode: 'diagnosis_context_ambiguous',
+      contextAuthority: 'diagnosis_context',
+      irTargetLabel: irLabel,
+      screenshotDisplayId: args.screenshotDisplayId ?? null,
+    },
+    debug: {
+      reason: 'ambiguous_diagnosis_kind_has_ir_and_screenshot',
+      matchedPattern: 'ambiguous_diagnosis_reference',
+      irTargetLabel: irLabel,
+      screenshotDisplayId: args.screenshotDisplayId ?? null,
+    },
+  } as any;
+}
+function hasRecentDiagnosisKindClarifyContext(historyForTurn: any[]): boolean {
+  const tail = Array.isArray(historyForTurn) ? historyForTurn.slice(-8).reverse() : [];
+
+  return tail.some((t: any) => {
+    const s = getTurnText(t);
+    if (!s) return false;
+
+    return (
+      /どちらの続きとして見ますか/u.test(s) &&
+      /ir診断/u.test(s) &&
+      /スクショ診断/u.test(s)
+    );
+  });
+}
+
+function resolveDiagnosisKindClarifySelection(args: {
+  userText: string;
+  historyForTurn?: any[];
+}): 'ir' | 'screenshot' | null {
+  if (!hasRecentDiagnosisKindClarifyContext(args.historyForTurn ?? [])) return null;
+
+  const compact = String(args.userText ?? '')
+    .trim()
+    .replace(/[　\s]+/g, '')
+    .toLowerCase();
+
+  if (/^(1|１|一|ir|ｉｒ|ir診断|ｉｒ診断)$/u.test(compact)) return 'ir';
+
+  if (/^(2|２|二|スクショ診断|スクリーンショット診断|画像診断|screenshot|screenshotdiagnosis)$/u.test(compact)) {
+    return 'screenshot';
+  }
+
+  return null;
+}
 function isExplicitIrDiagnosisRequest(userTextRaw: string): boolean {
   const compact = String(userTextRaw ?? '')
     .trim()
@@ -372,6 +471,16 @@ function isExplicitIrDiagnosisRequest(userTextRaw: string): boolean {
 
   return /^(ir|ｉｒ)診断/u.test(compact);
 }
+
+function isExplicitScreenshotDiagnosisRequest(userTextRaw: string): boolean {
+  const compact = String(userTextRaw ?? '')
+    .trim()
+    .replace(/[　\s]+/g, '')
+    .toLowerCase();
+
+  return /(スクショ診断|スクリーンショット診断|画像診断|screenshotdiagnosis)/u.test(compact);
+}
+
 function hasDiagnosisReference(userTextRaw: string): boolean {
   const userText = String(userTextRaw ?? '').trim();
   if (!userText) return false;
@@ -389,6 +498,7 @@ function resolveDiagnosisContextKind(args: {
 }): 'screenshot' | 'ir' | 'ambiguous' | 'none' {
   const userText = String(args.userText ?? '').trim();
   if (isExplicitIrDiagnosisRequest(userText)) return 'ir';
+  if (isExplicitScreenshotDiagnosisRequest(userText)) return 'screenshot';
   if (!hasDiagnosisReference(userText)) return 'none';
 
   const meta = args.meta ?? {};
@@ -1082,8 +1192,91 @@ export async function resolvePreSeedDecision(
     }));
   }
 
-  const historyIrDiagnosis = extractLatestIrDiagnosisFromHistory(historyForTurn);
+  const latest = await fetchLatestScreenshotDiagnosisForConversation({
+    supabase: args.supabase,
+    userCode: args.userCode,
+    conversationId: args.conversationId,
+  });
 
+  const latestDisplayId = Number(latest?.display_id ?? 0);
+  const hasLatestScreenshotDiagnosis =
+    Number.isFinite(latestDisplayId) &&
+    latestDisplayId > 0 &&
+    Boolean(latest?.diagnosis_text);
+  const historyIrDiagnosis = extractLatestIrDiagnosisFromHistory(historyForTurn);
+  const diagnosisKindClarifySelection = resolveDiagnosisKindClarifySelection({
+    userText,
+    historyForTurn,
+  });
+
+  if (diagnosisKindClarifySelection === 'screenshot') {
+    const selectedDisplayId =
+      historyDisplayId ||
+      (Number.isFinite(latestDisplayId) && latestDisplayId > 0 ? latestDisplayId : null);
+
+    if (selectedDisplayId) {
+      console.log('[IROS/PRE_SEED_ENGINE][DIAGNOSIS_KIND_SELECTION_SCREENSHOT]', {
+        traceId: args.traceId ?? null,
+        conversationId: args.conversationId ?? null,
+        userCode: args.userCode,
+        displayId: selectedDisplayId,
+        userTextHead: userText.slice(0, 120),
+      });
+
+      return withCognitionMap(await buildScreenshotDiagnosisPreSeed({
+        ...args,
+        userText: 'スクショ診断の続きを詳しくしてください',
+        displayId: selectedDisplayId,
+        matchedPattern: 'diagnosis_kind_clarify_selection_screenshot',
+      }));
+    }
+  }
+
+  if (
+    diagnosisKindClarifySelection === 'ir' &&
+    historyIrDiagnosis?.diagnosisText
+  ) {
+    console.log('[IROS/PRE_SEED_ENGINE][DIAGNOSIS_KIND_SELECTION_IR]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode,
+      targetKey: historyIrDiagnosis.targetKey,
+      targetLabel: historyIrDiagnosis.targetLabel,
+      userTextHead: userText.slice(0, 120),
+    });
+
+    return withCognitionMap(buildHistoryIrDiagnosisFollowupDecision({
+      userText: 'ir診断の内容を深めてください',
+      userCode: args.userCode,
+      conversationId: args.conversationId,
+      traceId: args.traceId,
+      historyIr: historyIrDiagnosis,
+    }));
+  }
+
+  if (
+    diagnosisContextKind === 'ambiguous' &&
+    historyIrDiagnosis?.diagnosisText &&
+    hasLatestScreenshotDiagnosis
+  ) {
+    console.log('[IROS/PRE_SEED_ENGINE][DIAGNOSIS_KIND_CLARIFY]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode,
+      irTargetLabel: historyIrDiagnosis.targetLabel,
+      screenshotDisplayId: latestDisplayId,
+      userTextHead: userText.slice(0, 120),
+    });
+
+    return withCognitionMap(buildAmbiguousDiagnosisKindClarifyDecision({
+      userText,
+      userCode: args.userCode,
+      conversationId: args.conversationId,
+      traceId: args.traceId,
+      irTargetLabel: historyIrDiagnosis.targetLabel,
+      screenshotDisplayId: latestDisplayId,
+    }));
+  }
   if (
     historyIrDiagnosis?.diagnosisText &&
     (diagnosisContextKind === 'ir' || diagnosisContextKind === 'ambiguous')
@@ -1149,46 +1342,46 @@ export async function resolvePreSeedDecision(
       });
     }
   }
-  const latest = await fetchLatestScreenshotDiagnosisForConversation({
+  const latestForScreenshotRoute = await fetchLatestScreenshotDiagnosisForConversation({
     supabase: args.supabase,
     userCode: args.userCode,
     conversationId: args.conversationId,
   });
 
-  const latestDisplayId = Number(latest?.display_id ?? 0);
+  const latestDisplayIdForScreenshotRoute = Number(latestForScreenshotRoute?.display_id ?? 0);
 
   if (
-    Number.isFinite(latestDisplayId) &&
-    latestDisplayId > 0 &&
+    Number.isFinite(latestDisplayIdForScreenshotRoute) &&
+    latestDisplayIdForScreenshotRoute > 0 &&
     (strength === 'strong' || diagnosisContextKind === 'screenshot')
   ) {
     console.log('[IROS/PRE_SEED_ENGINE][LATEST_SCREENSHOT_CONTEXT_CONTINUE]', {
       traceId: args.traceId,
       conversationId: args.conversationId,
       userCode: args.userCode,
-      displayId: latestDisplayId,
+      displayId: latestDisplayIdForScreenshotRoute,
       strength,
       userTextHead: userText.slice(0, 120),
-      diagnosisTextLen: String(latest?.diagnosis_text ?? '').length,
+      diagnosisTextLen: String(latestForScreenshotRoute?.diagnosis_text ?? '').length,
     });
 
     return withCognitionMap(await buildScreenshotDiagnosisPreSeed({
       ...args,
-      displayId: latestDisplayId,
+      displayId: latestDisplayIdForScreenshotRoute,
       matchedPattern: 'latest_screenshot_diagnosis_context_followup_strong',
     }));
   }
 
   if (
-    Number.isFinite(latestDisplayId) &&
-    latestDisplayId > 0 &&
+    Number.isFinite(latestDisplayIdForScreenshotRoute) &&
+    latestDisplayIdForScreenshotRoute > 0 &&
     strength === 'weak'
   ) {
     console.log('[IROS/PRE_SEED_ENGINE][LATEST_SCREENSHOT_CONTEXT_AMBIGUOUS]', {
       traceId: args.traceId,
       conversationId: args.conversationId,
       userCode: args.userCode,
-      displayId: latestDisplayId,
+      displayId: latestDisplayIdForScreenshotRoute,
       strength,
       userTextHead: userText.slice(0, 120),
     });
@@ -1198,7 +1391,7 @@ export async function resolvePreSeedDecision(
       userCode: args.userCode,
       conversationId: args.conversationId,
       traceId: args.traceId,
-      displayId: latestDisplayId,
+      displayId: latestDisplayIdForScreenshotRoute,
     }));
   }
   if (!historyDisplayId && diagnosisContextKind === 'ambiguous') {
@@ -1349,6 +1542,15 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
+
+
+
+
+
+
+
+
+
 
 
 

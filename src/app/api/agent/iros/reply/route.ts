@@ -1507,7 +1507,7 @@ let extraSoT: Record<string, any> = {
       });
     }
     if (
-      preSeedDecision?.route === 'direct_reply' &&
+      (preSeedDecision?.route === 'direct_reply' || preSeedDecision?.route === 'clarify') &&
       preSeedDecision.shouldBypassWriter &&
       preSeedDecision.directReply
     ) {
@@ -4601,6 +4601,7 @@ if (!skipTraining) {
     );
   }
 }
+
 
 
 
