@@ -1,4 +1,4 @@
-import type { PreSeedDecision } from './types';
+﻿import type { PreSeedDecision } from './types';
 
 export type PreSeedInputIntent =
   | 'deepen'
@@ -181,7 +181,7 @@ function classifyInputIntent(userText: string): {
     return { inputIntent: 'explain_reason', evidence };
   }
 
-  if (has(c, [/文面/u, /文章/u, /言い方/u, /返し方/u, /どう返/u, /どう送/u, /作って/u, /書いて/u, /プロンプト/u])) {
+  if (has(c, [/文面/u, /文章/u, /言い方/u, /返し方/u, /どう言/u, /なんて言/u, /どう伝/u, /どう返/u, /どう送/u, /作って/u, /書いて/u, /プロンプト/u])) {
     evidence.push('create_phrase');
     return { inputIntent: 'create', evidence };
   }
@@ -510,6 +510,12 @@ export function buildPreSeedFlowDirective(args: BuildPreSeedFlowDirectiveArgs): 
   const flowEvidence: string[] = [...axisBand.evidence];
   const historyEvidence: string[] = [...history.evidence];
 
+  if ((input.inputIntent === 'deepen' || input.inputIntent === 'explain_reason') && history.analysisHeavyStreak >= 2) {
+    loopRisk = raiseRisk(loopRisk, 'medium');
+    historyEvidence.push('analysis_heavy_deepening_repeated');
+  }
+
+
   if ((input.inputIntent === 'deepen' || input.inputIntent === 'explain_reason') && history.recentGoalStreak >= 2) {
     loopRisk = raiseRisk(loopRisk, 'medium');
     historyEvidence.push('same_goal_deepening_repeated');
@@ -617,3 +623,5 @@ export function buildPreSeedFlowDirective(args: BuildPreSeedFlowDirectiveArgs): 
     },
   };
 }
+
+
