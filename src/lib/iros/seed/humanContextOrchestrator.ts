@@ -1,4 +1,4 @@
-// src/lib/iros/seed/humanContextOrchestrator.ts
+﻿// src/lib/iros/seed/humanContextOrchestrator.ts
 //
 // iros — Human Context Orchestrator v1
 //
@@ -183,7 +183,7 @@ function detectQuestionAxis(userText: string, questionType: string | null | unde
     return 'I';
   }
 
-  if (/(どう送|なんて送|どう伝え|何をすれば|どう動|実装|作る|形にする|手順|具体)/.test(t)) {
+  if (/(どう言|なんて言|どう伝|どう送|なんて送|何をすれば|どう動|実装|作る|形にする|手順|具体)/.test(t)) {
     return 'C';
   }
 
@@ -307,7 +307,7 @@ function buildWriterDirective(args: {
       : '',
     primary === 'I' && !plainMeaningQuestion ? '目的・意味・未来を中心に返し、ユーザー発話にない対立構造を足さない。' : '',
     primary === 'R' ? '相手の本心断定を避け、関係の受け取り方として返す。' : '',
-    primary === 'C' ? '具体へ落とすが、手順を増やしすぎない。' : '',
+    primary === 'C' ? '具体へ落とすが、手順を増やしすぎない。直前文脈の対象に向けた短い文案・小さな一手を出す。ユーザーの質問文そのものを文例として引用しない。' : '',
   ].filter(Boolean);
 
   return parts.join(' ');
@@ -418,3 +418,4 @@ export function buildHumanContextOrchestration(
     seedText: lines.join('\n').trim(),
   };
 }
+
