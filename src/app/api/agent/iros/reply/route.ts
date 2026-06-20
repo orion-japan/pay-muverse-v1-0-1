@@ -1455,6 +1455,38 @@ let extraSoT: Record<string, any> = {
           });
         }
 
+        const preSeedTcfStarterForDiagnosisWriter =
+          (preSeedDecision as any)?.tcfStarter ??
+          (preSeedDecision as any)?.ctxPackPatch?.tcfStarter ??
+          (preSeedDecision as any)?.metaPatch?.tcfStarter ??
+          (preSeedDecision as any)?.writerInput?.tcfStarter ??
+          null;
+
+        console.log('[IROS/TCF_ROTATION_SEED][PRE_SEED_BRIDGE]', {
+          traceId,
+          conversationId,
+          userCode,
+          source: 'preseed_tcf_starter',
+          route: preSeedDecision.route,
+          kind: preSeedDecision.kind,
+          sourceId: preSeedDecision.sourceId ?? null,
+          applied: Boolean(preSeedTcfStarterForDiagnosisWriter),
+          cDirection: preSeedTcfStarterForDiagnosisWriter?.cDirection ?? null,
+          userReaction: preSeedTcfStarterForDiagnosisWriter?.userReaction ?? null,
+          convergence: preSeedTcfStarterForDiagnosisWriter?.convergence ?? null,
+          currentFocus: preSeedTcfStarterForDiagnosisWriter?.currentFocus ?? null,
+          nextFocus: preSeedTcfStarterForDiagnosisWriter?.nextFocus ?? null,
+          cognitionMapRelationCode:
+            (preSeedDecision as any)?.cognitionMap?.relationCode ??
+            (preSeedDecision as any)?.ctxPackPatch?.cognitionMap?.relationCode ??
+            (preSeedDecision as any)?.metaPatch?.cognitionMap?.relationCode ??
+            null,
+          cognitionMapProgress:
+            (preSeedDecision as any)?.cognitionMap?.progress ??
+            (preSeedDecision as any)?.ctxPackPatch?.cognitionMap?.progress ??
+            (preSeedDecision as any)?.metaPatch?.cognitionMap?.progress ??
+            null,
+        });
         console.log('[IROS/ROUTE][PRE_SEED_DIAGNOSIS_WRITER_RETURN]', {
           traceId,
           conversationId,
@@ -4601,6 +4633,7 @@ if (!skipTraining) {
     );
   }
 }
+
 
 
 
