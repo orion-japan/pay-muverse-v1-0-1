@@ -93,20 +93,22 @@ function normalizeResult(raw: any, fallbackSeedText: string): PreSeedAssistResul
 
   const targetLabel = cleanString(raw?.targetLabel) || null;
   const targetKey = cleanString(raw?.targetKey) || null;
-  const directReply = cleanString(raw?.directReply) || null;
+  const rawDirectReply = cleanString(raw?.directReply) || null;
   const reason = cleanString(raw?.reason) || 'pre-seed assist normalized';
+
+  // followup は診断・関係の中身を Writer に渡す。
+  // directReply が残ると route 側の PRE_SEED_DIRECT_REPLY で早期終了してしまう。
+  const shouldForceWriter =
+    kind === 'diagnosis_followup' || kind === 'relationship_followup';
+
+  const directReply = shouldForceWriter ? null : rawDirectReply;
 
   const rawShouldBypassWriter =
     typeof raw?.shouldBypassWriter === 'boolean'
       ? raw.shouldBypassWriter
       : Boolean(directReply && kind !== 'normal' && confidence >= 0.75);
 
-  // followup は診断・関係の中身を Writer に渡す。
-  // directReply で早期終了すると、診断正本を取得しても本文に反映されない。
-  const shouldBypassWriter =
-    kind === 'diagnosis_followup' || kind === 'relationship_followup'
-      ? false
-      : rawShouldBypassWriter;
+  const shouldBypassWriter = shouldForceWriter ? false : rawShouldBypassWriter;
 
   const seedText =
     cleanString(raw?.seedText) ||
@@ -182,6 +184,8 @@ export async function runPreSeedAssist(
     '- directReply を出す場合、shouldBypassWriter は true にします。',
     '- activeContextFrame に diagnosis があり、userText が「それは？」「なぜ？」「どうしたら？」「もう少し」など診断の続きにも通常相談にも見える場合は、kind="diagnosis_target_confirm" とし、directReply で「これは、さっきの診断の続きとして見ますか？それとも、今の相談として新しく見ますか？」と確認します。',
     '- activeContextFrame に diagnosis があり、userText が診断対象・診断本文・直前回答に含まれる具体語へ接続している場合は kind="diagnosis_followup" にします。',
+    '- kind="diagnosis_followup" の場合、directReply は必ず null、shouldBypassWriter は false にします。本文を書かず、seedText に正本と指示だけを入れます。',
+    '- 「診断内容を詳しく」「診断内容をさらに詳しく」「この診断を深めて」は、指定部分の辞書説明ではなく diagnosis_followup として Writer に渡します。',
     '- 「別件です」「普通の相談に戻ります」「この診断はここまで」「通常チャット」など明示終了がある場合は kind="normal" にします。',
     '- activeContextFrame がない、または診断との接続が明確にない場合は kind="normal", confidence=0, shouldBypassWriter=false にします。',
     '',
@@ -272,4 +276,6 @@ export async function runPreSeedAssist(
     return buildFallbackResult(args, 'llm_failed');
   }
 }
+
+
 
