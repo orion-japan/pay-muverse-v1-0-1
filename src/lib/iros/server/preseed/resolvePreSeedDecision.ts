@@ -364,6 +364,79 @@ function buildAmbiguousScreenshotClarifyDecision(args: {
   };
 }
 
+function hasDiagnosisReference(userTextRaw: string): boolean {
+  const userText = String(userTextRaw ?? '').trim();
+  if (!userText) return false;
+
+  return (
+    /(診断|結果|さっきの|この|それ|もう少し|深めて|見て|続きを|続き)/u.test(userText) &&
+    /(診断|結果|さっき|この|それ|もう少し|深め|見て|続き)/u.test(userText)
+  );
+}
+
+function resolveDiagnosisContextKind(args: {
+  userText: string;
+  meta?: any;
+  historyForTurn?: any[];
+}): 'screenshot' | 'ir' | 'ambiguous' | 'none' {
+  const userText = String(args.userText ?? '').trim();
+  if (!hasDiagnosisReference(userText)) return 'none';
+
+  const meta = args.meta ?? {};
+  const ctxPack = meta?.ctxPack ?? meta?.extra?.ctxPack ?? {};
+
+  const hasScreenshotContext = Boolean(
+    meta?.screenshotDiagnosisContext ||
+    meta?.screenshotDiagnosisHintText ||
+    ctxPack?.screenshotDiagnosisContext ||
+    ctxPack?.screenshotDiagnosisHintText ||
+    ctxPack?.resolvedAsk?.referenceTarget?.includes?.('SCREENSHOT_CONTEXT_V1')
+  );
+
+  const hasIrContext = Boolean(
+    meta?.lastIrDiagnosis ||
+    ctxPack?.lastIrDiagnosis ||
+    ctxPack?.diagnosisFollowup ||
+    meta?.diagnosisFollowup
+  );
+
+  if (hasScreenshotContext && !hasIrContext) return 'screenshot';
+  if (hasIrContext && !hasScreenshotContext) return 'ir';
+
+  if (hasScreenshotContext && hasIrContext) {
+    const lastIrDiagnosisLike =
+      meta?.lastIrDiagnosis ??
+      ctxPack?.lastIrDiagnosis ??
+      null;
+
+    const lastIrDiagnosisKindText = String(
+      lastIrDiagnosisLike?.kind ??
+        lastIrDiagnosisLike?.source ??
+        lastIrDiagnosisLike?.targetLabel ??
+        lastIrDiagnosisLike?.diagnosisFollowupTargetLabel ??
+        ''
+    );
+
+    if (/screenshot|スクショ|スクリーンショット|mu_first_screenshot|screenshot_diagnosis/u.test(lastIrDiagnosisKindText)) {
+      return 'screenshot';
+    }
+
+    const history = Array.isArray(args.historyForTurn) ? args.historyForTurn : [];
+    const tail = history.slice(-6).map((m: any) => JSON.stringify(m ?? '')).join('\n');
+
+    if (/SCREENSHOT_CONTEXT_V1|screenshotDiagnosisContext|screenshot_diagnosis|mu_screenshot_diagnosis/u.test(tail)) {
+      return 'screenshot';
+    }
+
+    if (/lastIrDiagnosis|ir_diagnosis|diagnosisFollowup/u.test(tail)) {
+      return 'ir';
+    }
+
+    return 'ambiguous';
+  }
+
+  return 'ambiguous';
+}
 async function fetchLatestScreenshotDiagnosisForConversation(args: {
   supabase: any;
   userCode: string;
@@ -605,6 +678,21 @@ export async function resolvePreSeedDecision(
     historyForTurn,
   });
 
+  const diagnosisContextKind = resolveDiagnosisContextKind({
+    userText,
+    meta: args.meta,
+    historyForTurn,
+  });
+
+  console.log('[IROS/PRE_SEED_ENGINE][DIAGNOSIS_CONTEXT_KIND]', {
+    traceId: args.traceId ?? null,
+    conversationId: args.conversationId ?? null,
+    userCode: args.userCode ?? null,
+    diagnosisContextKind,
+    strength,
+    userTextHead: userText.slice(0, 120),
+  });
+
   if (strength === 'exit') {
     console.log('[IROS/PRE_SEED_ENGINE][SCREENSHOT_CONTEXT_RESET]', {
       traceId: args.traceId,
@@ -693,7 +781,7 @@ export async function resolvePreSeedDecision(
     };
   }
 
-  if (historyDisplayId && strength === 'strong') {
+  if (historyDisplayId && (strength === 'strong' || diagnosisContextKind === 'screenshot')) {
     console.log('[IROS/PRE_SEED_ENGINE][HISTORY_SCREENSHOT_CONTEXT_CONTINUE]', {
       traceId: args.traceId,
       conversationId: args.conversationId,
@@ -729,6 +817,56 @@ export async function resolvePreSeedDecision(
     }));
   }
 
+  if (!historyDisplayId && diagnosisContextKind === 'ambiguous') {
+    console.log('[IROS/PRE_SEED_ENGINE][DIAGNOSIS_CONTEXT_AMBIGUOUS]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode ?? null,
+      userTextHead: userText.slice(0, 120),
+    });
+
+    return withCognitionMap({
+      kind: 'normal_chat',
+      confidence: 0.55,
+      sourceAuthority: 'user_text',
+      sourceKind: 'diagnosis_context_ambiguous',
+      sourceId: null,
+      sourceText: userText,
+      route: 'direct_reply',
+      seedText: null,
+      directReply: 'スクショ診断の続きとして見ますか？それとも、ir診断の続きを見ますか？',
+      writerInput: null,
+      shouldBypassWriter: true,
+      shouldBypassRephrase: true,
+      shouldUsePreSeedWriter: false,
+      shouldSuppressHistoryForWriter: true,
+      shouldSuppressSimilarFlow: true,
+      shouldSuppressSlotPlan: true,
+      shouldSuppressMemoryDelta: true,
+      shouldSuppressIntuitionCandidate: true,
+      shouldSuppressNormalResonance: true,
+      shouldOpenContextThread: false,
+      contextThreadCode: null,
+      ctxPackPatch: {
+        presentationKind: 'diagnosis_context_clarification',
+        replyGoal: { kind: 'clarify' },
+        qCode: 'Q1',
+        depthStage: 'S1',
+      },
+      metaPatch: {
+        presentationKind: 'diagnosis_context_clarification',
+        diagnosisContextAmbiguous: true,
+        inputKind: 'diagnosis_reference',
+        goalKind: 'clarify',
+        q_code: 'Q1',
+        depth_stage: 'S1',
+      },
+      debug: {
+        reason: 'diagnosis_context_ambiguous',
+        matchedPattern: 'diagnosis_reference_without_context',
+      },
+    });
+  }
   const latest = await fetchLatestScreenshotDiagnosisForConversation({
     supabase: args.supabase,
     userCode: args.userCode,
@@ -740,7 +878,7 @@ export async function resolvePreSeedDecision(
   if (
     Number.isFinite(latestDisplayId) &&
     latestDisplayId > 0 &&
-    strength === 'strong'
+    (strength === 'strong' || diagnosisContextKind === 'screenshot')
   ) {
     console.log('[IROS/PRE_SEED_ENGINE][LATEST_SCREENSHOT_CONTEXT_CONTINUE]', {
       traceId: args.traceId,
@@ -879,27 +1017,4 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

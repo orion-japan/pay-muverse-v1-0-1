@@ -1149,12 +1149,29 @@ let extraSoT: Record<string, any> = {
       hasSupabase: Boolean((supabase as any)?.from),
     });
 
+    const preSeedMeta: any = {
+      ...(metaForIros ?? {}),
+      ...(extraSoT ?? {}),
+      extra: {
+        ...((metaForIros as any)?.extra ?? {}),
+        ...(extraSoT ?? {}),
+        ctxPack: {
+          ...(((metaForIros as any)?.extra ?? {})?.ctxPack ?? {}),
+          ...(((extraSoT as any)?.ctxPack ?? {})),
+        },
+      },
+      ctxPack: {
+        ...((metaForIros as any)?.ctxPack ?? {}),
+        ...(((extraSoT as any)?.ctxPack ?? {})),
+      },
+    };
+
     const preSeedDecision = await resolvePreSeedDecision({
       userText: userTextClean,
       userCode,
       conversationId,
       supabase: supabase as any,
-      meta: metaForIros,
+      meta: preSeedMeta,
       historyForTurn: Array.isArray(chatHistory) ? chatHistory : [],
       traceId,
     });
