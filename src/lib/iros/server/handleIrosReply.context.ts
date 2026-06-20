@@ -749,11 +749,58 @@ export async function buildTurnContext(
     workingReference: workingReferenceForMemoryRouter,
   });
   const memoryGuardDecision = guardIrosMemoryDecision(memoryDecision);
+  const activeContextFrameForDiagnosisFollowup =
+    (baseMetaForTurn as any)?.extra?.activeContextFrame ??
+    (baseMetaForTurn as any)?.extra?.ctxPack?.activeContextFrame ??
+    (baseMetaForTurn as any)?.activeContextFrame ??
+    null;
+
+  const activeDiagnosisFramePrimaryEntityId = String(
+    activeContextFrameForDiagnosisFollowup?.framePrimaryEntityId ??
+      activeContextFrameForDiagnosisFollowup?.primaryEntityId ??
+      ''
+  ).trim();
+
+  const activeDiagnosisFrameEntityKindsRaw =
+    activeContextFrameForDiagnosisFollowup?.frameEntityKinds ??
+    activeContextFrameForDiagnosisFollowup?.entityKinds ??
+    activeContextFrameForDiagnosisFollowup?.entities ??
+    [];
+
+  const activeDiagnosisFrameEntityKinds = Array.isArray(activeDiagnosisFrameEntityKindsRaw)
+    ? activeDiagnosisFrameEntityKindsRaw
+    : [];
+
+  const activeDiagnosisFrameDiagnosisEntity = activeDiagnosisFrameEntityKinds.find((entity: any) => {
+    const id = String(entity?.id ?? '').trim();
+    const kind = String(entity?.kind ?? '').trim();
+    return kind === 'diagnosis' || id.startsWith('diagnosis:');
+  });
+
+  const activeDiagnosisFramePersonEntity = activeDiagnosisFrameEntityKinds.find((entity: any) => {
+    const kind = String(entity?.kind ?? '').trim();
+    return kind === 'person';
+  });
+
+  const hasActiveDiagnosisFrameForFollowup =
+    activeDiagnosisFramePrimaryEntityId.startsWith('diagnosis:') ||
+    !!activeDiagnosisFrameDiagnosisEntity;
+
+  const activeDiagnosisFrameTargetLabel =
+    String(activeDiagnosisFramePersonEntity?.label ?? '').trim() ||
+    String(activeDiagnosisFrameDiagnosisEntity?.label ?? '')
+      .replace(/の(?:ir診断|IR診断|診断)$/u, '')
+      .trim() ||
+    (activeDiagnosisFramePrimaryEntityId.startsWith('diagnosis:')
+      ? activeDiagnosisFramePrimaryEntityId.replace(/^diagnosis:/u, '').trim()
+      : null);
+
   const diagnosisFollowupTargetLabel =
     (memoryDecision.memoryIntent === 'diagnosis_recall'
       ? memoryDecision.targetLabel
       : null) ||
-    extractDiagnosisFollowupTargetLabel(followupSourceText);
+    extractDiagnosisFollowupTargetLabel(followupSourceText) ||
+    activeDiagnosisFrameTargetLabel;
 
 
   if (memoryDecision.memoryIntent === 'reference_check') {
@@ -837,6 +884,7 @@ export async function buildTurnContext(
     );
 
   const previousTurnLooksDiagnosisForFollowup =
+    hasActiveDiagnosisFrameForFollowup ||
     Boolean(prevIrMeta) ||
     (baseMetaForTurn as any)?.prevMeta?.presentationKind === 'diagnosis' ||
     (baseMetaForTurn as any)?.prevMeta?.extra?.presentationKind === 'diagnosis' ||
@@ -1543,6 +1591,9 @@ export async function buildTurnContext(
       hasExplicitDiagnosisReferenceForFollowup,
       previousTurnLooksDiagnosisForFollowup,
       canEnterDiagnosisFollowup,
+      hasActiveDiagnosisFrameForFollowup,
+      activeDiagnosisFramePrimaryEntityId: activeDiagnosisFramePrimaryEntityId || null,
+      activeDiagnosisFrameTargetLabel: activeDiagnosisFrameTargetLabel || null,
       diagnosisFollowupKind,
       diagnosisFollowupTargetLabel,
       followupSourceText,
@@ -3184,6 +3235,8 @@ export async function buildTurnContext(
     },
   };
 }
+
+
 
 
 
