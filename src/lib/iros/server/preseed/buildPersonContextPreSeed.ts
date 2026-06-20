@@ -1,4 +1,7 @@
 ﻿import type { PreSeedDecision } from './types';
+import { buildCognitionMap } from '../../cognition/buildCognitionMap';
+import { cognitionMapToSeedText } from '../../cognition/cognitionMap';
+import { buildPreSeedTcfStarter } from './preSeedTcfStarter';
 import { loadPersonIntentState } from '@/lib/iros/memory/loadPersonIntent';
 import { loadLatestIrDiagnosisSnapshot } from '@/lib/iros/memoryRecall';
 import {
@@ -824,6 +827,7 @@ export async function buildPersonContextPreSeed(args: {
     },
   };
 }
+
 
 
 
