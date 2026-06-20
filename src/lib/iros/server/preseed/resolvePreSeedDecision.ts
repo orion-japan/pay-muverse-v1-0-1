@@ -893,56 +893,6 @@ export async function resolvePreSeedDecision(
     }));
   }
 
-  if (!historyDisplayId && diagnosisContextKind === 'ambiguous') {
-    console.log('[IROS/PRE_SEED_ENGINE][DIAGNOSIS_CONTEXT_AMBIGUOUS]', {
-      traceId: args.traceId ?? null,
-      conversationId: args.conversationId ?? null,
-      userCode: args.userCode ?? null,
-      userTextHead: userText.slice(0, 120),
-    });
-
-    return withCognitionMap({
-      kind: 'normal_chat',
-      confidence: 0.55,
-      sourceAuthority: 'user_text',
-      sourceKind: 'diagnosis_context_ambiguous',
-      sourceId: null,
-      sourceText: userText,
-      route: 'direct_reply',
-      seedText: null,
-      directReply: 'スクショ診断の続きとして見ますか？それとも、ir診断の続きを見ますか？',
-      writerInput: null,
-      shouldBypassWriter: true,
-      shouldBypassRephrase: true,
-      shouldUsePreSeedWriter: false,
-      shouldSuppressHistoryForWriter: true,
-      shouldSuppressSimilarFlow: true,
-      shouldSuppressSlotPlan: true,
-      shouldSuppressMemoryDelta: true,
-      shouldSuppressIntuitionCandidate: true,
-      shouldSuppressNormalResonance: true,
-      shouldOpenContextThread: false,
-      contextThreadCode: null,
-      ctxPackPatch: {
-        presentationKind: 'diagnosis_context_clarification',
-        replyGoal: { kind: 'clarify' },
-        qCode: 'Q1',
-        depthStage: 'S1',
-      },
-      metaPatch: {
-        presentationKind: 'diagnosis_context_clarification',
-        diagnosisContextAmbiguous: true,
-        inputKind: 'diagnosis_reference',
-        goalKind: 'clarify',
-        q_code: 'Q1',
-        depth_stage: 'S1',
-      },
-      debug: {
-        reason: 'diagnosis_context_ambiguous',
-        matchedPattern: 'diagnosis_reference_without_context',
-      },
-    });
-  }
   if (diagnosisContextKind === 'ir') {
     const activeIr = pickActiveIrDiagnosisContext(args.meta);
 
@@ -1037,6 +987,56 @@ export async function resolvePreSeedDecision(
       traceId: args.traceId,
       displayId: latestDisplayId,
     }));
+  }
+  if (!historyDisplayId && diagnosisContextKind === 'ambiguous') {
+    console.log('[IROS/PRE_SEED_ENGINE][DIAGNOSIS_CONTEXT_AMBIGUOUS]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode ?? null,
+      userTextHead: userText.slice(0, 120),
+    });
+
+    return withCognitionMap({
+      kind: 'normal_chat',
+      confidence: 0.55,
+      sourceAuthority: 'user_text',
+      sourceKind: 'diagnosis_context_ambiguous',
+      sourceId: null,
+      sourceText: userText,
+      route: 'direct_reply',
+      seedText: null,
+      directReply: 'スクショ診断の続きとして見ますか？それとも、ir診断の続きを見ますか？',
+      writerInput: null,
+      shouldBypassWriter: true,
+      shouldBypassRephrase: true,
+      shouldUsePreSeedWriter: false,
+      shouldSuppressHistoryForWriter: true,
+      shouldSuppressSimilarFlow: true,
+      shouldSuppressSlotPlan: true,
+      shouldSuppressMemoryDelta: true,
+      shouldSuppressIntuitionCandidate: true,
+      shouldSuppressNormalResonance: true,
+      shouldOpenContextThread: false,
+      contextThreadCode: null,
+      ctxPackPatch: {
+        presentationKind: 'diagnosis_context_clarification',
+        replyGoal: { kind: 'clarify' },
+        qCode: 'Q1',
+        depthStage: 'S1',
+      },
+      metaPatch: {
+        presentationKind: 'diagnosis_context_clarification',
+        diagnosisContextAmbiguous: true,
+        inputKind: 'diagnosis_reference',
+        goalKind: 'clarify',
+        q_code: 'Q1',
+        depth_stage: 'S1',
+      },
+      debug: {
+        reason: 'diagnosis_context_ambiguous',
+        matchedPattern: 'diagnosis_reference_without_context',
+      },
+    });
   }
   try {
     const universalCandidate = await resolveUniversalPreSeed({
@@ -1136,6 +1136,8 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
+
+
 
 
 
