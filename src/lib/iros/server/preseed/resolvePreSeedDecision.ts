@@ -544,6 +544,10 @@ function buildHistoryIrDiagnosisFollowupDecision(args: {
     'rule=スクショ診断として扱わない。',
     'rule=新しい診断を作り直さず、下のir診断本文を正本として深める。',
     'rule=SimilarFlowや通常履歴に引っ張られない。',
+    'rule=診断本文を引用して説明しない。',
+    'rule=「ここで言う」「診断本文では」「補足すると」から始めない。',
+    'rule=自然な追加解説として、観測対象の状態・揺れ・向かう先・ユーザーが見るべき点の順に深める。',
+    'rule=返答冒頭は、対象の状態を一文で言い切る。',
     '',
     'USER_FOLLOWUP:',
     args.userText,
@@ -1330,6 +1334,7 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
+
 
 
 
