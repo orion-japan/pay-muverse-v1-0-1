@@ -364,6 +364,14 @@ function buildAmbiguousScreenshotClarifyDecision(args: {
   };
 }
 
+function isExplicitIrDiagnosisRequest(userTextRaw: string): boolean {
+  const compact = String(userTextRaw ?? '')
+    .trim()
+    .replace(/[　\s]+/g, '')
+    .toLowerCase();
+
+  return /^(ir|ｉｒ)診断/u.test(compact);
+}
 function hasDiagnosisReference(userTextRaw: string): boolean {
   const userText = String(userTextRaw ?? '').trim();
   if (!userText) return false;
@@ -380,6 +388,7 @@ function resolveDiagnosisContextKind(args: {
   historyForTurn?: any[];
 }): 'screenshot' | 'ir' | 'ambiguous' | 'none' {
   const userText = String(args.userText ?? '').trim();
+  if (isExplicitIrDiagnosisRequest(userText)) return 'ir';
   if (!hasDiagnosisReference(userText)) return 'none';
 
   const meta = args.meta ?? {};
@@ -1136,6 +1145,8 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
+
+
 
 
 
