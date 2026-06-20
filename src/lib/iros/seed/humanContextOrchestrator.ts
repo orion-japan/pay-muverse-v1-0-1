@@ -208,6 +208,10 @@ function secondaryFor(primary: HumanReplyAxis): HumanReplyAxis | null {
   return null;
 }
 
+function isCreatePhraseRequest(userText: string): boolean {
+  const t = compact(userText);
+  return /(どう言|なんて言|どう伝|どう送|なんて送|言い方|返し方|文面|文章)/.test(t);
+}
 function buildAvoidAxis(primary: HumanReplyAxis, userText: string): string[] {
   const t = compact(userText);
   const avoid: string[] = [];
@@ -359,9 +363,19 @@ export function buildHumanContextOrchestration(
   const qContext = buildQContext(input.qCode);
   const trustLevel = trustFrom(input.confidence, input.returnStreak);
   const replyFocus = buildReplyFocus(replyAxisPrimary, replyAxisSecondary, plainMeaningQuestion);
+  const createPhraseRequest =
+    replyAxisPrimary === 'C' &&
+    isCreatePhraseRequest(userText);
 
   const avoidReply = [
     ...avoidAxis,
+    ...(createPhraseRequest
+      ? [
+          'user_question_as_example',
+          'mu_instruction_phrase',
+          'answering_how_to_prompt_mu',
+        ]
+      : []),
     'do_not_expose_internal_codes',
     'do_not_invent_unprovided_story',
   ];
@@ -394,6 +408,11 @@ export function buildHumanContextOrchestration(
     spinNextAxis ? `SPIN_NEXT_AXIS=${spinNextAxis}` : null,
     spinOrder ? `SPIN_AXIS_ORDER=${spinOrder.join(',')}` : null,
     spinProgressMeaning ? `SPIN_PROGRESS_MEANING=${spinProgressMeaning}` : null,
+    createPhraseRequest ? 'CREATE_MODE=small_phrase' : null,
+    createPhraseRequest ? 'CREATE_TARGET=previous_context_target' : null,
+    createPhraseRequest ? 'CREATE_INTENT=answer_how_to_say_to_target' : null,
+    createPhraseRequest ? 'CREATE_OUTPUT=short_message_to_target' : null,
+    createPhraseRequest ? 'DO_NOT_TREAT_USER_QUESTION_AS_PHRASE=true' : null,
     currentMeaning ? `CURRENT_MEANING=${currentMeaning}` : null,
     futureMeaning ? `FUTURE_MEANING=${futureMeaning}` : null,
     qContext ? `Q_CONTEXT=${qContext}` : null,
@@ -418,4 +437,5 @@ export function buildHumanContextOrchestration(
     seedText: lines.join('\n').trim(),
   };
 }
+
 
