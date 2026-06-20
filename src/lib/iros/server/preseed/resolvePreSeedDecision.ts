@@ -1,4 +1,4 @@
-﻿import { buildCognitionMap } from '../../cognition/buildCognitionMap';
+import { buildCognitionMap } from '../../cognition/buildCognitionMap';
 import { cognitionMapToSeedText, type CognitionMap } from '../../cognition/cognitionMap';
 import { buildIrDiagnosisPreSeed } from './buildIrDiagnosisPreSeed';
 import { resolveUniversalPreSeed } from './universal';
@@ -514,6 +514,82 @@ function extractExplicitPersonFollowupTarget(userTextRaw: string): {
     return {
       targetKey: label,
       targetLabel: label,
+    };
+  }
+
+  return null;
+}
+function isDeicticDiagnosisOrRelationFollowup(userTextRaw: string): boolean {
+  const text = String(userTextRaw ?? '').trim();
+  if (!text) return false;
+
+  // 明示指定は既存の診断ルートへ渡す
+  if (isExplicitIrDiagnosisRequest(text) || isExplicitScreenshotDiagnosisRequest(text)) {
+    return false;
+  }
+
+  // 明示人物名がある場合は existing explicit person route に任せる
+  if (extractExplicitPersonFollowupTarget(text)) {
+    return false;
+  }
+
+  const compact = text.replace(/[　\s]+/g, '');
+
+  return (
+    /(この|その|さっきの|前の|直前の)(診断|診断結果|結果|内容|返答|話|続き)/u.test(compact) ||
+    /(診断|診断結果|結果).*(もう少し|深め|詳しく|気持ち|本音|意図|約束|来る|来ます|来ると思)/u.test(compact) ||
+    /(相手|あの人|その人).*(気持ち|本音|意図|約束|来る|来ます|来ると思|どう思|どう動)/u.test(compact) ||
+    /(約束).*(来る|来ます|来ると思|守る|守れそう)/u.test(compact)
+  );
+}
+
+function isUnsafeImplicitTargetLabel(targetRaw: unknown): boolean {
+  const target = String(targetRaw ?? '').trim();
+  if (!target) return true;
+  if (target.length > 24) return true;
+
+  // 人物名ではなく、文中の意味句・判断句を targetKey にしてしまう事故を止める
+  if (
+    /(ただの|好意|気持ち|本音|意図|可能性|様子|慎重|関係|診断|結果|内容|約束|来る|来ます|思います|思って|よりも|けれど|だけど|だから|について|から|では|相手|あなた|自分|僕|私|これ|それ|この|その)/u.test(target)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function extractLatestPersonReferenceFromHistory(historyForTurnRaw: any[]): {
+  targetKey: string;
+  targetLabel: string;
+  sourceUserText: string;
+} | null {
+  const history = Array.isArray(historyForTurnRaw) ? historyForTurnRaw : [];
+  const tail = history.slice(-12).reverse();
+
+  for (const message of tail) {
+    const role = String(message?.role ?? message?.speaker ?? '').toLowerCase();
+    const content = getTurnText(message);
+    if (!content) continue;
+
+    // 直近に明確なスクショ/ir診断がある場合は、人物復元より診断ルートを優先する
+    if (
+      role === 'assistant' &&
+      /(SCREENSHOT_CONTEXT_V1|screenshotDiagnosisContext|screenshot_diagnosis|mu_screenshot_diagnosis|観測対象[:：]|IR_DIAGNOSIS|ir_diagnosis|diagnosisFollowup)/u.test(content)
+    ) {
+      return null;
+    }
+
+    if (role && role !== 'user') continue;
+
+    const explicit = extractExplicitPersonFollowupTarget(content);
+    if (!explicit?.targetKey || !explicit?.targetLabel) continue;
+
+    if (isUnsafeImplicitTargetLabel(explicit.targetKey)) continue;
+
+    return {
+      targetKey: explicit.targetKey,
+      targetLabel: explicit.targetLabel,
+      sourceUserText: content,
     };
   }
 
@@ -1230,6 +1306,93 @@ export async function resolvePreSeedDecision(
     }));
   }
 
+  const recentPersonReferenceForDeicticFollowup = extractLatestPersonReferenceFromHistory(historyForTurn);
+
+  if (
+    recentPersonReferenceForDeicticFollowup &&
+    isDeicticDiagnosisOrRelationFollowup(userText)
+  ) {
+    const personDecision = await buildPersonContextPreSeed({
+      ...args,
+      targetKey: recentPersonReferenceForDeicticFollowup.targetKey,
+      targetLabel: recentPersonReferenceForDeicticFollowup.targetLabel,
+      traceId: args.traceId ?? null,
+    });
+
+    if (personDecision) {
+      const enhancedPersonDecision: PreSeedDecision = {
+        ...personDecision,
+        confidence: Math.max(Number(personDecision.confidence ?? 0), 0.88),
+        shouldBypassRephrase: true,
+        shouldSuppressHistoryForWriter: true,
+        shouldSuppressSimilarFlow: true,
+        shouldSuppressMemoryDelta: true,
+        shouldSuppressIntuitionCandidate: true,
+        shouldSuppressNormalResonance: true,
+        ctxPackPatch: {
+          ...(personDecision.ctxPackPatch ?? {}),
+          presentationKind: 'person_reference_followup',
+          memoryIntent: 'person_reference',
+          memorySpace: 'person',
+          recentPersonReferenceResolved: true,
+          recentPersonReferenceSourceUserText: recentPersonReferenceForDeicticFollowup.sourceUserText,
+          shouldSuppressHistoryForWriter: true,
+          shouldSuppressSimilarFlow: true,
+          similarFlowSeed: '',
+          similarFlowDebug: null,
+          resolvedTarget: {
+            ...((personDecision.ctxPackPatch as any)?.resolvedTarget ?? {}),
+            status: 'resolved',
+            label: recentPersonReferenceForDeicticFollowup.targetLabel,
+            targetKey: recentPersonReferenceForDeicticFollowup.targetKey,
+            canonicalName: recentPersonReferenceForDeicticFollowup.targetLabel,
+            domain: 'person',
+            confidence: 0.9,
+            source: 'recent_explicit_person_reference',
+          },
+        },
+        metaPatch: {
+          ...(personDecision.metaPatch ?? {}),
+          presentationKind: 'person_reference_followup',
+          memoryIntent: 'person_reference',
+          memorySpace: 'person',
+          recentPersonReferenceResolved: true,
+          recentPersonReferenceSourceUserText: recentPersonReferenceForDeicticFollowup.sourceUserText,
+          targetKey: recentPersonReferenceForDeicticFollowup.targetKey,
+          targetLabel: recentPersonReferenceForDeicticFollowup.targetLabel,
+          shouldSuppressHistoryForWriter: true,
+          shouldSuppressSimilarFlow: true,
+        },
+        debug: {
+          ...(personDecision.debug ?? {}),
+          reason: 'deictic_followup_recent_person_reference',
+          matchedPattern: 'deictic_diagnosis_or_relation_followup_to_recent_person',
+        },
+      };
+
+      console.log('[IROS/PRE_SEED_ENGINE][DEICTIC_PERSON_REFERENCE_CONTINUE]', {
+        traceId: args.traceId ?? null,
+        conversationId: args.conversationId ?? null,
+        userCode: args.userCode,
+        targetKey: recentPersonReferenceForDeicticFollowup.targetKey,
+        targetLabel: recentPersonReferenceForDeicticFollowup.targetLabel,
+        sourceUserTextHead: recentPersonReferenceForDeicticFollowup.sourceUserText.slice(0, 120),
+        userTextHead: userText.slice(0, 120),
+        route: enhancedPersonDecision.route,
+      });
+
+      return withCognitionMap(enhancedPersonDecision);
+    }
+
+    console.warn('[IROS/PRE_SEED_ENGINE][DEICTIC_PERSON_REFERENCE_SOURCE_NOT_FOUND]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode,
+      targetKey: recentPersonReferenceForDeicticFollowup.targetKey,
+      targetLabel: recentPersonReferenceForDeicticFollowup.targetLabel,
+      userTextHead: userText.slice(0, 120),
+    });
+  }
   const latest = await fetchLatestScreenshotDiagnosisForConversation({
     supabase: args.supabase,
     userCode: args.userCode,
@@ -1511,6 +1674,23 @@ export async function resolvePreSeedDecision(
       
       const explicitPersonFollowupTarget = extractExplicitPersonFollowupTarget(userText);
 
+
+      if (
+        universalCandidate?.resolvedTarget?.targetKey &&
+        isUnsafeImplicitTargetLabel(universalCandidate.resolvedTarget.targetKey)
+      ) {
+        console.warn('[IROS/PRE_SEED_ENGINE][UNSAFE_UNIVERSAL_TARGET_DROPPED]', {
+          traceId: args.traceId ?? null,
+          conversationId: args.conversationId,
+          userCode: args.userCode,
+          memoryIntent: universalCandidate.memoryIntent,
+          droppedTargetKey: universalCandidate.resolvedTarget.targetKey,
+          droppedTargetLabel: universalCandidate.resolvedTarget.label ?? null,
+          userTextHead: userText.slice(0, 120),
+        });
+
+        (universalCandidate as any).resolvedTarget = null;
+      }
       if (
         universalCandidate?.memoryIntent === 'active_thread_followup' &&
         explicitPersonFollowupTarget?.targetKey &&
