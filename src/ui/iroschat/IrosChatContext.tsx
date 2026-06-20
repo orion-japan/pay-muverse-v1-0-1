@@ -439,7 +439,13 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
       };
     }
 
-    const rows = screenshotMsgs.length ? [...rowsBase, ...screenshotMsgs] : rowsBase;
+    const rows = (screenshotMsgs.length ? [...rowsBase, ...screenshotMsgs] : rowsBase)
+      .slice()
+      .sort((a: any, b: any) => {
+        const at = Number(a?.ts ?? Date.parse(String(a?.created_at ?? '')) ?? 0);
+        const bt = Number(b?.ts ?? Date.parse(String(b?.created_at ?? '')) ?? 0);
+        return at - bt;
+      });
 
     setMessages((prev) => {
       // 会話が変わっていたら、過去の Seed は引き継がずにサーバー結果だけにする
@@ -1092,6 +1098,7 @@ const payload: any = {
     </IrosChatContext.Provider>
   );
 };
+
 
 
 

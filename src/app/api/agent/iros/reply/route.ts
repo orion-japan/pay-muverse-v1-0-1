@@ -824,9 +824,31 @@ let extraSoT: Record<string, any> = {
           ''
       ).trim();
 
-      const isExplicitScreenshotDiagnosisTurnForContextGate =
+      const hasExplicitScreenshotDiagnosisIdForContextGate =
         /スクショ診断\s*(?:ID|id)?[:：]?\s*\d+/u.test(currentUserTextForScreenshotContextGate) ||
         /スクリーンショット診断\s*(?:ID|id)?[:：]?\s*\d+/u.test(currentUserTextForScreenshotContextGate);
+
+      const hasNearbyScreenshotDiagnosisReferenceForContextGate =
+        /(?:この|今の|上の|さっきの|直前の|前の)\s*(?:スクショ診断|スクリーンショット診断|画像診断|診断結果|診断|結果)/u.test(
+          currentUserTextForScreenshotContextGate
+        ) ||
+        /(?:スクショ|スクリーンショット|画像).*(?:診断|結果|続き|深め|詳しく|相手|気持ち)/u.test(
+          currentUserTextForScreenshotContextGate
+        ) ||
+        /(?:診断結果|診断|結果).*(?:続き|深め|詳しく|相手|気持ち|読み解|見て|教えて)/u.test(
+          currentUserTextForScreenshotContextGate
+        );
+
+      const hasTopicSwitchForScreenshotContextGate =
+        /(?:ところで|話(?:を)?変える|話変わる|別件|それとは別|関係ない|実装|コード|GitHub|github|プッシュ|コミット|ブランチ|typecheck|npm|PC|パソコン|課金|料金|Muverse)/u.test(
+          currentUserTextForScreenshotContextGate
+        );
+
+      const isExplicitScreenshotDiagnosisTurnForContextGate =
+        hasExplicitScreenshotDiagnosisIdForContextGate ||
+        (Boolean(screenshotDiagnosisHintText) &&
+          hasNearbyScreenshotDiagnosisReferenceForContextGate &&
+          !hasTopicSwitchForScreenshotContextGate);
 
       if (!isExplicitScreenshotDiagnosisTurnForContextGate && screenshotDiagnosisHintText) {
         console.log('[IROS/SCREENSHOT_DIAG_CTX_SKIPPED_NON_EXPLICIT]', {
@@ -835,6 +857,9 @@ let extraSoT: Record<string, any> = {
           userCode,
           userTextHead: currentUserTextForScreenshotContextGate.slice(0, 120),
           hintLen: screenshotDiagnosisHintText.length,
+          hasExplicitScreenshotDiagnosisId: hasExplicitScreenshotDiagnosisIdForContextGate,
+          hasNearbyReference: hasNearbyScreenshotDiagnosisReferenceForContextGate,
+          hasTopicSwitch: hasTopicSwitchForScreenshotContextGate,
         });
       }
 
@@ -879,6 +904,7 @@ let extraSoT: Record<string, any> = {
           hintHead: screenshotDiagnosisHintText.slice(0, 180),
           hasLastIrDiagnosis: Boolean((extraSoT as any)?.lastIrDiagnosis),
           hasCtxPackLastIrDiagnosis: Boolean((extraSoT as any)?.ctxPack?.lastIrDiagnosis),
+          resolvedBy: hasExplicitScreenshotDiagnosisIdForContextGate ? 'explicit_id' : 'nearby_reference',
         });
       }
     }
@@ -1144,7 +1170,8 @@ let extraSoT: Record<string, any> = {
       directReplyLen: String(preSeedDecision?.directReply ?? '').length,
       seedLen: String(preSeedDecision?.seedText ?? '').length,
     });
-
+
+
 
     // -------------------------------------------------------
     // 11.975) Person Fact Capture Layer
@@ -3269,7 +3296,7 @@ return NextResponse.json({
                 '予約や到着時間など、具体的な予定の情報が出ています。',
                 'なので今のスクショ上では、「来ない流れ」より「会う方向に整っている流れ」です。',
                 '',
-                'ただ、相手の気持ちまでは断定しません。',
+                'この流れでは、相手側にも「予定を流したくない」「早く整えたい」という温度が出ています。',
                 '見るところは、来るか来ないかだけではなく、相手が自分のペースで来られる余白が残っているかです。'
               ].join('\n');
             } else if (hasArrival) {
@@ -3278,8 +3305,8 @@ return NextResponse.json({
                 '',
                 '予約や到着時間、移動や予定に関する具体的な情報が出ているので、会話は切れているというより、必要な確認をしながら進んでいます。',
                 '',
-                'ただし、相手の気持ちまでは断定しません。',
-                '見るべきなのは、相手がどの温度で返しているかと、あなたがどこまで先に整えすぎているかです。'
+                'この流れでは、相手側にも「予定を流したくない」「早く整えたい」という温度が出ています。',
+                '見るべきなのは、相手が確認を急いだ理由と、こちらの確定報告を受けて安心できる流れになっているかです。'
               ].join('\n');
             } else {
               finalText = [
@@ -3287,8 +3314,8 @@ return NextResponse.json({
                 '',
                 '診断内容をそのまま貼るのではなく、見えている根拠だけで言うと、会話は切れているというより、必要な確認をしながら進んでいる状態です。',
                 '',
-                'ただし、相手の気持ちまでは断定しません。',
-                '見るべきなのは、相手がどの温度で返しているかと、あなたがどこまで先に整えすぎているかです。'
+                'この流れでは、相手側にも「予定を流したくない」「早く整えたい」という温度が出ています。',
+                '見るべきなのは、相手が確認を急いだ理由と、こちらの確定報告を受けて安心できる流れになっているかです。'
               ].join('\n');
             }
 
@@ -4485,6 +4512,7 @@ if (!skipTraining) {
     );
   }
 }
+
 
 
 
