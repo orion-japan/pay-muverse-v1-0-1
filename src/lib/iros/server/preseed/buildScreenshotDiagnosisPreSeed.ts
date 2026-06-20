@@ -1,6 +1,9 @@
-﻿import type { PreSeedDecision, ResolvePreSeedDecisionArgs } from './types';
+import type { PreSeedDecision, ResolvePreSeedDecisionArgs } from './types';
 import { buildScreenshotDiagnosisSeed } from './buildScreenshotDiagnosisSeed';
 import { buildScreenshotDiagnosisDirectReply } from './buildScreenshotDiagnosisDirectReply';
+import { buildCognitionMap } from '../../cognition/buildCognitionMap';
+import { cognitionMapToSeedText } from '../../cognition/cognitionMap';
+import { buildPreSeedTcfStarter } from './preSeedTcfStarter';
 
 function normalizeDiagnosisRow(row: any): {
   displayId: number | null;
@@ -43,8 +46,6 @@ async function fetchScreenshotDiagnosisByDisplayId(args: {
 
   if (!supabase?.from) return null;
 
-  // 既存の成功ルートに合わせる。
-  // image_url など未存在の可能性がある列は select しない。
   const baseSelect =
     'id, display_id, user_code, conversation_id, source, mode, diagnosis_text, diagnosis_seed_json, used_at, created_at';
 
@@ -68,7 +69,6 @@ async function fetchScreenshotDiagnosisByDisplayId(args: {
 
   if (byDisplay?.data) return byDisplay.data;
 
-  // 念のため id でも試す。ただし id は uuid の可能性があるため、失敗しても問題なし。
   const byId = await supabase
     .from('mu_screenshot_diagnosis_logs')
     .select(baseSelect)
@@ -127,7 +127,7 @@ export async function buildScreenshotDiagnosisPreSeed(args: ResolvePreSeedDecisi
         `スクショ診断ID:${displayId}は見つかりましたが、診断本文を取得できませんでした。保存ログの diagnosis_text を確認してください。`,
       shouldBypassWriter: true,
       shouldBypassRephrase: true,
-    shouldUsePreSeedWriter: true,
+      shouldUsePreSeedWriter: true,
       shouldSuppressHistoryForWriter: true,
       shouldSuppressSimilarFlow: true,
       shouldSuppressSlotPlan: true,
@@ -190,12 +190,37 @@ export async function buildScreenshotDiagnosisPreSeed(args: ResolvePreSeedDecisi
     userText,
     diagnosisText,
   });
+
+  const cognitionMap = buildCognitionMap({
+    userText,
+    targetLabel: `スクショ診断ID:${sourceId}`,
+    targetKey: `screenshot:${sourceId}`,
+    sourceKind: 'diagnosis_text',
+    sourceText: diagnosisText,
+    debug: {
+      source: 'buildScreenshotDiagnosisPreSeed',
+      displayId: sourceId,
+      matchedPattern,
+    },
+  });
+
+  const cognitionMapSeedText = cognitionMapToSeedText(cognitionMap);
+  const tcfStarter = buildPreSeedTcfStarter({
+    userText,
+    decisionKind: 'screenshot_diagnosis_followup',
+    sourceAuthority: 'screenshot_diagnosis_text',
+    cognitionMap,
+  });
+
   const writerInput = {
     writerKind: 'diagnosis_writer' as const,
     displayId: sourceId,
     userText,
     sourceText: diagnosisText,
     seedText,
+    cognitionMap,
+    cognitionMapSeedText,
+    tcfStarter,
     traceId,
     conversationId,
     userCode,
@@ -235,6 +260,12 @@ export async function buildScreenshotDiagnosisPreSeed(args: ResolvePreSeedDecisi
     continuityKind: 'screenshot_diagnosis_followup',
     diagnosisContextStatus: 'active',
 
+    cognitionMap,
+    cognitionMapSeedText,
+    cognitionMapApplied: true,
+    tcfStarter,
+    preSeedTcfStarterApplied: true,
+
     goalKind: 'clarify',
     targetKind: 'clarify',
     replyGoal: { kind: 'clarify', questionsMax: 0 },
@@ -264,6 +295,9 @@ export async function buildScreenshotDiagnosisPreSeed(args: ResolvePreSeedDecisi
     seedText,
     directReply,
     writerInput,
+    cognitionMap,
+    cognitionMapSeedText,
+    tcfStarter,
 
     shouldBypassWriter: true,
     shouldBypassRephrase: true,
@@ -287,6 +321,11 @@ export async function buildScreenshotDiagnosisPreSeed(args: ResolvePreSeedDecisi
       writerSourceAuthority: 'diagnosisText',
       continuityKind: 'screenshot_diagnosis_followup',
       diagnosisContextStatus: 'active',
+      cognitionMap,
+      cognitionMapSeedText,
+      cognitionMapApplied: true,
+      tcfStarter,
+      preSeedTcfStarterApplied: true,
       llmRewriteSeed: seedText,
       slotPlanSeed: seedText,
       memorySeedText: seedText,
@@ -307,6 +346,13 @@ export async function buildScreenshotDiagnosisPreSeed(args: ResolvePreSeedDecisi
       sourceTextHead: diagnosisText.slice(0, 160),
       seedHead: seedText.slice(0, 160),
       directReplyHead: directReply.slice(0, 160),
+      cognitionMapApplied: true,
+      cognitionMapRelationCode: cognitionMap.relationCode,
+      cognitionMapProgress: cognitionMap.progress,
+      cognitionMapTriggerKind: cognitionMap.trigger.kind,
+      cognitionMapGapState: cognitionMap.gap.state,
+      tcfStarterApplied: true,
+      tcfStarterDirection: tcfStarter.cDirection,
     },
   };
 
@@ -332,11 +378,12 @@ export async function buildScreenshotDiagnosisPreSeed(args: ResolvePreSeedDecisi
     sourceTextHead: String(decision.sourceText ?? '').slice(0, 160),
     seedHead: String(decision.seedText ?? '').slice(0, 160),
     directReplyHead: String(decision.directReply ?? '').slice(0, 160),
+    cognitionMapRelationCode: cognitionMap.relationCode,
+    cognitionMapProgress: cognitionMap.progress,
+    tcfStarterDirection: tcfStarter.cDirection,
+    tcfStarterReaction: tcfStarter.userReaction,
+    tcfStarterConvergence: tcfStarter.convergence,
   });
 
   return decision;
 }
-
-
-
-
