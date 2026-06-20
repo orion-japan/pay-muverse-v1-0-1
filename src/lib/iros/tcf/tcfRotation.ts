@@ -570,6 +570,29 @@ export function buildTcfRotationDecision(input: BuildTcfRotationDecisionInput): 
   const shouldUseTcfPattern = hasMemoryRecallNotFoundTurnContract ? false : Boolean(writerPatternKey || surfacePlanKind);
   const nextFocus = firstString(starter?.nextFocus, starter?.next_focus, input.nextFocus, currentFocus, previousFocus);
 
+  if (starter) {
+    const traceId = firstString(
+      (input as any).traceId,
+      meta.traceId,
+      extra.traceId,
+      ctxPack.traceId,
+      asRecord(meta.extra)?.traceId,
+      asRecord(asRecord(meta.extra)?.ctxPack)?.traceId,
+    );
+
+    console.log('[IROS/TCF_ROTATION_SEED][PRE_SEED_STARTER_APPLIED]', {
+      traceId,
+      cDirection,
+      userReaction,
+      convergence,
+      currentFocus,
+      nextFocus,
+      starterCurrentFocus,
+      starterCDirection,
+      starterUserReaction,
+      starterConvergence,
+    });
+  }
   return {
     previousFocus,
     currentFocus,
@@ -634,3 +657,4 @@ export function formatTcfRotationSeed(decision: TcfRotationDecision | null | und
   ].filter((line): line is string => Boolean(line));
   return lines.join('\n').trim();
 }
+
