@@ -566,7 +566,13 @@ function buildHistoryIrDiagnosisFollowupDecision(args: {
     route: 'diagnosis_writer',
     seedText,
     directReply: null,
-    writerInput: seedText,
+    writerInput: {
+      writerKind: 'diagnosis_writer',
+      displayId: 0,
+      userText: args.userText,
+      sourceText: args.historyIr.diagnosisText,
+      seedText,
+    },
     shouldBypassWriter: false,
     shouldBypassRephrase: false,
     shouldUsePreSeedWriter: true,
@@ -1334,6 +1340,7 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
+
 
 
 

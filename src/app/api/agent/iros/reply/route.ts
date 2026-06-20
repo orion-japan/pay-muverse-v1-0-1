@@ -3937,7 +3937,21 @@ meta.extra = {
   },
 };
 
-const isPreSeedDirectReplyForPostProcessing = Boolean(
+const preSeedAssistKindForFinalLock = String(
+  (result as any)?.meta?.extra?.preSeedAssistKind ??
+    (result as any)?.metaForSave?.extra?.preSeedAssistKind ??
+    (metaForSave as any)?.extra?.preSeedAssistKind ??
+    (metaForSave as any)?.extra?.ctxPack?.preSeedAssistKind ??
+    ''
+).trim();
+
+const shouldForceWriterForFinalLock =
+  preSeedAssistKindForFinalLock === 'diagnosis_followup' ||
+  preSeedAssistKindForFinalLock === 'relationship_followup';
+
+const isPreSeedDirectReplyForPostProcessing =
+  !shouldForceWriterForFinalLock &&
+  Boolean(
   (result as any)?.gate === 'pre_seed_direct_reply' ||
     (result as any)?.result?.gate === 'pre_seed_direct_reply' ||
     (result as any)?.meta?.extra?.preSeedDirectReply === true ||
@@ -3949,7 +3963,6 @@ const isPreSeedDirectReplyForPostProcessing = Boolean(
     String((metaForSave as any)?.extra?.preSeedAssistKind ?? '').trim() === 'memory_recall_preflight_none' ||
     String((metaForSave as any)?.extra?.ctxPack?.preSeedAssistKind ?? '').trim() === 'memory_recall_preflight_none'
 );
-
 if (isPreSeedDirectReplyForPostProcessing && metaForSave && typeof metaForSave === 'object') {
   (metaForSave as any).skipTraining = true;
   (metaForSave as any).skip_training = true;
@@ -4588,6 +4601,7 @@ if (!skipTraining) {
     );
   }
 }
+
 
 
 
