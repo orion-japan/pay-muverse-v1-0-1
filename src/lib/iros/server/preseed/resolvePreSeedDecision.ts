@@ -459,6 +459,11 @@ export async function resolvePreSeedDecision(
     confidence: cognitionMap.confidence,
   });
 
+  const withCognitionMap = (decision: PreSeedDecision | null): PreSeedDecision | null => {
+    if (!decision) return null;
+    return attachCognitionMapToDecision(decision, cognitionMap);
+  };
+
   const fastPathDirectReply = resolveFastPathDirectReply(userText);
   if (fastPathDirectReply) {
     console.log('[IROS/PRE_SEED_ENGINE][FAST_PATH_DIRECT_REPLY]', {
@@ -470,7 +475,7 @@ export async function resolvePreSeedDecision(
       directReplyHead: String(fastPathDirectReply.directReply ?? '').slice(0, 120),
     });
 
-    return attachCognitionMapToDecision(fastPathDirectReply, cognitionMap);
+    return withCognitionMap(fastPathDirectReply);
   }
 
   const isMemoryTruthCheck =
@@ -698,11 +703,11 @@ export async function resolvePreSeedDecision(
       userTextHead: userText.slice(0, 120),
     });
 
-    return buildScreenshotDiagnosisPreSeed({
+    return withCognitionMap(await buildScreenshotDiagnosisPreSeed({
       ...args,
       displayId: historyDisplayId,
       matchedPattern: 'history_screenshot_diagnosis_context_followup_strong',
-    });
+    }));
   }
 
   if (historyDisplayId && strength === 'weak') {
@@ -715,13 +720,13 @@ export async function resolvePreSeedDecision(
       userTextHead: userText.slice(0, 120),
     });
 
-    return buildAmbiguousScreenshotClarifyDecision({
+    return withCognitionMap(buildAmbiguousScreenshotClarifyDecision({
       userText,
       userCode: args.userCode,
       conversationId: args.conversationId,
       traceId: args.traceId,
       displayId: historyDisplayId,
-    });
+    }));
   }
 
   const latest = await fetchLatestScreenshotDiagnosisForConversation({
@@ -747,11 +752,11 @@ export async function resolvePreSeedDecision(
       diagnosisTextLen: String(latest?.diagnosis_text ?? '').length,
     });
 
-    return buildScreenshotDiagnosisPreSeed({
+    return withCognitionMap(await buildScreenshotDiagnosisPreSeed({
       ...args,
       displayId: latestDisplayId,
       matchedPattern: 'latest_screenshot_diagnosis_context_followup_strong',
-    });
+    }));
   }
 
   if (
@@ -768,13 +773,13 @@ export async function resolvePreSeedDecision(
       userTextHead: userText.slice(0, 120),
     });
 
-    return buildAmbiguousScreenshotClarifyDecision({
+    return withCognitionMap(buildAmbiguousScreenshotClarifyDecision({
       userText,
       userCode: args.userCode,
       conversationId: args.conversationId,
       traceId: args.traceId,
       displayId: latestDisplayId,
-    });
+    }));
   }
   try {
     const universalCandidate = await resolveUniversalPreSeed({
@@ -826,7 +831,7 @@ export async function resolvePreSeedDecision(
             seedLen: String((irDecision as any).seedText ?? '').length,
           });
 
-          return irDecision;
+          return withCognitionMap(irDecision);
         }
       }
     }
@@ -860,7 +865,7 @@ export async function resolvePreSeedDecision(
             seedLen: String((personDecision as any).seedText ?? '').length,
           });
 
-          return personDecision;
+          return withCognitionMap(personDecision);
         }
       }
   } catch (e: any) {
@@ -874,6 +879,10 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
+
+
+
+
 
 
 
