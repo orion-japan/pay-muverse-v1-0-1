@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
-import { resolvePreSeedDecision } from '@/lib/iros/server/preseed';
+import { buildPreSeedFlowDirective, resolvePreSeedDecision } from '@/lib/iros/server/preseed';
 import { callPreSeedDiagnosisWriter } from '@/lib/iros/server/preseed/callPreSeedDiagnosisWriter';
 import { createClient } from '@supabase/supabase-js';
 
@@ -1133,7 +1133,52 @@ let extraSoT: Record<string, any> = {
       traceId,
     });
 
-    console.log('[IROS/ROUTE][PRE_SEED_AFTER_RESOLVE]', {
+    const preSeedFlowDirective = buildPreSeedFlowDirective({
+  userText: userTextClean,
+  decision: preSeedDecision,
+  meta: {
+    ...(metaForIros ?? {}),
+    extra: {
+      ...((metaForIros as any)?.extra ?? {}),
+      ...(extraSoT ?? {}),
+    },
+  },
+  historyForTurn: Array.isArray(chatHistory) ? chatHistory : [],
+});
+
+{
+  const previousCtxPack =
+    extraSoT.ctxPack && typeof extraSoT.ctxPack === 'object'
+      ? extraSoT.ctxPack
+      : {};
+
+  extraSoT = {
+    ...extraSoT,
+    preSeedFlowDirective,
+    ctxPack: {
+      ...previousCtxPack,
+      preSeedFlowDirective,
+    },
+  };
+}
+
+console.log('[IROS/ROUTE][PRE_SEED_FLOW_DIRECTIVE]', {
+  traceId,
+  conversationId,
+  userCode,
+  inputIntent: preSeedFlowDirective.inputIntent,
+  currentAxis: preSeedFlowDirective.currentAxis,
+  currentBand: preSeedFlowDirective.currentBand,
+  flowDirection: preSeedFlowDirective.flowDirection,
+  shouldDeepen: preSeedFlowDirective.shouldDeepen,
+  shouldLimitDeepening: preSeedFlowDirective.shouldLimitDeepening,
+  createReady: preSeedFlowDirective.createReady,
+  createSource: preSeedFlowDirective.createSource,
+  createIntegrity: preSeedFlowDirective.createIntegrity,
+  createDistortionRisk: preSeedFlowDirective.createDistortionRisk,
+  evidence: preSeedFlowDirective.evidence,
+});
+console.log('[IROS/ROUTE][PRE_SEED_AFTER_RESOLVE]', {
       traceId,
       conversationId,
       userCode,
@@ -1285,7 +1330,7 @@ let extraSoT: Record<string, any> = {
       extraSoT = {
         ...extraSoT,
         ...(preSeedDecision.metaPatch ?? {}),
-        preSeedDecision,
+        decision: preSeedDecision,
         preSeedDecisionKind: preSeedDecision.kind,
         preSeedDecisionRoute: preSeedDecision.route,
         preSeedBypassWriter: preSeedDecision.shouldBypassWriter,
@@ -1293,7 +1338,7 @@ let extraSoT: Record<string, any> = {
         ctxPack: {
           ...previousCtxPack,
           ...(preSeedDecision.ctxPackPatch ?? {}),
-          preSeedDecision,
+          decision: preSeedDecision,
         },
       };
 
@@ -1349,7 +1394,7 @@ let extraSoT: Record<string, any> = {
           extra: {
             ...((metaForIros as any)?.extra ?? {}),
             ...((preSeedDecision as any)?.metaPatch ?? {}),
-            preSeedDecision,
+            decision: preSeedDecision,
             preSeedBypassWriter: true,
             preSeedBypassRephrase: preSeedDecision.shouldBypassRephrase,
             preSeedWriter: true,
@@ -1357,7 +1402,7 @@ let extraSoT: Record<string, any> = {
             ctxPack: {
               ...(((metaForIros as any)?.extra ?? {})?.ctxPack ?? {}),
               ...((preSeedDecision as any)?.ctxPackPatch ?? {}),
-              preSeedDecision,
+              decision: preSeedDecision,
               preSeedWriter: true,
               preSeedWriterKind: 'diagnosis_writer',
             },
@@ -1474,13 +1519,13 @@ let extraSoT: Record<string, any> = {
         extra: {
           ...((metaForIros as any)?.extra ?? {}),
           ...((preSeedDecision as any)?.metaPatch ?? {}),
-          preSeedDecision,
+          decision: preSeedDecision,
           preSeedBypassWriter: true,
           preSeedBypassRephrase: preSeedDecision.shouldBypassRephrase,
           ctxPack: {
             ...(((metaForIros as any)?.extra ?? {})?.ctxPack ?? {}),
             ...((preSeedDecision as any)?.ctxPackPatch ?? {}),
-            preSeedDecision,
+            decision: preSeedDecision,
           },
         },
       };
@@ -1680,7 +1725,7 @@ let extraSoT: Record<string, any> = {
           ctxPack: {
             ...(((metaForIros as any)?.extra ?? {})?.ctxPack ?? {}),
             ...((preSeedDecision as any)?.ctxPackPatch ?? {}),
-            preSeedDecision,
+            decision: preSeedDecision,
             preSeedPersonContextWriter: true,
             preSeedDirectReply: true,
             directReplyCandidate: directText,
@@ -4485,6 +4530,8 @@ if (!skipTraining) {
     );
   }
 }
+
+
 
 
 
