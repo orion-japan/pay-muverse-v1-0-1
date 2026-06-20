@@ -481,6 +481,44 @@ function isExplicitScreenshotDiagnosisRequest(userTextRaw: string): boolean {
   return /(スクショ診断|スクリーンショット診断|画像診断|screenshotdiagnosis)/u.test(compact);
 }
 
+function extractExplicitPersonFollowupTarget(userTextRaw: string): {
+  targetKey: string;
+  targetLabel: string;
+} | null {
+  const text = String(userTextRaw ?? '').trim();
+  if (!text) return null;
+
+  if (/(スクショ|スクリーンショット|画像診断|ir診断|診断ID|診断結果|この診断|その診断)/u.test(text)) {
+    return null;
+  }
+
+  const patterns: RegExp[] = [
+    /^(.+?)(?:について|のこと|との関係|との距離|の状態|の気持ち|の本音|をもう少し|を深めて|を見て)/u,
+    /^(.+?)(?:さん|様|ちゃん|くん)?(?:について|のこと|との関係|の状態|の気持ち|を見て|を深めて)/u,
+  ];
+
+  for (const pattern of patterns) {
+    const m = text.match(pattern);
+    const raw = String(m?.[1] ?? '').trim();
+    if (!raw) continue;
+
+    const label = raw
+      .replace(/^(この|その|あの|さっきの|前の|直前の)/u, '')
+      .replace(/[「」『』"'“”]/g, '')
+      .trim();
+
+    if (!label) continue;
+    if (label.length > 24) continue;
+    if (/(スクショ|スクリーンショット|診断|結果|内容|相手|自分|あなた|僕|私|これ|それ)/u.test(label)) continue;
+
+    return {
+      targetKey: label,
+      targetLabel: label,
+    };
+  }
+
+  return null;
+}
 function hasDiagnosisReference(userTextRaw: string): boolean {
   const userText = String(userTextRaw ?? '').trim();
   if (!userText) return false;
@@ -1542,6 +1580,7 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
+
 
 
 
