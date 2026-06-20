@@ -665,6 +665,43 @@ export async function buildPersonContextPreSeed(args: {
     userCode: args.userCode,
     aliases,
   });
+  const cognitionMapSourceKind =
+    hasRelationshipContext && !personIntentNote ? 'relationship_memory' : 'person_context';
+
+  const cognitionMapSourceText = [
+    personIntentNote ? `PERSON_STATE:\n${personIntentNote}` : '',
+    hasRelationshipContext && relationshipNoteText ? `RELATIONSHIP_MEMORY:\n${relationshipNoteText}` : '',
+    diagnosisText ? `IR_DIAGNOSIS:\n${diagnosisText}` : '',
+    conversationMentionNote ? `CONVERSATION_MENTIONS:\n${conversationMentionNote}` : '',
+    longTermNote ? `LONG_TERM_CONTEXT:\n${longTermNote}` : '',
+  ].filter(Boolean).join('\n\n') || seedText;
+
+  const cognitionMap = buildCognitionMap({
+    userText: args.userText,
+    targetLabel,
+    targetKey,
+    sourceKind: cognitionMapSourceKind,
+    sourceText: cognitionMapSourceText,
+    debug: {
+      source: 'buildPersonContextPreSeed',
+      relationId,
+      hasPersonIntent: Boolean(personIntentNote),
+      hasRelationship: hasRelationshipContext,
+      hasDiagnosis: Boolean(diagnosisText),
+      hasConversationMentions: Boolean(conversationMentionNote),
+      hasLongTerm: Boolean(longTermNote),
+      exposeRelationshipContext,
+    },
+  });
+
+  const cognitionMapSeedText = cognitionMapToSeedText(cognitionMap);
+
+  const tcfStarter = buildPreSeedTcfStarter({
+    userText: args.userText,
+    decisionKind: 'person_reference',
+    sourceAuthority: hasRelationshipContext ? 'relationship_memory' : 'person_context',
+    cognitionMap,
+  });
   console.log('[IROS/PRE_SEED_PERSON_CONTEXT][SOURCE_DEBUG]', {
     traceId: args.traceId ?? null,
     targetLabel,
@@ -827,6 +864,7 @@ export async function buildPersonContextPreSeed(args: {
     },
   };
 }
+
 
 
 
