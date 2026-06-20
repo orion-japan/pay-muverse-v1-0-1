@@ -1512,6 +1512,51 @@ let extraSoT: Record<string, any> = {
         },
       };
 
+      let preSeedDirectSaved: any = null;
+
+      try {
+        const metaForPreSeedDirectPersist: any = {
+          ...metaForDirectReply,
+          extra: {
+            ...((metaForDirectReply as any)?.extra ?? {}),
+            persistedByRoute: true,
+            persistPolicy: 'REPLY_SINGLE_WRITER',
+            persistAssistantMessage: false,
+            preSeedDirectReplyPersist: true,
+            finalTextPolicy: 'FINAL_TEXT_SYNCED_PRE_SEED_DIRECT_REPLY',
+            resolvedText: directText,
+            finalAssistantText: directText,
+            rawTextFromModel: directText,
+            extractedTextFromModel: directText,
+          },
+        };
+
+        preSeedDirectSaved = await persistAssistantMessageToIrosMessages({
+          supabase,
+          conversationId,
+          userCode,
+          content: directText,
+          meta: metaForPreSeedDirectPersist,
+        } as any);
+
+        console.log('[IROS/ROUTE][PRE_SEED_DIRECT_REPLY_PERSIST]', {
+          traceId,
+          conversationId,
+          userCode,
+          ok: preSeedDirectSaved?.ok ?? null,
+          inserted: preSeedDirectSaved?.inserted ?? null,
+          messageId: preSeedDirectSaved?.messageId ?? null,
+          error: preSeedDirectSaved?.error ?? null,
+        });
+      } catch (e: any) {
+        console.warn('[IROS/ROUTE][PRE_SEED_DIRECT_REPLY_PERSIST_FAILED]', {
+          traceId,
+          conversationId,
+          userCode,
+          error: e?.message ?? e,
+        });
+      }
+
       console.log('[IROS/ROUTE][PRE_SEED_DIRECT_REPLY_RETURN]', {
         traceId,
         conversationId,
@@ -4512,6 +4557,7 @@ if (!skipTraining) {
     );
   }
 }
+
 
 
 

@@ -87,6 +87,147 @@ function looksLikeClearlyNormalChat(userText: string): boolean {
   );
 }
 
+
+function buildFastPathDirectReplyDecision(args: {
+  userText: string;
+  kind: 'greeting' | 'thanks' | 'ack' | 'closing';
+  directReply: string;
+}): PreSeedDecision {
+  return {
+    kind: 'normal_chat',
+    confidence: 0.99,
+
+    sourceAuthority: 'user_text',
+    sourceKind: `fast_path_${args.kind}`,
+    sourceId: null,
+    sourceText: args.userText,
+
+    route: 'direct_reply',
+
+    seedText: null,
+    directReply: args.directReply,
+    writerInput: null,
+
+    shouldBypassWriter: true,
+    shouldBypassRephrase: true,
+    shouldUsePreSeedWriter: false,
+
+    shouldSuppressHistoryForWriter: true,
+    shouldSuppressSimilarFlow: true,
+    shouldSuppressSlotPlan: true,
+    shouldSuppressMemoryDelta: true,
+    shouldSuppressIntuitionCandidate: true,
+    shouldSuppressNormalResonance: true,
+
+    shouldOpenContextThread: false,
+    contextThreadCode: null,
+
+    ctxPackPatch: {
+      fastPath: true,
+      fastPathKind: args.kind,
+      inputKind: args.kind,
+      shortSummary: args.userText,
+      contextReset: true,
+      contextResetReason: `fast_path_${args.kind}`,
+      shouldCloseContextThread: true,
+      shouldResetActiveTarget: true,
+      shouldSuppressPastContext: true,
+      shouldSuppressHistoryForWriter: true,
+      shouldSuppressSimilarFlow: true,
+      historyForWriter: [],
+      similarFlowSeed: '',
+      similarFlowDebug: null,
+      goalKind: 'stabilize',
+      targetKind: 'stabilize',
+      replyGoal: { kind: 'stabilize' },
+      qCode: 'Q1',
+      depthStage: 'S1',
+      presentationKind: 'fast_path_direct_reply',
+    },
+
+    metaPatch: {
+      fastPath: true,
+      fastPathKind: args.kind,
+      inputKind: args.kind,
+      contextReset: true,
+      contextResetReason: `fast_path_${args.kind}`,
+      shouldCloseContextThread: true,
+      shouldResetActiveTarget: true,
+      shouldSuppressPastContext: true,
+      shouldSuppressHistoryForWriter: true,
+      shouldSuppressSimilarFlow: true,
+      goalKind: 'stabilize',
+      targetKind: 'stabilize',
+      q_code: 'Q1',
+      depth_stage: 'S1',
+      presentationKind: 'fast_path_direct_reply',
+    },
+
+    debug: {
+      reason: `fast_path_${args.kind}`,
+      matchedPattern: `fast_path_${args.kind}`,
+      directReplyHead: args.directReply.slice(0, 120),
+      sourceTextHead: args.userText.slice(0, 120),
+    },
+  };
+}
+
+function resolveFastPathDirectReply(userTextRaw: string): PreSeedDecision | null {
+  const userText = String(userTextRaw ?? '').trim();
+  const compact = userText.replace(/[ \t\r\n　]/g, '').toLowerCase();
+
+  if (!compact) return null;
+
+  if (/^(おはよう|おはようございます)$/u.test(compact)) {
+    return buildFastPathDirectReplyDecision({
+      userText,
+      kind: 'greeting',
+      directReply: 'おはようございます。',
+    });
+  }
+
+  if (/^(こんにちは|こんにちわ)$/u.test(compact)) {
+    return buildFastPathDirectReplyDecision({
+      userText,
+      kind: 'greeting',
+      directReply: 'こんにちは。',
+    });
+  }
+
+  if (/^(こんばんは|こんばんわ)$/u.test(compact)) {
+    return buildFastPathDirectReplyDecision({
+      userText,
+      kind: 'greeting',
+      directReply: 'こんばんは。',
+    });
+  }
+
+  if (/^(ありがとう|ありがとうございます|ありがと)$/u.test(compact)) {
+    return buildFastPathDirectReplyDecision({
+      userText,
+      kind: 'thanks',
+      directReply: 'こちらこそ、ありがとうございます。',
+    });
+  }
+
+  if (/^(了解|了解です|わかりました|分かりました|ok|ｏｋ)$/iu.test(compact)) {
+    return buildFastPathDirectReplyDecision({
+      userText,
+      kind: 'ack',
+      directReply: 'はい、了解です。',
+    });
+  }
+
+  if (/^(またね|ではまた|おやすみ|おやすみなさい)$/u.test(compact)) {
+    return buildFastPathDirectReplyDecision({
+      userText,
+      kind: 'closing',
+      directReply: compact.startsWith('おやすみ') ? 'おやすみなさい。' : 'また話しましょう。',
+    });
+  }
+
+  return null;
+}
 function getScreenshotDiagnosisFollowupStrength(args: {
   userText: string;
   historyForTurn: any[];
@@ -259,6 +400,20 @@ export async function resolvePreSeedDecision(
   }
 
   const userText = String(args.userText ?? '').trim();
+
+  const fastPathDirectReply = resolveFastPathDirectReply(userText);
+  if (fastPathDirectReply) {
+    console.log('[IROS/PRE_SEED_ENGINE][FAST_PATH_DIRECT_REPLY]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode ?? null,
+      userTextHead: userText.slice(0, 120),
+      fastPathKind: fastPathDirectReply.metaPatch?.fastPathKind ?? null,
+      directReplyHead: String(fastPathDirectReply.directReply ?? '').slice(0, 120),
+    });
+
+    return fastPathDirectReply;
+  }
 
   const isMemoryTruthCheck =
     (
@@ -661,6 +816,8 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
+
+
 
 
 
