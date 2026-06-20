@@ -29,7 +29,7 @@ export async function callPreSeedDiagnosisWriter(
   const diagnosisText = String(input.sourceText ?? '').trim();
   const seedText = String(input.seedText ?? '').trim();
 
-  if (!displayId || !userText || !diagnosisText) return null;
+  if (!userText || !diagnosisText) return null;
 
   const model =
     process.env.IROS_PRESEED_WRITER_MODEL ||
@@ -148,4 +148,5 @@ export async function callPreSeedDiagnosisWriter(
     return null;
   }
 }
+
 

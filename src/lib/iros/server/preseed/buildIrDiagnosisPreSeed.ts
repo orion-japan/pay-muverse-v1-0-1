@@ -194,7 +194,7 @@ function buildIrDiagnosisSeed(args: {
     `targetKey=${args.targetKey}`,
     `userText=${args.userText}`,
     'sourceAuthority=ir_diagnosis_text',
-    'memoryIntent=ir_diagnosis_recall',
+    'memoryIntent=ir_diagnosis_followup',
     'route=diagnosis_writer',
     '',
     'RULES:',
@@ -278,7 +278,7 @@ export async function buildIrDiagnosisPreSeed(
   });
 
   return {
-    kind: 'ir_diagnosis_recall',
+    kind: 'ir_diagnosis_followup',
     confidence: 0.92,
     sourceAuthority: 'ir_diagnosis_text',
     sourceKind: source.source ?? 'iros_ir_diagnosis_results',
@@ -315,7 +315,7 @@ export async function buildIrDiagnosisPreSeed(
 
     metaPatch: {
       preSeedIrDiagnosis: true,
-      memoryIntent: 'ir_diagnosis_recall',
+      memoryIntent: 'ir_diagnosis_followup',
       memorySpace: 'ir_diagnosis',
       sourceAuthority: 'ir_diagnosis_text',
       targetLabel,
@@ -327,7 +327,7 @@ export async function buildIrDiagnosisPreSeed(
       preSeedIrDiagnosis: true,
       diagnosisFollowup: true,
       presentationKind: 'diagnosis_followup',
-      memoryIntent: 'ir_diagnosis_recall',
+      memoryIntent: 'ir_diagnosis_followup',
       memorySpace: 'ir_diagnosis',
       memoryTargetLabel: targetLabel,
       memoryTargetKey: targetKey,
@@ -339,13 +339,14 @@ export async function buildIrDiagnosisPreSeed(
     },
 
     debug: {
-      reason: 'ir_diagnosis_recall_source_found',
+      reason: 'ir_diagnosis_followup_source_found',
       matchedPattern: args.matchedPattern ?? null,
       targetKey,
-      routeReason: 'universal_preseed_ir_diagnosis_recall',
+      routeReason: 'preseed_ir_diagnosis_followup',
     },
   } as any;
 }
+
 
 
 

@@ -824,9 +824,31 @@ let extraSoT: Record<string, any> = {
           ''
       ).trim();
 
-      const isExplicitScreenshotDiagnosisTurnForContextGate =
+      const hasExplicitScreenshotDiagnosisIdForContextGate =
         /スクショ診断\s*(?:ID|id)?[:：]?\s*\d+/u.test(currentUserTextForScreenshotContextGate) ||
         /スクリーンショット診断\s*(?:ID|id)?[:：]?\s*\d+/u.test(currentUserTextForScreenshotContextGate);
+
+      const hasNearbyScreenshotDiagnosisReferenceForContextGate =
+        /(?:この|今の|上の|さっきの|直前の|前の)\s*(?:スクショ診断|スクリーンショット診断|画像診断|診断結果|診断|結果)/u.test(
+          currentUserTextForScreenshotContextGate
+        ) ||
+        /(?:スクショ|スクリーンショット|画像).*(?:診断|結果|続き|深め|詳しく|相手|気持ち)/u.test(
+          currentUserTextForScreenshotContextGate
+        ) ||
+        /(?:診断結果|診断|結果).*(?:続き|深め|詳しく|相手|気持ち|読み解|見て|教えて)/u.test(
+          currentUserTextForScreenshotContextGate
+        );
+
+      const hasTopicSwitchForScreenshotContextGate =
+        /(?:ところで|話(?:を)?変える|話変わる|別件|それとは別|関係ない|実装|コード|GitHub|github|プッシュ|コミット|ブランチ|typecheck|npm|PC|パソコン|課金|料金|Muverse)/u.test(
+          currentUserTextForScreenshotContextGate
+        );
+
+      const isExplicitScreenshotDiagnosisTurnForContextGate =
+        hasExplicitScreenshotDiagnosisIdForContextGate ||
+        (Boolean(screenshotDiagnosisHintText) &&
+          hasNearbyScreenshotDiagnosisReferenceForContextGate &&
+          !hasTopicSwitchForScreenshotContextGate);
 
       if (!isExplicitScreenshotDiagnosisTurnForContextGate && screenshotDiagnosisHintText) {
         console.log('[IROS/SCREENSHOT_DIAG_CTX_SKIPPED_NON_EXPLICIT]', {
@@ -835,6 +857,9 @@ let extraSoT: Record<string, any> = {
           userCode,
           userTextHead: currentUserTextForScreenshotContextGate.slice(0, 120),
           hintLen: screenshotDiagnosisHintText.length,
+          hasExplicitScreenshotDiagnosisId: hasExplicitScreenshotDiagnosisIdForContextGate,
+          hasNearbyReference: hasNearbyScreenshotDiagnosisReferenceForContextGate,
+          hasTopicSwitch: hasTopicSwitchForScreenshotContextGate,
         });
       }
 
@@ -879,6 +904,7 @@ let extraSoT: Record<string, any> = {
           hintHead: screenshotDiagnosisHintText.slice(0, 180),
           hasLastIrDiagnosis: Boolean((extraSoT as any)?.lastIrDiagnosis),
           hasCtxPackLastIrDiagnosis: Boolean((extraSoT as any)?.ctxPack?.lastIrDiagnosis),
+          resolvedBy: hasExplicitScreenshotDiagnosisIdForContextGate ? 'explicit_id' : 'nearby_reference',
         });
       }
     }
@@ -1123,62 +1149,74 @@ let extraSoT: Record<string, any> = {
       hasSupabase: Boolean((supabase as any)?.from),
     });
 
+    const preSeedMeta: any = {
+      ...(metaForIros ?? {}),
+      ...(extraSoT ?? {}),
+      extra: {
+        ...((metaForIros as any)?.extra ?? {}),
+        ...(extraSoT ?? {}),
+        ctxPack: {
+          ...(((metaForIros as any)?.extra ?? {})?.ctxPack ?? {}),
+          ...(((extraSoT as any)?.ctxPack ?? {})),
+        },
+      },
+      ctxPack: {
+        ...((metaForIros as any)?.ctxPack ?? {}),
+        ...(((extraSoT as any)?.ctxPack ?? {})),
+      },
+    };
+
     const preSeedDecision = await resolvePreSeedDecision({
       userText: userTextClean,
       userCode,
       conversationId,
       supabase: supabase as any,
-      meta: metaForIros,
+      meta: preSeedMeta,
       historyForTurn: Array.isArray(chatHistory) ? chatHistory : [],
       traceId,
     });
 
     const preSeedFlowDirective = buildPreSeedFlowDirective({
-  userText: userTextClean,
-  decision: preSeedDecision,
-  meta: {
-    ...(metaForIros ?? {}),
-    extra: {
-      ...((metaForIros as any)?.extra ?? {}),
-      ...(extraSoT ?? {}),
-    },
-  },
-  historyForTurn: Array.isArray(chatHistory) ? chatHistory : [],
-});
+      userText: userTextClean,
+      decision: preSeedDecision,
+      meta: preSeedMeta,
+      historyForTurn: Array.isArray(chatHistory) ? chatHistory : [],
+    });
 
-{
-  const previousCtxPack =
-    extraSoT.ctxPack && typeof extraSoT.ctxPack === 'object'
-      ? extraSoT.ctxPack
-      : {};
+    {
+      const previousCtxPack =
+        extraSoT.ctxPack && typeof extraSoT.ctxPack === 'object'
+          ? extraSoT.ctxPack
+          : {};
 
-  extraSoT = {
-    ...extraSoT,
-    preSeedFlowDirective,
-    ctxPack: {
-      ...previousCtxPack,
-      preSeedFlowDirective,
-    },
-  };
-}
+      extraSoT = {
+        ...extraSoT,
+        preSeedFlowDirective,
+        ctxPack: {
+          ...previousCtxPack,
+          preSeedFlowDirective,
+        },
+      };
+    }
 
-console.log('[IROS/ROUTE][PRE_SEED_FLOW_DIRECTIVE]', {
-  traceId,
-  conversationId,
-  userCode,
-  inputIntent: preSeedFlowDirective.inputIntent,
-  currentAxis: preSeedFlowDirective.currentAxis,
-  currentBand: preSeedFlowDirective.currentBand,
-  flowDirection: preSeedFlowDirective.flowDirection,
-  shouldDeepen: preSeedFlowDirective.shouldDeepen,
-  shouldLimitDeepening: preSeedFlowDirective.shouldLimitDeepening,
-  createReady: preSeedFlowDirective.createReady,
-  createSource: preSeedFlowDirective.createSource,
-  createIntegrity: preSeedFlowDirective.createIntegrity,
-  createDistortionRisk: preSeedFlowDirective.createDistortionRisk,
-  evidence: preSeedFlowDirective.evidence,
-});
-console.log('[IROS/ROUTE][PRE_SEED_AFTER_RESOLVE]', {
+    console.log('[IROS/ROUTE][PRE_SEED_FLOW_DIRECTIVE]', {
+      traceId,
+      conversationId,
+      userCode,
+      inputIntent: preSeedFlowDirective.inputIntent,
+      currentAxis: preSeedFlowDirective.currentAxis,
+      currentBand: preSeedFlowDirective.currentBand,
+      flowDirection: preSeedFlowDirective.flowDirection,
+      shouldDeepen: preSeedFlowDirective.shouldDeepen,
+      shouldLimitDeepening: preSeedFlowDirective.shouldLimitDeepening,
+      createReady: preSeedFlowDirective.createReady,
+      createSource: preSeedFlowDirective.createSource,
+      createIntegrity: preSeedFlowDirective.createIntegrity,
+      createDistortionRisk: preSeedFlowDirective.createDistortionRisk,
+      evidence: preSeedFlowDirective.evidence,
+    });
+
+    console.log('[IROS/ROUTE][PRE_SEED_AFTER_RESOLVE]', {
       traceId,
       conversationId,
       userCode,
@@ -1189,7 +1227,8 @@ console.log('[IROS/ROUTE][PRE_SEED_AFTER_RESOLVE]', {
       directReplyLen: String(preSeedDecision?.directReply ?? '').length,
       seedLen: String(preSeedDecision?.seedText ?? '').length,
     });
-
+
+
 
     // -------------------------------------------------------
     // 11.975) Person Fact Capture Layer
@@ -1330,7 +1369,7 @@ console.log('[IROS/ROUTE][PRE_SEED_AFTER_RESOLVE]', {
       extraSoT = {
         ...extraSoT,
         ...(preSeedDecision.metaPatch ?? {}),
-        decision: preSeedDecision,
+        preSeedDecision,
         preSeedDecisionKind: preSeedDecision.kind,
         preSeedDecisionRoute: preSeedDecision.route,
         preSeedBypassWriter: preSeedDecision.shouldBypassWriter,
@@ -1338,7 +1377,7 @@ console.log('[IROS/ROUTE][PRE_SEED_AFTER_RESOLVE]', {
         ctxPack: {
           ...previousCtxPack,
           ...(preSeedDecision.ctxPackPatch ?? {}),
-          decision: preSeedDecision,
+          preSeedDecision,
         },
       };
 
@@ -1394,7 +1433,7 @@ console.log('[IROS/ROUTE][PRE_SEED_AFTER_RESOLVE]', {
           extra: {
             ...((metaForIros as any)?.extra ?? {}),
             ...((preSeedDecision as any)?.metaPatch ?? {}),
-            decision: preSeedDecision,
+            preSeedDecision,
             preSeedBypassWriter: true,
             preSeedBypassRephrase: preSeedDecision.shouldBypassRephrase,
             preSeedWriter: true,
@@ -1402,7 +1441,7 @@ console.log('[IROS/ROUTE][PRE_SEED_AFTER_RESOLVE]', {
             ctxPack: {
               ...(((metaForIros as any)?.extra ?? {})?.ctxPack ?? {}),
               ...((preSeedDecision as any)?.ctxPackPatch ?? {}),
-              decision: preSeedDecision,
+              preSeedDecision,
               preSeedWriter: true,
               preSeedWriterKind: 'diagnosis_writer',
             },
@@ -1456,6 +1495,38 @@ console.log('[IROS/ROUTE][PRE_SEED_AFTER_RESOLVE]', {
           });
         }
 
+        const preSeedTcfStarterForDiagnosisWriter =
+          (preSeedDecision as any)?.tcfStarter ??
+          (preSeedDecision as any)?.ctxPackPatch?.tcfStarter ??
+          (preSeedDecision as any)?.metaPatch?.tcfStarter ??
+          (preSeedDecision as any)?.writerInput?.tcfStarter ??
+          null;
+
+        console.log('[IROS/TCF_ROTATION_SEED][PRE_SEED_BRIDGE]', {
+          traceId,
+          conversationId,
+          userCode,
+          source: 'preseed_tcf_starter',
+          route: preSeedDecision.route,
+          kind: preSeedDecision.kind,
+          sourceId: preSeedDecision.sourceId ?? null,
+          applied: Boolean(preSeedTcfStarterForDiagnosisWriter),
+          cDirection: preSeedTcfStarterForDiagnosisWriter?.cDirection ?? null,
+          userReaction: preSeedTcfStarterForDiagnosisWriter?.userReaction ?? null,
+          convergence: preSeedTcfStarterForDiagnosisWriter?.convergence ?? null,
+          currentFocus: preSeedTcfStarterForDiagnosisWriter?.currentFocus ?? null,
+          nextFocus: preSeedTcfStarterForDiagnosisWriter?.nextFocus ?? null,
+          cognitionMapRelationCode:
+            (preSeedDecision as any)?.cognitionMap?.relationCode ??
+            (preSeedDecision as any)?.ctxPackPatch?.cognitionMap?.relationCode ??
+            (preSeedDecision as any)?.metaPatch?.cognitionMap?.relationCode ??
+            null,
+          cognitionMapProgress:
+            (preSeedDecision as any)?.cognitionMap?.progress ??
+            (preSeedDecision as any)?.ctxPackPatch?.cognitionMap?.progress ??
+            (preSeedDecision as any)?.metaPatch?.cognitionMap?.progress ??
+            null,
+        });
         console.log('[IROS/ROUTE][PRE_SEED_DIAGNOSIS_WRITER_RETURN]', {
           traceId,
           conversationId,
@@ -1508,7 +1579,7 @@ console.log('[IROS/ROUTE][PRE_SEED_AFTER_RESOLVE]', {
       });
     }
     if (
-      preSeedDecision?.route === 'direct_reply' &&
+      (preSeedDecision?.route === 'direct_reply' || preSeedDecision?.route === 'clarify') &&
       preSeedDecision.shouldBypassWriter &&
       preSeedDecision.directReply
     ) {
@@ -1519,16 +1590,61 @@ console.log('[IROS/ROUTE][PRE_SEED_AFTER_RESOLVE]', {
         extra: {
           ...((metaForIros as any)?.extra ?? {}),
           ...((preSeedDecision as any)?.metaPatch ?? {}),
-          decision: preSeedDecision,
+          preSeedDecision,
           preSeedBypassWriter: true,
           preSeedBypassRephrase: preSeedDecision.shouldBypassRephrase,
           ctxPack: {
             ...(((metaForIros as any)?.extra ?? {})?.ctxPack ?? {}),
             ...((preSeedDecision as any)?.ctxPackPatch ?? {}),
-            decision: preSeedDecision,
+            preSeedDecision,
           },
         },
       };
+
+      let preSeedDirectSaved: any = null;
+
+      try {
+        const metaForPreSeedDirectPersist: any = {
+          ...metaForDirectReply,
+          extra: {
+            ...((metaForDirectReply as any)?.extra ?? {}),
+            persistedByRoute: true,
+            persistPolicy: 'REPLY_SINGLE_WRITER',
+            persistAssistantMessage: false,
+            preSeedDirectReplyPersist: true,
+            finalTextPolicy: 'FINAL_TEXT_SYNCED_PRE_SEED_DIRECT_REPLY',
+            resolvedText: directText,
+            finalAssistantText: directText,
+            rawTextFromModel: directText,
+            extractedTextFromModel: directText,
+          },
+        };
+
+        preSeedDirectSaved = await persistAssistantMessageToIrosMessages({
+          supabase,
+          conversationId,
+          userCode,
+          content: directText,
+          meta: metaForPreSeedDirectPersist,
+        } as any);
+
+        console.log('[IROS/ROUTE][PRE_SEED_DIRECT_REPLY_PERSIST]', {
+          traceId,
+          conversationId,
+          userCode,
+          ok: preSeedDirectSaved?.ok ?? null,
+          inserted: preSeedDirectSaved?.inserted ?? null,
+          messageId: preSeedDirectSaved?.messageId ?? null,
+          error: preSeedDirectSaved?.error ?? null,
+        });
+      } catch (e: any) {
+        console.warn('[IROS/ROUTE][PRE_SEED_DIRECT_REPLY_PERSIST_FAILED]', {
+          traceId,
+          conversationId,
+          userCode,
+          error: e?.message ?? e,
+        });
+      }
 
       console.log('[IROS/ROUTE][PRE_SEED_DIRECT_REPLY_RETURN]', {
         traceId,
@@ -1725,7 +1841,7 @@ console.log('[IROS/ROUTE][PRE_SEED_AFTER_RESOLVE]', {
           ctxPack: {
             ...(((metaForIros as any)?.extra ?? {})?.ctxPack ?? {}),
             ...((preSeedDecision as any)?.ctxPackPatch ?? {}),
-            decision: preSeedDecision,
+            preSeedDecision,
             preSeedPersonContextWriter: true,
             preSeedDirectReply: true,
             directReplyCandidate: directText,
@@ -3314,7 +3430,7 @@ return NextResponse.json({
                 '予約や到着時間など、具体的な予定の情報が出ています。',
                 'なので今のスクショ上では、「来ない流れ」より「会う方向に整っている流れ」です。',
                 '',
-                'ただ、相手の気持ちまでは断定しません。',
+                'この流れでは、相手側にも「予定を流したくない」「早く整えたい」という温度が出ています。',
                 '見るところは、来るか来ないかだけではなく、相手が自分のペースで来られる余白が残っているかです。'
               ].join('\n');
             } else if (hasArrival) {
@@ -3323,8 +3439,8 @@ return NextResponse.json({
                 '',
                 '予約や到着時間、移動や予定に関する具体的な情報が出ているので、会話は切れているというより、必要な確認をしながら進んでいます。',
                 '',
-                'ただし、相手の気持ちまでは断定しません。',
-                '見るべきなのは、相手がどの温度で返しているかと、あなたがどこまで先に整えすぎているかです。'
+                'この流れでは、相手側にも「予定を流したくない」「早く整えたい」という温度が出ています。',
+                '見るべきなのは、相手が確認を急いだ理由と、こちらの確定報告を受けて安心できる流れになっているかです。'
               ].join('\n');
             } else {
               finalText = [
@@ -3332,8 +3448,8 @@ return NextResponse.json({
                 '',
                 '診断内容をそのまま貼るのではなく、見えている根拠だけで言うと、会話は切れているというより、必要な確認をしながら進んでいる状態です。',
                 '',
-                'ただし、相手の気持ちまでは断定しません。',
-                '見るべきなのは、相手がどの温度で返しているかと、あなたがどこまで先に整えすぎているかです。'
+                'この流れでは、相手側にも「予定を流したくない」「早く整えたい」という温度が出ています。',
+                '見るべきなのは、相手が確認を急いだ理由と、こちらの確定報告を受けて安心できる流れになっているかです。'
               ].join('\n');
             }
 
@@ -3474,16 +3590,30 @@ const fromResultObj = stripInternalLines(resultObjFinalRaw);
       ? mfsExtra.ctxPack
       : null;
 
-  const isPreSeedDirectReplyPrePersist = Boolean(
-    resultAny?.gate === 'pre_seed_direct_reply' ||
-      resultAny?.result?.gate === 'pre_seed_direct_reply' ||
-      resultAny?.meta?.extra?.preSeedDirectReply === true ||
-      resultAny?.metaForSave?.extra?.preSeedDirectReply === true ||
-      mfsExtra?.preSeedDirectReply === true ||
-      ctxPackAny?.preSeedDirectReply === true ||
-      mfsExtra?.preSeedAssistKind === 'diagnosis_detail' ||
-      ctxPackAny?.preSeedAssistKind === 'diagnosis_detail'
-  );
+  const preSeedAssistKindForDirectLock = String(
+    mfsExtra?.preSeedAssistKind ??
+      ctxPackAny?.preSeedAssistKind ??
+      resultAny?.meta?.extra?.preSeedAssistKind ??
+      resultAny?.metaForSave?.extra?.preSeedAssistKind ??
+      ''
+  ).trim();
+
+  const shouldForceWriterForPreSeedAssist =
+    preSeedAssistKindForDirectLock === 'diagnosis_followup' ||
+    preSeedAssistKindForDirectLock === 'relationship_followup';
+
+  const isPreSeedDirectReplyPrePersist =
+    !shouldForceWriterForPreSeedAssist &&
+    Boolean(
+      resultAny?.gate === 'pre_seed_direct_reply' ||
+        resultAny?.result?.gate === 'pre_seed_direct_reply' ||
+        resultAny?.meta?.extra?.preSeedDirectReply === true ||
+        resultAny?.metaForSave?.extra?.preSeedDirectReply === true ||
+        mfsExtra?.preSeedDirectReply === true ||
+        ctxPackAny?.preSeedDirectReply === true ||
+        mfsExtra?.preSeedAssistKind === 'diagnosis_detail' ||
+        ctxPackAny?.preSeedAssistKind === 'diagnosis_detail'
+    );
 
   const directReplyPrePersist =
     [
@@ -3879,7 +4009,21 @@ meta.extra = {
   },
 };
 
-const isPreSeedDirectReplyForPostProcessing = Boolean(
+const preSeedAssistKindForFinalLock = String(
+  (result as any)?.meta?.extra?.preSeedAssistKind ??
+    (result as any)?.metaForSave?.extra?.preSeedAssistKind ??
+    (metaForSave as any)?.extra?.preSeedAssistKind ??
+    (metaForSave as any)?.extra?.ctxPack?.preSeedAssistKind ??
+    ''
+).trim();
+
+const shouldForceWriterForFinalLock =
+  preSeedAssistKindForFinalLock === 'diagnosis_followup' ||
+  preSeedAssistKindForFinalLock === 'relationship_followup';
+
+const isPreSeedDirectReplyForPostProcessing =
+  !shouldForceWriterForFinalLock &&
+  Boolean(
   (result as any)?.gate === 'pre_seed_direct_reply' ||
     (result as any)?.result?.gate === 'pre_seed_direct_reply' ||
     (result as any)?.meta?.extra?.preSeedDirectReply === true ||
@@ -3891,7 +4035,6 @@ const isPreSeedDirectReplyForPostProcessing = Boolean(
     String((metaForSave as any)?.extra?.preSeedAssistKind ?? '').trim() === 'memory_recall_preflight_none' ||
     String((metaForSave as any)?.extra?.ctxPack?.preSeedAssistKind ?? '').trim() === 'memory_recall_preflight_none'
 );
-
 if (isPreSeedDirectReplyForPostProcessing && metaForSave && typeof metaForSave === 'object') {
   (metaForSave as any).skipTraining = true;
   (metaForSave as any).skip_training = true;
@@ -4530,6 +4673,11 @@ if (!skipTraining) {
     );
   }
 }
+
+
+
+
+
 
 
 

@@ -1,4 +1,11 @@
-﻿export type PreSeedKind =
+import type { CognitionMap } from '../../cognition/cognitionMap';
+import type {
+  TcfCDirection,
+  TcfUserReaction,
+  TcfConvergenceState,
+} from '../../tcf/tcfRotation';
+
+export type PreSeedKind =
   | 'normal_chat'
   | 'screenshot_diagnosis_boot'
   | 'screenshot_diagnosis_followup'
@@ -33,6 +40,14 @@ export type PreSeedRoute =
   | 'tool_action'
   | 'blocked';
 
+export type PreSeedTcfStarter = {
+  cDirection: TcfCDirection;
+  userReaction: TcfUserReaction;
+  convergence: TcfConvergenceState;
+  currentFocus: string | null;
+  nextFocus: string | null;
+};
+
 export type PreSeedDecision = {
   kind: PreSeedKind;
   confidence: number;
@@ -48,6 +63,10 @@ export type PreSeedDecision = {
   directReply?: string | null;
 
   writerInput?: Record<string, any> | null;
+
+  cognitionMap?: CognitionMap | null;
+  cognitionMapSeedText?: string | null;
+  tcfStarter?: PreSeedTcfStarter | null;
 
   shouldBypassWriter: boolean;
   shouldBypassRephrase: boolean;
@@ -74,6 +93,13 @@ export type PreSeedDecision = {
     sourceTextHead?: string | null;
     seedHead?: string | null;
     directReplyHead?: string | null;
+    cognitionMapApplied?: boolean;
+    cognitionMapRelationCode?: string | null;
+    cognitionMapProgress?: string | null;
+    cognitionMapTriggerKind?: string | null;
+    cognitionMapGapState?: string | null;
+    tcfStarterApplied?: boolean;
+    tcfStarterDirection?: TcfCDirection | null;
   };
 };
 
@@ -86,5 +112,3 @@ export type ResolvePreSeedDecisionArgs = {
   historyForTurn?: any[];
   traceId?: string | null;
 };
-
-
