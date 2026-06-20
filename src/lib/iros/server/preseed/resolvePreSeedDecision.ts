@@ -487,7 +487,16 @@ function extractLatestIrDiagnosisFromHistory(historyForTurnRaw: any[]): {
     if (!looksIrDiagnosis) continue;
 
     const targetMatch = content.match(/観測対象[:：]\s*([^\n\r]+)/u);
-    const targetLabel = String(targetMatch?.[1] ?? 'ir診断').trim();
+    let targetLabel = String(targetMatch?.[1] ?? 'ir診断').trim();
+
+    // 「観測対象：みゆ 🧭 現状：...」のように同一行へ続く場合は、
+    // 対象名だけを正規化して meta の汚れを防ぐ。
+    targetLabel = targetLabel
+      .replace(/\s*[🧭🧩🌱].*$/u, '')
+      .replace(/\s*(現状|ポイント|メッセージ)[:：].*$/u, '')
+      .trim();
+
+    if (!targetLabel) targetLabel = 'ir診断';
 
     return {
       targetKey: targetLabel,
@@ -1340,6 +1349,7 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
+
 
 
 
