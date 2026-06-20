@@ -444,16 +444,41 @@ function hasRecentDiagnosisKindClarifyContext(historyForTurn: any[]): boolean {
   });
 }
 
+function hasRecentScreenshotContinuationClarifyContext(historyForTurn: any[]): boolean {
+  const tail = Array.isArray(historyForTurn) ? historyForTurn.slice(-8).reverse() : [];
+
+  return tail.some((t: any) => {
+    const s = getTurnText(t);
+    if (!s) return false;
+
+    return (
+      /このまま診断ID[:：]?\d+の続きとして見ますか/u.test(s) ||
+      /診断ID[:：]?\d+の続きとして見ますか/u.test(s) ||
+      (/別件として通常チャット/u.test(s) && /診断ID[:：]?\d+/u.test(s))
+    );
+  });
+}
 function resolveDiagnosisKindClarifySelection(args: {
   userText: string;
   historyForTurn?: any[];
 }): 'ir' | 'screenshot' | null {
-  if (!hasRecentDiagnosisKindClarifyContext(args.historyForTurn ?? [])) return null;
 
   const compact = String(args.userText ?? '')
     .trim()
     .replace(/[　\s]+/g, '')
     .toLowerCase();
+
+  if (!compact) return null;
+
+  if (
+    hasRecentScreenshotContinuationClarifyContext(args.historyForTurn ?? []) &&
+    /^(続き|続きで|そのまま|はい|お願いします|おねがいします|それで|その続き|続けて|続きを|yes|ok|okay)$/u.test(compact)
+  ) {
+    return 'screenshot';
+  }
+
+  if (!hasRecentDiagnosisKindClarifyContext(args.historyForTurn ?? [])) return null;
+
 
   if (/^(1|１|一|ir|ｉｒ|ir診断|ｉｒ診断)$/u.test(compact)) return 'ir';
 
@@ -564,26 +589,188 @@ function extractLatestPersonReferenceFromHistory(historyForTurnRaw: any[]): {
   sourceUserText: string;
 } | null {
   const history = Array.isArray(historyForTurnRaw) ? historyForTurnRaw : [];
-  const tail = history.slice(-12).reverse();
+  const tail = history.slice(-18).reverse();
+
+  function obj(value: any): Record<string, any> | null {
+    return value && typeof value === 'object' ? (value as Record<string, any>) : null;
+  }
+
+  function str(value: any): string | null {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+
+  function fromRelationId(value: any): string | null {
+    const s = str(value);
+    if (!s) return null;
+    const m = s.match(/__person_(.+)$/u);
+    return m?.[1]?.trim() || null;
+  }
+
+  function looksLikePersonSource(message: any): boolean {
+    const m = obj(message?.meta) ?? {};
+    const extra = obj(m.extra) ?? {};
+    const ctxPack = obj(extra.ctxPack) ?? obj(m.ctxPack) ?? {};
+    const resolvedTarget =
+      obj(ctxPack.resolvedTarget) ??
+      obj(extra.resolvedTarget) ??
+      obj(m.resolvedTarget) ??
+      {};
+
+    const raw = JSON.stringify({
+      kind: message?.kind,
+      route: message?.route,
+      sourceId: message?.sourceId ?? message?.source_id,
+      sourceKind: message?.sourceKind ?? message?.source_kind,
+      memoryIntent: message?.memoryIntent ?? message?.memory_intent,
+      memorySpace: message?.memorySpace ?? message?.memory_space,
+      relationId: message?.relationId ?? message?.relation_id,
+      metaKind: m.kind,
+      metaRoute: m.route,
+      metaSourceId: m.sourceId ?? m.source_id,
+      metaSourceKind: m.sourceKind ?? m.source_kind,
+      metaMemoryIntent: m.memoryIntent ?? m.memory_intent,
+      metaMemorySpace: m.memorySpace ?? m.memory_space,
+      metaRelationId: m.relationId ?? m.relation_id,
+      extraKind: extra.kind,
+      extraSourceId: extra.sourceId ?? extra.source_id,
+      extraMemoryIntent: extra.memoryIntent ?? extra.memory_intent,
+      extraMemorySpace: extra.memorySpace ?? extra.memory_space,
+      ctxKind: ctxPack.kind,
+      ctxSourceId: ctxPack.sourceId ?? ctxPack.source_id,
+      ctxMemoryIntent: ctxPack.memoryIntent ?? ctxPack.memory_intent,
+      ctxMemorySpace: ctxPack.memorySpace ?? ctxPack.memory_space,
+      resolvedTarget,
+    });
+
+    return /person_reference|memorySpace["':\s]*person|memory_space["':\s]*person|__person_/u.test(raw);
+  }
+
+  function extractPersonTargetFromMessage(message: any): {
+    targetKey: string;
+    targetLabel: string;
+    sourceUserText: string;
+  } | null {
+    const m = obj(message?.meta) ?? {};
+    const extra = obj(m.extra) ?? {};
+    const ctxPack = obj(extra.ctxPack) ?? obj(m.ctxPack) ?? {};
+    const resolvedTarget =
+      obj(ctxPack.resolvedTarget) ??
+      obj(extra.resolvedTarget) ??
+      obj(m.resolvedTarget) ??
+      {};
+
+    const sourceIdPerson =
+      fromRelationId(message?.sourceId) ??
+      fromRelationId(message?.source_id) ??
+      fromRelationId(m.sourceId) ??
+      fromRelationId(m.source_id) ??
+      fromRelationId(extra.sourceId) ??
+      fromRelationId(extra.source_id) ??
+      fromRelationId(ctxPack.sourceId) ??
+      fromRelationId(ctxPack.source_id) ??
+      fromRelationId(message?.relationId) ??
+      fromRelationId(message?.relation_id) ??
+      fromRelationId(m.relationId) ??
+      fromRelationId(m.relation_id) ??
+      fromRelationId(extra.relationId) ??
+      fromRelationId(extra.relation_id) ??
+      fromRelationId(ctxPack.relationId) ??
+      fromRelationId(ctxPack.relation_id);
+
+    const targetKey =
+      str(sourceIdPerson) ??
+      str(message?.targetKey) ??
+      str(message?.target_key) ??
+      str(m.targetKey) ??
+      str(m.target_key) ??
+      str(extra.targetKey) ??
+      str(extra.target_key) ??
+      str(ctxPack.targetKey) ??
+      str(ctxPack.target_key) ??
+      str(resolvedTarget.targetKey) ??
+      str(resolvedTarget.target_key) ??
+      str(resolvedTarget.canonicalName) ??
+      str(resolvedTarget.canonical_name);
+
+    const targetLabel =
+      str(message?.targetLabel) ??
+      str(message?.target_label) ??
+      str(m.targetLabel) ??
+      str(m.target_label) ??
+      str(extra.targetLabel) ??
+      str(extra.target_label) ??
+      str(ctxPack.targetLabel) ??
+      str(ctxPack.target_label) ??
+      str(resolvedTarget.label) ??
+      str(resolvedTarget.targetLabel) ??
+      str(resolvedTarget.target_label) ??
+      str(targetKey);
+
+    if (!targetKey || !targetLabel) return null;
+    if (isUnsafeImplicitTargetLabel(targetKey) || isUnsafeImplicitTargetLabel(targetLabel)) return null;
+    if (!looksLikePersonSource(message) && !sourceIdPerson) return null;
+
+    return {
+      targetKey,
+      targetLabel,
+      sourceUserText: getTurnText(message) || `person_reference:${targetLabel}`,
+    };
+  }
+
+  function isDiagnosisBarrier(message: any, content: string): boolean {
+    const m = obj(message?.meta) ?? {};
+    const extra = obj(m.extra) ?? {};
+    const ctxPack = obj(extra.ctxPack) ?? obj(m.ctxPack) ?? {};
+
+    const raw = JSON.stringify({
+      contentHead: content.slice(0, 240),
+      kind: message?.kind,
+      route: message?.route,
+      sourceId: message?.sourceId ?? message?.source_id,
+      sourceKind: message?.sourceKind ?? message?.source_kind,
+      metaKind: m.kind,
+      metaSourceId: m.sourceId ?? m.source_id,
+      metaSourceKind: m.sourceKind ?? m.source_kind,
+      extraKind: extra.kind,
+      extraSourceId: extra.sourceId ?? extra.source_id,
+      extraSourceKind: extra.sourceKind ?? extra.source_kind,
+      ctxKind: ctxPack.kind,
+      ctxSourceId: ctxPack.sourceId ?? ctxPack.source_id,
+      ctxSourceKind: ctxPack.sourceKind ?? ctxPack.source_kind,
+      presentationKind:
+        ctxPack.presentationKind ??
+        ctxPack.presentation_kind ??
+        extra.presentationKind ??
+        extra.presentation_kind ??
+        m.presentationKind ??
+        m.presentation_kind,
+    });
+
+    return (
+      /スクショ診断ID[:：]?\d+/u.test(content.replace(/[　\s]+/g, '')) ||
+      /screenshot_diagnosis|screenshotDiagnosis|mu_screenshot_diagnosis|screenshot_diagnosis_boot|SCREENSHOT_DIAGNOSIS/u.test(raw) ||
+      /ir_diagnosis|ir診断|IR_DIAGNOSIS|lastIrDiagnosis|diagnosisKindClarify/u.test(raw)
+    );
+  }
 
   for (const message of tail) {
-    const role = String(message?.role ?? message?.speaker ?? '').toLowerCase();
     const content = getTurnText(message);
     if (!content) continue;
 
-    // 直近に明確なスクショ/ir診断がある場合は、人物復元より診断ルートを優先する
-    if (
-      role === 'assistant' &&
-      /(SCREENSHOT_CONTEXT_V1|screenshotDiagnosisContext|screenshot_diagnosis|mu_screenshot_diagnosis|観測対象[:：]|IR_DIAGNOSIS|ir_diagnosis|diagnosisFollowup)/u.test(content)
-    ) {
+    const fromAssistantMeta = extractPersonTargetFromMessage(message);
+    if (fromAssistantMeta) return fromAssistantMeta;
+
+    if (isDiagnosisBarrier(message, content)) {
       return null;
     }
 
+    const role = String(message?.role ?? message?.speaker ?? '').toLowerCase();
     if (role && role !== 'user') continue;
 
     const explicit = extractExplicitPersonFollowupTarget(content);
     if (!explicit?.targetKey || !explicit?.targetLabel) continue;
-
     if (isUnsafeImplicitTargetLabel(explicit.targetKey)) continue;
 
     return {
@@ -596,15 +783,30 @@ function extractLatestPersonReferenceFromHistory(historyForTurnRaw: any[]): {
   return null;
 }
 function hasDiagnosisReference(userTextRaw: string): boolean {
-  const userText = String(userTextRaw ?? '').trim();
-  if (!userText) return false;
+  const text = String(userTextRaw ?? '').trim();
+  if (!text) return false;
+
+  const compact = text.replace(/[　\s]+/g, '');
 
   return (
-    /(診断|結果|さっきの|この|それ|もう少し|深めて|見て|続きを|続き)/u.test(userText) &&
-    /(診断|結果|さっき|この|それ|もう少し|深め|見て|続き)/u.test(userText)
+    /診断/u.test(text) ||
+    /診断結果/u.test(text) ||
+    /この診断/u.test(text) ||
+    /さっきの診断/u.test(text) ||
+    /前の診断/u.test(text) ||
+    /スクショ診断/u.test(text) ||
+    /スクリーンショット診断/u.test(text) ||
+    /ir診断/iu.test(text) ||
+    /相手の気持ち/u.test(text) ||
+    /約束/u.test(text) ||
+    /来ると思/u.test(text) ||
+    /来ますか/u.test(text) ||
+    /深め/u.test(text) ||
+    /続き/u.test(text) ||
+    /screenshotdiagnosis/iu.test(compact) ||
+    /screenshot/iu.test(compact)
   );
 }
-
 function resolveDiagnosisContextKind(args: {
   userText: string;
   meta?: any;
@@ -1161,6 +1363,94 @@ export async function resolvePreSeedDecision(
     ? args.historyForTurn
     : [];
 
+  const explicitPersonFollowupTargetBeforeDiagnosis = extractExplicitPersonFollowupTarget(userText);
+
+  if (
+    explicitPersonFollowupTargetBeforeDiagnosis?.targetKey &&
+    explicitPersonFollowupTargetBeforeDiagnosis?.targetLabel &&
+    !isUnsafeImplicitTargetLabel(explicitPersonFollowupTargetBeforeDiagnosis.targetKey)
+  ) {
+    const personDecision = await buildPersonContextPreSeed({
+      ...args,
+      targetKey: explicitPersonFollowupTargetBeforeDiagnosis.targetKey,
+      targetLabel: explicitPersonFollowupTargetBeforeDiagnosis.targetLabel,
+      traceId: args.traceId ?? null,
+    });
+
+    if (personDecision) {
+      const enhancedPersonDecision: PreSeedDecision = {
+        ...personDecision,
+        confidence: Math.max(Number(personDecision.confidence ?? 0), 0.92),
+        shouldBypassWriter: true,
+        shouldBypassRephrase: true,
+        shouldSuppressHistoryForWriter: true,
+        shouldSuppressSimilarFlow: true,
+        shouldSuppressMemoryDelta: true,
+        shouldSuppressIntuitionCandidate: true,
+        shouldSuppressNormalResonance: true,
+        ctxPackPatch: {
+          ...(personDecision.ctxPackPatch ?? {}),
+          presentationKind: 'person_reference_followup',
+          memoryIntent: 'person_reference',
+          memorySpace: 'person',
+          explicitPersonReferenceResolved: true,
+          shouldSuppressHistoryForWriter: true,
+          shouldSuppressSimilarFlow: true,
+          similarFlowSeed: '',
+          similarFlowDebug: null,
+          resolvedTarget: {
+            ...((personDecision.ctxPackPatch as any)?.resolvedTarget ?? {}),
+            status: 'resolved',
+            label: explicitPersonFollowupTargetBeforeDiagnosis.targetLabel,
+            targetKey: explicitPersonFollowupTargetBeforeDiagnosis.targetKey,
+            canonicalName: explicitPersonFollowupTargetBeforeDiagnosis.targetLabel,
+            domain: 'person',
+            confidence: 0.95,
+            source: 'explicit_person_reference_before_diagnosis_context',
+          },
+        },
+        metaPatch: {
+          ...(personDecision.metaPatch ?? {}),
+          presentationKind: 'person_reference_followup',
+          memoryIntent: 'person_reference',
+          memorySpace: 'person',
+          explicitPersonReferenceResolved: true,
+          targetKey: explicitPersonFollowupTargetBeforeDiagnosis.targetKey,
+          targetLabel: explicitPersonFollowupTargetBeforeDiagnosis.targetLabel,
+          shouldSuppressHistoryForWriter: true,
+          shouldSuppressSimilarFlow: true,
+        },
+        debug: {
+          ...(personDecision.debug ?? {}),
+          reason: 'explicit_person_reference_before_diagnosis_context',
+          matchedPattern: 'explicit_person_followup_before_screenshot_weak',
+        },
+      };
+
+      console.log('[IROS/PRE_SEED_ENGINE][EXPLICIT_PERSON_REFERENCE_BEFORE_DIAGNOSIS]', {
+        traceId: args.traceId ?? null,
+        conversationId: args.conversationId ?? null,
+        userCode: args.userCode,
+        targetKey: explicitPersonFollowupTargetBeforeDiagnosis.targetKey,
+        targetLabel: explicitPersonFollowupTargetBeforeDiagnosis.targetLabel,
+        userTextHead: userText.slice(0, 120),
+        route: enhancedPersonDecision.route,
+      });
+
+      return withCognitionMap(enhancedPersonDecision);
+    }
+
+    console.warn('[IROS/PRE_SEED_ENGINE][EXPLICIT_PERSON_REFERENCE_BEFORE_DIAGNOSIS_SOURCE_NOT_FOUND]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode,
+      targetKey: explicitPersonFollowupTargetBeforeDiagnosis.targetKey,
+      targetLabel: explicitPersonFollowupTargetBeforeDiagnosis.targetLabel,
+      userTextHead: userText.slice(0, 120),
+    });
+  }
+
+
   const historyDisplayId = extractLatestScreenshotDisplayIdFromHistory(historyForTurn);
   const strength = getScreenshotDiagnosisFollowupStrength({
     userText,
@@ -1287,6 +1577,100 @@ export async function resolvePreSeedDecision(
     }));
   }
 
+  const recentPersonReferenceForDeicticFollowupBeforeWeak =
+    isDeicticDiagnosisOrRelationFollowup(userText)
+      ? extractLatestPersonReferenceFromHistory(historyForTurn)
+      : null;
+
+  if (recentPersonReferenceForDeicticFollowupBeforeWeak) {
+    const personDecision = await buildPersonContextPreSeed({
+      ...args,
+      targetKey: recentPersonReferenceForDeicticFollowupBeforeWeak.targetKey,
+      targetLabel: recentPersonReferenceForDeicticFollowupBeforeWeak.targetLabel,
+      traceId: args.traceId ?? null,
+    });
+
+    if (personDecision) {
+      const enhancedPersonDecision: PreSeedDecision = {
+        ...personDecision,
+        confidence: Math.max(Number(personDecision.confidence ?? 0), 0.9),
+        shouldBypassRephrase: true,
+        shouldSuppressHistoryForWriter: true,
+        shouldSuppressSimilarFlow: true,
+        shouldSuppressMemoryDelta: true,
+        shouldSuppressIntuitionCandidate: true,
+        shouldSuppressNormalResonance: true,
+        ctxPackPatch: {
+          ...(personDecision.ctxPackPatch ?? {}),
+          presentationKind: 'person_reference_followup',
+          memoryIntent: 'person_reference',
+          memorySpace: 'person',
+          recentPersonReferenceResolved: true,
+          recentPersonReferenceSourceUserText: recentPersonReferenceForDeicticFollowupBeforeWeak.sourceUserText,
+          shouldSuppressHistoryForWriter: true,
+          shouldSuppressSimilarFlow: true,
+          similarFlowSeed: '',
+          similarFlowDebug: null,
+          resolvedTarget: {
+            ...((personDecision.ctxPackPatch as any)?.resolvedTarget ?? {}),
+            status: 'resolved',
+            label: recentPersonReferenceForDeicticFollowupBeforeWeak.targetLabel,
+            targetKey: recentPersonReferenceForDeicticFollowupBeforeWeak.targetKey,
+            canonicalName: recentPersonReferenceForDeicticFollowupBeforeWeak.targetLabel,
+            domain: 'person',
+            confidence: 0.92,
+            source: 'deictic_person_followup_before_screenshot_weak_clarify',
+          },
+        },
+        metaPatch: {
+          ...(personDecision.metaPatch ?? {}),
+          presentationKind: 'person_reference_followup',
+          memoryIntent: 'person_reference',
+          memorySpace: 'person',
+          recentPersonReferenceResolved: true,
+          recentPersonReferenceSourceUserText: recentPersonReferenceForDeicticFollowupBeforeWeak.sourceUserText,
+          targetKey: recentPersonReferenceForDeicticFollowupBeforeWeak.targetKey,
+          targetLabel: recentPersonReferenceForDeicticFollowupBeforeWeak.targetLabel,
+          shouldSuppressHistoryForWriter: true,
+          shouldSuppressSimilarFlow: true,
+        },
+        debug: {
+          ...(personDecision.debug ?? {}),
+          reason: 'deictic_person_followup_before_screenshot_weak_clarify',
+          matchedPattern: 'deictic_followup_after_recent_person_reference',
+        },
+      };
+
+      console.log('[IROS/PRE_SEED_ENGINE][DEICTIC_PERSON_REFERENCE_BEFORE_SCREENSHOT_WEAK]', {
+        traceId: args.traceId ?? null,
+        conversationId: args.conversationId ?? null,
+        userCode: args.userCode,
+        targetKey: recentPersonReferenceForDeicticFollowupBeforeWeak.targetKey,
+        targetLabel: recentPersonReferenceForDeicticFollowupBeforeWeak.targetLabel,
+        sourceUserTextHead: recentPersonReferenceForDeicticFollowupBeforeWeak.sourceUserText.slice(0, 120),
+        userTextHead: userText.slice(0, 120),
+        route: enhancedPersonDecision.route,
+      });
+
+      return withCognitionMap(enhancedPersonDecision);
+    }
+  }
+  if (historyDisplayId && isDeicticDiagnosisOrRelationFollowup(userText)) {
+    console.log('[IROS/PRE_SEED_ENGINE][ACTIVE_SCREENSHOT_DIAGNOSIS_CONTEXT]', {
+      traceId: args.traceId,
+      conversationId: args.conversationId,
+      userCode: args.userCode,
+      displayId: historyDisplayId,
+      strength,
+      userTextHead: userText.slice(0, 120),
+    });
+
+    return withCognitionMap(await buildScreenshotDiagnosisPreSeed({
+      ...args,
+      displayId: historyDisplayId,
+      matchedPattern: 'active_screenshot_diagnosis_context_deictic_followup',
+    }));
+  }
   if (historyDisplayId && strength === 'weak') {
     console.log('[IROS/PRE_SEED_ENGINE][HISTORY_SCREENSHOT_CONTEXT_AMBIGUOUS]', {
       traceId: args.traceId,
@@ -1791,8 +2175,6 @@ if (
 
   return null;
 }
-
-
 
 
 
