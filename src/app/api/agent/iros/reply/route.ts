@@ -3518,16 +3518,30 @@ const fromResultObj = stripInternalLines(resultObjFinalRaw);
       ? mfsExtra.ctxPack
       : null;
 
-  const isPreSeedDirectReplyPrePersist = Boolean(
-    resultAny?.gate === 'pre_seed_direct_reply' ||
-      resultAny?.result?.gate === 'pre_seed_direct_reply' ||
-      resultAny?.meta?.extra?.preSeedDirectReply === true ||
-      resultAny?.metaForSave?.extra?.preSeedDirectReply === true ||
-      mfsExtra?.preSeedDirectReply === true ||
-      ctxPackAny?.preSeedDirectReply === true ||
-      mfsExtra?.preSeedAssistKind === 'diagnosis_detail' ||
-      ctxPackAny?.preSeedAssistKind === 'diagnosis_detail'
-  );
+  const preSeedAssistKindForDirectLock = String(
+    mfsExtra?.preSeedAssistKind ??
+      ctxPackAny?.preSeedAssistKind ??
+      resultAny?.meta?.extra?.preSeedAssistKind ??
+      resultAny?.metaForSave?.extra?.preSeedAssistKind ??
+      ''
+  ).trim();
+
+  const shouldForceWriterForPreSeedAssist =
+    preSeedAssistKindForDirectLock === 'diagnosis_followup' ||
+    preSeedAssistKindForDirectLock === 'relationship_followup';
+
+  const isPreSeedDirectReplyPrePersist =
+    !shouldForceWriterForPreSeedAssist &&
+    Boolean(
+      resultAny?.gate === 'pre_seed_direct_reply' ||
+        resultAny?.result?.gate === 'pre_seed_direct_reply' ||
+        resultAny?.meta?.extra?.preSeedDirectReply === true ||
+        resultAny?.metaForSave?.extra?.preSeedDirectReply === true ||
+        mfsExtra?.preSeedDirectReply === true ||
+        ctxPackAny?.preSeedDirectReply === true ||
+        mfsExtra?.preSeedAssistKind === 'diagnosis_detail' ||
+        ctxPackAny?.preSeedAssistKind === 'diagnosis_detail'
+    );
 
   const directReplyPrePersist =
     [
@@ -4574,6 +4588,7 @@ if (!skipTraining) {
     );
   }
 }
+
 
 
 
