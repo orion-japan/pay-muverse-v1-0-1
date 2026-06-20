@@ -437,6 +437,82 @@ function resolveDiagnosisContextKind(args: {
 
   return 'ambiguous';
 }
+function isScreenshotLikeDiagnosisCandidate(candidate: any): boolean {
+  const raw = JSON.stringify(candidate ?? '').toLowerCase();
+
+  return (
+    raw.includes('screenshot') ||
+    raw.includes('スクショ') ||
+    raw.includes('スクリーンショット') ||
+    raw.includes('mu_first_screenshot') ||
+    raw.includes('screenshot_diagnosis')
+  );
+}
+
+function pickActiveIrDiagnosisContext(metaRaw: any): {
+  targetKey: string;
+  targetLabel: string | null;
+  source: any;
+} | null {
+  const meta = metaRaw ?? {};
+  const ctxPack = meta?.ctxPack ?? meta?.extra?.ctxPack ?? {};
+
+  const candidates = [
+    ctxPack?.lastIrDiagnosis,
+    meta?.lastIrDiagnosis,
+    ctxPack?.activeIrDiagnosis,
+    meta?.activeIrDiagnosis,
+    ctxPack?.diagnosisFollowup,
+    meta?.diagnosisFollowup,
+    ctxPack?.irMeta,
+    meta?.irMeta,
+    ctxPack?.activeContextFrame,
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (isScreenshotLikeDiagnosisCandidate(candidate)) continue;
+
+    const targetKey = String(
+      candidate?.targetKey ??
+        candidate?.target_key ??
+        candidate?.structuredTargetKey ??
+        candidate?.memoryTargetKey ??
+        candidate?.person ??
+        candidate?.target ??
+        candidate?.label ??
+        ''
+    ).trim();
+
+    const targetLabelRaw = String(
+      candidate?.targetLabel ??
+        candidate?.target_label ??
+        candidate?.memoryTargetLabel ??
+        candidate?.displayName ??
+        candidate?.label ??
+        targetKey
+    ).trim();
+
+    const hasDiagnosisText = Boolean(
+      candidate?.diagnosisText ||
+        candidate?.diagnosis_text ||
+        candidate?.sourceText ||
+        candidate?.text ||
+        candidate?.summary ||
+        candidate?.observation ||
+        candidate?.state
+    );
+
+    if (targetKey && hasDiagnosisText) {
+      return {
+        targetKey,
+        targetLabel: targetLabelRaw || targetKey,
+        source: candidate,
+      };
+    }
+  }
+
+  return null;
+}
 async function fetchLatestScreenshotDiagnosisForConversation(args: {
   supabase: any;
   userCode: string;
@@ -867,6 +943,49 @@ export async function resolvePreSeedDecision(
       },
     });
   }
+  if (diagnosisContextKind === 'ir') {
+    const activeIr = pickActiveIrDiagnosisContext(args.meta);
+
+    if (activeIr?.targetKey) {
+      const irDecision = await buildIrDiagnosisPreSeed({
+        ...args,
+        targetKey: activeIr.targetKey,
+        targetLabel: activeIr.targetLabel,
+        matchedPattern: 'active_ir_diagnosis_context_followup',
+      } as any);
+
+      if (irDecision) {
+        console.log('[IROS/PRE_SEED_ENGINE][ACTIVE_IR_DIAGNOSIS_CONTEXT_CONTINUE]', {
+          traceId: args.traceId ?? null,
+          conversationId: args.conversationId ?? null,
+          userCode: args.userCode,
+          targetKey: activeIr.targetKey,
+          targetLabel: activeIr.targetLabel,
+          route: irDecision.route,
+          sourceId: irDecision.sourceId ?? null,
+          sourceTextLen: String((irDecision as any).sourceText ?? '').length,
+        });
+
+        return withCognitionMap(irDecision);
+      }
+
+      console.warn('[IROS/PRE_SEED_ENGINE][ACTIVE_IR_DIAGNOSIS_CONTEXT_SOURCE_NOT_FOUND]', {
+        traceId: args.traceId ?? null,
+        conversationId: args.conversationId ?? null,
+        userCode: args.userCode,
+        targetKey: activeIr.targetKey,
+        targetLabel: activeIr.targetLabel,
+        userTextHead: userText.slice(0, 120),
+      });
+    } else {
+      console.warn('[IROS/PRE_SEED_ENGINE][ACTIVE_IR_DIAGNOSIS_CONTEXT_TARGET_NOT_FOUND]', {
+        traceId: args.traceId ?? null,
+        conversationId: args.conversationId ?? null,
+        userCode: args.userCode,
+        userTextHead: userText.slice(0, 120),
+      });
+    }
+  }
   const latest = await fetchLatestScreenshotDiagnosisForConversation({
     supabase: args.supabase,
     userCode: args.userCode,
@@ -1017,4 +1136,6 @@ export async function resolvePreSeedDecision(
 
   return null;
 }
+
+
 
