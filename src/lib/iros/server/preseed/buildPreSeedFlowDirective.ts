@@ -267,7 +267,55 @@ export function buildPreSeedFlowDirective(
     const decision = args.preSeedDecision ?? args.decision;
 
   if (!decision) {
-    throw new Error('buildPreSeedFlowDirective requires preSeedDecision or decision');
+    return {
+      source: 'preseed_input_flow',
+      inputIntent: 'unknown',
+      currentAxis: null,
+      currentBand: null,
+      flowDirection: 'return_to_input',
+      convergenceMode: 'none',
+      shouldDeepen: false,
+      shouldLimitDeepening: false,
+      shouldUseCreate: false,
+      shouldUseSmallAction: false,
+      shouldHoldAction: false,
+      intentionFormed: false,
+      tInsightReady: false,
+      intentionConvergence: {
+        intentionReached: false,
+        shouldStopAnalysis: false,
+        shouldNameCore: false,
+        shouldPlaceCreate: false,
+        shouldMoveToSmallAction: false,
+        shouldLetFlowContinue: false,
+      },
+      createReady: false,
+      createSource: 'unknown',
+      createIntegrity: 'unknown',
+      createDistortionRisk: 'weak',
+      distortionReason: null,
+      seedDirection: {
+        targetLabel: null,
+        targetType: null,
+        flowSeed: 'return_to_input',
+        writerSeed: null,
+        avoidSeed: ['対象が未確定のため、断定せず入力へ戻す'],
+      },
+      writerGuidance: {
+        mustKeepTarget: false,
+        mustNotOverDeepen: false,
+        shouldShiftFromAnalysisToPlacement: false,
+        shouldOfferSmallCreate: false,
+        shouldAvoidOtherMindAssertion: true,
+        shouldAvoidLargeAction: true,
+        shouldLeaveOpenSpace: true,
+      },
+      evidence: {
+        fromUserInput: ['decision=null'],
+        fromFlowMeta: [],
+        fromHistory: [],
+      },
+    };
   }
   const previousDirective = readPreviousDirective(args.meta);
 
@@ -461,6 +509,9 @@ export function buildPreSeedFlowDirective(
     },
   };
 }
+
+
+
 
 
 
