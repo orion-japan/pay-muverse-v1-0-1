@@ -1,4 +1,4 @@
-﻿// src/lib/iros/seed/humanContextOrchestrator.ts
+// src/lib/iros/seed/humanContextOrchestrator.ts
 //
 // iros — Human Context Orchestrator v1
 //
@@ -275,7 +275,7 @@ function buildReplyFocus(
       ? '言葉の意味・指している内容を日常語で説明する。詩的展開や意図展開を先に出さない。'
       : '目的・意味・未来の方向を主軸に返す。心理状態の説明だけで閉じない。';
   }
-  if (primary === 'C') return '現実の一歩や形にする方向を返す。抽象論だけで終わらせない。';
+  if (primary === 'C') return '現実の一歩を返す。恋愛・相手反応文脈では、不安で動くか自然に差し出すかを分け、抽象論だけで終わらせない。';
   if (primary === 'T') return '全体視点で統合する。ただし飛躍した断定は避ける。';
   if (primary === 'F') return '外に出す形、伝え方、輪郭を整える。';
   return '今回の主軸に沿って返す。';
@@ -311,7 +311,7 @@ function buildWriterDirective(args: {
       : '',
     primary === 'I' && !plainMeaningQuestion ? '目的・意味・未来を中心に返し、ユーザー発話にない対立構造を足さない。' : '',
     primary === 'R' ? '相手の本心断定を避け、関係の受け取り方として返す。' : '',
-    primary === 'C' ? '具体へ落とすが、手順を増やしすぎない。Create時は文案や行動案から始めず、先に形象を一つ置く。その形象から自然に出る小さな一歩だけを添える。ユーザーの質問文そのものを文例として引用しない。' : '',
+    primary === 'C' ? '具体へ落とすが、手順を増やしすぎない。Create時は抽象語だけで終わらせない。相手反応・恋愛・不安文脈では、形象を先に置かず、不安で動くのか自然に一言だけ差し出せるのかを分ける。送るなら短く、反応が薄ければ重ねない。ユーザーの質問文そのものを文例として引用しない。' : '',
   ].filter(Boolean);
 
   return parts.join(' ');
@@ -437,7 +437,3 @@ export function buildHumanContextOrchestration(
     seedText: lines.join('\n').trim(),
   };
 }
-
-
-
-
