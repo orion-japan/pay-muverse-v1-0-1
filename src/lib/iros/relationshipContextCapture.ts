@@ -364,6 +364,9 @@ function buildConfirmationReply(targetLabel: string | null): string {
 
   return 'その関係性は、誰との関係として見ておけばいいですか？';
 }
+function buildProvisionalRelationshipReply(targetLabel: string): string {
+  return `${targetLabel}との関係として、いったん受け取っておきますね。名前や呼び名が出てきたら、同じ相手として見ていきます。`;
+}
 
 async function saveGuidanceHint(args: {
   supabase: any;
@@ -448,33 +451,65 @@ export async function captureRelationshipContextFromConversation(args: CaptureAr
   });
 
   if (!resolved.targetLabel || resolved.confidence !== 'high') {
-    const directReply = buildConfirmationReply(resolved.targetLabel);
+    const provisionalTargetLabel = ctx.valueText || '気になっている相手';
+    const provisionalCtx: ExtractedRelationshipContext = {
+      ...ctx,
+      status: 'candidate',
+      confidence: 'low',
+    };
 
-    console.info('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][NEEDS_CONFIRMATION]', {
+    const { data: existing } = await args.supabase
+      .from('iros_person_intent_state')
+      .select('guidance_hint')
+      .eq('owner_user_code', args.userCode)
+      .eq('target_type', 'person')
+      .eq('target_label', provisionalTargetLabel)
+      .maybeSingle();
+
+    const guidanceHint = buildGuidanceHint({
+      targetLabel: provisionalTargetLabel,
+      ctx: provisionalCtx,
+      previousGuidanceHint: existing?.guidance_hint ?? null,
+    });
+
+    const saved = await saveGuidanceHint({
+      supabase: args.supabase,
+      userCode: args.userCode,
+      targetLabel: provisionalTargetLabel,
+      guidanceHint,
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId,
+      kind: ctx.kind,
+    });
+
+    const directReply = buildProvisionalRelationshipReply(provisionalTargetLabel);
+
+    console.info('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][PROVISIONAL_TARGET_SAVED]', {
       traceId: args.traceId ?? null,
       conversationId: args.conversationId,
       userCode: args.userCode,
       kind: ctx.kind,
-      targetLabel: resolved.targetLabel ?? null,
-      targetSource: resolved.source ?? null,
-      confidence: resolved.confidence,
+      targetLabel: provisionalTargetLabel,
+      targetSource: 'provisional_relationship_label',
+      saved,
+      confidence: 'low',
       userTextHead: userText.slice(0, 120),
     });
 
     return {
-      captured: false,
-      shouldAskConfirmation: true,
-      targetLabel: resolved.targetLabel,
-      targetSource: resolved.source,
+      captured: saved,
+      shouldAskConfirmation: false,
+      targetLabel: provisionalTargetLabel,
+      targetSource: 'provisional_relationship_label',
       kind: ctx.kind,
-      status: 'needs_confirmation',
+      status: 'candidate',
       confidence: 'low',
       sensitivity: ctx.sensitivity,
       source: 'conversation',
       valueText: ctx.valueText,
       valueNormalized: ctx.valueNormalized,
       directReply,
-      reason: 'needs_confirmation',
+      reason: saved ? 'provisional_target_saved' : 'provisional_target_save_failed',
     };
   }
 

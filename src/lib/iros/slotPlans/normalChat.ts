@@ -1045,6 +1045,22 @@ function buildImageFirstCreateSlots(args: { userText: string; ctxPack?: any; met
   const ctxPack = args.ctxPack ?? args.meta?.extra?.ctxPack ?? {};
   const domain = ctxPack.focusDomain ?? ctxPack.tcfStarter?.focusDomain ?? resolveImageFirstCreateDomain({ userText: args.userText, relationshipContext: ctxPack.relationshipContext, relationshipCapture: ctxPack.relationshipCapture, resolvedRelationId: ctxPack.resolvedRelationId, targetLabel: ctxPack.targetLabel, activeDiagnosisFrame: ctxPack.activeDiagnosisFrame, topicDigest: ctxPack.topicDigest, situationTopic: ctxPack.situationTopic, cognitionMap: ctxPack.cognitionMap });
   const line = ctxPack.focusLabel ?? ctxPack.tcfStarter?.currentFocus ?? ctxPack.tcfStarter?.nextFocus ?? resolveImageFirstCreateFocusLabel(domain);
+
+  const relationImageFirstSource = [
+    args.userText,
+    line,
+    ctxPack.targetLabel,
+    ctxPack.relationshipContext,
+    ctxPack.relationshipCapture,
+    ctxPack.preSeedWriterSeed,
+    ctxPack.preSeedWriterGuidance,
+  ].filter(Boolean).join('\n');
+
+  if (/(相手|好きな人|気になっている相手|片思い|恋愛|返事|返信|反応|距離|近づ|重い|嫌われ|不安|気持ちが分から|気持ちがわから)/u.test(relationImageFirstSource)) {
+    return [
+      { key: 'SHIFT', role: 'assistant', style: 'neutral', content: buildShiftTConcretize([args.userText, line].filter(Boolean).join('\n'), line) },
+    ];
+  }
   return [
     { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { laneKey: 'T_CONCRETIZE', createAxis: 'imaginal_form_create', focusDomain: domain, user: null }) },
     { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 't_concretize', intent: 'place_imaginal_form', hint: 'image_first_create_v1', line, source: 'tcf_rotation', createAxis: 'imaginal_form_create', focusDomain: domain, writerPattern: 'IMAGE_FIRST_CREATE_V1', contract: ['first_line_places_imaginal_form', 'no_action_plan', 'no_message_draft', 'no_checklist', 'plain_words'], rules: { no_action_plan: true, no_message_draft: true, no_send_decision: true, no_checklist: true, no_bullets: true, questions_max: 0, lines_max: 4, forbidden_words: ['紙に書く', 'メモする', '一つに絞る', '短く送る', '送るなら', '送るか送らないか', '一通', '文面', '返信', '返事', '連絡'] }, seed_text: ['形象：' + line, '出力ルール：行動案・文案例・送る/送らない判断を冒頭に出さない。', 'まず内側に置く形を一つ提示し、その意味を短く説明する。', '最後に必要なら、その形を崩さない小さな保持だけを添える。'].join('\n') }) },
