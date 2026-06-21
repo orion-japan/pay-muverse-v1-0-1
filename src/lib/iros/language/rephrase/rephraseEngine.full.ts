@@ -2647,6 +2647,19 @@ return blocks;
 
   if (isImageFirstEarlyGuard) {
     const userNow = String(userText ?? '').trim();
+
+    // WORD_CREATE_ESCAPE_IMAGE_FIRST_GUARD_V1_REPHRASE
+    const explicitWordCreateNow =
+      /相手に送るなら|送るなら|なんて送|何て送|どう送|どう返|返信文|返事文|返信|返事|文面|文章|メッセージ|一文|短い文|文を|言い方|言葉にして|言葉にする|作って|作る/u.test(userNow);
+
+    if (explicitWordCreateNow) {
+      console.log('[IROS/IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD][SKIP_WORD_CREATE]', {
+        traceId: (debug as any)?.traceId ?? null,
+        conversationId: (debug as any)?.conversationId ?? null,
+        userCode: (debug as any)?.userCode ?? null,
+        userText: userNow,
+      });
+    }
     const genericNextActionAsk =
       // IMAGE_FIRST_CREATE_PLACE_ASK_PATTERNS_V2
       /次に.*何をすれば|どうすれば|どうしたら|どう動けば|どう進めれば|何から|何を先に置けば|何を置けば|何を先に置く|何を置く|先に.*置けば|先に.*置くもの/u.test(userNow);
@@ -2683,6 +2696,7 @@ return blocks;
     logRephraseOk(debug, out.map((x) => x.key), finalText, 'IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD');
     logRephraseAfterAttach(debug, out.map((x) => x.key), finalText, 'IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD', metaExtra);
 
+    if (!explicitWordCreateNow) {
     return {
       ok: true,
       // IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD はここで本文を確定させる。
@@ -2713,6 +2727,7 @@ return blocks;
         },
       },
     } as any;
+    }
   }
   const metaTextBase = safeContextToText(opts?.userContext ?? null);
 

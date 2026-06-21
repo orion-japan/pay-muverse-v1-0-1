@@ -45,8 +45,15 @@ function isImaginalFormCreateRequest(value: unknown): boolean {
   return asksNext && !asksText;
 }
 
+// WORD_CREATE_ESCAPE_IMAGE_FIRST_GUARD_V1
+function isWordCreateRequest(value: unknown): boolean {
+  const c = compactText(value);
+  return /相手に送るなら|送るなら|なんて送|何て送|どう送|どう返|返信文|返事文|返信|返事|文面|文章|メッセージ|一文|短い文|文を|言い方|言葉にして|言葉にする|作って|作る/u.test(c);
+}
+
 function buildCreateDirective(args: {
   imageFirstCreate: boolean;
+  wordCreate: boolean;
   flowAcceptance: boolean;
   shouldUseCreate: boolean;
   shouldUseSmallAction: boolean;
@@ -60,6 +67,18 @@ function buildCreateDirective(args: {
         'ユーザーはすでに動く方向を受け取っている。行動を追加で命令せず、その小さな流れが現実に置かれ始めていることを短く支える。',
       writerMove: ['acknowledge_flow', 'stabilize_small_motion', 'do_not_add_homework'],
       avoid: ['forcing_more_action', 'too_many_options', 'over_explaining_relationship'],
+    };
+  }
+
+  if (args.wordCreate) {
+    return {
+      mode: 'word_create',
+      createObject: 'one_sentence',
+      imaginalFormFirst: false,
+      instruction:
+        'SEED制御: この返信はWord Createである。形象固定文に戻さず、ユーザーが求めた文面・返信文・一文を短くそのまま出す。分析だけで終わらせない。',
+      writerMove: ['form_one_sentence', 'make_sendable_text', 'keep_short_and_natural'],
+      avoid: ['image_first_fixed_final', 'action_homework', 'over_explaining', 'too_many_options'],
     };
   }
 
@@ -315,6 +334,7 @@ function buildWriterSeed(args: {
   intentionReached: boolean;
   createDistortionRisk: 'none' | 'weak' | 'medium' | 'strong';
   imageFirstCreate: boolean;
+  wordCreate: boolean;
   flowAcceptance: boolean;
 }): string | null {
   if (args.shouldHoldAction) {
@@ -323,6 +343,10 @@ function buildWriterSeed(args: {
 
   if (args.flowAcceptance) {
     return 'ユーザーはすでに小さく動く方向を受け取っている。新しい課題や選択肢を増やさず、その動きが現実に流れ始めていることを短く支える。';
+  }
+
+  if (args.wordCreate) {
+    return 'PRESEED_WORD_CREATE_DIRECTIVE: このターンはWord Createである。返信文・文面・一文を求めているため、A軸の形象固定文に戻さない。冒頭から使える短い言葉を出す。分析だけで終わらせず、送れる文または一文を提示する。';
   }
 
   if (args.imageFirstCreate) {
@@ -358,12 +382,13 @@ export function buildPreSeedFlowDirective(
     const fallbackText = normalizeText(userText);
 
     const fallbackFlowAcceptance = isFlowAcceptanceText(fallbackText);
-    const fallbackImageFirstCreate = isImaginalFormCreateRequest(fallbackText);
+    const fallbackWordCreate = isWordCreateRequest(fallbackText);
+    const fallbackImageFirstCreate = !fallbackWordCreate && isImaginalFormCreateRequest(fallbackText);
 
     const fallbackInputIntent: PreSeedFlowDirective['inputIntent'] =
       fallbackFlowAcceptance
         ? 'continue'
-        : /送るなら|なんて送|何て送|返信|返事|文章|文を|言い方|作って|作る|create/.test(fallbackText)
+        : fallbackWordCreate
           ? 'create'
           : fallbackImageFirstCreate || /行動|どうすれば|どうしたら|次|何を先に置けば|何を置けば|何を先に置く|何を置く|先に.*置けば|先に.*置くもの/.test(fallbackText)
             ? 'ask_action'
@@ -448,7 +473,7 @@ export function buildPreSeedFlowDirective(
       fallbackCreateReady && !fallbackShouldHoldAction;
 
     const fallbackShouldUseSmallAction =
-      fallbackShouldUseCreate && fallbackCreateDistortionRisk !== 'strong';
+      fallbackShouldUseCreate && !fallbackWordCreate && fallbackCreateDistortionRisk !== 'strong';
 
     const fallbackIntentionReached =
       hasIntentionSignal && !fallbackCreateReady;
@@ -487,9 +512,11 @@ export function buildPreSeedFlowDirective(
         ? 'ユーザー入力だけではCreateの由来に関係圧や不安反応が混じる可能性があるため、行動提案を急がず、自分の方向を失っていないかを先に整える。'
         : fallbackFlowAcceptance
           ? 'ユーザーはすでに小さく動く方向を受け取っている。新しい課題や選択肢を増やさず、その動きが現実に流れ始めていることを短く支える。'
-          : fallbackImageFirstCreate
-            ? 'PRESEED_CREATE_DIRECTIVE: このCreateは行動指示ではない。Imaginal Form（形象）を先に立てる。返信の冒頭を、文案・行動案・質問・選択肢から始めてはいけない。まず本人の内側に見える場面・姿・形を一つ置く。本人に考えさせたり選ばせたりしない。形象を置いたあと、必要なら自然に出る小さな一歩だけを添える。'
-            : fallbackShouldUseSmallAction
+          : fallbackWordCreate
+            ? 'PRESEED_WORD_CREATE_DIRECTIVE: このCreateはWord Createである。返信文・文面・一文を求めているため、形象固定文に戻さない。冒頭から使える短い言葉を出す。'
+            : fallbackImageFirstCreate
+              ? 'PRESEED_CREATE_DIRECTIVE: このCreateは行動指示ではない。Imaginal Form（形象）を先に立てる。返信の冒頭を、文案・行動案・質問・選択肢から始めてはいけない。まず本人の内側に見える場面・姿・形を一つ置く。本人に考えさせたり選ばせたりしない。形象を置いたあと、必要なら自然に出る小さな一歩だけを添える。'
+              : fallbackShouldUseSmallAction
               ? 'ユーザーは言葉や行動の形を求めているため、大きな結論にせず、先に形象を置き、そこから小さく実行できる一歩へ収束させる。'
               : fallbackIntentionReached
                 ? 'ユーザー入力だけでも意図の輪郭が出ているため、これ以上の相手分析・原因分析を増やさず、核心を短く言葉にして収束させる。'
@@ -524,6 +551,7 @@ export function buildPreSeedFlowDirective(
       distortionReason: hasApprovalRisk ? 'approval_seeking' : null,
       createDirective: buildCreateDirective({
         imageFirstCreate: fallbackImageFirstCreate,
+        wordCreate: fallbackWordCreate,
         flowAcceptance: fallbackFlowAcceptance,
         shouldUseCreate: fallbackShouldUseCreate,
         shouldUseSmallAction: fallbackShouldUseSmallAction,
@@ -547,7 +575,7 @@ export function buildPreSeedFlowDirective(
         shouldAvoidOtherMindAssertion: true,
         shouldAvoidLargeAction: true,
         shouldLeaveOpenSpace: true,
-        shouldUseImaginalForm: fallbackImageFirstCreate || fallbackShouldUseCreate,
+        shouldUseImaginalForm: fallbackImageFirstCreate || (fallbackShouldUseCreate && !fallbackWordCreate),
         shouldAvoidHomework: true,
         shouldAvoidTooManyOptions: true,
       },
@@ -591,7 +619,8 @@ export function buildPreSeedFlowDirective(
     inputIntent !== 'ask_action';
 
   const flowAcceptance = isFlowAcceptanceText(userText);
-  const imageFirstCreate = isImaginalFormCreateRequest(userText);
+  const wordCreate = isWordCreateRequest(userText);
+  const imageFirstCreate = !wordCreate && isImaginalFormCreateRequest(userText);
 
   const createReady =
     inputIntent === 'create' ||
@@ -635,6 +664,7 @@ export function buildPreSeedFlowDirective(
 
   const shouldUseSmallAction =
     shouldUseCreate &&
+    !wordCreate &&
     (createDistortionRisk === 'none' || createDistortionRisk === 'weak');
 
   let flowDirection: PreSeedFlowDirection = 'continue_observation';
@@ -674,6 +704,7 @@ export function buildPreSeedFlowDirective(
     intentionReached,
     createDistortionRisk,
     imageFirstCreate,
+    wordCreate,
     flowAcceptance,
   });
 
@@ -731,6 +762,7 @@ export function buildPreSeedFlowDirective(
     distortionReason,
     createDirective: buildCreateDirective({
       imageFirstCreate,
+      wordCreate,
       flowAcceptance,
       shouldUseCreate,
       shouldUseSmallAction,
@@ -750,7 +782,7 @@ export function buildPreSeedFlowDirective(
       shouldAvoidOtherMindAssertion: true,
       shouldAvoidLargeAction: true,
       shouldLeaveOpenSpace: convergenceMode === 'toward_flow' || shouldUseSmallAction,
-      shouldUseImaginalForm: imageFirstCreate || shouldUseCreate,
+      shouldUseImaginalForm: imageFirstCreate || (shouldUseCreate && !wordCreate),
       shouldAvoidHomework: true,
       shouldAvoidTooManyOptions: true,
     },
