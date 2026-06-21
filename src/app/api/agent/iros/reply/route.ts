@@ -3445,7 +3445,25 @@ return NextResponse.json({
             String(conversationId ?? '');
 
           // ✅ 戻り値を受け取る（n が未定義で落ちていたのを修正）
-          const n = normalizeIrosStyleFinal(finalText, {
+                    // STYLE_NORM_FINAL_SKIP_PRESERVE_RAW_FINAL_V2
+          // image_first_create の deterministic final は、この後の文体補正・practical guard で意味を変えない。
+          const preserveRawFinalForStyleNorm =
+            Boolean((result as any)?.meta?.extra?.preserveRawFinal) ||
+            Boolean((result as any)?.meta?.extra?.skipStyleNorm) ||
+            Boolean((result as any)?.meta?.extra?.imageFirstCreateFinalGuard) ||
+            Boolean((meta as any)?.extra?.preserveRawFinal) ||
+            Boolean((meta as any)?.extra?.skipStyleNorm) ||
+            Boolean((meta as any)?.extra?.imageFirstCreateFinalGuard) ||
+            Boolean((metaForSave as any)?.extra?.preserveRawFinal) ||
+            Boolean((metaForSave as any)?.extra?.skipStyleNorm) ||
+            Boolean((metaForSave as any)?.extra?.imageFirstCreateFinalGuard) ||
+            Boolean((extraSoT as any)?.preserveRawFinal) ||
+            Boolean((extraSoT as any)?.skipStyleNorm) ||
+            Boolean((extraSoT as any)?.imageFirstCreateFinalGuard);
+
+const n = preserveRawFinalForStyleNorm
+            ? { text: finalText, meta: { skipped: true, reason: 'preserveRawFinal' } }
+            : normalizeIrosStyleFinal(finalText, {
             seed,
             emojiKeepRate: 1.0, // 絵文字は剥がさない
             maxReplacements: 5, // ✅ 最終語彙補正を有効化。「置く」系などを自然語へ変換する
@@ -3456,7 +3474,9 @@ return NextResponse.json({
           // ✅ Mu practical final guard
           // - writer 指示だけでは残る禁止表現を、UI/DB保存前の最終正本で保証する。
           // - ここは表示本文だけを軽く整える。意味は変えず、古い締め癖だけ落とす。
-          const practicalSafeText = String(outText ?? '')
+          const practicalSafeText = preserveRawFinalForStyleNorm
+            ? String(outText ?? '')
+            : String(outText ?? '')
             .replace(/このくらいで十分です。?/g, '今わかっているのは、ここまでです。')
             .replace(/これくらいで十分です。?/g, '今わかっているのは、ここまでです。')
             .replace(/くらいで十分です。?/g, 'くらいまでが、今わかっていることです。')
@@ -3544,7 +3564,8 @@ return NextResponse.json({
             .replace(/\s*[🌱🌸🌀🪔]\s*$/g, '');
 
           console.info('[IROS/STYLE_NORM_FINAL]', {
-            applied: true,
+            applied: !preserveRawFinalForStyleNorm,
+            skipped: preserveRawFinalForStyleNorm ? 'preserveRawFinal' : null,
             meta: (n as any)?.meta,
             len_in: String(finalText ?? '').length,
             len_out: String(practicalSafeText ?? '').length,
