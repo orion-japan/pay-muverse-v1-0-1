@@ -1,4 +1,4 @@
-import { buildCognitionMap } from '../../cognition/buildCognitionMap';
+﻿import { buildCognitionMap } from '../../cognition/buildCognitionMap';
 import { cognitionMapToSeedText, type CognitionMap } from '../../cognition/cognitionMap';
 import { buildIrDiagnosisPreSeed } from './buildIrDiagnosisPreSeed';
 import { resolveUniversalPreSeed } from './universal';
@@ -1844,6 +1844,36 @@ export async function resolvePreSeedDecision(
     historyIrDiagnosis?.diagnosisText &&
     hasLatestScreenshotDiagnosis
   ) {
+    const compactUserTextForDiagnosisFollowup = String(userText ?? '')
+      .trim()
+      .replace(/[　\s]+/g, '');
+
+    const shouldPreferLatestIrDiagnosisFromConversation =
+      /(もう少し|深め|詳しく|詳細|続きを|続き|この診断|その診断|診断の内容|内容)/u.test(
+        compactUserTextForDiagnosisFollowup
+      );
+
+    if (shouldPreferLatestIrDiagnosisFromConversation) {
+      console.log('[IROS/PRE_SEED_ENGINE][HISTORY_IR_DIAGNOSIS_PRIORITY_OVER_SCREENSHOT]', {
+        traceId: args.traceId ?? null,
+        conversationId: args.conversationId ?? null,
+        userCode: args.userCode,
+        targetKey: historyIrDiagnosis.targetKey,
+        targetLabel: historyIrDiagnosis.targetLabel,
+        screenshotDisplayId: latestDisplayId,
+        userTextHead: userText.slice(0, 120),
+        reason: 'latest_conversation_ir_diagnosis_has_priority',
+      });
+
+      return withCognitionMap(buildHistoryIrDiagnosisFollowupDecision({
+        userText,
+        userCode: args.userCode,
+        conversationId: args.conversationId,
+        traceId: args.traceId,
+        historyIr: historyIrDiagnosis,
+      }));
+    }
+
     console.log('[IROS/PRE_SEED_ENGINE][DIAGNOSIS_KIND_CLARIFY]', {
       traceId: args.traceId ?? null,
       conversationId: args.conversationId ?? null,
