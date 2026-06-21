@@ -73,6 +73,46 @@ function getCidFromLocation(): string | null {
   return sp.get('cid');
 }
 
+function sanitizeReplyExtraForTransport(extra: Json | undefined): Json | undefined {
+  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return extra;
+
+  const sanitized: Json = { ...extra };
+
+  // /reply は conversationId を正本にサーバ側で文脈を解決する。
+  // クライアントから前ターンの ctx/history 系を渡すと、新規会話でも残響が混入するため送らない。
+  for (const key of [
+    'ctxPack',
+    'historyForWriter',
+    'historyDigestV1',
+    'topicDigest',
+    'topicDigestV2',
+    'conversationLine',
+    'situationSummary',
+    'situationTopic',
+    'referenceTarget',
+    'resolvedAsk',
+    'memoryDelta',
+    'memoryDeltaSeed',
+    'intuitionCandidate',
+    'intuitionSeed',
+    'lastIrDiagnosis',
+    'diagnosisFollowup',
+    'diagnosisFollowupTargetLabel',
+    'screenshotDiagnosisContext',
+    'screenshotDiagnosisHintText',
+    'screenshotDiagnosisFollowup',
+    'relationshipAskTypeForHfw',
+  ]) {
+    delete sanitized[key];
+  }
+
+  if (sanitized.extra && typeof sanitized.extra === 'object' && !Array.isArray(sanitized.extra)) {
+    sanitized.extra = sanitizeReplyExtraForTransport(sanitized.extra as Json);
+  }
+
+  return sanitized;
+}
+
 // -------- 公開 API --------
 
 export async function irosReply(body: {
@@ -81,7 +121,7 @@ export async function irosReply(body: {
   modeHint?: string;
   extra?: Json;
 
-  // ✅追加
+  // 互換のため型には残すが、/reply には送らない。
   history?: unknown[];
 }): Promise<Json> {
   const cid = body.conversationId ?? getCidFromLocation();
@@ -94,10 +134,11 @@ export async function irosReply(body: {
     conversationId: cid,
     text,
     modeHint: body.modeHint,
-    extra: body.extra,
+    extra: sanitizeReplyExtraForTransport(body.extra),
 
-    // ✅追加
-    history: Array.isArray(body.history) ? body.history : undefined,
+    // ✅ /reply へは履歴を送らない。
+    // 新規conversationIdでも旧historyが混入すると、別会話の文脈へ誤爆するため。
+    history: undefined,
   };
 
   const res = await withAuthFetch('/api/agent/iros/reply', {
