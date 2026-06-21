@@ -2684,16 +2684,34 @@ return blocks;
 
     return {
       ok: true,
-      slots: out,
+      // IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD はここで本文を確定させる。
+      // 後段の NORMAL_COMPRESSED / style normalize / practical guard に再加工させない。
+      out: finalText,
+      text: finalText,
+      content: finalText,
+      slots: out.map((x) => ({ ...x, text: finalText, content: finalText })),
       meta: {
         inKeys,
         outKeys: out.map((x) => x.key),
         rawLen: finalText.length,
         rawHead: safeHead(finalText, 120),
+        out: finalText,
+        text: finalText,
+        content: finalText,
         note: 'IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD',
-        extra: metaExtra,
+        extra: {
+          ...metaExtra,
+          out: finalText,
+          text: finalText,
+          content: finalText,
+          rephraseFinalText: finalText,
+          preserveRawFinal: true,
+          skipStyleNorm: true,
+          skipPracticalGuard: true,
+          imageFirstCreateFinalGuard: true,
+        },
       },
-    };
+    } as any;
   }
   const metaTextBase = safeContextToText(opts?.userContext ?? null);
 
