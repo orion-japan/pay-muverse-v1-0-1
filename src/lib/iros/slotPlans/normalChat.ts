@@ -1063,76 +1063,129 @@ function buildImageFirstCreateSlots(args: { userText: string; ctxPack?: any; met
 }
 
 function buildShiftTConcretize(seedText: string, focusLabel?: string) {
-  // ✅ t_concretize は「行動の押し付け」ではなく「対象の一点固定 → 最後に“具体1つ”」に寄せる
-  // - ラベル（「次の一歩：」「結論：」等）を禁止して、テンプレ臭を消す（B方針）
-  // - 最終行に “具体を1つだけ” を必須（チェックリスト禁止）
-  // - 10分/タイマー/姿勢など “時間・作法” は入れない（ユーザー方針）
-  // - ACK + 一般論だけで終わらない
-
   const focus = typeof focusLabel === 'string' && focusLabel.trim() ? focusLabel.trim() : '';
   const raw = String(seedText ?? '').trim();
+  const source = `${focus}\n${raw}`;
 
-  // writer に渡す“内部seed”だけを濃くする（UIには露出しない想定）
-  const packedSeed = [
-    focus ? `対象：${focus}` : '',
-    raw ? `状況：${raw}` : '',
-    // ✅ ここがコア：出力フォーマットを固定（ラベル禁止 + 最終行は具体1つ）
-    '出力ルール：ACKで終わらない／一般論で終わらない／ラベル（次の一歩：・結論：・ポイント：など）を使わない',
-    '形式：2〜3行。質問は最大1つまで。チェックリスト禁止。箇条書き禁止。',
-    '最終行：状況に合わせた“具体の一歩”を自然文で1つだけ（複数案/列挙/手順化はしない）。',
-    '禁止：時間/タイマー/姿勢/習慣の指示。禁止語：選びました／視点を変えることで／次の一歩：／結論：',
-  ]
-    .filter(Boolean)
-    .join('\n');
+  const isRelationshipRc =
+    /(相手|好きな人|あの人|その人|返事|返信|反応|距離|近づ|重い|離れ|嫌われ|不安|確認したい|気持ちが分から|気持ちがわから)/u.test(source);
 
-    console.warn('[IROS/T_CONCRETIZE][SHIFT_BUILDER_USED]', {
-      hasFocus: !!focus,
-      seedHead: packedSeed.slice(0, 120),
-      stack: new Error('SHIFT_BUILDER_USED').stack,
-    });
+  const isScUnstuck =
+    /(じゃあどうしたら|じゃあどうすれば|結局どうしたら|結局どうすれば|もう分からない|もうわからない|もう無理|全部だめ|どうせ|しんどい|疲れた|限界)/u.test(source);
 
-  const imageFirstCreateSourceForSlots = [
-    packedSeed,
-    focus,
-    raw,
-  ]
-    .map((v) => String(v ?? '').trim())
-    .filter(Boolean)
-    .join('\n');
+  const isTcCreate =
+    /PRESEED_CREATE_DIRECTIVE_FORCE|image_first_create|place_create|TC_CREATE|imaginal_create/u.test(source);
 
-  const isImageFirstCreateConvergenceForSlots =
-    imageFirstCreateSourceForSlots.includes('PRESEED_CREATE_DIRECTIVE_FORCE') ||
-    imageFirstCreateSourceForSlots.includes('image_first_create') ||
-    imageFirstCreateSourceForSlots.includes('place_create') ||
+  const origin = isTcCreate
+    ? 'TC_CREATE'
+    : isScUnstuck
+      ? 'SC_UNSTUCK'
+      : isRelationshipRc
+        ? 'RC_STABILIZE'
+        : 'GENERAL_ACTION';
 
-    /^では、私は次に何をすればいいですか[？?]?$/.test(String(raw ?? '').trim()) ||
-    /^私は次に何をすればいいですか[？?]?$/.test(String(raw ?? '').trim());
+  const mode = origin === 'TC_CREATE'
+    ? 'imaginal_create'
+    : origin === 'RC_STABILIZE'
+      ? 'stabilize_action'
+      : origin === 'SC_UNSTUCK'
+        ? 'unstuck_action'
+        : 'general_action';
 
-  const imageFirstFocusLabelForSlots =
-    focus || '今の文脈で現実に置く入口';
+  const focusLine =
+    focus ||
+    (origin === 'RC_STABILIZE'
+      ? '不安で動くか、自然に一言だけ差し出せるか'
+      : origin === 'SC_UNSTUCK'
+        ? '今すぐ全部を決めず、一点だけ見ること'
+        : origin === 'TC_CREATE'
+          ? '今の文脈で現実に置く入口'
+          : '今できる具体を一つに絞ること');
+
+  const writerSeed =
+    origin === 'RC_STABILIZE'
+      ? [
+          focus ? `対象：${focus}` : '',
+          raw ? `状況：${raw}` : '',
+          '出力ルール：抽象語で終わらない。「形」「中心」「立ち位置」「戻りたい現実のイメージ」を最終出力に使わない。',
+          '目的：相手の気持ちを当てに行かず、不安で動くのか自然に一言だけ差し出せるのかを分ける。',
+          '必須：送るなら短い一言。返事が薄ければ重ねない。見るのは相手が返してくる温度。',
+          '形式：3〜6行。箇条書き禁止。質問で終わらない。',
+        ].filter(Boolean).join('\n')
+      : origin === 'SC_UNSTUCK'
+        ? [
+            focus ? `対象：${focus}` : '',
+            raw ? `状況：${raw}` : '',
+            '出力ルール：全部を決めさせない。行動リストにしない。まず負荷を下げる。',
+            '必須：今日見る一点だけを出す。すぐ相手に答えを取りに行かせない。',
+            '形式：3〜5行。箇条書き禁止。質問で終わらない。',
+          ].filter(Boolean).join('\n')
+        : origin === 'TC_CREATE'
+          ? [
+              focus ? `対象：${focus}` : '',
+              raw ? `状況：${raw}` : '',
+              '出力ルール：作る現実の形、今日置く入口、言葉または行動への落とし込みまで出す。',
+              '禁止：抽象語だけで終わること。行動リスト化すること。',
+              '形式：3〜6行。箇条書き禁止。',
+            ].filter(Boolean).join('\n')
+          : [
+              focus ? `対象：${focus}` : '',
+              raw ? `状況：${raw}` : '',
+              '出力ルール：一つだけ実行可能な入口を出し、判断条件を添える。',
+              '形式：2〜5行。箇条書き禁止。',
+            ].filter(Boolean).join('\n');
+
+  console.warn('[IROS/T_CONCRETIZE][SHIFT_BUILDER_USED]', {
+    origin,
+    mode,
+    hasFocus: !!focus,
+    seedHead: writerSeed.slice(0, 120),
+    stack: new Error('SHIFT_BUILDER_USED').stack,
+  });
+
   const payload = {
     kind: 't_concretize',
-    intent: 'place_imaginal_form',
-    hint: 'image_first_create_v1',
-    line: imageFirstFocusLabelForSlots,
-    source: 'create_progress_bridge',
-    createAxis: 'imaginal_form_create',
+    intent: origin === 'TC_CREATE' ? 'place_imaginal_form' : mode,
+    hint:
+      origin === 'TC_CREATE'
+        ? 'tc_create_v1'
+        : origin === 'RC_STABILIZE'
+          ? 'rc_stabilize_v1'
+          : origin === 'SC_UNSTUCK'
+            ? 'sc_unstuck_v1'
+            : 'general_action_v1',
+    line: focusLine,
+    source: 'create_origin_bridge',
+    concretizeOrigin: origin,
+    createMode: mode,
+    createReady: origin === 'TC_CREATE',
+    createAxis:
+      origin === 'TC_CREATE'
+        ? 'imaginal_form_create'
+        : origin === 'RC_STABILIZE'
+          ? 'stabilize_action'
+          : origin === 'SC_UNSTUCK'
+            ? 'unstuck_action'
+            : 'general_action',
     rules: {
       ...(SHIFT_PRESET_T_CONCRETIZE.rules ?? {}),
       no_checklist: true,
       no_lecture: true,
-      no_future_instruction: true, // 「〜しておくといい」系の未来講釈を抑制
+      no_future_instruction: origin !== 'TC_CREATE',
       questions_max: 0,
       no_question_back: true,
-      no_question_end: false,
-      // 追加の“テンプレ抑制”は seed 側で強く縛る（ここは既存互換を維持）
+      no_question_end: true,
+      require_focus_line: false,
     },
-    seed_text: packedSeed,
+    seed_text: writerSeed,
     tone: SHIFT_PRESET_T_CONCRETIZE.tone ?? undefined,
-    allow: SHIFT_PRESET_T_CONCRETIZE.allow ?? { concrete_reply: true, short_reply_ok: true },
+    allow: {
+      ...(SHIFT_PRESET_T_CONCRETIZE.allow ?? {}),
+      concrete_reply: origin !== 'TC_CREATE',
+      short_reply_ok: origin !== 'TC_CREATE',
+    },
   };
 
-  // ✅ ここは「@SHIFT ...」そのものを返す（二重ラップ禁止）
   return `@SHIFT ${JSON.stringify(payload)}`;
 }
 
