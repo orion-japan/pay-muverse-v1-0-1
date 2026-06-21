@@ -1,4 +1,4 @@
-// src/lib/iros/memory/buildFlowMeaning.ts
+﻿// src/lib/iros/memory/buildFlowMeaning.ts
 // iros — Flow Meaning Builder v1
 // 目的:
 // - state / flow / question を、writer が使える意味ラベルへ変換する
@@ -168,7 +168,7 @@ export function buildFlowMeaningV1(args: FlowMeaningInput): FlowMeaningOutput {
         flowMeaning =
           '動き方や作り方の前に、今回はその流れにどんな意味を示すかを見極めたい局面';
         continuingTension =
-          '次の一手を決めるより先に、その行動がどの意図から出るのかを確かめたい';
+          '次の一歩を決めるより先に、その行動がどの意図から出るのかを確かめたい';
       } else if (primaryHead === 'S') {
         flowMeaning =
           '内面の揺れを見ながら、今回は感情整理そのものより、その揺れが何を指しているかを知りたい局面';
@@ -206,7 +206,7 @@ export function buildFlowMeaningV1(args: FlowMeaningInput): FlowMeaningOutput {
     } else if (isFutureQuestion(questionType, userText)) {
       thisTurnHook =
         '未来予測そのものより、自分はどこを見て次に進めばいいかを確かめたい';
-      openLoop = '次の一手 / どの見方を採るか';
+      openLoop = '次の一歩 / どの見方を採るか';
     } else if (isMeaningCheck(questionType) && observedHead !== 'I') {
       thisTurnHook =
         '表面の言い換えではなく、自分の中で実際に向きが変わる一点をつかみたい';
@@ -282,3 +282,4 @@ export function buildFlowMeaningV1(args: FlowMeaningInput): FlowMeaningOutput {
 
   return out;
 }
+

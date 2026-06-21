@@ -431,7 +431,7 @@ export async function POST(req: NextRequest) {
       '出力は必ずJSONのみ。Markdownや説明文を前後に付けないでください。',
       'JSONは display_text と seed を持つオブジェクトにしてください。display_textでは箇条書き、番号付きリスト、行頭の「-」を使わず、短い段落の文章で書いてください。',
       'display_text の見出しは必ず「内容要約」「関係の読み解き」の2つだけにしてください。表示見出しはこの2つ以外を出さないでください。関係の読み解きの本文では、内部タグ名を列挙せず、関係の位置、反応の意味、継続しているものを自然文で書いてください。見えている事実を順番に説明するだけで終わらせず、このスクショで起きている関係構造の中心を一文で掴み、そのあとに、なぜそう読めるのかを短く書いてください。',
-      'display_text では「次の一歩」「次の一手」「返信案」「どう返すか」を出さないでください。それらはユーザーが求めた時だけ本線Muで返してください。',
+      'display_text では「次の一歩」「次の一歩」「返信案」「どう返すか」を出さないでください。それらはユーザーが求めた時だけ本線Muで返してください。',
       '返信案、送信文、文例、例文は、本線スクショ診断では、頼まれない限り出さないでください。',
       'display_text は全体で900文字以内。内容要約は最大3行までにし、関係の読み解きを本文の中心にしてください。関係の読み解きは、観察説明ではなく『このやり取りは何が返ってきている場面なのか』『右側の人は何を確かめているのか』『関係の中で何が継続しているのか』を中心にしてください。判断保留にする材料は表示せず内部Seedに残してください。',
       'seed は、mirror, position, user_reaction, partner_signal, i_layer, timing, risk, why_this_screenshot, user_inner_reaction, evidence_points, uncertain_points, writer_directives を持つJSONにしてください。why_this_screenshotには、このスクショを診断したくなった入口を短く入れてください。user_inner_reactionには、ユーザー側が何を確かめたかったように見えるかを断定せずに入れてください。evidence_pointsには画像内の根拠を配列で入れ、uncertain_pointsには断定しない点を配列で入れてください。',
@@ -590,4 +590,5 @@ export async function GET(req: NextRequest) {
     return json({ ok: false, error: 'internal_error' }, 500);
   }
 }
+
 

@@ -1,4 +1,4 @@
-// src/lib/iros/conversation/resolveReplyMode.ts
+﻿// src/lib/iros/conversation/resolveReplyMode.ts
 
 export type ReplyMode = 'clarify' | 'compare' | 'decide' | 'commit' | 'resonate';
 
@@ -130,7 +130,7 @@ const COMMIT_PATTERNS: RegExp[] = [
   /これでいく/,
   /進める/,
   /やることは決まった/,
-  /次の一手/,
+  /次の一歩/,
   /まず何をする/,
   /最初の一歩/,
   /行動に落と/,
@@ -341,3 +341,4 @@ export function resolveReplyMode(input: ResolveReplyModeInput): ReplyModeDecisio
   if (currentTurnDecision) return currentTurnDecision;
   return decideFromFallback(input);
 }
+

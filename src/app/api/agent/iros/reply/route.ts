@@ -1200,6 +1200,37 @@ let extraSoT: Record<string, any> = {
         preSeedFlowDirective.shouldUseCreate === true ||
         preSeedFlowDirective.shouldUseSmallAction === true;
 
+      
+      const preSeedCreateModeForBridge = String(
+        preSeedFlowDirective.createDirective?.mode ?? ''
+      ).trim();
+
+      const preSeedCreateBridgeMode =
+        preSeedCreateModeForBridge === 'image_first_create'
+          ? 'image_first_create'
+          : preSeedCreateModeForBridge === 'flow_acceptance'
+            ? 'future_create'
+            : preSeedConvergesToCreate
+              ? 'future_create'
+              : null;
+
+      const preSeedCreateBridgeFocusLabel =
+        preSeedCreateBridgeMode === 'image_first_create'
+          ? '相手の反応待ちから、自分の時間を先に戻す形'
+          : preSeedCreateBridgeMode === 'future_create'
+            ? 'いまの理解を、次の未来の形へ置く'
+            : null;
+
+      const createProgressBridge = preSeedCreateBridgeMode
+        ? {
+            kind: 'create_progress_bridge',
+            mode: preSeedCreateBridgeMode,
+            laneKey: 'T_CONCRETIZE',
+            focusLabel: preSeedCreateBridgeFocusLabel,
+            reason:
+              'preseed_create_ready: do not force action; move by imaginal/future create after convergence',
+          }
+        : null;
       const preSeedCtxPatch = preSeedConvergesToIntention
         ? {
             goalKind: 'resonate',
@@ -1210,6 +1241,10 @@ let extraSoT: Record<string, any> = {
             replyGoal: { kind: 'resonate' },
             preSeedWriterGuidance: preSeedFlowDirective.writerGuidance,
             preSeedWriterSeed: preSeedFlowDirective.seedDirection?.writerSeed ?? null,
+            preSeedCreateDirective: preSeedFlowDirective.createDirective ?? null,
+            createProgressBridge,
+            laneKey: createProgressBridge?.laneKey ?? null,
+            focusLabel: createProgressBridge?.focusLabel ?? null,
           }
         : preSeedConvergesToCreate
           ? {
@@ -1221,11 +1256,19 @@ let extraSoT: Record<string, any> = {
               replyGoal: { kind: 'enableAction' },
               preSeedWriterGuidance: preSeedFlowDirective.writerGuidance,
               preSeedWriterSeed: preSeedFlowDirective.seedDirection?.writerSeed ?? null,
-            }
+            preSeedCreateDirective: preSeedFlowDirective.createDirective ?? null,
+            createProgressBridge,
+            laneKey: createProgressBridge?.laneKey ?? null,
+            focusLabel: createProgressBridge?.focusLabel ?? null,
+          }
           : {
               preSeedWriterGuidance: preSeedFlowDirective.writerGuidance,
               preSeedWriterSeed: preSeedFlowDirective.seedDirection?.writerSeed ?? null,
-            };
+            preSeedCreateDirective: preSeedFlowDirective.createDirective ?? null,
+            createProgressBridge,
+            laneKey: createProgressBridge?.laneKey ?? null,
+            focusLabel: createProgressBridge?.focusLabel ?? null,
+          };
 
       extraSoT = {
         ...extraSoT,
@@ -1767,6 +1810,12 @@ let extraSoT: Record<string, any> = {
         maxChars: 1600,
       });
 
+      const shouldDisableSimilarFlowForCreateBridge =
+        String((extraSoT as any)?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+        String((extraSoT as any)?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+        String((extraSoT as any)?.ctxPack?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+        String((extraSoT as any)?.ctxPack?.createProgressBridge?.mode ?? '').trim() === 'image_first_create';
+
       const shouldDisableSimilarFlowForScreenshotDiagnosisPreWriter =
         /スクショ診断\s*(?:ID|id)?[:：]?\s*\d*/u.test(String((reqMeta as any)?.userText ?? (reqMeta as any)?.text ?? (reqMeta as any)?.currentUserText ?? '')) ||
         /スクリーンショット診断\s*(?:ID|id)?[:：]?\s*\d*/u.test(String((reqMeta as any)?.userText ?? (reqMeta as any)?.text ?? (reqMeta as any)?.currentUserText ?? '')) ||
@@ -1775,7 +1824,8 @@ let extraSoT: Record<string, any> = {
         String((reqMeta as any)?.ctxPack?.screenshotDiagnosisContext ?? '').trim().length > 0 ||
         String((reqMeta as any)?.ctxPack?.screenshotDiagnosisHintText ?? '').trim().length > 0 ||
         String((reqMeta as any)?.ctxPack?.presentationKind ?? '').trim() === 'screenshot_diagnosis_followup' ||
-        String((reqMeta as any)?.ctxPack?.continuityKind ?? '').trim() === 'screenshot_diagnosis_followup';
+        String((reqMeta as any)?.ctxPack?.continuityKind ?? '').trim() === 'screenshot_diagnosis_followup' ||
+        shouldDisableSimilarFlowForCreateBridge;
 
       if (shouldDisableSimilarFlowForScreenshotDiagnosisPreWriter) {
         console.log('[IROS/SIMILAR_FLOW_PRE_WRITER][SKIP_SCREENSHOT_DIAGNOSIS]', {
@@ -3227,7 +3277,15 @@ return NextResponse.json({
           const extraAny: any = metaAny?.extra ?? {};
 
           const laneKey =
-            String(extraAny?.intentBridge?.laneKey ?? metaAny?.laneKey ?? '').trim() || 'IDEA_BAND';
+            String(
+              extraAny?.intentBridge?.laneKey ??
+                extraAny?.createProgressBridge?.laneKey ??
+                extraAny?.laneKey ??
+                extraAny?.ctxPack?.createProgressBridge?.laneKey ??
+                extraAny?.ctxPack?.laneKey ??
+                metaAny?.laneKey ??
+                ''
+            ).trim() || 'IDEA_BAND';
 
           const phase = (metaAny?.phase ?? metaAny?.framePlan?.phase ?? null) as any;
           const depth = (metaAny?.depth ?? metaAny?.depthStage ?? null) as any;
@@ -4714,6 +4772,11 @@ if (!skipTraining) {
     );
   }
 }
+
+
+
+
+
 
 
 

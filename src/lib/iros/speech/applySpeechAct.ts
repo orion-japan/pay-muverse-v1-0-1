@@ -1,4 +1,4 @@
-// file: src/lib/iros/speech/applySpeechAct.ts
+﻿// file: src/lib/iros/speech/applySpeechAct.ts
 // iros — SpeechAct Applier
 //
 // ✅ 目的：SpeechAct を「LLM呼び出し制御」と「出力器(AllowSchema)」に変換する
@@ -6,7 +6,7 @@
 // - 呼ぶ場合でも “助言したい本能” を器で封じるための instruction を生成する
 //
 // 方針：MIRROR は完全廃止。観測のみ返す状態は作らない。
-// - QブレーキやslotPlan無しは FORWARD（最小の一手）へ倒す
+// - QブレーキやslotPlan無しは FORWARD（最小の一歩）へ倒す
 //
 // 返すもの：
 // - allow: AllowSchema（固定の出力器）
@@ -80,7 +80,7 @@ function buildLLMSystemForAllow(allow: AllowSchema): string {
     '- name: 「核：...」',
     '- flip: 「反転：A→B」',
     '- commit: 「固定：...」',
-    '- actions: 「一手：...」(最大2行まで)',
+    '- actions: 「一歩：...」(最大2行まで)',
     '- question: 「問い：...」(任意)',
   ]);
 
@@ -89,7 +89,7 @@ function buildLLMSystemForAllow(allow: AllowSchema): string {
 
   if (allow.act === 'FORWARD') {
     actExtra.push(
-      'FORWARD: 最小の一手のみ。基本は1行。説明・観測・共感・問いは禁止（許可fieldsに含まれている場合のみ最小限）。',
+      'FORWARD: 最小の一歩のみ。基本は1行。説明・観測・共感・問いは禁止（許可fieldsに含まれている場合のみ最小限）。',
     );
   }
   if ((allow as any).act === 'NAME') {
@@ -99,7 +99,7 @@ function buildLLMSystemForAllow(allow: AllowSchema): string {
     actExtra.push('FLIP: 反転のみ。反転は1行。任意で観測1行まで。助言・問いは禁止。');
   }
   if ((allow as any).act === 'COMMIT') {
-    actExtra.push('COMMIT: 固定と最小の一手のみ。actions は最大2つ。長文化禁止。');
+    actExtra.push('COMMIT: 固定と最小の一歩のみ。actions は最大2つ。長文化禁止。');
   }
 
   return joinLines([...base, fieldRule, ...actExtra]);
@@ -234,7 +234,7 @@ export function applySpeechAct(decision: SpeechDecision): ApplySpeechActOutput {
         '【抑制モード】いまは乱れを増やさないため、1行で返してください。',
         '「かもしれない」「たぶん」などの曖昧化は最大1回まで。できるだけ言い切りで。',
         '共感テンプレ（「大変でしたね」等）・一般論・未来予測・質問は出さない。',
-        '結論は「一手」または「次の操作」だけにしてください。',
+        '結論は「一歩」または「次の操作」だけにしてください。',
       ])
     : '';
 
@@ -248,3 +248,4 @@ export function applySpeechAct(decision: SpeechDecision): ApplySpeechActOutput {
     llmSystem,
   };
 }
+

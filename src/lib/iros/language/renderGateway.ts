@@ -1,4 +1,4 @@
-// src/lib/iros/language/renderGateway.ts
+﻿// src/lib/iros/language/renderGateway.ts
 import { renderV2, type RenderBlock } from './renderV2';
 import { logConvEvidence } from '../conversation/evidenceLog';
 import { computeConvSignals } from '../conversation/signals';
@@ -1610,7 +1610,7 @@ void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）
     }
   } catch {}
 
-  // ✅ @NEXT_HINT は UI に出さないが、「最小の一手」の本文補完に使えるので保持する
+  // ✅ @NEXT_HINT は UI に出さないが、「最小の一歩」の本文補完に使えるので保持する
   // - rb（rephraseBlocks）ではなく “slotPlan 側” に入っているので、まず slotPlan から拾う
   let nextHintFromSlotPlan: string | null = null;
 
@@ -1738,7 +1738,7 @@ void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）
           if (key === 'ACCEPT') return '受容';
           if (key === 'INTEGRATE') return '統合';
           if (key === 'CHOICE') return '選択';
-          if (key === 'NEXT_MIN') return '最小の一手';
+          if (key === 'NEXT_MIN') return '最小の一歩';
           return null;
         };
 
@@ -1746,7 +1746,7 @@ void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）
           const s = String(t ?? '').trim();
           return (
             /^#{1,6}\s+\S+/.test(s) || // ### 見出し
-            /^(入口|状況|二項|焦点移動|受容|統合|選択|最小の一手)$/.test(s) // 文字見出し
+            /^(入口|状況|二項|焦点移動|受容|統合|選択|最小の一歩)$/.test(s) // 文字見出し
           );
         };
 
@@ -1762,7 +1762,7 @@ void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）
           const titleRaw = m && m[1] ? String(m[1]).trim() : null;
 
           // 文字見出し
-          if (!titleRaw && /^(入口|状況|二項|焦点移動|受容|統合|選択|最小の一手)$/.test(s)) return s;
+          if (!titleRaw && /^(入口|状況|二項|焦点移動|受容|統合|選択|最小の一歩)$/.test(s)) return s;
           if (!titleRaw) return null;
 
           // 「入口：月食」→「月食」だけ
@@ -1776,7 +1776,7 @@ void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）
           const b = String(base ?? '').trim();
           if (!b) return null;
 
-          if (b.includes('最小の一手')) return '最小の一手';
+          if (b.includes('最小の一歩')) return '最小の一歩';
 
           const s = String(bodyText ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
 
@@ -1847,7 +1847,7 @@ void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）
           ? ((extraAny as any).rephraseBlocks as any[])
           : null;
 
-        const fallbackOrder = ['入口', '状況', '二項', '焦点移動', '受容', '統合', '選択', '最小の一手'] as const;
+        const fallbackOrder = ['入口', '状況', '二項', '焦点移動', '受容', '統合', '選択', '最小の一歩'] as const;
 
         // ✅ rbTexts（ブロック）→ 行トークンへ展開
         const rbTokens: string[] = [];
@@ -1949,7 +1949,7 @@ void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）
   } catch {}
 
 
-// ====== 置き換え②：最小の一手の補完で使う hint ソース ======
+// ====== 置き換え②：最小の一歩の補完で使う hint ソース ======
 //
 // 対象（現状）
 // 1574: const hint = String(nextHintFromRb ?? '').trim();
@@ -1994,7 +1994,7 @@ const maxLinesForRender =
     : maxLinesFinal;
 
 // ✅ DROP_EMPTY_NEXT_MIN:
-// 「最小の一手」の見出しだけが残る事故（本文欠落）を UI から隠す。
+// 「最小の一歩」の見出しだけが残る事故（本文欠落）を UI から隠す。
 // ただし「見出し＋本文が同一ブロック内」に入っている場合は削除しない。
 try {
   const isNextMinHeaderLine = (s: string) => {
@@ -2003,7 +2003,7 @@ try {
       .replace(/^#{1,6}\s*/u, '')
       .replace(/^[✨⭐️🌟🔸🔹・•\-–—]+\s*/u, '')
       .trim();
-    return /^最小の一手/.test(tt);
+    return /^最小の一歩/.test(tt);
   };
 
   const isHeaderLine = (s: string) => /^###\s+/.test(String(s ?? '').trim());
@@ -2016,7 +2016,7 @@ try {
       .map((x) => String(x ?? '').trim())
       .filter(Boolean);
 
-    // 先頭が「最小の一手」見出しで、2行目以降に本文がある（=同一ブロック内に本文がある）
+    // 先頭が「最小の一歩」見出しで、2行目以降に本文がある（=同一ブロック内に本文がある）
     if (lines.length >= 2 && isNextMinHeaderLine(lines[0])) {
       // 2行目が別見出しなら本文なし扱い
       return !isHeaderLine(lines[1]);
@@ -2137,7 +2137,7 @@ function trimTo60(s: string): string {
   return t.slice(0, 60) + '…';
 }
 
-// ✅ FIX: 「最小の一手」セクションが無い/本文が無い場合、@NEXT_HINT を一文化して補完する（ラベル可変）
+// ✅ FIX: 「最小の一歩」セクションが無い/本文が無い場合、@NEXT_HINT を一文化して補完する（ラベル可変）
 try {
   const hint = String(nextHintFromSlotPlan ?? nextHintFromRb ?? '').trim();
 
@@ -2166,7 +2166,7 @@ try {
     const kk = String(k ?? '').trim();
     switch (kk) {
       case 'uncover':
-        return '次の一手';
+        return '次の一歩';
       case 'stabilize':
       case 'reframeIntention':
       default:
@@ -2177,7 +2177,7 @@ try {
   const nextLabel = decideNextLabel(goalKind);
 
   // ✅ “同義” 扱いする既存ラベル（入力側の揺れ吸収）
-  const NEXT_LABELS = ['最小の一手', '次の一手', 'ここから', 'NEXT', 'NEXT_MIN', 'NEXT_HINT'];
+  const NEXT_LABELS = ['最小の一歩', '次の一歩', 'ここから', 'NEXT', 'NEXT_MIN', 'NEXT_HINT'];
 
   const isNextHeader = (s: string) => {
     const t = String(s ?? '').trim();
@@ -2917,4 +2917,5 @@ const blocksCountForLog = Array.isArray(blocksForRender) ? blocksForRender.lengt
 
   return { content, meta };
 }
+
 

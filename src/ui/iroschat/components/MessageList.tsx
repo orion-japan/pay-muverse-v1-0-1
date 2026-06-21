@@ -337,7 +337,7 @@ function transformIrTemplateToMarkdown(input: string): string {
       '焦点移動',
       '受容',
       '統合',
-      '最小の一手',
+      '最小の一歩',
     ]);
 
     const lines = input.split(/\r?\n/);
@@ -1081,6 +1081,7 @@ const shouldShowDiagnosisNotice =
       </div>
     );
   }
+
 
 
 

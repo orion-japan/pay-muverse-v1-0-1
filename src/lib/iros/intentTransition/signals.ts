@@ -1,4 +1,4 @@
-// file: src/lib/iros/intentTransition/signals.ts
+﻿// file: src/lib/iros/intentTransition/signals.ts
 // iros - Intent Transition v1.0 (signals) — CONFIRMED
 // - Extract ONLY evidence-like signals from user text
 // - Do not "infer intent"; just detect requests and behavioral proofs
@@ -37,7 +37,7 @@ const RE_WANTS_IDEAS: RegExp[] = [
 /** Execution request (C-side request; not allowed unless anchor set) */
 const RE_WANTS_EXECUTION: RegExp[] = [
   /具体的に/,
-  /次の(一手|手)/,
+  /次の(一歩|手)/,
   /やり方/,
   /手順/,
   /実装/,
@@ -127,3 +127,4 @@ export function extractIntentSignals(text: string): IntentSignals {
     hasResetEvidence,
   };
 }
+

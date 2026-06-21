@@ -1,4 +1,4 @@
-import type { CognitionMap } from '../../cognition/cognitionMap';
+﻿import type { CognitionMap } from '../../cognition/cognitionMap';
 import type {
   TcfCDirection,
   TcfUserReaction,
@@ -138,6 +138,15 @@ export type PreSeedFlowDirective = {
     | 'premature_action'
     | null;
 
+  createDirective?: {
+    mode: 'image_first_create' | 'word_create' | 'action_create' | 'flow_acceptance';
+    createObject: 'inner_scene' | 'one_sentence' | 'small_gesture' | 'field_setting' | 'small_action';
+    imaginalFormFirst: boolean;
+    instruction: string;
+    writerMove: string[];
+    avoid: string[];
+  } | null;
+
   seedDirection: {
     targetLabel?: string | null;
     targetType?: string | null;
@@ -154,6 +163,9 @@ export type PreSeedFlowDirective = {
     shouldAvoidOtherMindAssertion: boolean;
     shouldAvoidLargeAction: boolean;
     shouldLeaveOpenSpace: boolean;
+    shouldUseImaginalForm?: boolean;
+    shouldAvoidHomework?: boolean;
+    shouldAvoidTooManyOptions?: boolean;
   };
 
   evidence: {

@@ -1,4 +1,4 @@
-// src/lib/iros/language/shiftPresets.ts
+﻿// src/lib/iros/language/shiftPresets.ts
 
 export type ShiftPreset = {
   kind: string;
@@ -55,7 +55,7 @@ export const SHIFT_PRESET_C_SENSE_HINT: ShiftPreset = {
 
 /**
  * T_CONCRETIZE
- * - T層の「実装・検証・次の一手」レーン
+ * - T層の「実装・検証・次の一歩」レーン
  * - （条件m）禁止6つを解除し、会話が“進む”言葉を許可する
  */
 export const SHIFT_PRESET_T_CONCRETIZE: ShiftPreset = {
@@ -107,3 +107,4 @@ export const SHIFT_PRESET_T_CONCRETIZE: ShiftPreset = {
     concrete_reply: false,
   },
 };
+

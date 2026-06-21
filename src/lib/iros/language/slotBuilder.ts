@@ -1,4 +1,4 @@
-// src/lib/iros/language/slotBuilder.ts
+﻿// src/lib/iros/language/slotBuilder.ts
 // iros — RenderEngine v2: Slot Planner (Plan + anti-repeat)
 // - 本文は作らない（slotを「選ぶ」だけ）
 // - userTextは禁止（入力に含めない）
@@ -159,7 +159,7 @@ function basePlan(args: {
   // - SAFEは必要な時だけ別経路で入れる
   // - 通常会話ではOBS/SHIFT/NEXT/INSIGHTの深度を優先する
 
-  // NEXT は cooldown 以外は基本入れる（最小の一手）
+  // NEXT は cooldown 以外は基本入れる（最小の一歩）
   if (String(goalKind) !== 'cooldown') plan.push('NEXT');
 
   // T は短く（OBSを落としても良い）
@@ -326,3 +326,4 @@ export function buildSlotPlanV2(args: {
     signature: resolved.signature,
   };
 }
+

@@ -2808,8 +2808,15 @@ console.log('[IROS/PP][RS_SNAPSHOT]', {
       const exprDecision = (() => {
         try {
           const laneKey =
-            String((metaForSave as any)?.extra?.intentBridge?.laneKey ?? (metaForSave as any)?.laneKey ?? '').trim() ||
-            'IDEA_BAND';
+            String(
+              (metaForSave as any)?.extra?.intentBridge?.laneKey ??
+                (metaForSave as any)?.extra?.createProgressBridge?.laneKey ??
+                (metaForSave as any)?.extra?.laneKey ??
+                (metaForSave as any)?.extra?.ctxPack?.createProgressBridge?.laneKey ??
+                (metaForSave as any)?.extra?.ctxPack?.laneKey ??
+                (metaForSave as any)?.laneKey ??
+                ''
+            ).trim() || 'IDEA_BAND';
 
           const phase = ((metaForSave as any)?.phase ?? (metaForSave as any)?.framePlan?.phase ?? null) as any;
           const depth = ((metaForSave as any)?.depth ?? (metaForSave as any)?.depthStage ?? null) as any;
@@ -3703,6 +3710,36 @@ try {
             }
           } catch {}
 
+          const preSeedCreateDirectiveForce =
+            (metaForSave as any)?.extra?.preSeedCreateDirective ??
+            (metaForSave as any)?.extra?.ctxPack?.preSeedCreateDirective ??
+            null;
+
+          const preSeedCreateModeForce = String(
+            preSeedCreateDirectiveForce?.mode ?? ''
+          ).trim();
+
+          if (
+            preSeedCreateModeForce === 'image_first_create' ||
+            preSeedCreateModeForce === 'word_create' ||
+            preSeedCreateModeForce === 'action_create'
+          ) {
+            const createForceSeed = [
+              'PRESEED_CREATE_DIRECTIVE_FORCE (DO NOT OUTPUT)',
+              'この返答は、文案例・送信文・行動案から始めない。',
+              '最初に、ユーザーの内側に見える形象を一つ置く。',
+              '形象とは、相手の反応待ちで止まっている自分ではなく、自分の時間を先に戻している場面・姿・形である。',
+              'そのあとに必要なら、小さな一歩または一手を一つだけ添える。',
+              '短文例は、ユーザーが文面・文章・なんて送るかを明示した場合だけ出す。',
+              '選択肢を増やさない。宿題にしない。考えさせる質問で終わらない。',
+            ].join('\n');
+
+            seedForWriterRaw = [
+              createForceSeed,
+              String(seedForWriterRaw ?? '').trim(),
+            ].filter(Boolean).join('\n\n');
+          }
+
           seedForWriterSanitized = sanitizeLlmRewriteSeed(seedForWriterRaw, userText);
         }
       }
@@ -4091,6 +4128,7 @@ const finalPhaseForUnified =
 
   return { assistantText: finalAssistantText, metaForSave };
 }
+
 
 
 

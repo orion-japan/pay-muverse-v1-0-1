@@ -29,6 +29,78 @@ function includesAny(text: string, words: string[]): boolean {
   return words.some((word) => text.includes(word));
 }
 
+function isFlowAcceptanceText(value: unknown): boolean {
+  const c = compactText(value);
+  return /やってみます|動いてみます|試してみます|進めてみます|その方向で|少し動|一歩や|それで行|その形で|置いてみます/u.test(c);
+}
+
+function isImaginalFormCreateRequest(value: unknown): boolean {
+  const c = compactText(value);
+  const asksNext =
+    /どうすれば|どうしたら|次に|何をすれば|なにをすれば|どう動けば|どう進め|行動|やること/u.test(c);
+  const asksText =
+    /なんて送|何て送|どう返|文面|文章|メッセージ|言葉にして|返信/u.test(c);
+
+  return asksNext && !asksText;
+}
+
+function buildCreateDirective(args: {
+  imageFirstCreate: boolean;
+  flowAcceptance: boolean;
+  shouldUseCreate: boolean;
+  shouldUseSmallAction: boolean;
+}): PreSeedFlowDirective['createDirective'] {
+  if (args.flowAcceptance) {
+    return {
+      mode: 'flow_acceptance',
+      createObject: 'small_gesture',
+      imaginalFormFirst: false,
+      instruction:
+        'ユーザーはすでに動く方向を受け取っている。行動を追加で命令せず、その小さな流れが現実に置かれ始めていることを短く支える。',
+      writerMove: ['acknowledge_flow', 'stabilize_small_motion', 'do_not_add_homework'],
+      avoid: ['forcing_more_action', 'too_many_options', 'over_explaining_relationship'],
+    };
+  }
+
+  if (args.imageFirstCreate) {
+    return {
+      mode: 'image_first_create',
+      createObject: 'inner_scene',
+      imaginalFormFirst: true,
+      instruction:
+        'SEED制御: この返信は行動指示ではなく形象Createである。冒頭を文案・行動案・質問・選択肢から始めない。まず本人の内側に見える形象を一つ立てる。その形象から自然に出る一歩だけを添える。',
+      writerMove: ['show_the_shape', 'name_the_scene', 'offer_one_small_form', 'let_the_user_feel_it_before_acting'],
+      avoid: ['commanding_action', 'asking_user_to_decide_from_zero', 'too_many_options', 'homework', 'over_explaining_relationship'],
+    };
+  }
+
+  if (args.shouldUseSmallAction) {
+    return {
+      mode: 'action_create',
+      createObject: 'small_action',
+      imaginalFormFirst: true,
+      instruction:
+        '大きな行動へ押さず、意図が現実に置ける最小形を一つだけ示す。先に形象、次に一歩。',
+      writerMove: ['show_the_shape', 'place_one_small_action'],
+      avoid: ['large_action', 'too_many_options', 'pressure_to_execute'],
+    };
+  }
+
+  if (args.shouldUseCreate) {
+    return {
+      mode: 'word_create',
+      createObject: 'one_sentence',
+      imaginalFormFirst: true,
+      instruction:
+        '説明を増やさず、意図が言葉になる前の形を一つ置き、それを短い言葉にする。',
+      writerMove: ['show_the_shape', 'form_one_sentence'],
+      avoid: ['over_explaining', 'mind_reading', 'forcing_decision'],
+    };
+  }
+
+  return null;
+}
+
 function getMetaObject(value: any): Record<string, any> {
   return value && typeof value === 'object' ? value : {};
 }
@@ -49,6 +121,7 @@ function inferInputIntent(userText: string, decision: PreSeedDecision): PreSeedI
   const goalKind = String((decision as any).goalKind ?? decision.metaPatch?.goalKind ?? '').trim();
   const followupKind = String((decision as any).followupKind ?? decision.metaPatch?.followupKind ?? '').trim();
 
+  if (isFlowAcceptanceText(userText)) return 'continue';
   if (goalKind === 'deepen' || /深め|もう少し|詳しく|掘って|見て/u.test(c)) return 'deepen';
   if (goalKind === 'explain_reason' || followupKind === 'reason_detail') return 'explain_reason';
   if (/なぜ|なんで|どうして|理由|根拠/u.test(c)) return 'explain_reason';
@@ -69,6 +142,10 @@ function inferAxisAndBand(args: {
   const c = compactText(args.userText);
   const kind = args.decision.kind;
   const sourceKind = String(args.decision.sourceKind ?? '').trim();
+
+  if (args.intent === 'continue' && isFlowAcceptanceText(args.userText)) {
+    return { currentAxis: 'F', currentBand: 'SF' };
+  }
 
   if (args.intent === 'create' || args.intent === 'ask_action') {
     return { currentAxis: 'C', currentBand: 'RC' };
@@ -236,13 +313,23 @@ function buildWriterSeed(args: {
   shouldHoldAction: boolean;
   intentionReached: boolean;
   createDistortionRisk: 'none' | 'weak' | 'medium' | 'strong';
+  imageFirstCreate: boolean;
+  flowAcceptance: boolean;
 }): string | null {
   if (args.shouldHoldAction) {
     return 'このターンでは行動提案を急がず、関係圧や不安反応から出たCreateを小さくし、自分の方向を失っていないかを先に整える。';
   }
 
+  if (args.flowAcceptance) {
+    return 'ユーザーはすでに小さく動く方向を受け取っている。新しい課題や選択肢を増やさず、その動きが現実に流れ始めていることを短く支える。';
+  }
+
+  if (args.imageFirstCreate) {
+    return 'PRESEED_CREATE_DIRECTIVE: このターンのCreateは行動指示ではない。Imaginal Form（形象）を先に立てる。返信の冒頭を、文案・行動案・質問・選択肢から始めてはいけない。まず、ユーザーの内側に見える場面・姿・形を一つ置く。ユーザーに考えさせたり、ゼロから選ばせたりしない。形象を置いたあと、必要なら自然に出る小さな一歩だけを添える。';
+  }
+
   if (args.intentionReached && args.shouldUseSmallAction) {
-    return '意図に到達しているため、これ以上の相手分析・原因分析を増やさず、核心を短く言葉にして、小さなCreateまたは実行可能な一手へ収束させる。';
+    return '意図に到達しているため、これ以上の相手分析・原因分析を増やさず、核心を短く言葉にして、小さなCreateまたは実行可能な一歩へ収束させる。';
   }
 
   if (args.intentionReached) {
@@ -269,18 +356,25 @@ export function buildPreSeedFlowDirective(
   if (!decision) {
     const fallbackText = normalizeText(userText);
 
+    const fallbackFlowAcceptance = isFlowAcceptanceText(fallbackText);
+    const fallbackImageFirstCreate = isImaginalFormCreateRequest(fallbackText);
+
     const fallbackInputIntent: PreSeedFlowDirective['inputIntent'] =
-      /送るなら|なんて送|何て送|返信|返事|文章|文を|言い方|作って|作る|create|行動|どうすれば|次/.test(fallbackText)
-        ? 'create'
-        : /なぜ|なんで|理由|どうして|結局|つまり|ということ|ってこと/.test(fallbackText)
-          ? 'explain_reason'
-          : /深め|もっと|詳しく|掘り下げ/.test(fallbackText)
-            ? 'deepen'
-            : /違う|修正|ちょっと違う|そうじゃない/.test(fallbackText)
-              ? 'correct'
-              : /続き|さっき|この話|前の/.test(fallbackText)
-                ? 'continue'
-                : 'unknown';
+      fallbackFlowAcceptance
+        ? 'continue'
+        : /送るなら|なんて送|何て送|返信|返事|文章|文を|言い方|作って|作る|create/.test(fallbackText)
+          ? 'create'
+          : fallbackImageFirstCreate || /行動|どうすれば|どうしたら|次/.test(fallbackText)
+            ? 'ask_action'
+            : /なぜ|なんで|理由|どうして|結局|つまり|ということ|ってこと/.test(fallbackText)
+              ? 'explain_reason'
+              : /深め|もっと|詳しく|掘り下げ/.test(fallbackText)
+                ? 'deepen'
+                : /違う|修正|ちょっと違う|そうじゃない/.test(fallbackText)
+                  ? 'correct'
+                  : /続き|さっき|この話|前の/.test(fallbackText)
+                    ? 'continue'
+                    : 'unknown';
 
     const hasIntentionSignal =
       /結局|つまり|私は|自分|方向|意図|核心|本質|気づ|わかった|分かった|待ちすぎ|待ち過ぎ|手放|選ぶ|決める/.test(fallbackText);
@@ -294,12 +388,15 @@ export function buildPreSeedFlowDirective(
     const hasApprovalRisk =
       /嫌われ|怒らせ|見捨て|合わせ|相手が望|相手のため|返事がないから|反応がないから/.test(fallbackText);
 
-    const fallbackCreateReady = fallbackInputIntent === 'create';
+    const fallbackCreateReady =
+      fallbackInputIntent === 'create' || fallbackInputIntent === 'ask_action';
 
     const fallbackCurrentAxis: PreSeedFlowDirective['currentAxis'] =
-      fallbackCreateReady
-        ? 'C'
-        : hasIntentionSignal
+      fallbackFlowAcceptance
+        ? 'F'
+        : fallbackCreateReady
+          ? 'C'
+          : hasIntentionSignal
           ? 'I'
           : hasRelationSignal
             ? 'R'
@@ -359,10 +456,10 @@ export function buildPreSeedFlowDirective(
       fallbackIntentionReached || fallbackCreateReady;
 
     const fallbackFlowDirection: PreSeedFlowDirective['flowDirection'] =
-      fallbackShouldHoldAction
-        ? 'hold_before_create'
-        : fallbackShouldUseSmallAction
-          ? 'let_flow_continue'
+      fallbackFlowAcceptance
+        ? 'let_flow_continue'
+        : fallbackShouldHoldAction
+          ? 'hold_before_create'
           : fallbackShouldUseCreate
             ? 'place_create'
             : fallbackIntentionReached
@@ -374,22 +471,28 @@ export function buildPreSeedFlowDirective(
                   : 'return_to_input';
 
     const fallbackConvergenceMode: PreSeedFlowDirective['convergenceMode'] =
-      fallbackShouldUseSmallAction
-        ? 'toward_small_action'
-        : fallbackShouldUseCreate
-          ? 'toward_create'
-          : fallbackIntentionReached
-            ? 'toward_intention'
-            : 'none';
+      fallbackFlowAcceptance
+        ? 'toward_flow'
+        : fallbackShouldUseSmallAction
+          ? 'toward_small_action'
+          : fallbackShouldUseCreate
+            ? 'toward_create'
+            : fallbackIntentionReached
+              ? 'toward_intention'
+              : 'none';
 
     const fallbackWriterSeed =
       fallbackShouldHoldAction
         ? 'ユーザー入力だけではCreateの由来に関係圧や不安反応が混じる可能性があるため、行動提案を急がず、自分の方向を失っていないかを先に整える。'
-        : fallbackShouldUseSmallAction
-          ? 'ユーザーは言葉や行動の形を求めているため、大きな結論にせず、小さく実行できる一手へ収束させる。'
-          : fallbackIntentionReached
-            ? 'ユーザー入力だけでも意図の輪郭が出ているため、これ以上の相手分析・原因分析を増やさず、核心を短く言葉にして収束させる。'
-            : null;
+        : fallbackFlowAcceptance
+          ? 'ユーザーはすでに小さく動く方向を受け取っている。新しい課題や選択肢を増やさず、その動きが現実に流れ始めていることを短く支える。'
+          : fallbackImageFirstCreate
+            ? 'PRESEED_CREATE_DIRECTIVE: このCreateは行動指示ではない。Imaginal Form（形象）を先に立てる。返信の冒頭を、文案・行動案・質問・選択肢から始めてはいけない。まず本人の内側に見える場面・姿・形を一つ置く。本人に考えさせたり選ばせたりしない。形象を置いたあと、必要なら自然に出る小さな一歩だけを添える。'
+            : fallbackShouldUseSmallAction
+              ? 'ユーザーは言葉や行動の形を求めているため、大きな結論にせず、先に形象を置き、そこから小さく実行できる一歩へ収束させる。'
+              : fallbackIntentionReached
+                ? 'ユーザー入力だけでも意図の輪郭が出ているため、これ以上の相手分析・原因分析を増やさず、核心を短く言葉にして収束させる。'
+                : null;
 
     return {
       source: 'preseed_input_flow',
@@ -418,6 +521,12 @@ export function buildPreSeedFlowDirective(
       createIntegrity: fallbackCreateIntegrity,
       createDistortionRisk: fallbackCreateDistortionRisk,
       distortionReason: hasApprovalRisk ? 'approval_seeking' : null,
+      createDirective: buildCreateDirective({
+        imageFirstCreate: fallbackImageFirstCreate,
+        flowAcceptance: fallbackFlowAcceptance,
+        shouldUseCreate: fallbackShouldUseCreate,
+        shouldUseSmallAction: fallbackShouldUseSmallAction,
+      }),
       seedDirection: {
         targetLabel: null,
         targetType: null,
@@ -433,10 +542,13 @@ export function buildPreSeedFlowDirective(
         mustKeepTarget: false,
         mustNotOverDeepen: fallbackShouldLimitDeepening,
         shouldShiftFromAnalysisToPlacement: fallbackIntentionReached || fallbackShouldUseCreate,
-        shouldOfferSmallCreate: fallbackShouldUseSmallAction,
+        shouldOfferSmallCreate: fallbackShouldUseSmallAction || fallbackShouldUseCreate,
         shouldAvoidOtherMindAssertion: true,
         shouldAvoidLargeAction: true,
         shouldLeaveOpenSpace: true,
+        shouldUseImaginalForm: fallbackImageFirstCreate || fallbackShouldUseCreate,
+        shouldAvoidHomework: true,
+        shouldAvoidTooManyOptions: true,
       },
       evidence: {
         fromUserInput: [
@@ -476,6 +588,9 @@ export function buildPreSeedFlowDirective(
     currentBand === 'IT' &&
     inputIntent !== 'create' &&
     inputIntent !== 'ask_action';
+
+  const flowAcceptance = isFlowAcceptanceText(userText);
+  const imageFirstCreate = isImaginalFormCreateRequest(userText);
 
   const createReady =
     inputIntent === 'create' ||
@@ -525,10 +640,10 @@ export function buildPreSeedFlowDirective(
 
   if (inputIntent === 'correct') {
     flowDirection = 'correct_angle';
+  } else if (flowAcceptance || currentAxis === 'F') {
+    flowDirection = 'let_flow_continue';
   } else if (shouldHoldAction) {
     flowDirection = 'hold_before_create';
-  } else if (shouldUseSmallAction) {
-    flowDirection = 'let_flow_continue';
   } else if (shouldUseCreate) {
     flowDirection = 'place_create';
   } else if (intentionFormed) {
@@ -542,10 +657,10 @@ export function buildPreSeedFlowDirective(
   }
 
   const convergenceMode =
+    flowDirection === 'let_flow_continue' ? 'toward_flow' :
     shouldUseSmallAction ? 'toward_small_action' :
     shouldUseCreate ? 'toward_create' :
     intentionFormed ? 'toward_intention' :
-    flowDirection === 'let_flow_continue' ? 'toward_flow' :
     'none';
 
   const intentionReached = intentionFormed && shouldLimitDeepening;
@@ -557,6 +672,8 @@ export function buildPreSeedFlowDirective(
     shouldHoldAction,
     intentionReached,
     createDistortionRisk,
+    imageFirstCreate,
+    flowAcceptance,
   });
 
   const avoidSeed: string[] = [];
@@ -611,6 +728,12 @@ export function buildPreSeedFlowDirective(
     createIntegrity,
     createDistortionRisk,
     distortionReason,
+    createDirective: buildCreateDirective({
+      imageFirstCreate,
+      flowAcceptance,
+      shouldUseCreate,
+      shouldUseSmallAction,
+    }),
     seedDirection: {
       targetLabel,
       targetType,
@@ -626,6 +749,9 @@ export function buildPreSeedFlowDirective(
       shouldAvoidOtherMindAssertion: true,
       shouldAvoidLargeAction: true,
       shouldLeaveOpenSpace: convergenceMode === 'toward_flow' || shouldUseSmallAction,
+      shouldUseImaginalForm: imageFirstCreate || shouldUseCreate,
+      shouldAvoidHomework: true,
+      shouldAvoidTooManyOptions: true,
     },
     evidence: {
       fromUserInput: [
@@ -642,6 +768,22 @@ export function buildPreSeedFlowDirective(
     },
   };
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

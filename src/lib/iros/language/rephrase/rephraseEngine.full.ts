@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+﻿/* eslint-disable @typescript-eslint/no-explicit-any */
 
 // src/lib/iros/language/rephraseEngine.ts
 // iros — Rephrase/Generate Engine (slot-preserving)
@@ -4550,6 +4550,15 @@ const shouldPreferPastStateRecall =
       hasPriorDiagnosis: false,
     });
 
+    const isImageFirstCreateForWriter =
+      String((opts as any)?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+      String((opts as any)?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+      String((opts as any)?.userContext?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+      String((opts as any)?.userContext?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+      String((opts as any)?.userContext?.ctxPack?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+      String((opts as any)?.userContext?.ctxPack?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+      String((opts as any)?.ctxPack?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+      String((opts as any)?.ctxPack?.createProgressBridge?.mode ?? '').trim() === 'image_first_create';
     const rawTurnsForWriter =
       shouldPreferPastStateRecall || turnsPatternKeyForWriter === 'DECLARATION_RESONANCE_V1'
         ? (
@@ -4569,8 +4578,8 @@ const shouldPreferPastStateRecall =
             (opts as any)?.userContext?.ctxPack?.turnsForWriter ??
             (opts as any)?.userContext?.ctxPack?.turns ??
             (opts as any)?.userContext?.turns ??
-            (opts as any)?.userContext?.ctxPack?.historyForWriter ??
-            (opts as any)?.userContext?.historyForWriter ??
+            (isImageFirstCreateForWriter ? null : (opts as any)?.userContext?.ctxPack?.historyForWriter) ??
+            (isImageFirstCreateForWriter ? null : (opts as any)?.userContext?.historyForWriter) ??
             lastTurnsSafe ??
             []
           );
@@ -5299,7 +5308,7 @@ const systemPromptForWriter = [
           : isMeaningUncoverBomb
             ? '3段落目の1文目は、I層の爆心として書く。今回はどちら寄りかを仮置きするだけでなく、何がこの迷いの主因として前に出ているのかを一文で言い当てる。ただし断定の押しつけにはしない。いま主に残っている本音と、まだ切れずに残っているもののどちらが核なのかが、静かに深く伝わる書き方を優先する。'
             : isIntentMethodBomb
-              ? '3段落目の1文目は、先にやる一手を短く置く。観測へ戻さず、方法を1つに絞る。結論を濁さず、いま最初に定めるべき対象や基準を一文で言う。'
+              ? '3段落目の1文目は、先にやる一歩を短く置く。観測へ戻さず、方法を1つに絞る。結論を濁さず、いま最初に定めるべき対象や基準を一文で言う。'
               : '3段落目の1文目は、今回はどちら寄りかを仮置きしてよい。ただし先に結論だけを置かず、なぜそちらに見えるのかが一緒に伝わる一文にする。「見るなら」「次は」などの案内語にしない。結論確定ではなく、いま主にどちらの力が前に出ていて、どちらがまだ残っているのかが同時にわかる書き方を優先する。'),
 
       block_concrete_sort_axis:
@@ -5307,7 +5316,7 @@ const systemPromptForWriter = [
         (isCompareStructureBomb
           ? '3段落目の2文目は、AがBをどう読むと関係の見え方が変わるかを書く。説明口調にしない。Aの目に見えていた欠点が、別の力として見え直す感じを自然文で置く。'
           : isIntentMethodBomb
-            ? '3段落目の2文目は、その一手をどう具体化するかを書く。比較説明ではなく、選択肢を増やさずに軸を細める。たとえば「やる・やめる・保留」のどれに近いかを見る、など一段狭い見方を置く。'
+            ? '3段落目の2文目は、その一歩をどう具体化するかを書く。比較説明ではなく、選択肢を増やさずに軸を細める。たとえば「やる・やめる・保留」のどれに近いかを見る、など一段狭い見方を置く。'
             : '3段落目の2文目は、比べている二つの違いを書く。比較を説明しない。その差が読めば分かる形で、そのまま言葉にする。整理語を使わず、前文の見立てをそのまま細める。'),
 
       block_concrete_sort_boundary:
@@ -5343,7 +5352,7 @@ const systemPromptForWriter = [
         (isCompareStructureBomb
           ? '4段落目の3文目は、説明ではなく一撃で閉じる。最後に、この関係の本質が一文で残るようにする。例はその比較対象に合うものだけを使う。たとえば「この関係は、同じ強さを競わせるより、力の置き場を分けたときに一番まとまります。」「強さがぶつかる関係ではなく、強さの向きを分けたときに大きく動ける組み合わせです。」のように、関係の核がそのまま覚えられる一文を優先する。'
           : isIntentMethodBomb
-            ? '4段落目の3文目は、余韻で逃がさず最初の行動で閉じる。励ましや余白にしない。今ここで着手する一手がそのまま残るように、短く具体的に終える。たとえば「まずは、外したくないものを一つ決めてください」のように閉じる。'
+            ? '4段落目の3文目は、余韻で逃がさず最初の行動で閉じる。励ましや余白にしない。今ここで着手する一歩がそのまま残るように、短く具体的に終える。たとえば「まずは、外したくないものを一つ決めてください」のように閉じる。'
             : '4段落目の3文目は、余韻だけで閉じる。文や言葉への言及をしない。強く締めず、静けさと少しの残りだけが場に残る形で終える。完全に閉じ切らず、呼吸が残る終わり方にする。'),
             bodyStyle: isCompareStructureBomb
             ? {
@@ -6028,7 +6037,7 @@ const writerDirectivesFromSlotForFirstPass = isDetailPatternWriterForFirstPass
     ambiguity: 'deny', // deny|allow
     brevity: 'normal', // short|normal|long
     rhythm: 'breathe', // flat|breathe
-    forbidden: ['結論：', '次の一手：', '箇条書き', 'チェックリスト'],
+    forbidden: ['結論：', '次の一歩：', '箇条書き', 'チェックリスト'],
   };
 
   const exprMetaBase =
@@ -10257,7 +10266,7 @@ const isResonanceStructureFollowup =
       block_state_open_edge:
         '相手の本心は断定しない。「気持ちがない」ではなく「返せる状態にない可能性がある」と、分かる範囲だけを普通の言葉で言う。',
       block_state_action:
-        '最後は、相手を追い詰めない短い一手だけを書く。「急がなくて大丈夫、落ち着いたらでいいよ」くらいの一文にする。説明で締めない。',
+        '最後は、相手を追い詰めない短い一歩だけを書く。「急がなくて大丈夫、落ち着いたらでいいよ」くらいの一文にする。説明で締めない。',
       bodyStyle: {
         preferBlockSplit: true,
         minBlocks: 2,
@@ -10276,7 +10285,7 @@ const isResonanceStructureFollowup =
         '「仕事側の圧」ではなく「仕事の忙しさ」「仕事で余裕がない」を使う',
         '既出履歴に仕事の忙しさがある場合は、会話語で一度だけ自然に入れる',
         '元発話を引用しない',
-        '最後は短い一手だけにする',
+        '最後は短い一歩だけにする',
         '3〜5文で会話として返す',
       ],
     }
@@ -10585,7 +10594,7 @@ const isResonanceStructureFollowup =
                       '状態観測に戻らない',
                       '「まだ決めきれない」「残っている」「開いたまま」「輪郭」「そっと置く」で終わらない',
                       'ユーザーは前回助言の意味や使い方を聞いている。前回助言を具体的に扱える形へ変換する',
-                      '前回の抽象助言を、ユーザーが今できる具体的な一手に変換する',
+                      '前回の抽象助言を、ユーザーが今できる具体的な一歩に変換する',
                       '「待つ」「置いておく」だけで終わらせない',
                       '一度だけ送れる短文例を必ず出す',
                       '送った後は連投しない境界まで入れる',
@@ -10593,7 +10602,7 @@ const isResonanceStructureFollowup =
                       '連投すると、不安を解消するための連絡になりやすく、相手には重く届きやすいことを説明する',
                       '一通で止めることは我慢ではなく、その一通に役割を渡すことだと説明する',
                       '追いかけたい気持ちは否定せず、重く送らせない',
-                      'ユーザーの状態が「何もできない」から「一手は打てた」に変わるように返す',
+                      'ユーザーの状態が「何もできない」から「一歩は打てた」に変わるように返す',
                       '番号・見出しは避け、普通の会話文で返す。ただしユーザーが例を求めた場合のみ、番号ではなく「- 」の箇条書きを独立行で使ってよい',
                     ],
                     block_repair_receive:
@@ -10660,7 +10669,7 @@ const isResonanceStructureFollowup =
                     block_deep_read_under:
                       '次に、言葉の奥で強くなっている反応パターンを、断定せず自然文で一段だけ触れる。',
                     block_deep_read_return:
-                      '最後は、ユーザーが扱える見方・置き方・一手に戻す。',
+                      '最後は、ユーザーが扱える見方・置き方・一歩に戻す。',
                   }
                 : {};
 
@@ -15205,7 +15214,7 @@ userContext: {
       case 'INTEGRATE':
         return '統合';
       case 'NEXT_MIN':
-        return '最小の一手';
+        return '最小の一歩';
       default:
         return String(k);
     }
@@ -15301,7 +15310,7 @@ userContext: {
       const missing = Array.isArray(r0.missing) ? r0.missing : [];
       const miss0 = normalizeHead(String(missing[0] ?? ''));
       const isOnlyNextMin =
-        missing.length === 1 && (miss0 === '最小の一手' || miss0 === 'NEXT_MIN' || miss0 === 'NEXT');
+        missing.length === 1 && (miss0 === '最小の一歩' || miss0 === 'NEXT_MIN' || miss0 === 'NEXT');
 
       // ✅ 末尾が「見出し開始だけ」で途切れている（例: "\n### " / "###" で終わる）なら、
       // これは後半欠落の可能性が高いので従来どおり FATAL → retry を許可する（安全弁）。
@@ -15315,8 +15324,8 @@ userContext: {
         /^\s*###/.test(lastLine) && lastLine.trim().length <= 6; // "###" / "### " / "### ?" 程度
 
       // ⚠️ 仕様変更（仕様書と差分あり）
-      // 仕様書では「最小の一手（NEXT_MIN）」は必須ブロックだが、実運用では毎回出すと過剰になりやすい。
-      // そのため missing が「最小の一手」だけの場合は、補完（AUTO_PATCH）も retry 促進もせず、そのまま通す。
+      // 仕様書では「最小の一歩（NEXT_MIN）」は必須ブロックだが、実運用では毎回出すと過剰になりやすい。
+      // そのため missing が「最小の一歩」だけの場合は、補完（AUTO_PATCH）も retry 促進もせず、そのまま通す。
       // ※ただし末尾途切れ（見出し開始だけで切断）は安全弁として従来通り retry を許可する。
       if (!isTailTruncatedHeading && isOnlyNextMin) {
         v = {
@@ -16243,6 +16252,8 @@ return await runRetryPass({
     slotsForGuard,
   });
 }
+
+
 
 
 

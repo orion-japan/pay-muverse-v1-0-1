@@ -1,10 +1,10 @@
-// file: src/lib/iros/speech/enforceAllowSchema.ts
+﻿// file: src/lib/iros/speech/enforceAllowSchema.ts
 // iros — Enforce AllowSchema (last gate)
 //
 // ✅ 目的：LLMの出力が “器(AllowSchema)” を破っても、最終出力を整形して封じる
 // - 許可されていない行頭ラベルは捨てる
 // - maxLines を超えたら切る
-// - NAME/FLIP は助言・問い・一手を落とす（fieldsで制御）
+// - NAME/FLIP は助言・問い・一歩を落とす（fieldsで制御）
 // - COMMIT でも actions は最大2行、question は最大1行に制限
 //
 // ✅ 重要：最終出力からラベルを完全に消す。
@@ -25,7 +25,7 @@ const LABELS = {
   name: /^核：\s*/u,
   flip: /^反転：\s*/u,
   commit: /^固定：\s*/u,
-  actions: /^一手：\s*/u,
+  actions: /^一歩：\s*/u,
   question: /^問い：\s*/u,
 };
 
@@ -182,9 +182,10 @@ export function enforceAllowSchema(allow: AllowSchema, rawText: string): Enforce
       return { act, text: clampLines(fallback, Math.min(2, maxLines)), dropped, kept: 1 };
     }
 
-    // FORWARD など：最小の一手相当として1行返す
+    // FORWARD など：最小の一歩相当として1行返す
     return { act, text: clampLines(fallback, 1), dropped, kept: 1 };
   }
 
   return { act, text: out.join('\n'), dropped, kept: out.length };
 }
+

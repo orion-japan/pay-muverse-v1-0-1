@@ -1,4 +1,4 @@
-// src/lib/iros/language/rephrase/retryPass.ts
+﻿// src/lib/iros/language/rephrase/retryPass.ts
 // iros — Retry pass (2nd pass) extracted helper
 //
 // 目的：rephraseEngine.full.ts の retry(2nd pass) を責務分離する（挙動不変）。
@@ -159,7 +159,7 @@ const shouldRepairBlockPlanOnly = fatalSet.has('BLOCK_PLAN_CONTRACT');
 
 // 1st pass の下書きがある場合のみローカル補修を試す
 if (shouldRepairBlockPlanOnly && String(baseDraftForRepair ?? '').trim().length > 0) {
-  const requiredHeads = ['入口', '二項', '焦点移動', '受容', '統合', '最小の一手'];
+  const requiredHeads = ['入口', '二項', '焦点移動', '受容', '統合', '最小の一歩'];
 
   // 既存本文を「行配列（空行除去）」へ
   const lines = String(baseDraftForRepair ?? '')
@@ -191,7 +191,7 @@ if (shouldRepairBlockPlanOnly && String(baseDraftForRepair ?? '').trim().length 
     '統合',
     '体感を壊さず、守りたいものも外さない、という両立の形にまとめます。',
     '',
-    '最小の一手',
+    '最小の一歩',
     '今夜は「体感」と「守りたいもの」をそれぞれ一語でメモして終える。',
     '',
   ];
@@ -230,7 +230,7 @@ if (shouldRepairBlockPlanOnly && String(baseDraftForRepair ?? '').trim().length 
     ensureHead('受容', '良い悪いで裁かずに、いまの混ざり方をそのまま認めます。');
   }
   ensureHead('統合', '両方を外さない形にまとめます。');
-  ensureHead('最小の一手', '今夜は「体感」と「守りたいもの」を一語ずつメモ。');
+  ensureHead('最小の一歩', '今夜は「体感」と「守りたいもの」を一語ずつメモ。');
 
   // 返却（LLM retry しない）
   raw2 = repaired.join('\n').trim() + '\n';
@@ -259,10 +259,10 @@ if (shouldRepairBlockPlanOnly && String(baseDraftForRepair ?? '').trim().length 
     '焦点移動',
     '受容',
     '統合',
-    '最小の一手',
+    '最小の一歩',
     '',
     'ルール：各段は 1〜3行で短く。削りすぎず、下書きの流れを保持。',
-    '最後は「最小の一手」の段で 1行だけ、具体的な一歩で終える。',
+    '最後は「最小の一歩」の段で 1行だけ、具体的な一歩で終える。',
   ].join('\n');
 
   const retryMessages: any[] = Array.isArray(retryMessages0) ? [...retryMessages0] : [];
@@ -702,4 +702,5 @@ if (shouldRepairBlockPlanOnly && String(baseDraftForRepair ?? '').trim().length 
     flagshipReasons: Array.isArray(vRetry?.reasons) ? vRetry.reasons : [],
   });
 }
+
 

@@ -2036,6 +2036,19 @@ try {
   // 目的:
   // - 直前のMu返答が長い解説文だった場合、historyForWriter 経由で同じ文体を再学習してしまう。
   // - 恋愛の連絡不安では、現在のユーザー発話 + focusResolution + writerDirectives を正本にする。
+  const isImageFirstCreateForHfw =
+    String((meta as any)?.extra?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+    String((meta as any)?.extra?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+    String((meta as any)?.extra?.ctxPack?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+    String((meta as any)?.extra?.ctxPack?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+    String((extraMerged as any)?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+    String((extraMerged as any)?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+    String((extraMerged as any)?.ctxPack?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+    String((extraMerged as any)?.ctxPack?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+    String((ctxPack as any)?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+    String((ctxPack as any)?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+    String((userContext as any)?.ctxPack?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+    String((userContext as any)?.ctxPack?.createProgressBridge?.mode ?? '').trim() === 'image_first_create';
   const relationshipAskTypeForHfw = normText(
     (meta as any)?.extra?.resolvedAsk?.askType ??
       (meta as any)?.extra?.ctxPack?.resolvedAsk?.askType ??
@@ -2513,6 +2526,51 @@ try {
     (userContext.ctxPack as any).historyForWriter = hfwForWriter;
     (userContext as any).turnsForWriter = hfwForWriter;
   }
+  if (isImageFirstCreateForHfw) {
+    const keepUserOnly = (value: any): any[] => {
+      if (!Array.isArray(value)) return [];
+      return value
+        .filter((turn: any) => String(turn?.role ?? '').toLowerCase() === 'user')
+        .map((turn: any) => ({
+          role: 'user',
+          content: normText(turn?.content ?? turn?.text ?? '').slice(0, 260),
+        }))
+        .filter((turn: any) => String(turn?.content ?? '').trim().length > 0)
+        .slice(-2);
+    };
+
+    const userOnlyFromTurnsForWriter = keepUserOnly((userContext as any)?.turnsForWriter);
+    const userOnlyFromHistoryForWriter = keepUserOnly((userContext as any)?.ctxPack?.historyForWriter);
+    const userOnlyFromTurns = keepUserOnly((userContext as any)?.ctxPack?.turns);
+
+    const userOnly =
+      userOnlyFromTurnsForWriter.length > 0
+        ? userOnlyFromTurnsForWriter
+        : userOnlyFromHistoryForWriter.length > 0
+          ? userOnlyFromHistoryForWriter
+          : userOnlyFromTurns;
+
+    if (userOnly.length > 0) {
+      (userContext.ctxPack as any).historyForWriter = userOnly;
+      (userContext as any).turnsForWriter = userOnly;
+    } else {
+      delete (userContext.ctxPack as any).historyForWriter;
+      delete (userContext as any).turnsForWriter;
+    }
+
+    console.log('[IROS/_impl/rephrase.ts][HFW_IMAGE_FIRST_CREATE_USER_ONLY]', {
+      conversationId,
+      userCode,
+      traceId: traceId ?? null,
+      assignedLen: userOnly.length,
+      assignedRoles: userOnly.map((t: any) => t.role),
+      assignedPreview: userOnly.map((t: any) => ({
+        role: t.role,
+        contentHead: String(t.content ?? '').slice(0, 80),
+      })),
+    });
+  }
+
 } catch (e) {
   console.warn('[IROS/_impl/rephrase.ts][HFW_ASSIGN][WARN]', e);
 }
@@ -3083,6 +3141,7 @@ try {
 
   attachBlocksFromTextOrSkip(fallbackText, 'REPHRASE_EXCEPTION_FALLBACK');
 }}
+
 
 
 

@@ -1,9 +1,9 @@
-// file: src/lib/iros/language/renderReply.ts
+﻿// file: src/lib/iros/language/renderReply.ts
 // iros — Field Rendering (文章レンダリング層) [sofia-safe / minimal + breathable]
 // 目的：
 // - IT は itWriter を唯一の正として使う（構造は IT 側に集約）
 // - 非IT は “sofiaらしさ（静けさ / 断定 / 余白）” を保った短文に再構成
-// - 見出しラベル（核/反転/一手…）は出さない（render.ts 側で軽い整形は入るが、ここでも出さない）
+// - 見出しラベル（核/反転/一歩…）は出さない（render.ts 側で軽い整形は入るが、ここでも出さない）
 // - A/B案は出さない（1つに寄せる）
 // - “テンプレ臭” の固定文は極力避ける（最低限の補助だけ）
 // - ✅ 非SILENCEでは「空文字を返さない」（empty-but-forward再発防止）
@@ -488,3 +488,4 @@ function deriveOneStepSofia(text: string): string {
 
   return '最初の一歩だけを書いて終える（誰に／いつ／何を）。';
 }
+

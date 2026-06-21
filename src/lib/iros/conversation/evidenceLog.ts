@@ -1,4 +1,4 @@
-// src/lib/iros/conversation/evidenceLog.ts
+﻿// src/lib/iros/conversation/evidenceLog.ts
 // iros — Conversation Evidence Logger (phase11)
 //
 // 目的：会話の「強さ」を4条件で可視化し、改善が効いたかをログで判定できるようにする。
@@ -156,7 +156,7 @@ function judgeRepair(input: ConvEvidenceInput): { ok: boolean; why: string } {
 // - branch が C_BRIDGE / I_BRIDGE、または
 // - NEXT_HINT が出ている（phase11ではadvanceHint常設のため）
 // - ✅ それ以外でも T_CONCRETIZE（SHIFT kind=t_concretize / intent=implement_next_step）があれば「前進」扱い
-// - それ以外は slots 内の“提案/次の一手”の雰囲気を軽く拾う（固定語に依存しない）
+// - それ以外は slots 内の“提案/次の一歩”の雰囲気を軽く拾う（固定語に依存しない）
 function judgeAdvance(input: ConvEvidenceInput): { ok: boolean; why: string } {
   if (input.branch === 'C_BRIDGE') return { ok: true, why: 'branch=C_BRIDGE' };
   if (input.branch === 'I_BRIDGE') return { ok: true, why: 'branch=I_BRIDGE' };
@@ -208,7 +208,7 @@ function judgeAdvance(input: ConvEvidenceInput): { ok: boolean; why: string } {
   if (!st) return { ok: false, why: 'no_slots_text' };
 
   // “提案”の雰囲気だけ拾う（過剰に決めつけない）
-  const hints = ['案', '提案', '次', '一歩', '一手', 'まず', '整理', '選ぶ', '決める'];
+  const hints = ['案', '提案', '次', '一歩', '一歩', 'まず', '整理', '選ぶ', '決める'];
   const hit = hints.some((h) => st.includes(h));
   if (hit) return { ok: true, why: 'slots_has_soft_advance_hint' };
 
@@ -269,3 +269,4 @@ export function logConvEvidence(input: ConvEvidenceInput): ConvEvidence {
 
   return ev;
 }
+

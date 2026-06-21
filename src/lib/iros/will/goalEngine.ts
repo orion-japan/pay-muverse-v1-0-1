@@ -1,4 +1,4 @@
-// src/lib/iros/will/goalEngine.ts
+﻿// src/lib/iros/will/goalEngine.ts
 // Iros Will Engine — Goal層（このターンの「目的」をIrosが自分で決める）
 //
 // ※ DBアクセスは一切しない純関数エンジン
@@ -97,7 +97,7 @@ if (containsSeparationDecisionWords(text)) {
       kind: 'enableAction',
       targetDepth,
       targetQ: lastQ,
-      reason: '離脱・区切りの決定が明示されているため、次の一手を優先',
+      reason: '離脱・区切りの決定が明示されているため、次の一歩を優先',
     };
   }
 
@@ -186,7 +186,7 @@ function containsSeparationDecisionWords(text: string): boolean {
       kind: 'enableAction',
       targetDepth,
       targetQ: lastQ,
-      reason: '「選ぶ／決めた／理由はある」等のコミット宣言が検出されたため、次の一手を優先',
+      reason: '「選ぶ／決めた／理由はある」等のコミット宣言が検出されたため、次の一歩を優先',
     };
   }
 
@@ -203,6 +203,8 @@ function containsSeparationDecisionWords(text: string): boolean {
   // 4.5) 実用判断の問い → enableAction
   // - 「どうしよう / どうする / どうしたら / どうすれば」などは、
   //   stabilize ではなく「選び方・動き方」を返したい
+  // - 「何をすれば」単体ではCへ強制しない。
+  //   本当に深まった時だけ、TCF / CreateBridge 側の収束判断で前へ進ませる。
   if (/(どうしよう|どうする|どうしたら|どうすれば|どっちがいい|どちらがいい)/.test(text)) {
     const targetDepth = chooseActionDepth(lastDepth);
     return {
@@ -260,6 +262,21 @@ function containsSeparationDecisionWords(text: string): boolean {
 
 /* ========= helpers ========= */
 
+function compactGoalText(value: unknown): string {
+  return String(value ?? '').replace(/\s+/g, '').trim();
+}
+
+function isExplicitActionQuestion(value: unknown): boolean {
+  const t = compactGoalText(value);
+
+  const asksAction =
+    /どうしよう|どうする|どうしたら|どうすれば|どっちがいい|どちらがいい|次に|何をすれば|なにをすれば|どう動けば|どう進め|行動|やること/u.test(t);
+
+  const asksMessage =
+    /なんて送|何て送|どう返|文面|文章|メッセージ|言葉にして|返信/u.test(t);
+
+  return asksAction && !asksMessage;
+}
 function normalize(s: string): string {
   return (s ?? '')
     .toLowerCase()
@@ -536,3 +553,6 @@ function chooseGoalKindFromDepth(depth?: Depth): IrosGoalKind {
   if (depth.startsWith('T')) return 'reframeIntention';
   return 'uncover';
 }
+
+
+

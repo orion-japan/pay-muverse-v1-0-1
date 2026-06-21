@@ -149,11 +149,11 @@ function buildSpinProgressMeaning(args: {
     }
 
     if (lead === 'C' && next === 'F') {
-      return 'いまは形にする段階で、次に流れ・一手へ進める。';
+      return 'いまは形にする段階で、次に流れ・一歩へ進める。';
     }
 
     if (lead === 'F' && next === 'T') {
-      return 'いまは流れ・一手を整え、必要なら引き受ける核へ戻す。';
+      return 'いまは流れ・一歩を整え、必要なら引き受ける核へ戻す。';
     }
   }
 
@@ -311,7 +311,7 @@ function buildWriterDirective(args: {
       : '',
     primary === 'I' && !plainMeaningQuestion ? '目的・意味・未来を中心に返し、ユーザー発話にない対立構造を足さない。' : '',
     primary === 'R' ? '相手の本心断定を避け、関係の受け取り方として返す。' : '',
-    primary === 'C' ? '具体へ落とすが、手順を増やしすぎない。直前文脈の対象に向けた短い文案・小さな一手を出す。ユーザーの質問文そのものを文例として引用しない。' : '',
+    primary === 'C' ? '具体へ落とすが、手順を増やしすぎない。Create時は文案や行動案から始めず、先に形象を一つ置く。その形象から自然に出る小さな一歩だけを添える。ユーザーの質問文そのものを文例として引用しない。' : '',
   ].filter(Boolean);
 
   return parts.join(' ');
@@ -437,5 +437,7 @@ export function buildHumanContextOrchestration(
     seedText: lines.join('\n').trim(),
   };
 }
+
+
 
 

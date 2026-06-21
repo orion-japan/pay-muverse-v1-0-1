@@ -1,4 +1,4 @@
-// =============================================
+﻿// =============================================
 // file: src/lib/iros/language/rephrase/writerCalls.ts
 // ✅ buildFirstPassMessages を「最後 user で終わる」ように拡張
 // ✅ HistoryDigest v1 をここで注入できるようにする（唯一の choke point）
@@ -5167,13 +5167,13 @@ const diagnosisFollowupBlock = (() => {
             'RELATIONSHIP_SOLUTION_CONCRETIZE (DO NOT OUTPUT):',
             `CURRENT_USER=${currentUserText}`,
             previousAssistantText ? `PREVIOUS_ASSISTANT=${previousAssistantText.slice(0, 360)}` : '',
-            'MODE=前回の抽象助言を、具体的な一手に変換する',
+            'MODE=前回の抽象助言を、先に形象へ変換し、必要なら具体的な一歩または一手に変換する',
             'RULE=状態観測に戻らない。「まだ決めきれない」「残っている」「開いたまま」などで終わらない',
-            'RULE=「待つ」「置いておく」だけで終わらせない。ユーザーが今できる一通・一手まで落とす',
+            'RULE=「待つ」「置いておく」だけで終わらせない。ただし文案例から始めず、先に形象を置き、必要なら今できる一通・一歩まで落とす',
             'RULE=追いかけたい気持ちを否定せず、でも重く送らせない',
-            'RULE=一度だけ送れる短文例を出す。例：「忙しいと思うけど、落ち着いたら連絡もらえたらうれしい」',
+            'RULE=短文例は、ユーザーが明示的に文面を求めた場合だけ出す。通常は先に形象を置き、必要なら一文の方向だけを添える',
             'RULE=送った後は連投しない、という境界まで入れる',
-            'RULE=ユーザーの状態が「何もできない」から「一手は打てた」に変わるように返す',
+            'RULE=ユーザーの状態が「何もできない」から「一歩は置けた」に変わるように返す',
             'OUTPUT=普通の会話文で、2〜4段落。番号・見出し・箇条書きにしない',
           ]
             .filter(Boolean)
@@ -5901,4 +5901,9 @@ export async function callWriterLLM(args: {
 
   return text;
 }
+
+
+
+
+
 

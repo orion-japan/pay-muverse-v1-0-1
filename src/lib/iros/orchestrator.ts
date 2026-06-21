@@ -1,4 +1,4 @@
-// file: src/lib/iros/orchestrator.ts
+﻿// file: src/lib/iros/orchestrator.ts
 // Iros Orchestrator — Will Engine（Goal / Priority）+ Continuity Engine 統合版
 // ✅ V2方針：Orchestrator は「判断（meta確定）」のみ。本文生成（LLM）は一切しない。
 // - 本文は handleIrosReply 側の render-v2（itWriter含む）が唯一の生成者。
@@ -987,6 +987,10 @@ const prevActive =
     const laneKey =
       String(
         (meta as any)?.extra?.intentBridge?.laneKey ??
+          (meta as any)?.extra?.createProgressBridge?.laneKey ??
+          (meta as any)?.extra?.laneKey ??
+          (meta as any)?.extra?.ctxPack?.createProgressBridge?.laneKey ??
+          (meta as any)?.extra?.ctxPack?.laneKey ??
           (meta as any)?.intentBridge?.laneKey ??
           (meta as any)?.ctxPack?.intentBridge?.laneKey ??
           '',
@@ -2206,6 +2210,10 @@ if (shouldFallbackNormalChat) {
 
     const laneKeyNowRaw =
       (meta as any)?.extra?.intentBridge?.laneKey ??
+      (meta as any)?.extra?.createProgressBridge?.laneKey ??
+      (meta as any)?.extra?.laneKey ??
+      (meta as any)?.extra?.ctxPack?.createProgressBridge?.laneKey ??
+      (meta as any)?.extra?.ctxPack?.laneKey ??
       (meta as any)?.intentBridge?.laneKey ??
       null;
 
@@ -2254,6 +2262,10 @@ if (shouldFallbackNormalChat) {
 
     const focusLabelNow =
       (meta as any)?.extra?.intentBridge?.focusLabel ??
+      (meta as any)?.extra?.createProgressBridge?.focusLabel ??
+      (meta as any)?.extra?.focusLabel ??
+      (meta as any)?.extra?.ctxPack?.createProgressBridge?.focusLabel ??
+      (meta as any)?.extra?.ctxPack?.focusLabel ??
       (meta as any)?.intentBridge?.focusLabel ??
       undefined;
 
@@ -3289,3 +3301,5 @@ return {
 };
 }
 }
+
+

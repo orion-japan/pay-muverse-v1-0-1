@@ -987,20 +987,20 @@ function buildForwardFallbackText(seed: string, userText: string): string {
   const variants: Array<() => string> = [
     () =>
       u
-        ? `一手：「${u}」を1行に縮めて、いちばん軽い着手を1つだけ決める。🪔`
-        : `一手：一点だけ名指しして、いちばん軽い着手を1つだけ決める。🪔`,
+        ? `一歩：「${u}」を1行に縮めて、いちばん軽い着手を1つだけ決める。🪔`
+        : `一歩：一点だけ名指しして、いちばん軽い着手を1つだけ決める。🪔`,
     () =>
       u
-        ? `一手：候補は増やさず、「${u}」の最小の一歩を1つだけ書く。🪔`
-        : `一手：候補は増やさず、最小の一歩を1つだけ書く。🪔`,
+        ? `一歩：候補は増やさず、「${u}」の最小の一歩を1つだけ書く。🪔`
+        : `一歩：候補は増やさず、最小の一歩を1つだけ書く。🪔`,
     () =>
       u
-        ? `一手：「誰に／いつ／何を」を1つにして、「${u}」を“行動”に落とす。🪔`
-        : `一手：「誰に／いつ／何を」を1つにして、行動に落とす。🪔`,
+        ? `一歩：「誰に／いつ／何を」を1つにして、「${u}」を“行動”に落とす。🪔`
+        : `一歩：「誰に／いつ／何を」を1つにして、行動に落とす。🪔`,
     () =>
       u
-        ? `一手：「${u}」の対象を1つに絞り、今日の着手を1つだけやる。🪔`
-        : `一手：対象を1つに絞り、今日の着手を1つだけやる。🪔`,
+        ? `一歩：「${u}」の対象を1つに絞り、今日の着手を1つだけやる。🪔`
+        : `一歩：対象を1つに絞り、今日の着手を1つだけやる。🪔`,
   ];
 
   const idx = variants.length ? hash32(key) % variants.length : 0;
@@ -5504,7 +5504,7 @@ function normForRecall(v: any): string {
                 : 'diagnosis_concretize_v1',
           line:
             diagnosisFollowupKindForWriter === 'action'
-              ? '直前の診断から次の一手を一つ返す'
+              ? '直前の診断から次の一歩を一つ返す'
               : diagnosisFollowupKindForWriter === 'consult_timing'
                 ? '直前の診断を材料にして、今かまだか・渡し方・温度を相談として返す'
                 : '直前の診断文をそのまま具体化して返す',
@@ -6289,6 +6289,7 @@ function normForRecall(v: any): string {
         hasTcfRotationSeed: flowSeed.includes('TCF_ROTATION_SEED'),
         hasTcfRotationDecision: flowSeed.includes('TCF_ROTATION_DECISION'),
         flowSeedHead: flowSeed.slice(0, 900),
+        flowSeedFull: flowSeed.slice(0, 5000),
       });
     /* ---------------------------
        4) PostProcess
@@ -7054,7 +7055,27 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
   // 最大件数に再調整
   tail = tail.slice(-Math.max(1, maxMsgs));
 
-  console.log('[IROS/HFW_PICKED_TAIL]', {
+    const shouldSuppressAssistantHistoryForImageFirstCreate =
+    String((out.metaForSave as any)?.extra?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+    String((out.metaForSave as any)?.extra?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+    String((out.metaForSave as any)?.extra?.ctxPack?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+    String((out.metaForSave as any)?.extra?.ctxPack?.createProgressBridge?.mode ?? '').trim() === 'image_first_create';
+
+  if (shouldSuppressAssistantHistoryForImageFirstCreate) {
+    const beforeLen = Array.isArray(tail) ? tail.length : 0;
+    tail = tail
+      .filter((m: any) => String(m?.role ?? '').trim() === 'user')
+      .slice(-Math.max(1, maxMsgs));
+
+    console.log('[IROS/HFW_IMAGE_FIRST_CREATE_ASSISTANT_DROPPED]', {
+      conversationId,
+      userCode,
+      beforeLen,
+      afterLen: tail.length,
+      roles: tail.map((m: any) => m?.role ?? null),
+    });
+  }
+console.log('[IROS/HFW_PICKED_TAIL]', {
     len: Array.isArray(tail) ? tail.length : null,
     items: Array.isArray(tail)
       ? tail.map((m) => ({
@@ -7288,6 +7309,26 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
         normalizeTargetKind(metaAny?.target_kind);
 
         const normalizedFinalGoalKind = normalizeGoalKind(finalGoalKind);
+        const preSeedCreateDirectiveForGoal =
+          cpAny?.preSeedCreateDirective && typeof cpAny.preSeedCreateDirective === 'object'
+            ? cpAny.preSeedCreateDirective
+            : exAny?.preSeedCreateDirective && typeof exAny.preSeedCreateDirective === 'object'
+              ? exAny.preSeedCreateDirective
+              : metaAny?.preSeedCreateDirective && typeof metaAny.preSeedCreateDirective === 'object'
+                ? metaAny.preSeedCreateDirective
+                : null;
+
+        const preSeedCreateModeForGoal = String(
+          preSeedCreateDirectiveForGoal?.mode ?? ''
+        ).trim();
+
+        const shouldPreferPreSeedCreateGoal =
+          preSeedCreateModeForGoal === 'image_first_create' ||
+          preSeedCreateModeForGoal === 'word_create' ||
+          preSeedCreateModeForGoal === 'action_create' ||
+          String(cpAny?.targetKind ?? '') === 'small_create' ||
+          String(cpAny?.replyGoal?.kind ?? '') === 'enableAction';
+
 
         const hasMemoryRecallNotFoundTurnContractForGoal = (...contracts: any[]): boolean => {
           return contracts.some((contract) => {
@@ -7383,19 +7424,13 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
                 ? 'uncover'
 
 
-                : normalizedFinalGoalKind === 'resonate'
-
-
-                  ? 'resonate'
-
-
-                  : existingStrongGoalKind ??
-
-
-                    normalizedFinalGoalKind ??
-
-
-                    'uncover';
+                : shouldPreferPreSeedCreateGoal
+                  ? 'enableAction'
+                  : normalizedFinalGoalKind === 'resonate'
+                    ? 'resonate'
+                    : existingStrongGoalKind ??
+                      normalizedFinalGoalKind ??
+                      'uncover';
 
         const seedTextForGoal = String(
           exAny?.slotPlanSeed ??
@@ -7437,16 +7472,12 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
               ? 'clarify'
 
 
-              : normalizedFinalGoalKind === 'resonate'
-
-
-                ? 'resonate'
-
-
-                : existingStrongTargetKind ??
-
-
-                  (chosenGoalKindRaw === 'commit' ? 'decide' : chosenGoalKindRaw);
+              : shouldPreferPreSeedCreateGoal
+                ? 'small_create'
+                : normalizedFinalGoalKind === 'resonate'
+                  ? 'resonate'
+                  : existingStrongTargetKind ??
+                    (chosenGoalKindRaw === 'commit' ? 'decide' : chosenGoalKindRaw);
 
         const chosenTargetKind =
           chosenTargetKindRaw === 'commit'
@@ -7465,6 +7496,8 @@ const maxMsgs = Math.max(1, Math.min(2, Math.floor(maxMsgsRaw || 2)));
             chosenTargetKind,
             finalGoalKind,
             shiftKindNow,
+            preSeedCreateModeForGoal,
+            shouldPreferPreSeedCreateGoal,
             cp_goalKind: cpAny?.goalKind ?? null,
             cp_targetKind: cpAny?.targetKind ?? null,
             cp_replyGoalKind:
@@ -13847,6 +13880,12 @@ return {
     };
   }
 }
+
+
+
+
+
+
 
 
 

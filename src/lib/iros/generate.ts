@@ -1,4 +1,4 @@
-// src/lib/iros/generate.ts
+﻿// src/lib/iros/generate.ts
 // iros — Writer: 1ターン返信生成コア（v2 / empty-body防止 / SpeechAct単一ソース / ITはtLayerModeActive単一）
 //
 // ✅ v2の最重要要件（今回の「content/text/assistantText が空」事故を潰す）
@@ -740,7 +740,7 @@ function buildWriterHintsFromMeta(meta: any): {
           'rule=MuSelfナレッジは本文材料ではなく、返答方向の制御だけに使う',
           'rule=恋愛・人間関係では、相手攻略だけで終わらせず、必要に応じてユーザー自身の反応へ日常語で戻す',
           'rule=自己受容・MS理論・ニコイチ問題などの専門語は、ユーザーが学びや根本原因を求めた時以外は出さない',
-          'rule=深度が浅い時は、現実対応と短い一手を優先し、背景理論を説明しない',
+          'rule=深度が浅い時は、現実対応と短い一歩を優先し、背景理論を説明しない',
         ]
       : [];
 
@@ -1440,3 +1440,4 @@ if (meta && typeof meta === 'object') {
     speechReason: String((speechDecision as any).reason ?? ''),
   };
 }
+

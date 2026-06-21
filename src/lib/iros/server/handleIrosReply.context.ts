@@ -1604,7 +1604,7 @@ export async function buildTurnContext(
   const diagnosisFollowupKind: 'concretize' | 'action' | 'rephrase' | 'deepen' | null =
     !isDiagnosisFollowup
       ? null
-      : /どうすれば|何をすれば|次は|どう動く|何から|どこから|どう扱えば|どう進める|進め方|一手|行動|対処/.test(followupSourceText)
+      : /どうすれば|何をすれば|次は|どう動く|何から|どこから|どう扱えば|どう進める|進め方|一歩|行動|対処/.test(followupSourceText)
         ? 'action'
         : /言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|わかりやすく|分かりやすく|つまり|どういうこと|説明して|解説して|補足して|どんなでしたっけ|どんなでしたか|何でしたっけ|診断の結果/.test(followupSourceText)
           ? 'rephrase'
@@ -2128,7 +2128,7 @@ export async function buildTurnContext(
             : 'つまり、表面の一言だけではなく、その前後にある流れまで含めて見る必要がある、ということです。';
 
           const actionLine = isRelationReason
-            ? 'なので今は、関係の意味を確認するより、一緒にできる具体的な一手を軽く出すほうが合います。'
+            ? 'なので今は、関係の意味を確認するより、一緒にできる具体的な一歩を軽く出すほうが合います。'
             : 'なので今は、結論を急ぐより、その状態がどこから出ているのかを分けて見るほうが合います。';
 
           const diagnosisFollowupReasonDetailDirectReply = [
@@ -3281,6 +3281,7 @@ export async function buildTurnContext(
     },
   };
 }
+
 
 
 

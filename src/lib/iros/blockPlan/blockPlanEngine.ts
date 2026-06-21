@@ -1,4 +1,4 @@
-// file: src/lib/iros/blockPlan/blockPlanEngine.ts
+﻿// file: src/lib/iros/blockPlan/blockPlanEngine.ts
 //
 // iros BlockPlan Engine v2 (自然化 / 例外演出ゲート)
 //
@@ -18,8 +18,8 @@
 //   目的：リメイク入口（裂け目）を“段構成”で支える。ただし過剰演出はしない（multi6固定 / 条件限定）。
 //
 // ✅ 重要：
-// - 「次の一手 / 最小の一手（NEXT_MIN）」は廃止（BlockPlan では出さない）。
-//   ※ “次の一手” は slotPlan(NEXT) の世界で扱う。BlockPlan は段落の整理だけ。
+// - 「次の一歩 / 最小の一歩（NEXT_MIN）」は廃止（BlockPlan では出さない）。
+//   ※ “次の一歩” は slotPlan(NEXT) の世界で扱う。BlockPlan は段落の整理だけ。
 
 export type BlockKind =
   | 'ENTRY'
@@ -695,3 +695,4 @@ export function renderBlockPlanSystem4(plan: BlockPlan): string {
     .filter(Boolean)
     .join('\n');
 }
+

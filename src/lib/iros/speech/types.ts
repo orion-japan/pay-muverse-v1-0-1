@@ -1,15 +1,15 @@
-// file: src/lib/iros/speech/types.ts
+﻿// file: src/lib/iros/speech/types.ts
 // iros — SpeechAct types
 //
 // ✅ 方針：MIRROR 完全廃止 → FORWARD に統一
-// - FORWARD は「観測で止めない」ための器：核/反転/一手 を最小で許可
+// - FORWARD は「観測で止めない」ための器：核/反転/一歩 を最小で許可
 // - 旧 reason（Q_BRAKE_SUPPRESS 等）は互換で残しつつ、新 reason も追加
 
 export type SpeechAct =
-  | 'FORWARD' // ✅ MIRRORの完全置換（最小の一手へ）
+  | 'FORWARD' // ✅ MIRRORの完全置換（最小の一歩へ）
   | 'NAME'    // 核の命名（助言禁止）
   | 'FLIP'    // 反転（助言禁止）
-  | 'COMMIT'; // T条件成立時のみ固定（ここだけ最小の一手OK）
+  | 'COMMIT'; // T条件成立時のみ固定（ここだけ最小の一歩OK）
 
 
 export type SpeechDecisionReason =
@@ -44,16 +44,16 @@ export type SpeechDecision = {
 };
 
 // ✅ SpeechActごとの「許可される出力器」
-// - FORWARD：核/反転/一手 を最小で許可（観測で止めない）
+// - FORWARD：核/反転/一歩 を最小で許可（観測で止めない）
 // - NAME/FLIP：助言系は封じる
-// - COMMIT：固定 + 一手（最大2） + 問い(最大1) まで（enforce側で最終制限）
+// - COMMIT：固定 + 一歩（最大2） + 問い(最大1) まで（enforce側で最終制限）
 export type AllowSchema =
 
 
   | {
       act: 'FORWARD';
       allowLLM: true;
-      maxLines: 4; // 最小構造（観測→核→反転→一手）を想定
+      maxLines: 4; // 最小構造（観測→核→反転→一歩）を想定
       fields: {
         // 観測は任意（入ってもOKだが、観測だけで止まらない）
         observe?: true;
@@ -97,7 +97,7 @@ export type AllowSchema =
       maxLines: 14; // ここだけ少し長いのを許可（IT書式）
       fields: {
         commit: true;  // 固定文
-        actions: true; // 最小の一手（最大2）
+        actions: true; // 最小の一歩（最大2）
         // 問いは “任意”（enforce側で最大1に制限）
         question?: true;
         observe?: true;
@@ -142,3 +142,4 @@ export function defaultAllowSchema(act: SpeechAct): AllowSchema {
       };
   }
 }
+

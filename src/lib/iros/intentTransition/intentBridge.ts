@@ -1,4 +1,4 @@
-// src/lib/iros/intentTransition/intentBridge.ts
+﻿// src/lib/iros/intentTransition/intentBridge.ts
 // iros — Intent Bridge (R→I explicit / I→T reconfirm + Lane decision)
 
 export type IntentBand = 'I';
@@ -109,7 +109,7 @@ export function decideLaneKey(args: {
   if (wantsExplicitCandidateList) return 'IDEA_BAND';
 
   // ------------------------------------------------
-  // C) 決断要求 / 次の一手要求 / 比較して選びたい要求
+  // C) 決断要求 / 次の一歩要求 / 比較して選びたい要求
   //    → T_CONCRETIZE
   // ------------------------------------------------
   const wantsDecision =
@@ -258,3 +258,4 @@ function shouldDebug(): boolean {
     return false;
   }
 }
+

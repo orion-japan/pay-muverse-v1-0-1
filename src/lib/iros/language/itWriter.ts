@@ -1,9 +1,9 @@
-// file: src/lib/iros/language/itWriter.ts
+﻿// file: src/lib/iros/language/itWriter.ts
 // iros — IT Writer（未来言語 / 構造化生成）
 //
 // 目的：
 // - forceIT が立ったターンだけ「I→T→C→F 構造」を “見える書式” で出す
-// - 重複行（同じ一手の連打）をゼロにする
+// - 重複行（同じ一歩の連打）をゼロにする
 // - スマホ半面〜半面ちょい（約 10〜16 行 / 220〜380 字目安）を狙う
 //
 // 方針：
@@ -447,7 +447,7 @@ export function writeIT(input: ITWriterInput): ITWriterOutput {
   // 問い（tVector優先）
   const question =
     tvNextC ||
-    (coreFinal ? `この核心「${coreFinal}」を、いま一つ形にするなら何にする？` : 'いま確定する一言（または一手）は？');
+    (coreFinal ? `この核心「${coreFinal}」を、いま一つ形にするなら何にする？` : 'いま確定する一言（または一歩）は？');
 
   // ✅ “時間の押し付け”をしない（主権回収）
   const timingQ1 = '今すぐでなくても大丈夫です。';
@@ -583,3 +583,4 @@ export function writeIT(input: ITWriterInput): ITWriterOutput {
     },
   };
 }
+

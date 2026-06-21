@@ -1,4 +1,4 @@
-// src/lib/iros/allow/buildAllow.ts
+﻿// src/lib/iros/allow/buildAllow.ts
 // iros — allow builder (進行圧コントローラ)
 //
 // 📘 spec: allow 仕様書（IROS 進行制御レイヤー）
@@ -24,7 +24,7 @@ export type BuildAllowArgs = {
   qPrimary?: string | null; // e.g. "Q2"
   itOk?: boolean | null; // IT確定/コミット状態（true の時だけ commit_hint を許可）
 
-  // ✅ 明示的に「具体的な一手/最小行動」を要求された場合の救済フラグ
+  // ✅ 明示的に「具体的な一歩/最小行動」を要求された場合の救済フラグ
   // - lane を上書きせず、allow.concretize を“そのターンだけ”許可するために使う
   explicitConcretize?: boolean | null;
 };
@@ -111,7 +111,7 @@ export function buildAllow(args: BuildAllowArgs): Allow {
   // Q補正
   const strengthAfterQ = clampStrength((strengthAfterRepeat as number) + qStrengthDelta(args.qPrimary ?? null));
 
-  // ✅ 明示的な「最小の一手/具体化」要求がある場合は、押しを1だけ戻す（最低限の推進圧）
+  // ✅ 明示的な「最小の一歩/具体化」要求がある場合は、押しを1だけ戻す（最低限の推進圧）
   // - Q3 で strength=0 に落ちても、ここで 1 に戻せる
   const explicitConcretize = args.explicitConcretize === true;
   const strengthFinal = clampStrength((strengthAfterQ as number) + (explicitConcretize ? 1 : 0));
@@ -149,3 +149,4 @@ export function formatAllowSystemText(allow: Allow): string {
     `strength: ${allow.strength}`,
   ].join('\n');
 }
+

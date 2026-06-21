@@ -1,4 +1,4 @@
-// src/lib/iros/will/continuityEngine.ts
+﻿// src/lib/iros/will/continuityEngine.ts
 
 import type { Depth, QCode } from '../system';
 import type { IrosGoal } from './goalEngine';
@@ -11,6 +11,21 @@ export type ContinuityContext = {
 };
 
 // 深層トリガー語（I3へ昇格させる単語）
+function compactForContinuity(value: unknown): string {
+  return String(value ?? '').replace(/\s+/g, '').trim();
+}
+
+function isExplicitCreateConvergenceRequest(value: unknown): boolean {
+  const t = compactForContinuity(value);
+
+  const asksAction =
+    /どうすれば|どうしたら|どうしよう|どうする|次に|何をすれば|なにをすれば|どう動けば|どう進め|行動|やること/u.test(t);
+
+  const asksMessage =
+    /なんて送|何て送|どう返|文面|文章|メッセージ|言葉にして|返信/u.test(t);
+
+  return asksAction && !asksMessage;
+}
 const DEEP_TRIGGER = [
   '深層',
   '深い意図',
@@ -37,7 +52,14 @@ export function applyGoalContinuity(goal: IrosGoal, ctx: ContinuityContext): Iro
   }
 
   // ② Depth の連続性（ジャンプ調整）
-  if (lastDepth && adjusted.targetDepth) {
+  // 明示的Create要求では、S/RからC1への収束を「深度ジャンプ」として丸めない。
+  // ここは SRI の安定回転より、TCF / Create 収束を優先する。
+  const explicitCreateConvergence =
+    adjusted.kind === 'enableAction' &&
+    adjusted.targetDepth === 'C1' &&
+    isExplicitCreateConvergenceRequest(userText);
+
+  if (lastDepth && adjusted.targetDepth && !explicitCreateConvergence) {
     adjusted = {
       ...adjusted,
       targetDepth: softenDepthJump(lastDepth, adjusted.targetDepth),
@@ -57,6 +79,9 @@ export function applyGoalContinuity(goal: IrosGoal, ctx: ContinuityContext): Iro
       finalDepth: adjusted.targetDepth,
       // finalQ は "goal.targetQ" の状態（継承しない）
       finalQ: adjusted.targetQ ?? null,
+      explicitCreateConvergence,
+      goalKind: adjusted.kind ?? null,
+      userHead: String(userText ?? '').slice(0, 80),
     });
   }
 
@@ -90,3 +115,5 @@ function softenDepthJump(last: Depth, target: Depth): Depth {
 
   return DEPTH_SEQUENCE[nextIndex];
 }
+
+
