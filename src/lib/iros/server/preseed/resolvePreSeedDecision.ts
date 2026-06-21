@@ -1,4 +1,4 @@
-﻿import { buildCognitionMap } from '../../cognition/buildCognitionMap';
+import { buildCognitionMap } from '../../cognition/buildCognitionMap';
 import { cognitionMapToSeedText, type CognitionMap } from '../../cognition/cognitionMap';
 import { buildIrDiagnosisPreSeed } from './buildIrDiagnosisPreSeed';
 import { resolveUniversalPreSeed } from './universal';
@@ -1671,6 +1671,38 @@ export async function resolvePreSeedDecision(
       matchedPattern: 'active_screenshot_diagnosis_context_deictic_followup',
     }));
   }
+  const historyIrDiagnosisBeforeScreenshotWeak = extractLatestIrDiagnosisFromHistory(historyForTurn);
+  const compactUserTextBeforeScreenshotWeak = String(userText ?? '')
+    .trim()
+    .replace(/[　\s]+/g, '');
+
+  const shouldPreferHistoryIrBeforeScreenshotWeak =
+    Boolean(historyIrDiagnosisBeforeScreenshotWeak?.diagnosisText) &&
+    /(もう少し|深め|詳しく|詳細|続きを|続き|この診断|その診断|診断の内容|内容)/u.test(
+      compactUserTextBeforeScreenshotWeak
+    );
+
+  if (historyDisplayId && strength === 'weak' && shouldPreferHistoryIrBeforeScreenshotWeak) {
+    console.log('[IROS/PRE_SEED_ENGINE][HISTORY_IR_DIAGNOSIS_BEFORE_SCREENSHOT_WEAK]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode,
+      targetKey: historyIrDiagnosisBeforeScreenshotWeak?.targetKey ?? null,
+      targetLabel: historyIrDiagnosisBeforeScreenshotWeak?.targetLabel ?? null,
+      screenshotDisplayId: historyDisplayId,
+      userTextHead: userText.slice(0, 120),
+      reason: 'latest_ir_diagnosis_has_priority_before_screenshot_weak',
+    });
+
+    return withCognitionMap(buildHistoryIrDiagnosisFollowupDecision({
+      userText,
+      userCode: args.userCode,
+      conversationId: args.conversationId,
+      traceId: args.traceId,
+      historyIr: historyIrDiagnosisBeforeScreenshotWeak!,
+    }));
+  }
+
   if (historyDisplayId && strength === 'weak') {
     console.log('[IROS/PRE_SEED_ENGINE][HISTORY_SCREENSHOT_CONTEXT_AMBIGUOUS]', {
       traceId: args.traceId,
