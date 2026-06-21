@@ -1189,11 +1189,52 @@ let extraSoT: Record<string, any> = {
           ? extraSoT.ctxPack
           : {};
 
+      const preSeedConvergesToIntention =
+        preSeedFlowDirective.flowDirection === 'converge_to_intention' ||
+        preSeedFlowDirective.convergenceMode === 'toward_intention' ||
+        preSeedFlowDirective.intentionConvergence?.intentionReached === true;
+
+      const preSeedConvergesToCreate =
+        preSeedFlowDirective.convergenceMode === 'toward_create' ||
+        preSeedFlowDirective.convergenceMode === 'toward_small_action' ||
+        preSeedFlowDirective.shouldUseCreate === true ||
+        preSeedFlowDirective.shouldUseSmallAction === true;
+
+      const preSeedCtxPatch = preSeedConvergesToIntention
+        ? {
+            goalKind: 'resonate',
+            targetKind: 'intention_convergence',
+            shiftKind: 'narrow_shift',
+            shiftHint: 'preseed_intention_convergence',
+            shiftIntent: 'name_core_without_overdeepening',
+            replyGoal: { kind: 'resonate' },
+            preSeedWriterGuidance: preSeedFlowDirective.writerGuidance,
+            preSeedWriterSeed: preSeedFlowDirective.seedDirection?.writerSeed ?? null,
+          }
+        : preSeedConvergesToCreate
+          ? {
+              goalKind: 'enableAction',
+              targetKind: 'small_create',
+              shiftKind: 'decide_shift',
+              shiftHint: 'preseed_small_create',
+              shiftIntent: 'place_small_action',
+              replyGoal: { kind: 'enableAction' },
+              preSeedWriterGuidance: preSeedFlowDirective.writerGuidance,
+              preSeedWriterSeed: preSeedFlowDirective.seedDirection?.writerSeed ?? null,
+            }
+          : {
+              preSeedWriterGuidance: preSeedFlowDirective.writerGuidance,
+              preSeedWriterSeed: preSeedFlowDirective.seedDirection?.writerSeed ?? null,
+            };
+
       extraSoT = {
         ...extraSoT,
+        ...preSeedCtxPatch,
         preSeedFlowDirective,
+        preSeedFlowDirectiveAppliedToGoal: preSeedConvergesToIntention || preSeedConvergesToCreate,
         ctxPack: {
           ...previousCtxPack,
+          ...preSeedCtxPatch,
           preSeedFlowDirective,
         },
       };
