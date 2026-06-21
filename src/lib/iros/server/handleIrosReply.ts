@@ -1,4 +1,4 @@
-﻿// file: src/lib/iros/server/handleIrosReply.ts
+// file: src/lib/iros/server/handleIrosReply.ts
 // iros — handleIrosReply (V2 / single-writer friendly)
 //
 // ✅ 方針（ここを徹底）
@@ -4727,6 +4727,53 @@ function normForRecall(v: any): string {
             // MEMORY_SEED_RESTORE_FROM_HISTCTX
             // 保存済み ctxPack から、次ターンの Writer seed 正本に必要な Memory 系を復元する
             if (!isCategoryOnlyConsultation && histCtx && typeof histCtx === 'object') {
+              const restoredRelationTargetLabel =
+                typeof histCtx.targetLabel === 'string' && histCtx.targetLabel.trim()
+                  ? histCtx.targetLabel.trim()
+                  : typeof histCtx.relationshipContextCaptureTargetLabel === 'string' &&
+                      histCtx.relationshipContextCaptureTargetLabel.trim()
+                    ? histCtx.relationshipContextCaptureTargetLabel.trim()
+                    : typeof histCtx.relationshipCaptureTargetLabel === 'string' &&
+                        histCtx.relationshipCaptureTargetLabel.trim()
+                      ? histCtx.relationshipCaptureTargetLabel.trim()
+                      : null;
+
+              if (
+                !preOrchCtxPack.targetLabel &&
+                restoredRelationTargetLabel &&
+                /(気になっている相手|好きな人|片思い|相手)/u.test(restoredRelationTargetLabel)
+              ) {
+                preOrchCtxPack.targetLabel = restoredRelationTargetLabel;
+                preOrchCtxPack.relationshipCapture = {
+                  ...(preOrchCtxPack.relationshipCapture &&
+                  typeof preOrchCtxPack.relationshipCapture === 'object'
+                    ? preOrchCtxPack.relationshipCapture
+                    : {}),
+                  targetLabel: restoredRelationTargetLabel,
+                  kind:
+                    typeof histCtx.relationshipContextCaptureKind === 'string'
+                      ? histCtx.relationshipContextCaptureKind
+                      : 'one_sided_love',
+                  status: 'candidate',
+                  confidence: 'low',
+                  source: 'history_provisional_relation_target',
+                };
+                preOrchCtxPack.relationshipContext = {
+                  ...(preOrchCtxPack.relationshipContext &&
+                  typeof preOrchCtxPack.relationshipContext === 'object'
+                    ? preOrchCtxPack.relationshipContext
+                    : {}),
+                  targetLabel: restoredRelationTargetLabel,
+                  kind:
+                    typeof histCtx.relationshipContextCaptureKind === 'string'
+                      ? histCtx.relationshipContextCaptureKind
+                      : 'one_sided_love',
+                  status: 'candidate',
+                  confidence: 'low',
+                  source: 'history_provisional_relation_target',
+                };
+              }
+
               if (!preOrchCtxPack.relationshipMemory && histCtx.relationshipMemory) {
                 preOrchCtxPack.relationshipMemory = histCtx.relationshipMemory;
               }
