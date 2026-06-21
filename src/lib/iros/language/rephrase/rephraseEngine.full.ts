@@ -2709,6 +2709,30 @@ return blocks;
     logRephraseOk(debug, out.map((x) => x.key), finalText, 'IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD');
     logRephraseAfterAttach(debug, out.map((x) => x.key), finalText, 'IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD', metaExtra);
 
+    if (explicitActionCreateNow) {
+      const rcCFinalText = [
+        'いまは、一歩を決める前に、戻りたい現実の形を少し膨らませる段階です。',
+        '',
+        '見えている形は、「外側に押されて動く前に、自分の中心へ戻る入口を探している形」です。',
+        '',
+        'まず、その入口がどこにあるかを一つだけ見てください。',
+        '',
+        '行動を増やすためではなく、自分の流れに戻る場所を思い出すためです。'
+      ].join('\\n');
+
+      console.log('[IROS/RC_C_IMAGINAL_EXPAND_EARLY_FINAL]', {
+        userText: userNow,
+        outHead: rcCFinalText.slice(0, 120),
+      });
+
+      return {
+        ok: true,
+        out: rcCFinalText,
+        reason: 'rc_c_imaginal_expand',
+        mode: 'RC_C_IMAGINAL_EXPAND_EARLY_FINAL_GUARD',
+      } as any;
+    }
+
     if (!explicitWordCreateNow && !explicitActionCreateNow) {
     return {
       ok: true,
