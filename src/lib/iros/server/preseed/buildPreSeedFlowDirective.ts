@@ -354,7 +354,7 @@ function buildWriterSeed(args: {
   }
 
   if (args.actionCreate) {
-    return 'PRESEED_ACTION_CREATE_DIRECTIVE: このターンはAction Createである。A軸の形象固定文に戻さない。ユーザーが求めているのは、今日やること・次の一歩・小さな行動である。返答は、実行できる一歩を一つだけ具体的に出す。手順を増やしすぎない。文面だけで終わらない。';
+    return 'PRESEED_ACTION_CREATE_DIRECTIVE: このターンはAction Createである。A軸の形象固定文に戻さない。ユーザーが求めているのは、今日やること・次の一歩・小さな行動である。返答は、実行できる一歩を一つだけ具体的に出す。手順を増やしすぎない。文面だけで終わらない。「一手」という語は使わず、「一歩」に統一する。';
   }
 
   if (args.wordCreate) {
@@ -527,7 +527,7 @@ export function buildPreSeedFlowDirective(
         : fallbackFlowAcceptance
           ? 'ユーザーはすでに小さく動く方向を受け取っている。新しい課題や選択肢を増やさず、その動きが現実に流れ始めていることを短く支える。'
           : fallbackActionCreate
-            ? 'PRESEED_ACTION_CREATE_DIRECTIVE: このCreateはAction Createである。形象固定文に戻さず、今日やること・次の一歩・小さな行動を一つだけ具体的に出す。'
+            ? 'PRESEED_ACTION_CREATE_DIRECTIVE: このCreateはAction Createである。形象固定文に戻さず、今日やること・次の一歩・小さな行動を一つだけ具体的に出す。「一手」という語は使わず、「一歩」に統一する。'
             : fallbackWordCreate
               ? 'PRESEED_WORD_CREATE_DIRECTIVE: このCreateはWord Createである。返信文・文面・一文を求めているため、形象固定文に戻さない。冒頭から使える短い言葉を出す。'
               : fallbackImageFirstCreate

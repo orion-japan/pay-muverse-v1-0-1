@@ -918,7 +918,7 @@ export function writeLlmGateToMeta(metaForSave: any, patch: LlmGateProbeOutput['
   (metaForSave.extra as any).finalForceCall = patch.finalForceCall ?? null;
   (metaForSave.extra as any).finalForceCallReason = patch.finalForceCallReason ?? null;
 
-  // ✅ 新憲法：seed/本文の長さを直下にも残す（調査の1手短縮）
+  // ✅ 新憲法：seed/本文の長さを直下にも残す（調査の一歩短縮）
   (metaForSave.extra as any).resolvedTextLen = patch.resolvedTextLen ?? null;
   (metaForSave.extra as any).rewriteSeedLen = patch.rewriteSeedLen ?? null;
 }

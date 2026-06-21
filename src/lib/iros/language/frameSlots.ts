@@ -179,7 +179,7 @@ export function buildSlots(args: {
       if (s.id === 'OBS') return { ...s, hint: '観測（ストーリー化せず、事実だけ）' };
       if (s.id === 'SHIFT') return { ...s, hint: '視点転換（評価→運用／責め→扱い）' };
       if (s.id === 'NEXT')
-        return { ...s, hint: '次の一歩（極小の1手／成功確率を上げる）' };
+        return { ...s, hint: '次の一歩（極小の一歩／成功確率を上げる）' };
       return s;
     });
   }
