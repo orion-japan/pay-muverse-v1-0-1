@@ -1,4 +1,4 @@
-﻿// src/lib/iros/slotPlans/normalChat.ts
+// src/lib/iros/slotPlans/normalChat.ts
 // iros — normal chat slot plan (FINAL-only, flow-first, sofia-aligned)
 //
 // ✅ 新憲法（全文整理）
@@ -36,7 +36,7 @@ import { resolveReplyMode } from '../conversation/resolveReplyMode';
 import { shouldUseQuestionSlots, buildQuestionSlots } from './QuestionSlots';
 
 // ✅ レーン型（IntentBridgeと同じ定義を使う）
-import type { LaneKey } from '../intentTransition/intentBridge';
+import type { LaneKey, ConcretizeOrigin, CreateMode } from '../intentTransition/intentBridge';
 
 // ✅ SHIFT preset（ルールをここに寄せる）
 import { SHIFT_PRESET_C_SENSE_HINT, SHIFT_PRESET_T_CONCRETIZE } from '../language/shiftPresets';
@@ -127,6 +127,90 @@ function normalizeLaneKeyOrNull(v: unknown): LaneKey | null {
   return v === 'IDEA_BAND' || v === 'T_CONCRETIZE' ? v : null;
 }
 
+function resolveConcretizeCreateContext(args: {
+  userText: string;
+  laneKey?: LaneKey | null;
+  flowDelta?: string | null;
+  ctxPack?: any;
+  meta?: any;
+}): {
+  concretizeOrigin: ConcretizeOrigin;
+  createMode: CreateMode;
+  createReady: boolean;
+  createReason: string;
+} {
+  const t = norm(args.userText);
+  const laneKey = args.laneKey ?? null;
+  const ctxPack = args.ctxPack ?? args.meta?.extra?.ctxPack ?? {};
+  const meta = args.meta ?? {};
+
+  const flowDelta = String(
+    args.flowDelta ??
+      ctxPack?.flow?.delta ??
+      meta?.extra?.flow?.delta ??
+      meta?.flow?.delta ??
+      ''
+  )
+    .trim()
+    .toUpperCase();
+
+  const hasTSignal =
+    meta?.itTriggered === true ||
+    meta?.it_triggered === true ||
+    meta?.tLayerModeActive === true ||
+    meta?.t_layer_mode_active === true ||
+    typeof meta?.tLayerHint === 'string' ||
+    typeof meta?.t_layer_hint === 'string' ||
+    typeof meta?.tVector === 'string' ||
+    typeof meta?.t_vector === 'string' ||
+    Boolean(meta?.intentAnchorKey) ||
+    Boolean(meta?.intent_anchor_key) ||
+    Boolean(meta?.intent_anchor) ||
+    Boolean(meta?.intentAnchor) ||
+    Boolean(ctxPack?.tcfStarter) ||
+    Boolean(ctxPack?.preSeedCreateSignal);
+
+  const isScUnstuck =
+    /(じゃあどうしたら|じゃあどうすれば|結局どうしたら|結局どうすれば|もう分からない|もうわからない|もう無理|全部だめ|どうせ|しんどい|疲れた|限界)/u.test(t);
+
+  const isRelationshipRc =
+    /(相手|好きな人|あの人|その人|返事|返信|反応|距離|近づ|重い|離れ|嫌われ|不安|確認したい|気持ちが分から|気持ちがわから)/u.test(t);
+
+  if (laneKey === 'T_CONCRETIZE' && hasTSignal) {
+    return {
+      concretizeOrigin: 'TC_CREATE',
+      createMode: 'imaginal_create',
+      createReady: true,
+      createReason: 't_signal_present',
+    };
+  }
+
+  if (isScUnstuck) {
+    return {
+      concretizeOrigin: 'SC_UNSTUCK',
+      createMode: 'unstuck_action',
+      createReady: false,
+      createReason: 'overwhelmed_or_throwaway_howto',
+    };
+  }
+
+  if (laneKey === 'T_CONCRETIZE' && (flowDelta === 'RETURN' || isRelationshipRc)) {
+    return {
+      concretizeOrigin: 'RC_STABILIZE',
+      createMode: 'stabilize_action',
+      createReady: false,
+      createReason: isRelationshipRc ? 'relationship_reaction_howto' : 'return_flow_howto',
+    };
+  }
+
+  return {
+    concretizeOrigin: 'GENERAL_ACTION',
+    createMode: 'general_action',
+    createReady: false,
+    createReason: 'general_concretize',
+  };
+}
+
 // ✅ Phase11: advance判定のための “橋” を必ず出す
 // - evidenceLog.ts は key==='NEXT' または content.startsWith('@NEXT_HINT') を検出し、
 //   さらに mode==='advance_hint' を拾えれば advance=1 になる。
@@ -135,6 +219,10 @@ function buildNextHintSlot(args: {
   laneKey?: LaneKey | null;
   flowDelta?: string | null;
   memoryRecallCheck?: boolean | null;
+  ctxPack?: any;
+  meta?: any;
+  concretizeOrigin?: ConcretizeOrigin | null;
+  createMode?: CreateMode | null;
 }): NormalChatSlot {
   const laneKey = safeLaneKey(args.laneKey);
   const delta = args.flowDelta ? String(args.flowDelta) : null;
@@ -155,25 +243,63 @@ function buildNextHintSlot(args: {
     };
   }
 
+  const createCtx =
+    laneKey === 'T_CONCRETIZE'
+      ? resolveConcretizeCreateContext({
+          userText: args.userText,
+          laneKey,
+          flowDelta: delta,
+          ctxPack: args.ctxPack,
+          meta: args.meta,
+        })
+      : null;
+
+  const concretizeOrigin =
+    args.concretizeOrigin ??
+    createCtx?.concretizeOrigin ??
+    null;
+
+  const createMode =
+    args.createMode ??
+    createCtx?.createMode ??
+    null;
 
   const mode =
     laneKey === 'T_CONCRETIZE'
-      ? 'imaginal_create_hint'
+      ? createMode === 'imaginal_create'
+        ? 'tc_create_hint'
+        : createMode === 'stabilize_action'
+          ? 'rc_stabilize_hint'
+          : createMode === 'unstuck_action'
+            ? 'sc_unstuck_hint'
+            : 'general_action_hint'
       : 'resonance_hint';
 
   const hint =
     laneKey === 'T_CONCRETIZE'
-      ? 'いまは、一歩を決める前に、戻りたい現実のイメージを少し膨らませる段階です。見えている形は、「急いで何かを決める前に、いったん自分の流れを思い出す形」です。まず、その流れが戻る入口を一つだけ見つけてください。何かを増やすためではなく、自分のペースに戻る場所を思い出すためです。'
+      ? concretizeOrigin === 'TC_CREATE'
+        ? '作る現実の形、今日置く入口、言葉または行動への落とし込みまで出す。抽象語だけで終わらせない。'
+        : concretizeOrigin === 'RC_STABILIZE'
+          ? '相手の反応を取りに行かず、不安で動くのか自然に差し出せるのかを分ける。送るなら短い一言、薄ければ重ねない。'
+          : concretizeOrigin === 'SC_UNSTUCK'
+            ? '全部を決めさせず、負荷を下げる。今日見る一点だけに絞り、すぐ行動させない。'
+            : '一つだけ実行可能な入口を出し、判断条件を添える。'
       : laneKey === 'IDEA_BAND'
         ? '候補を増やさず、いま出ている差だけを見やすくする'
         : 'いま触れている輪郭を、説明へ戻さずそのまま残す';
 
-        const message =
-        laneKey === 'T_CONCRETIZE'
-          ? '次は行動を増やさず、形象を先に置くのが合っています。'
-          : laneKey === 'IDEA_BAND'
-            ? '次は候補を増やすより、いま出ている差だけを見やすくするのが合っています。'
-            : '次へ進めるより、いま残っている感触をそのまま置く。';
+  const message =
+    laneKey === 'T_CONCRETIZE'
+      ? concretizeOrigin === 'TC_CREATE'
+        ? '次は形象で終わらず、現実へ置ける入口まで作る。'
+        : concretizeOrigin === 'RC_STABILIZE'
+          ? '次は抽象的な形ではなく、不安で動くか自然に差し出すかの判断線を出す。'
+          : concretizeOrigin === 'SC_UNSTUCK'
+            ? '次は答えを増やさず、まず負荷を下げて一点だけ見る。'
+            : '次は具体を一つだけ出す。'
+      : laneKey === 'IDEA_BAND'
+        ? '次は候補を増やすより、いま出ている差だけを見やすくするのが合っています。'
+        : '次へ進めるより、いま残っている感触をそのまま置く';
 
   return {
     key: 'NEXT',
@@ -183,10 +309,16 @@ function buildNextHintSlot(args: {
       mode,
       laneKey: laneKey ?? null,
       delta,
-      hint: clamp(hint, 80),
-      message: clamp(message, 120),
+      concretizeOrigin,
+      createMode,
+      createReady: createCtx?.createReady ?? false,
+      createReason: createCtx?.createReason ?? null,
+      hint: clamp(hint, 120),
+      message: clamp(message, 160),
     })}`,
   };
+
+
 }
 
 function buildSafeSlot(args: { reason?: string | null; laneKey?: LaneKey | null; flowDelta?: string | null }): NormalChatSlot {
@@ -916,7 +1048,17 @@ function buildImageFirstCreateSlots(args: { userText: string; ctxPack?: any; met
   return [
     { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { laneKey: 'T_CONCRETIZE', createAxis: 'imaginal_form_create', focusDomain: domain, user: null }) },
     { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 't_concretize', intent: 'place_imaginal_form', hint: 'image_first_create_v1', line, source: 'tcf_rotation', createAxis: 'imaginal_form_create', focusDomain: domain, writerPattern: 'IMAGE_FIRST_CREATE_V1', contract: ['first_line_places_imaginal_form', 'no_action_plan', 'no_message_draft', 'no_checklist', 'plain_words'], rules: { no_action_plan: true, no_message_draft: true, no_send_decision: true, no_checklist: true, no_bullets: true, questions_max: 0, lines_max: 4, forbidden_words: ['紙に書く', 'メモする', '一つに絞る', '短く送る', '送るなら', '送るか送らないか', '一通', '文面', '返信', '返事', '連絡'] }, seed_text: ['形象：' + line, '出力ルール：行動案・文案例・送る/送らない判断を冒頭に出さない。', 'まず内側に置く形を一つ提示し、その意味を短く説明する。', '最後に必要なら、その形を崩さない小さな保持だけを添える。'].join('\n') }) },
-    { key: 'NEXT', role: 'assistant', style: 'neutral', content: '@NEXT_HINT ' + JSON.stringify({ mode: 'imaginal_create_hint', laneKey: 'T_CONCRETIZE', delta: args.flowDelta ?? null, hint: 'いまは、一歩を決める前に、戻りたい現実のイメージを少し膨らませる段階です。見えている形は、「急いで何かを決める前に、いったん自分の流れを思い出す形」です。まず、その流れが戻る入口を一つだけ見つけてください。何かを増やすためではなく、自分のペースに戻る場所を思い出すためです。', message: '次は行動を増やさず、形象を先に置く' }) },
+    { key: 'NEXT', role: 'assistant', style: 'neutral', content: '@NEXT_HINT ' + JSON.stringify({
+      mode: 'tc_create_hint',
+      laneKey: 'T_CONCRETIZE',
+      delta: args.flowDelta ?? null,
+      concretizeOrigin: 'TC_CREATE',
+      createMode: 'imaginal_create',
+      createReady: true,
+      createReason: 'image_first_create_slots',
+      hint: '作る現実の形、今日置く入口、言葉または行動への落とし込みまで出す。抽象語だけで終わらせない。',
+      message: '次は形象で止めず、現実へ置ける入口まで作る。'
+    }) },
   ];
 }
 
@@ -962,12 +1104,12 @@ function buildShiftTConcretize(seedText: string, focusLabel?: string) {
     imageFirstCreateSourceForSlots.includes('PRESEED_CREATE_DIRECTIVE_FORCE') ||
     imageFirstCreateSourceForSlots.includes('image_first_create') ||
     imageFirstCreateSourceForSlots.includes('place_create') ||
-    imageFirstCreateSourceForSlots.includes('相手の反応待ちから、自分の時間を先に戻す形') ||
+
     /^では、私は次に何をすればいいですか[？?]?$/.test(String(raw ?? '').trim()) ||
     /^私は次に何をすればいいですか[？?]?$/.test(String(raw ?? '').trim());
 
   const imageFirstFocusLabelForSlots =
-    '相手の反応待ちから、自分の時間を先に戻す形';
+    focus || '今の文脈で現実に置く入口';
   const payload = {
     kind: 't_concretize',
     intent: 'place_imaginal_form',
@@ -2394,18 +2536,3 @@ export function buildNormalChatSlotPlan(args: {
     slots,
   };
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

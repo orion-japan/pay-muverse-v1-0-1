@@ -1,4 +1,4 @@
-﻿// src/lib/iros/intentTransition/intentBridge.ts
+// src/lib/iros/intentTransition/intentBridge.ts
 // iros — Intent Bridge (R→I explicit / I→T reconfirm + Lane decision)
 
 export type IntentBand = 'I';
@@ -7,8 +7,24 @@ export type LaneKey =
   | 'IDEA_BAND'
   | 'T_CONCRETIZE';
 
+
+export type ConcretizeOrigin =
+  | 'TC_CREATE'
+  | 'RC_STABILIZE'
+  | 'SC_UNSTUCK'
+  | 'GENERAL_ACTION';
+
+export type CreateMode =
+  | 'imaginal_create'
+  | 'stabilize_action'
+  | 'unstuck_action'
+  | 'general_action';
 export type IntentBridgeResult = {
   laneKey: LaneKey;
+  concretizeOrigin?: ConcretizeOrigin;
+  createMode?: CreateMode;
+  createReady?: boolean;
+  createReason?: string;
   intentBand?: IntentBand;
   intentEntered?: true;
   itReconfirmed?: true;
