@@ -797,12 +797,6 @@ function hasDiagnosisReference(userTextRaw: string): boolean {
     /スクショ診断/u.test(text) ||
     /スクリーンショット診断/u.test(text) ||
     /ir診断/iu.test(text) ||
-    /相手の気持ち/u.test(text) ||
-    /約束/u.test(text) ||
-    /来ると思/u.test(text) ||
-    /来ますか/u.test(text) ||
-    /深め/u.test(text) ||
-    /続き/u.test(text) ||
     /screenshotdiagnosis/iu.test(compact) ||
     /screenshot/iu.test(compact)
   );
@@ -1162,25 +1156,9 @@ async function fetchLatestScreenshotDiagnosisForConversation(args: {
       });
     }
   }
-
-  const byUser = await supabase
-    .from('mu_screenshot_diagnosis_logs')
-    .select(select)
-    .eq('user_code', userCode)
-    .not('diagnosis_text', 'is', null)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (byUser?.error) {
-    console.warn('[IROS/PRE_SEED_ENGINE][LATEST_SCREENSHOT_FETCH_BY_USER_FAILED]', {
-      userCode,
-      conversationId,
-      error: byUser.error?.message ?? byUser.error,
-    });
-  }
-
-  return byUser?.data ?? null;
+  // 新規会話へ userCode 単位の過去スクショ診断を自動継承しない。
+  // 明示ID指定は detectPreSeedIntent -> buildScreenshotDiagnosisPreSeed 側で処理する。
+  return null;
 }
 
 export async function resolvePreSeedDecision(
@@ -2048,48 +2026,9 @@ export async function resolvePreSeedDecision(
       userCode: args.userCode ?? null,
       userTextHead: userText.slice(0, 120),
     });
-
-    return withCognitionMap({
-      kind: 'normal_chat',
-      confidence: 0.55,
-      sourceAuthority: 'user_text',
-      sourceKind: 'diagnosis_context_ambiguous',
-      sourceId: null,
-      sourceText: userText,
-      route: 'direct_reply',
-      seedText: null,
-      directReply: 'スクショ診断の続きとして見ますか？それとも、ir診断の続きを見ますか？',
-      writerInput: null,
-      shouldBypassWriter: true,
-      shouldBypassRephrase: true,
-      shouldUsePreSeedWriter: false,
-      shouldSuppressHistoryForWriter: true,
-      shouldSuppressSimilarFlow: true,
-      shouldSuppressSlotPlan: true,
-      shouldSuppressMemoryDelta: true,
-      shouldSuppressIntuitionCandidate: true,
-      shouldSuppressNormalResonance: true,
-      shouldOpenContextThread: false,
-      contextThreadCode: null,
-      ctxPackPatch: {
-        presentationKind: 'diagnosis_context_clarification',
-        replyGoal: { kind: 'clarify' },
-        qCode: 'Q1',
-        depthStage: 'S1',
-      },
-      metaPatch: {
-        presentationKind: 'diagnosis_context_clarification',
-        diagnosisContextAmbiguous: true,
-        inputKind: 'diagnosis_reference',
-        goalKind: 'clarify',
-        q_code: 'Q1',
-        depth_stage: 'S1',
-      },
-      debug: {
-        reason: 'diagnosis_context_ambiguous',
-        matchedPattern: 'diagnosis_reference_without_context',
-      },
-    });
+    // 診断文脈が確定していない場合は、確認文を返さず通常処理へ落とす。
+    // 「相手の気持ち」「深めて」「続き」などの通常相談語だけで
+    // スクショ診断 / ir診断 の選択肢を出さない。
   }
   try {
     const universalCandidate = await resolveUniversalPreSeed({
@@ -2237,25 +2176,3 @@ if (
 
   return null;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
