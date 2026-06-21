@@ -749,10 +749,17 @@ function buildRelationProbabilityFlowRescue(outText: string, extra: any): string
   const hasRelationContext =
     /(好きな人|片思い|相手|恋愛|近づ|重い|返事|反応|気持ち|距離|相手の反応)/u.test(guardContext);
 
+  const isOldBadShapeTemplate =
+    /(いま先に置く形は|自分の立ち位置|自分の中心|その形から外れない)/u.test(visible);
+
   const isBadCreateLeak =
     /(いま先に置く形は|自分の立ち位置|自分の中心|その形から外れない|作る現実の形|今日置く入口|言葉または行動への落とし込み|抽象語だけで終わらせない|内部指示を本文に出さず|文脈に合う自然な一歩だけを返す|preseed_image_first_create|image_first_create|imaginal_form_create)/u.test(visible);
 
-  if (!hasRelationContext || !isBadCreateLeak) return null;
+  if (!isBadCreateLeak) return null;
+
+  // 旧「形を置く」テンプレは、文脈に関係なく本文として禁止。
+  // それ以外のCreate漏れは、恋愛・相手反応文脈のときだけ救済する。
+  if (!isOldBadShapeTemplate && !hasRelationContext) return null;
 
   return [
     'いまは、気持ちを強く見せるより、相手が返しやすい小ささで動くのがいいです。',
