@@ -1,4 +1,4 @@
-﻿export type ActiveContextAnchorKind =
+export type ActiveContextAnchorKind =
   | 'diagnosis'
   | 'relationship'
   | 'previous_event';
