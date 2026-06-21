@@ -2630,6 +2630,71 @@ return blocks;
 
   // (B) LLM
   const userText = norm(opts?.userText ?? '');
+
+  // IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD_V1
+  // image_first_create は NORMAL_COMPRESSED_V1 / CONSULT_ANSWER に渡すと
+  // 「送る・文面・一通」へ戻るため、rephrase入口で決定的に完了させる。
+  const imageFirstEarlyGuardSeed = [
+    slotsAny.map((x: any) => String(x?.text ?? x?.content ?? x?.value ?? '')).join('\n'),
+    safeContextToText((opts as any)?.userContext ?? null),
+    safeContextToText((opts as any)?.extra ?? null),
+    safeContextToText((opts as any)?.ctxPack ?? null),
+    safeContextToText((opts as any)?.meta ?? null),
+  ].join('\n');
+
+  const isImageFirstEarlyGuard =
+    /IMAGE_FIRST_CREATE_V1|image_first_create_v1|imaginal_form_create|place_imaginal_form/u.test(imageFirstEarlyGuardSeed);
+
+  if (isImageFirstEarlyGuard) {
+    const userNow = String(userText ?? '').trim();
+    const genericNextActionAsk =
+      /次に.*何をすれば|どうすれば|どうしたら|どう動けば|どう進めれば|何から/u.test(userNow);
+    const explicitRelationNow =
+      /相手|恋愛|彼|彼女|好き|会う|会え|連絡|LINE|ライン|返信|返事|気持ち/u.test(userNow);
+
+    const focus =
+      genericNextActionAsk && !explicitRelationNow
+        ? '次に動く前に、今の自分の立ち位置を一つ置く形'
+        : '行動を増やす前に、内側に先に置く形';
+
+    const finalText = [
+      `いま先に置く形は、「${focus}」です。`,
+      'これは、やることを増やすためではなく、動く前に自分の中心を戻すための形です。',
+      '今日は、その形から外れないことだけで十分です。',
+    ].join('\n\n');
+
+    const out = [{ key: 'OBS', text: finalText }];
+    const metaExtra: any = {
+      rephraseBlocks: finalText.split(/\n\n+/).map((text) => ({ text, kind: 'p' })),
+      rephraseHead: safeHead(finalText, 120),
+      imageFirstCreateFinalGuard: true,
+    };
+
+    console.log('[IROS/IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD]', {
+      traceId: (debug as any)?.traceId ?? null,
+      conversationId: (debug as any)?.conversationId ?? null,
+      userCode: (debug as any)?.userCode ?? null,
+      userText: userNow,
+      focus,
+      outHead: safeHead(finalText, 120),
+    });
+
+    logRephraseOk(debug, out.map((x) => x.key), finalText, 'IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD');
+    logRephraseAfterAttach(debug, out.map((x) => x.key), finalText, 'IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD', metaExtra);
+
+    return {
+      ok: true,
+      slots: out,
+      meta: {
+        inKeys,
+        outKeys: out.map((x) => x.key),
+        rawLen: finalText.length,
+        rawHead: safeHead(finalText, 120),
+        note: 'IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD',
+        extra: metaExtra,
+      },
+    };
+  }
   const metaTextBase = safeContextToText(opts?.userContext ?? null);
 
   const extraForUnderstanding: any =
