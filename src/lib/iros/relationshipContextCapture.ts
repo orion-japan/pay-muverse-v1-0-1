@@ -265,7 +265,7 @@ function extractRelationshipContext(userText: string): ExtractedRelationshipCont
   if (isQuestionOrConsultation(s) || isRelationshipConsultation(s)) return null;
 
   const patterns: Array<[RegExp, RelationshipKind, string, string | null]> = [
-    [/(片思い|好きな人|一方的に好き)/u, 'one_sided_love', '片思いの相手', 'has_feelings'],
+    [/(片思い|好きな人|一方的に好き)/u, 'one_sided_love', '気になっている相手', 'has_feelings'],
     [/(両思い)/u, 'mutual_romance', '両思いの関係', 'mutual_feelings'],
     [/(恋人|付き合っている|交際中|彼氏|彼女)/u, 'romantic_partner', '恋人・交際関係', 'partner'],
     [/(元恋人|元カレ|元カノ|元彼|元彼女|前の恋人)/u, 'ex_partner', '元恋人', 'ex_partner'],
