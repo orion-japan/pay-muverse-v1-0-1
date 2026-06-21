@@ -267,51 +267,184 @@ export function buildPreSeedFlowDirective(
     const decision = args.preSeedDecision ?? args.decision;
 
   if (!decision) {
+    const fallbackText = normalizeText(userText);
+
+    const fallbackInputIntent: PreSeedFlowDirective['inputIntent'] =
+      /送るなら|なんて送|何て送|返信|返事|文章|文を|言い方|作って|作る|create|行動|どうすれば|次/.test(fallbackText)
+        ? 'create'
+        : /なぜ|なんで|理由|どうして|結局|つまり|ということ|ってこと/.test(fallbackText)
+          ? 'explain_reason'
+          : /深め|もっと|詳しく|掘り下げ/.test(fallbackText)
+            ? 'deepen'
+            : /違う|修正|ちょっと違う|そうじゃない/.test(fallbackText)
+              ? 'correct'
+              : /続き|さっき|この話|前の/.test(fallbackText)
+                ? 'continue'
+                : 'unknown';
+
+    const hasIntentionSignal =
+      /結局|つまり|私は|自分|方向|意図|核心|本質|気づ|わかった|分かった|待ちすぎ|待ち過ぎ|手放|選ぶ|決める/.test(fallbackText);
+
+    const hasRelationSignal =
+      /相手|反応|関係|彼|彼女|みゆ|リナ|返事|返信|嫌われ|合わせ/.test(fallbackText);
+
+    const hasEmotionSignal =
+      /不安|怖い|つらい|苦しい|焦る|迷う|気になる|寂しい|悲しい|怒り/.test(fallbackText);
+
+    const hasApprovalRisk =
+      /嫌われ|怒らせ|見捨て|合わせ|相手が望|相手のため|返事がないから|反応がないから/.test(fallbackText);
+
+    const fallbackCreateReady = fallbackInputIntent === 'create';
+
+    const fallbackCurrentAxis: PreSeedFlowDirective['currentAxis'] =
+      fallbackCreateReady
+        ? 'C'
+        : hasIntentionSignal
+          ? 'I'
+          : hasRelationSignal
+            ? 'R'
+            : hasEmotionSignal
+              ? 'S'
+              : null;
+
+    const fallbackCurrentBand: PreSeedFlowDirective['currentBand'] =
+      fallbackCurrentAxis === 'C' || fallbackCurrentAxis === 'R'
+        ? 'RC'
+        : fallbackCurrentAxis === 'I'
+          ? 'IT'
+          : fallbackCurrentAxis === 'S'
+            ? 'SF'
+            : null;
+
+    const fallbackCreateSource: PreSeedFlowDirective['createSource'] =
+      fallbackCreateReady && hasRelationSignal
+        ? 'R_relation'
+        : fallbackCreateReady && hasEmotionSignal
+          ? 'S_emotion'
+          : hasIntentionSignal
+            ? 'I_intention'
+            : 'unknown';
+
+    const fallbackCreateIntegrity: PreSeedFlowDirective['createIntegrity'] =
+      fallbackCreateReady && hasApprovalRisk
+        ? 'distorted'
+        : fallbackCreateReady && hasRelationSignal && !hasIntentionSignal
+          ? 'partially_aligned'
+          : hasIntentionSignal
+            ? 'aligned'
+            : 'unknown';
+
+    const fallbackCreateDistortionRisk: PreSeedFlowDirective['createDistortionRisk'] =
+      hasApprovalRisk
+        ? 'strong'
+        : fallbackCreateReady && hasRelationSignal && !hasIntentionSignal
+          ? 'medium'
+          : fallbackCreateReady
+            ? 'weak'
+            : 'weak';
+
+    const fallbackShouldHoldAction =
+      fallbackCreateReady && (fallbackCreateDistortionRisk === 'strong' || fallbackCreateIntegrity === 'distorted');
+
+    const fallbackShouldUseCreate =
+      fallbackCreateReady && !fallbackShouldHoldAction;
+
+    const fallbackShouldUseSmallAction =
+      fallbackShouldUseCreate && fallbackCreateDistortionRisk !== 'strong';
+
+    const fallbackIntentionReached =
+      hasIntentionSignal && !fallbackCreateReady;
+
+    const fallbackShouldLimitDeepening =
+      fallbackIntentionReached || fallbackCreateReady;
+
+    const fallbackFlowDirection: PreSeedFlowDirective['flowDirection'] =
+      fallbackShouldHoldAction
+        ? 'hold_before_create'
+        : fallbackShouldUseSmallAction
+          ? 'let_flow_continue'
+          : fallbackShouldUseCreate
+            ? 'place_create'
+            : fallbackIntentionReached
+              ? 'converge_to_intention'
+              : fallbackCurrentAxis === 'R'
+                ? 'relate_context'
+                : fallbackCurrentAxis === 'S'
+                  ? 'continue_observation'
+                  : 'return_to_input';
+
+    const fallbackConvergenceMode: PreSeedFlowDirective['convergenceMode'] =
+      fallbackShouldUseSmallAction
+        ? 'toward_small_action'
+        : fallbackShouldUseCreate
+          ? 'toward_create'
+          : fallbackIntentionReached
+            ? 'toward_intention'
+            : 'none';
+
+    const fallbackWriterSeed =
+      fallbackShouldHoldAction
+        ? 'ユーザー入力だけではCreateの由来に関係圧や不安反応が混じる可能性があるため、行動提案を急がず、自分の方向を失っていないかを先に整える。'
+        : fallbackShouldUseSmallAction
+          ? 'ユーザーは言葉や行動の形を求めているため、大きな結論にせず、小さく実行できる一手へ収束させる。'
+          : fallbackIntentionReached
+            ? 'ユーザー入力だけでも意図の輪郭が出ているため、これ以上の相手分析・原因分析を増やさず、核心を短く言葉にして収束させる。'
+            : null;
+
     return {
       source: 'preseed_input_flow',
-      inputIntent: 'unknown',
-      currentAxis: null,
-      currentBand: null,
-      flowDirection: 'return_to_input',
-      convergenceMode: 'none',
+      inputIntent: fallbackInputIntent,
+      currentAxis: fallbackCurrentAxis,
+      currentBand: fallbackCurrentBand,
+      flowDirection: fallbackFlowDirection,
+      convergenceMode: fallbackConvergenceMode,
       shouldDeepen: false,
-      shouldLimitDeepening: false,
-      shouldUseCreate: false,
-      shouldUseSmallAction: false,
-      shouldHoldAction: false,
-      intentionFormed: false,
-      tInsightReady: false,
+      shouldLimitDeepening: fallbackShouldLimitDeepening,
+      shouldUseCreate: fallbackShouldUseCreate,
+      shouldUseSmallAction: fallbackShouldUseSmallAction,
+      shouldHoldAction: fallbackShouldHoldAction,
+      intentionFormed: hasIntentionSignal,
+      tInsightReady: fallbackIntentionReached,
       intentionConvergence: {
-        intentionReached: false,
-        shouldStopAnalysis: false,
-        shouldNameCore: false,
-        shouldPlaceCreate: false,
-        shouldMoveToSmallAction: false,
-        shouldLetFlowContinue: false,
+        intentionReached: fallbackIntentionReached,
+        shouldStopAnalysis: fallbackIntentionReached,
+        shouldNameCore: fallbackIntentionReached,
+        shouldPlaceCreate: fallbackShouldUseCreate,
+        shouldMoveToSmallAction: fallbackShouldUseSmallAction,
+        shouldLetFlowContinue: fallbackShouldUseSmallAction,
       },
-      createReady: false,
-      createSource: 'unknown',
-      createIntegrity: 'unknown',
-      createDistortionRisk: 'weak',
-      distortionReason: null,
+      createReady: fallbackCreateReady,
+      createSource: fallbackCreateSource,
+      createIntegrity: fallbackCreateIntegrity,
+      createDistortionRisk: fallbackCreateDistortionRisk,
+      distortionReason: hasApprovalRisk ? 'approval_seeking' : null,
       seedDirection: {
         targetLabel: null,
         targetType: null,
-        flowSeed: 'return_to_input',
-        writerSeed: null,
-        avoidSeed: ['対象が未確定のため、断定せず入力へ戻す'],
+        flowSeed: fallbackFlowDirection,
+        writerSeed: fallbackWriterSeed,
+        avoidSeed: [
+          '対象が未確定のため、相手の心を断定しない',
+          fallbackShouldLimitDeepening ? '意図の輪郭が出ているため、分析を増やしすぎない' : null,
+          fallbackShouldHoldAction ? '関係圧から出たCreateをそのまま行動化しない' : null,
+        ].filter(Boolean) as string[],
       },
       writerGuidance: {
         mustKeepTarget: false,
-        mustNotOverDeepen: false,
-        shouldShiftFromAnalysisToPlacement: false,
-        shouldOfferSmallCreate: false,
+        mustNotOverDeepen: fallbackShouldLimitDeepening,
+        shouldShiftFromAnalysisToPlacement: fallbackIntentionReached || fallbackShouldUseCreate,
+        shouldOfferSmallCreate: fallbackShouldUseSmallAction,
         shouldAvoidOtherMindAssertion: true,
         shouldAvoidLargeAction: true,
         shouldLeaveOpenSpace: true,
       },
       evidence: {
-        fromUserInput: ['decision=null'],
+        fromUserInput: [
+          'decision=null',
+          hasIntentionSignal ? 'fallback:intention_signal' : null,
+          hasRelationSignal ? 'fallback:relation_signal' : null,
+          fallbackCreateReady ? 'fallback:create_request' : null,
+        ].filter(Boolean) as string[],
         fromFlowMeta: [],
         fromHistory: [],
       },
@@ -509,6 +642,9 @@ export function buildPreSeedFlowDirective(
     },
   };
 }
+
+
+
 
 
 
