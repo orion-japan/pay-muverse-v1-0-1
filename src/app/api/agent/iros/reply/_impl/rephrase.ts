@@ -2956,7 +2956,105 @@ try {
   const resExtra =
     (res as any)?.meta?.extra ?? (res as any)?.metaForSave?.extra ?? (res as any)?.extra ?? null;
 
-  const depthPersonalityMeta = {
+  
+  // REPHRASE_PRESERVE_RAW_FINAL_FLAGS_SYNC_V2
+  // rephraseEngine.full.ts 側で deterministic final を確定した場合、
+  // route.ts の STYLE_NORM_FINAL まで preserveRawFinal 系フラグを必ず伝播する。
+  {
+    const preserveSource: any =
+      ((res as any)?.meta?.extra && typeof (res as any).meta.extra === 'object')
+        ? (res as any).meta.extra
+        : ((res as any)?.metaForSave?.extra && typeof (res as any).metaForSave.extra === 'object')
+          ? (res as any).metaForSave.extra
+          : ((res as any)?.extra && typeof (res as any).extra === 'object')
+            ? (res as any).extra
+            : null;
+
+    const preserveRawFinal =
+      Boolean(preserveSource?.preserveRawFinal) ||
+      Boolean(preserveSource?.skipStyleNorm) ||
+      Boolean(preserveSource?.skipPracticalGuard) ||
+      Boolean(preserveSource?.imageFirstCreateFinalGuard);
+
+    if (preserveRawFinal) {
+      const preservedFinalText =
+        String(
+          preserveSource?.rephraseFinalText ??
+            preserveSource?.out ??
+            preserveSource?.text ??
+            preserveSource?.content ??
+            (res as any)?.out ??
+            (res as any)?.text ??
+            (res as any)?.content ??
+            (res as any)?.meta?.out ??
+            (res as any)?.meta?.text ??
+            (res as any)?.meta?.content ??
+            ''
+        ).trim();
+
+      const preservePatch: any = {
+        preserveRawFinal: true,
+        skipStyleNorm: true,
+        skipPracticalGuard: true,
+        imageFirstCreateFinalGuard: true,
+      };
+
+      if (preservedFinalText) {
+        preservePatch.rephraseFinalText = preservedFinalText;
+        preservePatch.finalAssistantText = preservedFinalText;
+        preservePatch.finalAssistantTextCandidate = preservedFinalText;
+        preservePatch.resolvedText = preservedFinalText;
+        preservePatch.out = preservedFinalText;
+        preservePatch.text = preservedFinalText;
+        preservePatch.content = preservedFinalText;
+        preservePatch.rephraseHead = preservedFinalText;
+        preservePatch.rephraseBlocks = preservedFinalText
+          .split(/\n\n+/)
+          .map((text: string) => ({ text: text.trim(), kind: 'p' }))
+          .filter((b: any) => b.text);
+      }
+
+      Object.assign(extraMerged as any, preservePatch);
+
+      (extraMerged as any).ctxPack =
+        (extraMerged as any).ctxPack && typeof (extraMerged as any).ctxPack === 'object'
+          ? (extraMerged as any).ctxPack
+          : {};
+
+      Object.assign((extraMerged as any).ctxPack, preservePatch);
+
+      meta.extra = {
+        ...(meta.extra ?? {}),
+        ...preservePatch,
+        ctxPack: {
+          ...(((meta.extra as any)?.ctxPack && typeof (meta.extra as any).ctxPack === 'object')
+            ? (meta.extra as any).ctxPack
+            : {}),
+          ...preservePatch,
+        },
+      };
+
+      console.log('[IROS/rephraseAttach][PRESERVE_RAW_FINAL_FLAGS_SYNC]', {
+        traceId,
+        conversationId,
+        userCode,
+        preserveRawFinal: true,
+        preservedFinalTextLen: preservedFinalText.length,
+        preservedFinalTextHead: preservedFinalText.slice(0, 120),
+      });
+    } else {
+      console.log('[IROS/rephraseAttach][PRESERVE_RAW_FINAL_FLAGS_SYNC_CHECK]', {
+        traceId,
+        conversationId,
+        userCode,
+        preserveRawFinal: false,
+        resExtraKeys: Object.keys((res as any)?.meta?.extra ?? {}),
+        resKeys: Object.keys(res ?? {}),
+      });
+    }
+  }
+
+const depthPersonalityMeta = {
     personDepthPattern: personDepthPatternForLLM,
     person_depth_pattern: personDepthPatternForLLM,
     depthDelta: depthDeltaForLLM,
