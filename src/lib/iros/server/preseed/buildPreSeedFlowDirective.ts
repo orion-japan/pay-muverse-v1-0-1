@@ -354,7 +354,7 @@ function buildWriterSeed(args: {
   }
 
   if (args.actionCreate) {
-    return 'PRESEED_ACTION_CREATE_DIRECTIVE: このターンはAction Createである。ただし、行動指示を直接出すのではない。まず、未来から届いている形象を一つ置く。その形象は「これから作る未来」ではなく、「すでに内側では知っている未来を思い出す形」である。その後、その未来に接続するための小さな一歩を一つだけ添える。「書く」「メモする」「片づける」を第一候補にしない。行動は、未来の形に触れる入口として出す。「十分」「それだけでいい」などの評価語で閉じず、その一歩が未来の入口になる形で結ぶ。旧表現は使わず、「一歩」に統一する。';
+    return 'PRESEED_ACTION_CREATE_DIRECTIVE: このターンはAction Createである。ただしC軸を一種類にしない。TCI/SRI/T由来のCなら、未来から届いている形象を一つ置き、その未来に接続する一歩を添える。RC由来のCなら、周囲の反応で動く前に、まず作りたい現実のイメージを膨らませる。RCでは、いきなり行動指示・文面作成・片づけ・メモ書きに落とさない。まず『どんな現実に戻りたいのか』の形を一つ広げ、その形から見える小さな入口だけを添える。「書く」「メモする」「片づける」を第一候補にしない。行動は、未来の形に触れる入口として出す。「十分」「それだけでいい」などの評価語で閉じず、その一歩が未来の入口になる形で結ぶ。旧表現は使わず、「一歩」に統一する。';
   }
 
   if (args.wordCreate) {
@@ -527,7 +527,7 @@ export function buildPreSeedFlowDirective(
         : fallbackFlowAcceptance
           ? 'ユーザーはすでに小さく動く方向を受け取っている。新しい課題や選択肢を増やさず、その動きが現実に流れ始めていることを短く支える。'
           : fallbackActionCreate
-            ? 'PRESEED_ACTION_CREATE_DIRECTIVE: このCreateはAction Createである。ただし、行動指示を直接出すのではない。まず未来から届いている形象を一つ置き、その形象に接続する小さな一歩を一つだけ添える。「書く」「メモする」「片づける」を第一候補にしない。「十分」「それだけでいい」で閉じない。旧表現は使わず、「一歩」に統一する。'
+            ? 'PRESEED_ACTION_CREATE_DIRECTIVE: このCreateはAction Createである。ただしC軸を一種類にしない。TCI/SRI/T由来なら未来想起の一歩を出してよい。RC由来なら、直接行動を決めず、まず作りたい現実のイメージを膨らませる。RCでは、文面作成・メモ書き・片づけに逃がさない。形象を広げ、その形から見える小さな入口だけを添える。旧表現は使わず、「一歩」に統一する。'
             : fallbackWordCreate
               ? 'PRESEED_WORD_CREATE_DIRECTIVE: このCreateはWord Createである。返信文・文面・一文を求めているため、形象固定文に戻さない。冒頭から使える短い言葉を出す。'
               : fallbackImageFirstCreate
