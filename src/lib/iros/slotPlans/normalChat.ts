@@ -278,7 +278,7 @@ function buildNextHintSlot(args: {
   const hint =
     laneKey === 'T_CONCRETIZE'
       ? concretizeOrigin === 'TC_CREATE'
-        ? '作る現実の形、今日置く入口、言葉または行動への落とし込みまで出す。抽象語だけで終わらせない。'
+        ? '内部指示を本文に出さず、文脈に合う自然な一歩だけを返す。'
         : concretizeOrigin === 'RC_STABILIZE'
           ? '相手の反応を取りに行かず、不安で動くのか自然に差し出せるのかを分ける。送るなら短い一言、薄ければ重ねない。'
           : concretizeOrigin === 'SC_UNSTUCK'
@@ -1056,8 +1056,8 @@ function buildImageFirstCreateSlots(args: { userText: string; ctxPack?: any; met
       createMode: 'imaginal_create',
       createReady: true,
       createReason: 'image_first_create_slots',
-      hint: '作る現実の形、今日置く入口、言葉または行動への落とし込みまで出す。抽象語だけで終わらせない。',
-      message: '次は形象で止めず、現実へ置ける入口まで作る。'
+      hint: '内部指示を本文に出さず、文脈に合う自然な一歩だけを返す。',
+      message: '次は内部指示を出さず、自然な一歩だけを返す。'
     }) },
   ];
 }
@@ -1076,12 +1076,15 @@ function buildShiftTConcretize(seedText: string, focusLabel?: string) {
   const isTcCreate =
     /PRESEED_CREATE_DIRECTIVE_FORCE|image_first_create|place_create|TC_CREATE|imaginal_create/u.test(source);
 
-  const origin = isTcCreate
-    ? 'TC_CREATE'
+  // 恋愛・相手反応・不安文脈では、Createより確率フロー/安定化を優先する。
+  // 「どうしたらいい？」は新しい形象を作るより、
+  // 直前の良い流れを次の一歩へ変換する方が自然。
+  const origin = isRelationshipRc
+    ? 'RC_STABILIZE'
     : isScUnstuck
       ? 'SC_UNSTUCK'
-      : isRelationshipRc
-        ? 'RC_STABILIZE'
+      : isTcCreate
+        ? 'TC_CREATE'
         : 'GENERAL_ACTION';
 
   const mode = origin === 'TC_CREATE'
@@ -1108,9 +1111,9 @@ function buildShiftTConcretize(seedText: string, focusLabel?: string) {
           focus ? `対象：${focus}` : '',
           raw ? `状況：${raw}` : '',
           '出力ルール：抽象語で終わらない。「形」「中心」「立ち位置」「戻りたい現実のイメージ」を最終出力に使わない。',
-          '目的：相手の気持ちを当てに行かず、不安で動くのか自然に一言だけ差し出せるのかを分ける。',
-          '必須：送るなら短い一言。返事が薄ければ重ねない。見るのは相手が返してくる温度。',
-          '形式：3〜6行。箇条書き禁止。質問で終わらない。',
+          '目的：直前の良い流れを、確率の高い次の一歩として本文化する。相手の気持ちを当てに行かず、不安で動くのか自然に一言だけ差し出せるのかを分ける。',
+          '必須：送るなら短い一言。返事が薄ければ重ねない。相手が広げてきたら少しだけ返す。見るのは相手の気持ちの断定ではなく、返ってくる温度。',
+          '形式：3〜6行。箇条書き禁止。質問で終わらない。内部指示やseed文を本文に出さない。',
         ].filter(Boolean).join('\n')
       : origin === 'SC_UNSTUCK'
         ? [
@@ -1124,8 +1127,8 @@ function buildShiftTConcretize(seedText: string, focusLabel?: string) {
           ? [
               focus ? `対象：${focus}` : '',
               raw ? `状況：${raw}` : '',
-              '出力ルール：作る現実の形、今日置く入口、言葉または行動への落とし込みまで出す。',
-              '禁止：抽象語だけで終わること。行動リスト化すること。',
+              '出力ルール：内部指示を本文に出さない。本文では、文脈に合う自然な一歩だけを書く。',
+              '禁止：内部指示の復唱。抽象語だけで終わること。行動リスト化すること。',
               '形式：3〜6行。箇条書き禁止。',
             ].filter(Boolean).join('\n')
           : [
