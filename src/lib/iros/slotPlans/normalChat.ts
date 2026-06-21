@@ -163,7 +163,7 @@ function buildNextHintSlot(args: {
 
   const hint =
     laneKey === 'T_CONCRETIZE'
-      ? 'いまは、一歩を決める前に、戻りたい現実の形を少し膨らませる段階です。見えている形は、「外側に押されて動く前に、自分の中心へ戻る入口を探している形」です。まず、その入口がどこにあるかを一つだけ見てください。行動を増やすためではなく、自分の流れに戻る場所を思い出すためです。'
+      ? 'いまは、一歩を決める前に、戻りたい現実のイメージを少し膨らませる段階です。見えている形は、「急いで何かを決める前に、いったん自分の流れを思い出す形」です。まず、その流れが戻る入口を一つだけ見つけてください。何かを増やすためではなく、自分のペースに戻る場所を思い出すためです。'
       : laneKey === 'IDEA_BAND'
         ? '候補を増やさず、いま出ている差だけを見やすくする'
         : 'いま触れている輪郭を、説明へ戻さずそのまま残す';
@@ -916,7 +916,7 @@ function buildImageFirstCreateSlots(args: { userText: string; ctxPack?: any; met
   return [
     { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { laneKey: 'T_CONCRETIZE', createAxis: 'imaginal_form_create', focusDomain: domain, user: null }) },
     { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 't_concretize', intent: 'place_imaginal_form', hint: 'image_first_create_v1', line, source: 'tcf_rotation', createAxis: 'imaginal_form_create', focusDomain: domain, writerPattern: 'IMAGE_FIRST_CREATE_V1', contract: ['first_line_places_imaginal_form', 'no_action_plan', 'no_message_draft', 'no_checklist', 'plain_words'], rules: { no_action_plan: true, no_message_draft: true, no_send_decision: true, no_checklist: true, no_bullets: true, questions_max: 0, lines_max: 4, forbidden_words: ['紙に書く', 'メモする', '一つに絞る', '短く送る', '送るなら', '送るか送らないか', '一通', '文面', '返信', '返事', '連絡'] }, seed_text: ['形象：' + line, '出力ルール：行動案・文案例・送る/送らない判断を冒頭に出さない。', 'まず内側に置く形を一つ提示し、その意味を短く説明する。', '最後に必要なら、その形を崩さない小さな保持だけを添える。'].join('\n') }) },
-    { key: 'NEXT', role: 'assistant', style: 'neutral', content: '@NEXT_HINT ' + JSON.stringify({ mode: 'imaginal_create_hint', laneKey: 'T_CONCRETIZE', delta: args.flowDelta ?? null, hint: 'いまは、一歩を決める前に、戻りたい現実の形を少し膨らませる段階です。見えている形は、「外側に押されて動く前に、自分の中心へ戻る入口を探している形」です。まず、その入口がどこにあるかを一つだけ見てください。行動を増やすためではなく、自分の流れに戻る場所を思い出すためです。', message: '次は行動を増やさず、形象を先に置く' }) },
+    { key: 'NEXT', role: 'assistant', style: 'neutral', content: '@NEXT_HINT ' + JSON.stringify({ mode: 'imaginal_create_hint', laneKey: 'T_CONCRETIZE', delta: args.flowDelta ?? null, hint: 'いまは、一歩を決める前に、戻りたい現実のイメージを少し膨らませる段階です。見えている形は、「急いで何かを決める前に、いったん自分の流れを思い出す形」です。まず、その流れが戻る入口を一つだけ見つけてください。何かを増やすためではなく、自分のペースに戻る場所を思い出すためです。', message: '次は行動を増やさず、形象を先に置く' }) },
   ];
 }
 
