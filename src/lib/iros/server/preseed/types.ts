@@ -48,6 +48,121 @@ export type PreSeedTcfStarter = {
   nextFocus: string | null;
 };
 
+export type SritcfAxis = 'S' | 'R' | 'I' | 'T' | 'C' | 'F';
+
+export type FlowBand = 'SF' | 'RC' | 'IT';
+
+export type CreateSource =
+  | 'S_emotion'
+  | 'R_relation'
+  | 'I_intention'
+  | 'T_insight'
+  | 'unknown';
+
+export type CreateIntegrity =
+  | 'aligned'
+  | 'partially_aligned'
+  | 'distorted'
+  | 'reactive'
+  | 'unknown';
+
+export type PreSeedInputIntent =
+  | 'deepen'
+  | 'explain_reason'
+  | 'clarify'
+  | 'correct'
+  | 'create'
+  | 'ask_action'
+  | 'continue'
+  | 'unknown';
+
+export type PreSeedFlowDirection =
+  | 'continue_observation'
+  | 'relate_context'
+  | 'name_intention'
+  | 'hold_before_create'
+  | 'place_create'
+  | 'let_flow_continue'
+  | 'return_to_input'
+  | 'correct_angle'
+  | 'converge_to_intention';
+
+export type PreSeedConvergenceMode =
+  | 'none'
+  | 'toward_intention'
+  | 'toward_create'
+  | 'toward_small_action'
+  | 'toward_flow';
+
+export type PreSeedFlowDirective = {
+  source: 'preseed_input_flow';
+
+  inputIntent: PreSeedInputIntent;
+
+  currentAxis: SritcfAxis | null;
+  currentBand: FlowBand | null;
+
+  flowDirection: PreSeedFlowDirection;
+  convergenceMode: PreSeedConvergenceMode;
+
+  shouldDeepen: boolean;
+  shouldLimitDeepening: boolean;
+  shouldUseCreate: boolean;
+  shouldUseSmallAction: boolean;
+  shouldHoldAction: boolean;
+
+  intentionFormed: boolean;
+  tInsightReady: boolean;
+
+  intentionConvergence: {
+    intentionReached: boolean;
+    shouldStopAnalysis: boolean;
+    shouldNameCore: boolean;
+    shouldPlaceCreate: boolean;
+    shouldMoveToSmallAction: boolean;
+    shouldLetFlowContinue: boolean;
+  };
+
+  createReady: boolean;
+  createSource: CreateSource;
+  createIntegrity: CreateIntegrity;
+  createDistortionRisk: 'none' | 'weak' | 'medium' | 'strong';
+
+  distortionReason?:
+    | 'fear_based'
+    | 'approval_seeking'
+    | 'relationship_pressure'
+    | 'false_assumption'
+    | 'overreading_other'
+    | 'self_abandonment'
+    | 'premature_action'
+    | null;
+
+  seedDirection: {
+    targetLabel?: string | null;
+    targetType?: string | null;
+    flowSeed?: string | null;
+    writerSeed?: string | null;
+    avoidSeed?: string[];
+  };
+
+  writerGuidance: {
+    mustKeepTarget: boolean;
+    mustNotOverDeepen: boolean;
+    shouldShiftFromAnalysisToPlacement: boolean;
+    shouldOfferSmallCreate: boolean;
+    shouldAvoidOtherMindAssertion: boolean;
+    shouldAvoidLargeAction: boolean;
+    shouldLeaveOpenSpace: boolean;
+  };
+
+  evidence: {
+    fromUserInput: string[];
+    fromFlowMeta: string[];
+    fromHistory: string[];
+  };
+};
+
 export type PreSeedDecision = {
   kind: PreSeedKind;
   confidence: number;
@@ -67,6 +182,7 @@ export type PreSeedDecision = {
   cognitionMap?: CognitionMap | null;
   cognitionMapSeedText?: string | null;
   tcfStarter?: PreSeedTcfStarter | null;
+  preSeedFlowDirective?: PreSeedFlowDirective | null;
 
   shouldBypassWriter: boolean;
   shouldBypassRephrase: boolean;
@@ -100,6 +216,9 @@ export type PreSeedDecision = {
     cognitionMapGapState?: string | null;
     tcfStarterApplied?: boolean;
     tcfStarterDirection?: TcfCDirection | null;
+    preSeedFlowDirectiveApplied?: boolean;
+    preSeedFlowDirection?: PreSeedFlowDirection | null;
+    preSeedConvergenceMode?: PreSeedConvergenceMode | null;
   };
 };
 
