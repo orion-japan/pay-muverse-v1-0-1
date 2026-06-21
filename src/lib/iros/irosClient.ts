@@ -113,6 +113,31 @@ function sanitizeReplyExtraForTransport(extra: Json | undefined): Json | undefin
   return sanitized;
 }
 
+function buildReplyTextForTransport(text: string): string {
+  const raw = String(text ?? '').trim();
+  if (!raw) return raw;
+
+  const compact = raw.replace(/[　\s]+/g, '');
+
+  const explicitlyDiagnosis =
+    /(スクショ診断|スクリーンショット診断|画像診断|screenshotdiagnosis|ir診断|ｉｒ診断|診断ID|この診断|その診断|前の診断|さっきの診断|診断結果|診断の続き)/iu.test(
+      raw
+    );
+
+  const plainRelationshipAdvice =
+    /(恋愛相談|好きな人|距離感|相手の気持ち|近づきたい|重くなる|離れていく|どう相手との距離|どう関わる)/u.test(
+      raw
+    );
+
+  // Pre-SEED 側には「相手の気持ち」などを診断参照と見なす広いガードがある。
+  // 明示診断ではない恋愛相談は、先頭に通常チャット指示を付けて診断分岐から外す。
+  if (plainRelationshipAdvice && !explicitlyDiagnosis && !compact.startsWith('通常チャット')) {
+    return `通常チャットです。過去の診断文脈は使わず、いまの相談文だけから見てください。\n\n${raw}`;
+  }
+
+  return raw;
+}
+
 // -------- 公開 API --------
 
 export async function irosReply(body: {
@@ -132,7 +157,7 @@ export async function irosReply(body: {
 
   const payload = {
     conversationId: cid,
-    text,
+    text: buildReplyTextForTransport(text),
     modeHint: body.modeHint,
     extra: sanitizeReplyExtraForTransport(body.extra),
 
