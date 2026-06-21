@@ -195,7 +195,7 @@ export function resolveImageFirstCreateDomain(args: {
 export function resolveImageFirstCreateFocusLabel(domain: ImageFirstCreateDomain): string {
   switch (domain) {
     case 'relation_waiting':
-      return '相手の反応待ちから、自分の時間を先に戻す形';
+      return '不安で動くか、自然に一言だけ差し出せるか';
     case 'self_next_position':
       return '次に動く前に、今の自分の立ち位置を一つ置く形';
     case 'creative_project':

@@ -1,4 +1,4 @@
-﻿import type { SimilarFlowSnapshot } from './loadSimilarFlowSnapshots';
+import type { SimilarFlowSnapshot } from './loadSimilarFlowSnapshots';
 
 export type BuildSimilarFlowSeedInput = {
   matches: SimilarFlowSnapshot[];
@@ -40,6 +40,15 @@ const clamp = (value: string, maxChars: number): string => {
   return value.slice(0, Math.max(0, maxChars - 20)).trimEnd() + '\n...truncated';
 };
 
+const isBadCreateTemplate = (value: unknown): boolean => {
+  const t = cleanText(value);
+  return /いま先に置く形は/u.test(t) ||
+    /次に動く前に、今の自分の立ち位置を一つ置く形/u.test(t) ||
+    /自分の中心を戻すための形/u.test(t) ||
+    /戻りたい現実のイメージ/u.test(t) ||
+    /その形から外れないことだけで十分/u.test(t);
+};
+
 export function buildSimilarFlowSeed(input: BuildSimilarFlowSeedInput): string | null {
   const matches = Array.isArray(input.matches) ? input.matches : [];
 
@@ -49,7 +58,7 @@ export function buildSimilarFlowSeed(input: BuildSimilarFlowSeedInput): string |
 
   const limit = Math.max(1, Math.min(Number(input.limit ?? 3), 5));
   const maxChars = Math.max(600, Math.min(Number(input.maxChars ?? 1600), 4000));
-  const picked = matches.slice(0, limit);
+  const picked = matches.filter((match) => !isBadCreateTemplate(match.assistantTextHead)).slice(0, limit);
 
   const currentState = input.currentState ?? {};
 
