@@ -59,7 +59,21 @@ export function buildPreSeedTcfStarter(args: {
     /修正して/u,
   ]);
 
-  const createAskActionLike = hasAny(userText, [/次に.*何をすれば/u, /どうすれば/u, /どうしたら/u, /どう動けば/u, /どう進めれば/u, /何から/u]);
+  // IMAGE_FIRST_CREATE_PLACE_ASK_PATTERNS_V1
+  const createAskActionLike = hasAny(userText, [
+    /次に.*何をすれば/u,
+    /どうすれば/u,
+    /どうしたら/u,
+    /どう動けば/u,
+    /どう進めれば/u,
+    /何から/u,
+    /何を先に置けば/u,
+    /何を置けば/u,
+    /何を先に置く/u,
+    /何を置く/u,
+    /先に.*置けば/u,
+    /先に.*置くもの/u,
+  ]);
   const createAxis = detectCreateConvergenceAxis({
     userText,
     preSeedFlowDirective: createAskActionLike ? { flowDirection: 'place_create', createReady: true, createSource: 'I_intention', inputIntent: 'ask_action' } : null,
