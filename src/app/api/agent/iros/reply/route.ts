@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { buildPreSeedFlowDirective, resolvePreSeedDecision } from '@/lib/iros/server/preseed';
 import { callPreSeedDiagnosisWriter } from '@/lib/iros/server/preseed/callPreSeedDiagnosisWriter';
 import { createClient } from '@supabase/supabase-js';
@@ -983,7 +983,7 @@ let extraSoT: Record<string, any> = {
                   content: [
                     'あなたは Mu の保存確認文を自然に整える担当です。',
                     '',
-                    '目的は、ユーザーが明示した関係性を保存したことを、短く自然に伝えることです。',
+                    '目的は、関係性を保存したことを、断定しすぎず短く自然に伝えることです。',
                     '',
                     '禁止:',
                     '- 新しい診断を始めない',
@@ -1011,6 +1011,8 @@ let extraSoT: Record<string, any> = {
                     `sensitivity: ${relationshipContextCapture.sensitivity ?? ''}`,
                     '',
                     'この保存確認文を、Muの自然な本文にしてください。',
+                    '禁止：片思いと断定する、相手との関係を決めつける、「前提にする」「見ておく」を強く言いすぎる。',
+                    '推奨：「気になっている相手との関係として、いったん受け取ります」「決めつけずに見ていきます」のように柔らかく言う。',
                     `テンプレ原文: ${fallbackDirectText}`,
                   ].join('\\n'),
                 },
@@ -4868,69 +4870,3 @@ if (!skipTraining) {
     );
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
