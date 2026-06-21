@@ -53,6 +53,53 @@ export function detectCommittedAction(userText: unknown): boolean {
   const t = text(userText);
   return hasAny(t, [/やります/u, /進めます/u, /送ります/u, /それで行きます/u, /それで進めます/u, /動きます/u, /実装してください/u, /入れてください/u, /コミット/u, /push/u, /プッシュ/u]);
 }
+export function detectRelationRcHowTo(args: {
+  userText?: unknown;
+  relationshipContext?: any;
+  relationshipCapture?: any;
+  resolvedRelationId?: unknown;
+  targetLabel?: unknown;
+  activeDiagnosisFrame?: any;
+  topicDigest?: unknown;
+  situationTopic?: unknown;
+  cognitionMap?: any;
+  meta?: any;
+  extra?: any;
+  ctxPack?: any;
+}): boolean {
+  const userText = text(args.userText);
+
+  const isHowToAsk = hasAny(userText, [
+    /どうしたら/u,
+    /どうすれば/u,
+    /どう動けば/u,
+    /何をすれば/u,
+    /次に.*何を/u,
+    /何から/u,
+    /一歩/u,
+  ]);
+
+  if (!isHowToAsk) return false;
+
+  const currentTextHasRelation = hasAny(userText, [
+    /相手/u,
+    /好きな人/u,
+    /あの人/u,
+    /その人/u,
+    /恋愛/u,
+    /片思い/u,
+    /返事/u,
+    /返信/u,
+    /反応/u,
+    /距離/u,
+    /近づ/u,
+    /重い/u,
+    /嫌われ/u,
+    /気持ち/u,
+  ]);
+
+  return currentTextHasRelation || hasRelationEvidence(args);
+}
 
 function readNestedCreate(args: {
   preSeedCreateDirective?: any;
@@ -92,6 +139,12 @@ export function detectCreateConvergenceAxis(args: {
 }): CreateConvergenceAxis {
   const userText = text(args.userText);
   if (detectExplicitWordCreate(userText)) return 'word_create';
+
+  // relation_rc_howto_action_create:
+  // 恋愛・相手反応文脈の「どうしたらいい？」は、
+  // image-first create ではなく、RC_STABILIZE 相当の action_create へ送る。
+  if (detectRelationRcHowTo(args)) return 'action_create';
+
   const create = readNestedCreate(args);
   const isImageFirstCreate = create.mode === 'image_first_create';
   const isPlaceCreate = create.flowDirection === 'place_create';
@@ -197,13 +250,13 @@ export function resolveImageFirstCreateFocusLabel(domain: ImageFirstCreateDomain
     case 'relation_waiting':
       return '不安で動くか、自然に一言だけ差し出せるか';
     case 'self_next_position':
-      return '次に動く前に、今の自分の立ち位置を一つ置く形';
+      return '次に動く前に、今できる一つを見分けること';
     case 'creative_project':
       return '実装や出力へ急ぐ前に、作ろうとしている形の中心を一つ置く形';
     case 'field_setting':
       return '場を動かす前に、先に置く空気と向きを一つ決める形';
     default:
-      return '行動を増やす前に、内側に先に置く形';
+      return '今すぐ増やさず、一つだけ実行できる入口';
   }
 }
 
