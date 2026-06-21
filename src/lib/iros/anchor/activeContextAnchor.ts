@@ -181,6 +181,20 @@ export function pickDiagnosisSourceText(args: {
   );
 }
 
+function isGeneratedDiagnosisClarificationText(value: unknown): boolean {
+  const s = cleanString(value) ?? '';
+  if (!s) return false;
+
+  return (
+    /スクショ診断の続きとして見ますか/u.test(s) ||
+    /ir診断の続きを見ますか/u.test(s) ||
+    /どちらの続きとして見ますか/u.test(s) ||
+    /診断の続きとして見ますか/u.test(s) ||
+    /の続きを見ますか/u.test(s) ||
+    /番号か.*ir診断.*スクショ診断/u.test(s)
+  );
+}
+
 export function buildDiagnosisActiveContextAnchor(args: {
   targetLabel?: unknown;
   targetKey?: unknown;
@@ -208,6 +222,14 @@ export function buildDiagnosisActiveContextAnchor(args: {
     irMeta: args.irMeta,
     fallbackText: args.sourceText,
   });
+
+  if (
+    isGeneratedDiagnosisClarificationText(targetLabel) ||
+    isGeneratedDiagnosisClarificationText(sourceText) ||
+    isGeneratedDiagnosisClarificationText(args.followupRequest)
+  ) {
+    return null;
+  }
 
   if (!targetLabel && !sourceText) return null;
 
