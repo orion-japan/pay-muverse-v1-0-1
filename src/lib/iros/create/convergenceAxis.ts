@@ -133,6 +133,36 @@ export function resolveImageFirstCreateDomain(args: {
   const userText = text(args.userText);
   const map = asRecord(args.cognitionMap) ?? {};
   const source = [userText, args.topicDigest, args.situationTopic, map.relationDomain, map.currentPosition, map.destination].map(text).filter(Boolean).join('\n');
+
+  const isGenericNextActionAsk = hasAny(userText, [
+    /次に.*何をすれば/u,
+    /どうすれば/u,
+    /どうしたら/u,
+    /どう動けば/u,
+    /どう進めれば/u,
+    /何から/u,
+  ]);
+
+  const hasExplicitRelationInCurrentText = hasAny(userText, [
+    /相手/u,
+    /恋愛/u,
+    /彼/u,
+    /彼女/u,
+    /好き/u,
+    /会う/u,
+    /会え/u,
+    /連絡/u,
+    /LINE/u,
+    /ライン/u,
+    /返信/u,
+    /返事/u,
+    /気持ち/u,
+  ]);
+
+  if (isGenericNextActionAsk && !hasExplicitRelationInCurrentText) {
+    return 'self_next_position';
+  }
+
   if (hasRelationEvidence(args)) return 'relation_waiting';
   if (hasAny(source, [/Muverse/u, /本/u, /書籍/u, /動画/u, /画像/u, /企画/u, /事業/u, /実装/u, /コード/u, /サービス/u, /創造/u])) return 'creative_project';
   if (hasAny(source, [/場/u, /フィールド/u, /Field/u, /空間/u, /場づくり/u])) return 'field_setting';
