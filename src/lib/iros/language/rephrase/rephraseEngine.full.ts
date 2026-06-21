@@ -2648,7 +2648,8 @@ return blocks;
   if (isImageFirstEarlyGuard) {
     const userNow = String(userText ?? '').trim();
     const genericNextActionAsk =
-      /次に.*何をすれば|どうすれば|どうしたら|どう動けば|どう進めれば|何から/u.test(userNow);
+      // IMAGE_FIRST_CREATE_PLACE_ASK_PATTERNS_V2
+      /次に.*何をすれば|どうすれば|どうしたら|どう動けば|どう進めれば|何から|何を先に置けば|何を置けば|何を先に置く|何を置く|先に.*置けば|先に.*置くもの/u.test(userNow);
     const explicitRelationNow =
       /相手|恋愛|彼|彼女|好き|会う|会え|連絡|LINE|ライン|返信|返事|気持ち/u.test(userNow);
 

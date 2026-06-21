@@ -134,6 +134,7 @@ export function resolveImageFirstCreateDomain(args: {
   const map = asRecord(args.cognitionMap) ?? {};
   const source = [userText, args.topicDigest, args.situationTopic, map.relationDomain, map.currentPosition, map.destination].map(text).filter(Boolean).join('\n');
 
+  // IMAGE_FIRST_CREATE_PLACE_ASK_PATTERNS_V2
   const isGenericNextActionAsk = hasAny(userText, [
     /次に.*何をすれば/u,
     /どうすれば/u,
@@ -141,6 +142,12 @@ export function resolveImageFirstCreateDomain(args: {
     /どう動けば/u,
     /どう進めれば/u,
     /何から/u,
+    /先に.*置くもの/u,
+    /先に.*置けば/u,
+    /何を置く/u,
+    /何を先に置く/u,
+    /何を置けば/u,
+    /何を先に置けば/u,
   ]);
 
   const hasExplicitRelationInCurrentText = hasAny(userText, [
@@ -166,7 +173,22 @@ export function resolveImageFirstCreateDomain(args: {
   if (hasRelationEvidence(args)) return 'relation_waiting';
   if (hasAny(source, [/Muverse/u, /本/u, /書籍/u, /動画/u, /画像/u, /企画/u, /事業/u, /実装/u, /コード/u, /サービス/u, /創造/u])) return 'creative_project';
   if (hasAny(source, [/場/u, /フィールド/u, /Field/u, /空間/u, /場づくり/u])) return 'field_setting';
-  if (hasAny(userText, [/次に.*何をすれば/u, /どうすれば/u, /どうしたら/u, /どう動けば/u, /どう進めれば/u, /何から/u])) return 'self_next_position';
+  if (
+    hasAny(userText, [
+      /次に.*何をすれば/u,
+      /どうすれば/u,
+      /どうしたら/u,
+      /どう動けば/u,
+      /どう進めれば/u,
+      /何から/u,
+      /何を先に置けば/u,
+      /何を置けば/u,
+      /何を先に置く/u,
+      /何を置く/u,
+      /先に.*置けば/u,
+      /先に.*置くもの/u,
+    ])
+  ) return 'self_next_position';
   return 'unknown_generic';
 }
 
