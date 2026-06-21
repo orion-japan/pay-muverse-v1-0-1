@@ -2652,6 +2652,19 @@ return blocks;
     const explicitWordCreateNow =
       /相手に送るなら|送るなら|なんて送|何て送|どう送|どう返|返信文|返事文|返信|返事|文面|文章|メッセージ|一文|短い文|文を|言い方|言葉にして|言葉にする|作って|作る/u.test(userNow);
 
+    // ACTION_CREATE_ESCAPE_IMAGE_FIRST_GUARD_V3_REPHRASE
+    const explicitActionCreateNow =
+      /今日.*何をすれば|今日は何をすれば|今日.*やる|今日中に.*やる|今から.*やる|実際にやること|やることを一つ|やることを1つ|一つだけ決め|1つだけ決め|次の一手|次の一歩|具体的にください|具体的に決め|何から始めれば|どこから始めれば|このあと.*始めれば|小さな行動|行動を一つ|行動を1つ|最初の一手|最初の一歩/u.test(userNow);
+
+    if (explicitActionCreateNow) {
+      console.log('[IROS/IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD][SKIP_ACTION_CREATE]', {
+        traceId: (debug as any)?.traceId ?? null,
+        conversationId: (debug as any)?.conversationId ?? null,
+        userCode: (debug as any)?.userCode ?? null,
+        userText: userNow,
+      });
+    }
+
     if (explicitWordCreateNow) {
       console.log('[IROS/IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD][SKIP_WORD_CREATE]', {
         traceId: (debug as any)?.traceId ?? null,
@@ -2696,7 +2709,7 @@ return blocks;
     logRephraseOk(debug, out.map((x) => x.key), finalText, 'IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD');
     logRephraseAfterAttach(debug, out.map((x) => x.key), finalText, 'IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD', metaExtra);
 
-    if (!explicitWordCreateNow) {
+    if (!explicitWordCreateNow && !explicitActionCreateNow) {
     return {
       ok: true,
       // IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD はここで本文を確定させる。
