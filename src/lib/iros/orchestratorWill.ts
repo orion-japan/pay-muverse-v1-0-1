@@ -17,6 +17,7 @@ import { adjustPriorityWithSelfAcceptance } from './orchestratorPierce';
 // ★ 置き換え：shouldRotateBand → decideRotation
 import { decideRotation } from './will/rotationEngine';
 import type { DescentGate } from './will/rotationEngine';
+import type { PreSeedCreateSignal } from './create/convergenceAxis';
 
 // ✅ 追加：Vent/Will detector（continuity の Q 継続/遮断の判断材料）
 import { detectVentWill } from './will/detectVentWill';
@@ -66,6 +67,7 @@ export type ComputeGoalAndPriorityArgs = {
   /** ✅ 追加：MemoryState から渡す「前回の回転状態」 */
   spinLoop?: SpinLoop | null;
   descentGate?: DescentGate | null;
+  preSeedCreateSignal?: PreSeedCreateSignal | null;
 };
 
 export type ComputeGoalAndPriorityResult = {
@@ -116,6 +118,7 @@ export function computeGoalAndPriority(args: ComputeGoalAndPriorityArgs): Comput
 
     spinLoop,
     descentGate,
+    preSeedCreateSignal,
   } = args;
 
   // この関数内では “今ターンで扱う深度/Q” を null/undefined 混在させない
@@ -283,6 +286,16 @@ export function computeGoalAndPriority(args: ComputeGoalAndPriorityArgs): Comput
     goal_out: goal,
   });
 
+  if (preSeedCreateSignal?.createReady === true && preSeedCreateSignal.targetKind === 'imaginal_form_create') {
+    const anyGoal: any = goal;
+    anyGoal.kind = 'enableAction';
+    anyGoal.targetKind = 'imaginal_form_create';
+    anyGoal.createAxis = 'imaginal_form_create';
+    anyGoal.reason = anyGoal.reason ? String(anyGoal.reason) + ' / Pre-SEED place_create により形象Create収束を優先' : 'Pre-SEED place_create により形象Create収束を優先';
+    anyGoal.detail = { ...(anyGoal.detail && typeof anyGoal.detail === 'object' ? anyGoal.detail : {}), preSeedCreateSignal, targetKind: 'imaginal_form_create', createAxis: 'imaginal_form_create' };
+    goal = anyGoal as IrosGoalType;
+  }
+
   /* =========================================================
      ②.5 三軸回転：decideRotation で帯域回転 + gate/loop を更新
      ※ ここでは “meta” は存在しない。入口は goal（orchestratorWill の責務範囲）
@@ -317,6 +330,11 @@ export function computeGoalAndPriority(args: ComputeGoalAndPriorityArgs): Comput
       // - 生成元は rephraseEngine.full.ts の meta.extra.llmSignals（保存されるなら goal/extra に載る）
       // - orchestratorWill は “meta” を参照しない（この関数の責務外）
       llmSignals: (anyGoal as any)?.extra?.llmSignals ?? (anyGoal as any)?.llmSignals ?? null,
+
+      createSignal:
+        preSeedCreateSignal?.createReady === true && preSeedCreateSignal.targetKind === 'imaginal_form_create'
+          ? { ready: true, source: 'preseed', axis: 'C', direction: 'imaginal_form_create', flowDirection: preSeedCreateSignal.flowDirection ?? 'place_create', avoidActionPlan: true }
+          : null,
 
       // 未配線（後で繋ぐ）
       actionSignal: null,

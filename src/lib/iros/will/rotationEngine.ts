@@ -68,6 +68,7 @@ export type RotationContext = {
    * （UIがなくても、上位で検出できるなら使う）
    */
   userAcceptedDescent?: boolean | null;
+  createSignal?: { ready: boolean; source: 'preseed' | 'memory' | 'manual'; axis: 'C'; direction: 'imaginal_form_create' | 'word_create' | 'action_create'; flowDirection?: string | null; avoidActionPlan?: boolean } | null;
 
   /**
    * LLM自然上昇の“兆しセンサー”
@@ -115,6 +116,7 @@ export function decideRotation(ctx: RotationContext): RotationDecision {
     actionSignal,
     delegateLevel,
     userAcceptedDescent,
+    createSignal,
     llmSignals, // ✅ 参照開始（depth直結は禁止：gate補助のみ）
   } = ctx;
 
@@ -175,6 +177,10 @@ export function decideRotation(ctx: RotationContext): RotationDecision {
       nextDescentGate: gate,
       reason: 'SoulLayer risk_flags に重いリスクがあるため回転しない',
     };
+  }
+
+  if (createSignal?.ready === true && createSignal.direction === 'imaginal_form_create') {
+    return { shouldRotate: true, nextDepth: baseDepth, nextSpinLoop: 'TCF', nextDescentGate: 'accepted', reason: 'preseed_place_create:imaginal_form_create' };
   }
 
   // --- ここから「下降ゲート（扉）」の更新判定 ---

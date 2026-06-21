@@ -1,5 +1,6 @@
 import type { CognitionMap } from '../../cognition/cognitionMap';
 import type { PreSeedDecision, PreSeedTcfStarter } from './types';
+import { detectCreateConvergenceAxis, resolveImageFirstCreateDomain, resolveImageFirstCreateFocusLabel } from '../../create/convergenceAxis';
 
 function text(v: unknown): string {
   return String(v ?? '').trim();
@@ -58,7 +59,15 @@ export function buildPreSeedTcfStarter(args: {
     /修正して/u,
   ]);
 
-  const cDirection: PreSeedTcfStarter['cDirection'] = isWriterCorrection
+  const createAskActionLike = hasAny(userText, [/次に.*何をすれば/u, /どうすれば/u, /どうしたら/u, /どう動けば/u, /どう進めれば/u, /何から/u]);
+  const createAxis = detectCreateConvergenceAxis({
+    userText,
+    preSeedFlowDirective: createAskActionLike ? { flowDirection: 'place_create', createReady: true, createSource: 'I_intention', inputIntent: 'ask_action' } : null,
+  });
+  const imageFirstDomain = createAxis === 'imaginal_form_create' ? resolveImageFirstCreateDomain({ userText, cognitionMap: map, topicDigest: source, situationTopic: map?.currentPosition ?? null }) : null;
+  const imageFirstFocus = imageFirstDomain ? resolveImageFirstCreateFocusLabel(imageFirstDomain) : null;
+
+  const cDirection: PreSeedTcfStarter['cDirection'] = createAxis !== 'none' ? createAxis : isWriterCorrection
     ? 'writer_correction'
     : isDiagnosis
       ? 'diagnosis_deepen'
@@ -70,7 +79,7 @@ export function buildPreSeedTcfStarter(args: {
             ? 'structure_design'
             : 'none';
 
-  const userReaction: PreSeedTcfStarter['userReaction'] = isWriterCorrection
+  const userReaction: PreSeedTcfStarter['userReaction'] = createAxis === 'imaginal_form_create' ? 'ask_more' : isWriterCorrection
     ? 'refine'
     : hasAny(userText, [/詳しく/u, /深め/u, /もう少し/u, /続きを/u, /教えて/u, /見て/u])
       ? 'ask_more'
@@ -78,7 +87,7 @@ export function buildPreSeedTcfStarter(args: {
         ? 'action'
         : 'unknown';
 
-  const convergence: PreSeedTcfStarter['convergence'] = isWriterCorrection
+  const convergence: PreSeedTcfStarter['convergence'] = createAxis === 'imaginal_form_create' ? 'partial' : isWriterCorrection
     ? 'partial'
     : cDirection === 'none'
       ? 'none'
@@ -87,6 +96,7 @@ export function buildPreSeedTcfStarter(args: {
         : 'partial';
 
   const currentFocus =
+    imageFirstFocus ||
     map?.currentPosition ||
     (isDiagnosis
       ? '診断本文を正本にして、今回の続き相談を読む'
@@ -97,6 +107,7 @@ export function buildPreSeedTcfStarter(args: {
           : null);
 
   const nextFocus =
+    imageFirstFocus ||
     map?.destination ||
     (isDiagnosis
       ? 'ユーザーがどう受け取り、次にどう動くかへ着地する'
@@ -112,6 +123,11 @@ export function buildPreSeedTcfStarter(args: {
     convergence,
     currentFocus,
     nextFocus,
+    createAxis,
+    createMode: createAxis === 'imaginal_form_create' ? 'image_first_create' : createAxis === 'word_create' ? 'word_create' : createAxis === 'action_create' ? 'action_create' : null,
+    focusDomain: imageFirstDomain,
+    writerPatternKey: createAxis === 'imaginal_form_create' ? 'IMAGE_FIRST_CREATE_V1' : null,
+    avoidActionPlan: createAxis === 'imaginal_form_create',
   };
 }
 

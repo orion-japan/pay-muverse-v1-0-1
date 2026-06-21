@@ -1,3 +1,5 @@
+import { detectCreateConvergenceAxis, resolveImageFirstCreateDomain, resolveImageFirstCreateFocusLabel } from '../create/convergenceAxis';
+
 export type TcfUserReaction =
   | 'accept'
   | 'reject'
@@ -25,7 +27,10 @@ export type TcfCDirection =
   | 'relation_boundary'
   | 'diagnosis_deepen'
   | 'memory_seed'
-  | 'writer_correction';
+  | 'writer_correction'
+  | 'imaginal_form_create'
+  | 'word_create'
+  | 'action_create';
 
 export type TcfAnchorEvent = 'choice' | 'action' | 'reconfirm' | 'none';
 
@@ -93,7 +98,10 @@ function normalizeTcfCDirection(value: unknown): TcfCDirection | null {
     v === 'relation_boundary' ||
     v === 'diagnosis_deepen' ||
     v === 'memory_seed' ||
-    v === 'writer_correction'
+    v === 'writer_correction' ||
+    v === 'imaginal_form_create' ||
+    v === 'word_create' ||
+    v === 'action_create'
   ) {
     return v;
   }
@@ -316,6 +324,19 @@ export function resolveTcfCDirection(input: ResolveTcfCDirectionInput): TcfCDire
   const goalKind = firstString(input.goalKind, ctxPack.goalKind, extra.goalKind, meta.goalKind, intentionContext.goalKind)?.toLowerCase() ?? null;
   const writerPatternKey = firstString(input.writerPatternKey, ctxPack.writerPatternKey, extra.writerPatternKey, meta.writerPatternKey)?.toLowerCase() ?? null;
 
+  const createAxis = detectCreateConvergenceAxis({
+    userText: input.userText,
+    meta,
+    extra,
+    ctxPack,
+    preSeedCreateDirective: ctxPack.preSeedCreateDirective ?? extra.preSeedCreateDirective ?? meta.preSeedCreateDirective,
+    createProgressBridge: ctxPack.createProgressBridge ?? extra.createProgressBridge ?? meta.createProgressBridge,
+    preSeedFlowDirective: ctxPack.preSeedFlowDirective ?? extra.preSeedFlowDirective ?? meta.preSeedFlowDirective,
+    tcfStarter: ctxPack.tcfStarter ?? extra.tcfStarter ?? meta.tcfStarter,
+  });
+
+  if (createAxis !== 'none') return createAxis;
+
   const text = joinForTcfMatch(
     input.userText,
     input.currentFocus,
@@ -406,6 +427,9 @@ export type BuildTcfRotationDecisionInput = TcfTEvidenceInput &
   };
 
 function resolveTcfWriterPatternKey(args: { cDirection: TcfCDirection; convergence: TcfConvergenceState }): string | null {
+  if (args.cDirection === 'imaginal_form_create') return 'IMAGE_FIRST_CREATE_V1';
+  if (args.cDirection === 'word_create') return 'WORD_CREATE_V1';
+  if (args.cDirection === 'action_create') return 'ACTION_CREATE_V1';
   if (args.cDirection === 'writer_correction' || args.convergence === 'diverged') return 'WRITER_CORRECTION_V1';
   if (args.convergence === 'partial' || args.convergence === 'unresolved' || args.convergence === 'recycle') return 'TCF_REFOCUS_V1';
   if (args.convergence === 'converged') return 'TCF_CONVERGENCE_V1';
@@ -416,6 +440,9 @@ function resolveTcfWriterPatternKey(args: { cDirection: TcfCDirection; convergen
 }
 
 function resolveTcfSurfacePlanKind(args: { cDirection: TcfCDirection; convergence: TcfConvergenceState }): string | null {
+  if (args.cDirection === 'imaginal_form_create') return 'imaginal_create';
+  if (args.cDirection === 'word_create') return 'word_create';
+  if (args.cDirection === 'action_create') return 'action_create';
   if (args.cDirection === 'writer_correction' || args.convergence === 'diverged') return 'writer_correction';
   if (args.convergence === 'partial' || args.convergence === 'unresolved' || args.convergence === 'recycle') return 'refocus';
   if (args.convergence === 'converged') return 'convergence';
@@ -506,9 +533,16 @@ export function buildTcfRotationDecision(input: BuildTcfRotationDecisionInput): 
     });
   })();
 
+  const createAxisForFocus = detectCreateConvergenceAxis({ userText: input.userText, meta, extra, ctxPack });
+  const imageFirstDomain = createAxisForFocus === 'imaginal_form_create'
+    ? resolveImageFirstCreateDomain({ userText: input.userText, relationshipContext: ctxPack.relationshipContext ?? extra.relationshipContext ?? meta.relationshipContext, relationshipCapture: ctxPack.relationshipCapture ?? extra.relationshipCapture ?? meta.relationshipCapture, resolvedRelationId: ctxPack.resolvedRelationId ?? extra.resolvedRelationId ?? meta.resolvedRelationId, targetLabel: ctxPack.targetLabel ?? extra.targetLabel ?? meta.targetLabel, activeDiagnosisFrame: ctxPack.activeDiagnosisFrame ?? extra.activeDiagnosisFrame ?? meta.activeDiagnosisFrame, topicDigest: ctxPack.topicDigest ?? extra.topicDigest ?? meta.topicDigest, situationTopic: ctxPack.situationTopic ?? extra.situationTopic ?? meta.situationTopic, cognitionMap: ctxPack.cognitionMap ?? extra.cognitionMap ?? meta.cognitionMap })
+    : null;
+  const imageFirstFocus = imageFirstDomain ? resolveImageFirstCreateFocusLabel(imageFirstDomain) : null;
+
   const previousFocus = firstString(input.previousFocus, ctxPack.previousFocus, extra.previousFocus, meta.previousFocus);
   const starterCurrentFocus = firstString(starter?.currentFocus, starter?.current_focus);
   const currentFocus = firstString(
+    imageFirstFocus,
     starterCurrentFocus,
     input.currentFocus,
     ctxPack.currentFocus,
@@ -568,7 +602,7 @@ export function buildTcfRotationDecision(input: BuildTcfRotationDecisionInput): 
   const writerPatternKey = hasMemoryRecallNotFoundTurnContract ? null : resolveTcfWriterPatternKey({ cDirection, convergence });
   const surfacePlanKind = hasMemoryRecallNotFoundTurnContract ? null : resolveTcfSurfacePlanKind({ cDirection, convergence });
   const shouldUseTcfPattern = hasMemoryRecallNotFoundTurnContract ? false : Boolean(writerPatternKey || surfacePlanKind);
-  const nextFocus = firstString(starter?.nextFocus, starter?.next_focus, input.nextFocus, currentFocus, previousFocus);
+  const nextFocus = firstString(imageFirstFocus, starter?.nextFocus, starter?.next_focus, input.nextFocus, currentFocus, previousFocus);
 
   if (starter) {
     const traceId = firstString(

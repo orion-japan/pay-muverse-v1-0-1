@@ -46,6 +46,12 @@ export type PreSeedTcfStarter = {
   convergence: TcfConvergenceState;
   currentFocus: string | null;
   nextFocus: string | null;
+
+  createAxis?: 'imaginal_form_create' | 'word_create' | 'action_create' | 'none';
+  createMode?: 'image_first_create' | 'word_create' | 'action_create' | null;
+  focusDomain?: 'relation_waiting' | 'self_next_position' | 'creative_project' | 'field_setting' | 'unknown_generic' | null;
+  writerPatternKey?: string | null;
+  avoidActionPlan?: boolean;
 };
 
 export type SritcfAxis = 'S' | 'R' | 'I' | 'T' | 'C' | 'F';

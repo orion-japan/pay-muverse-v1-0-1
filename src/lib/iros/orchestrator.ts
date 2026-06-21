@@ -34,6 +34,7 @@ import {
   type IrosGoalType,
   type IrosPriorityType,
 } from './orchestratorWill';
+import { buildPreSeedCreateSignal } from './create/convergenceAxis';
 
 // モード決定（mirror / vision / diagnosis）
 import { applyModeToMeta } from './orchestratorMode';
@@ -546,6 +547,18 @@ export async function runIrosTurn(
   // ----------------------------------------------------------------
   // 7. Will フェーズ：Goal / Priority の決定
   // ----------------------------------------------------------------
+  const preSeedCreateSignal = buildPreSeedCreateSignal({ userText: text, meta, extra: (meta as any).extra ?? null, ctxPack: (meta as any).extra?.ctxPack ?? (meta as any).ctxPack ?? null, preSeedCreateDirective: (meta as any).extra?.ctxPack?.preSeedCreateDirective ?? (meta as any).preSeedCreateDirective ?? null, createProgressBridge: (meta as any).extra?.ctxPack?.createProgressBridge ?? (meta as any).createProgressBridge ?? null, preSeedFlowDirective: (meta as any).extra?.ctxPack?.preSeedFlowDirective ?? (meta as any).preSeedFlowDirective ?? null, tcfStarter: (meta as any).extra?.ctxPack?.tcfStarter ?? (meta as any).tcfStarter ?? null });
+  if (preSeedCreateSignal) {
+    (meta as any).preSeedCreateSignal = preSeedCreateSignal;
+    (meta as any).targetKind = preSeedCreateSignal.targetKind ?? null;
+    (meta as any).createAxis = preSeedCreateSignal.targetKind ?? null;
+    const extra = ((meta as any).extra ??= {});
+    const ctxPack = (extra.ctxPack ??= {});
+    ctxPack.preSeedCreateSignal = preSeedCreateSignal;
+    ctxPack.targetKind = preSeedCreateSignal.targetKind ?? null;
+    ctxPack.createAxis = preSeedCreateSignal.targetKind ?? null;
+  }
+
   let { goal, priority } = computeGoalAndPriority({
     conversationId: conversationId ?? null, // ✅ 追加（DEPTH_WRITE に渡す）
 
@@ -560,6 +573,7 @@ export async function runIrosTurn(
     lastGoalKind: (lastGoalKind ?? undefined) as any,
     previousUncoverStreak,
     phase: (meta as any).phase ?? null,
+    preSeedCreateSignal,
     spinLoop:
       (typeof lastSpinLoop !== 'undefined' ? lastSpinLoop : null) ?? null,
     descentGate:

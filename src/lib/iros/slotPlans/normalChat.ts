@@ -40,6 +40,7 @@ import type { LaneKey } from '../intentTransition/intentBridge';
 
 // ✅ SHIFT preset（ルールをここに寄せる）
 import { SHIFT_PRESET_C_SENSE_HINT, SHIFT_PRESET_T_CONCRETIZE } from '../language/shiftPresets';
+import { resolveImageFirstCreateDomain, resolveImageFirstCreateFocusLabel } from '../create/convergenceAxis';
 
 // --------------------------------------------------
 // types
@@ -908,6 +909,17 @@ function buildShiftIdeaBand(seedText: string) {
 
 
 // --- 置き換え 1) buildShiftTConcretize を関数まるごと置き換え ---
+function buildImageFirstCreateSlots(args: { userText: string; ctxPack?: any; meta?: any; flowDelta?: string | null }): NormalChatSlot[] {
+  const ctxPack = args.ctxPack ?? args.meta?.extra?.ctxPack ?? {};
+  const domain = ctxPack.focusDomain ?? ctxPack.tcfStarter?.focusDomain ?? resolveImageFirstCreateDomain({ userText: args.userText, relationshipContext: ctxPack.relationshipContext, relationshipCapture: ctxPack.relationshipCapture, resolvedRelationId: ctxPack.resolvedRelationId, targetLabel: ctxPack.targetLabel, activeDiagnosisFrame: ctxPack.activeDiagnosisFrame, topicDigest: ctxPack.topicDigest, situationTopic: ctxPack.situationTopic, cognitionMap: ctxPack.cognitionMap });
+  const line = ctxPack.focusLabel ?? ctxPack.tcfStarter?.currentFocus ?? ctxPack.tcfStarter?.nextFocus ?? resolveImageFirstCreateFocusLabel(domain);
+  return [
+    { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { laneKey: 'T_CONCRETIZE', createAxis: 'imaginal_form_create', focusDomain: domain, user: null }) },
+    { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 't_concretize', intent: 'place_imaginal_form', hint: 'image_first_create_v1', line, source: 'tcf_rotation', createAxis: 'imaginal_form_create', focusDomain: domain, writerPattern: 'IMAGE_FIRST_CREATE_V1', contract: ['first_line_places_imaginal_form', 'no_action_plan', 'no_message_draft', 'no_checklist', 'plain_words'], rules: { no_action_plan: true, no_message_draft: true, no_send_decision: true, no_checklist: true, no_bullets: true, questions_max: 0, lines_max: 4, forbidden_words: ['紙に書く', 'メモする', '一つに絞る', '短く送る', '送るなら', '送るか送らないか', '一通', '文面', '返信', '返事', '連絡'] }, seed_text: ['形象：' + line, '出力ルール：行動案・文案例・送る/送らない判断を冒頭に出さない。', 'まず内側に置く形を一つ提示し、その意味を短く説明する。', '最後に必要なら、その形を崩さない小さな保持だけを添える。'].join('\n') }) },
+    { key: 'NEXT', role: 'assistant', style: 'neutral', content: '@NEXT_HINT ' + JSON.stringify({ mode: 'imaginal_create_hint', laneKey: 'T_CONCRETIZE', delta: args.flowDelta ?? null, hint: '行動案ではなく、内側の形を一つ置く', message: '次は行動を増やさず、形象を先に置く' }) },
+  ];
+}
+
 function buildShiftTConcretize(seedText: string, focusLabel?: string) {
   // ✅ t_concretize は「行動の押し付け」ではなく「対象の一点固定 → 最後に“具体1つ”」に寄せる
   // - ラベル（「次の一歩：」「結論：」等）を禁止して、テンプレ臭を消す（B方針）
@@ -1118,6 +1130,12 @@ function buildFlowReply(args: {
   }
 
   const t = norm(args.userText);
+  const createAxisNow = String((args as any)?.ctxPack?.createAxis ?? '').trim() || String((args as any)?.ctxPack?.targetKind ?? '').trim() || String((args as any)?.ctxPack?.tcfStarter?.createAxis ?? '').trim() || String((args as any)?.ctxPack?.tcfStarter?.cDirection ?? '').trim() || String((args as any)?.meta?.extra?.ctxPack?.createAxis ?? '').trim() || String((args as any)?.meta?.extra?.ctxPack?.targetKind ?? '').trim() || String((args as any)?.meta?.extra?.ctxPack?.tcfStarter?.createAxis ?? '').trim() || String((args as any)?.meta?.extra?.ctxPack?.tcfStarter?.cDirection ?? '').trim();
+  const writerPatternNow = String((args as any)?.ctxPack?.writerPatternKey ?? '').trim() || String((args as any)?.ctxPack?.tcfStarter?.writerPatternKey ?? '').trim() || String((args as any)?.meta?.extra?.ctxPack?.writerPatternKey ?? '').trim() || String((args as any)?.meta?.extra?.ctxPack?.tcfStarter?.writerPatternKey ?? '').trim();
+  if (createAxisNow === 'imaginal_form_create' || writerPatternNow === 'IMAGE_FIRST_CREATE_V1') {
+    return buildImageFirstCreateSlots({ userText: args.userText, ctxPack: args.ctxPack, meta: args.meta, flowDelta: args.flow?.delta ?? null });
+  }
+
   const seedText = clamp(t, 240);
 
   const delta = args.flow?.delta ? String(args.flow.delta) : 'FORWARD';
