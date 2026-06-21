@@ -5167,7 +5167,7 @@ const diagnosisFollowupBlock = (() => {
             'RELATIONSHIP_SOLUTION_CONCRETIZE (DO NOT OUTPUT):',
             `CURRENT_USER=${currentUserText}`,
             previousAssistantText ? `PREVIOUS_ASSISTANT=${previousAssistantText.slice(0, 360)}` : '',
-            'MODE=前回の抽象助言を、先に形象へ変換し、必要なら具体的な一歩または一手に変換する',
+            'MODE=前回の抽象助言を、先に形象へ変換し、必要なら具体的な一歩または一歩に変換する',
             'RULE=状態観測に戻らない。「まだ決めきれない」「残っている」「開いたまま」などで終わらない',
             'RULE=「待つ」「置いておく」だけで終わらせない。ただし文案例から始めず、先に形象を置き、必要なら今できる一通・一歩まで落とす',
             'RULE=追いかけたい気持ちを否定せず、でも重く送らせない',

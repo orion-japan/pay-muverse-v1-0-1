@@ -54,7 +54,7 @@ function isWordCreateRequest(value: unknown): boolean {
 // ACTION_CREATE_ESCAPE_IMAGE_FIRST_GUARD_V3
 function isActionCreateRequest(value: unknown): boolean {
   const c = compactText(value);
-  return /今日.*何をすれば|今日は何をすれば|今日.*やる|今日中に.*やる|今から.*やる|実際にやること|やることを一つ|やることを1つ|一つだけ決め|1つだけ決め|次の一手|次の一歩|具体的にください|具体的に決め|何から始めれば|どこから始めれば|このあと.*始めれば|小さな行動|行動を一つ|行動を1つ|最初の一手|最初の一歩/u.test(c);
+  return /今日.*何をすれば|今日は何をすれば|今日.*やる|今日中に.*やる|今から.*やる|実際にやること|やることを一つ|やることを1つ|一つだけ決め|1つだけ決め|次の一歩|次の一歩|具体的にください|具体的に決め|何から始めれば|どこから始めれば|このあと.*始めれば|小さな行動|行動を一つ|行動を1つ|最初の一歩|最初の一歩/u.test(c);
 }
 
 function buildCreateDirective(args: {
@@ -354,7 +354,7 @@ function buildWriterSeed(args: {
   }
 
   if (args.actionCreate) {
-    return 'PRESEED_ACTION_CREATE_DIRECTIVE: このターンはAction Createである。A軸の形象固定文に戻さない。ユーザーが求めているのは、今日やること・次の一手・小さな行動である。返答は、実行できる一手を一つだけ具体的に出す。手順を増やしすぎない。文面だけで終わらない。';
+    return 'PRESEED_ACTION_CREATE_DIRECTIVE: このターンはAction Createである。A軸の形象固定文に戻さない。ユーザーが求めているのは、今日やること・次の一歩・小さな行動である。返答は、実行できる一歩を一つだけ具体的に出す。手順を増やしすぎない。文面だけで終わらない。';
   }
 
   if (args.wordCreate) {
@@ -527,7 +527,7 @@ export function buildPreSeedFlowDirective(
         : fallbackFlowAcceptance
           ? 'ユーザーはすでに小さく動く方向を受け取っている。新しい課題や選択肢を増やさず、その動きが現実に流れ始めていることを短く支える。'
           : fallbackActionCreate
-            ? 'PRESEED_ACTION_CREATE_DIRECTIVE: このCreateはAction Createである。形象固定文に戻さず、今日やること・次の一手・小さな行動を一つだけ具体的に出す。'
+            ? 'PRESEED_ACTION_CREATE_DIRECTIVE: このCreateはAction Createである。形象固定文に戻さず、今日やること・次の一歩・小さな行動を一つだけ具体的に出す。'
             : fallbackWordCreate
               ? 'PRESEED_WORD_CREATE_DIRECTIVE: このCreateはWord Createである。返信文・文面・一文を求めているため、形象固定文に戻さない。冒頭から使える短い言葉を出す。'
               : fallbackImageFirstCreate

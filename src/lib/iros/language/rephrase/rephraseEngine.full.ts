@@ -2654,7 +2654,7 @@ return blocks;
 
     // ACTION_CREATE_ESCAPE_IMAGE_FIRST_GUARD_V3_REPHRASE
     const explicitActionCreateNow =
-      /今日.*何をすれば|今日は何をすれば|今日.*やる|今日中に.*やる|今から.*やる|実際にやること|やることを一つ|やることを1つ|一つだけ決め|1つだけ決め|次の一手|次の一歩|具体的にください|具体的に決め|何から始めれば|どこから始めれば|このあと.*始めれば|小さな行動|行動を一つ|行動を1つ|最初の一手|最初の一歩/u.test(userNow);
+      /今日.*何をすれば|今日は何をすれば|今日.*やる|今日中に.*やる|今から.*やる|実際にやること|やることを一つ|やることを1つ|一つだけ決め|1つだけ決め|次の一歩|次の一歩|具体的にください|具体的に決め|何から始めれば|どこから始めれば|このあと.*始めれば|小さな行動|行動を一つ|行動を1つ|最初の一歩|最初の一歩/u.test(userNow);
 
     if (explicitActionCreateNow) {
       console.log('[IROS/IMAGE_FIRST_CREATE_EARLY_FINAL_GUARD][SKIP_ACTION_CREATE]', {
