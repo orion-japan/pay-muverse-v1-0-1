@@ -1,4 +1,4 @@
-﻿// src/lib/iros/language/renderGateway.ts
+// src/lib/iros/language/renderGateway.ts
 import { renderV2, type RenderBlock } from './renderV2';
 import { logConvEvidence } from '../conversation/evidenceLog';
 import { computeConvSignals } from '../conversation/signals';
@@ -686,6 +686,83 @@ function renderSlotDirectivesToHuman(directives: string): string {
 function finalizeNoDirectiveLeak(outText: string): string {
   if (!looksLikeSlotDirectives(outText)) return outText;
   return renderSlotDirectivesToHuman(outText);
+}
+
+function pickDeepVisibleTextForRelationGuard(extra: any): string {
+  const parts: string[] = [];
+
+  const push = (v: unknown) => {
+    const s = String(v ?? '').trim();
+    if (s) parts.push(s);
+  };
+
+  try {
+    push(extra?.userText);
+    push(extra?.meta?.userText);
+    push(extra?.extra?.userText);
+    push(extra?.orch?.userText);
+
+    push(extra?.focusLabel);
+    push(extra?.meta?.focusLabel);
+    push(extra?.extra?.focusLabel);
+
+    const cp =
+      extra?.ctxPack ??
+      extra?.contextPack ??
+      extra?.meta?.ctxPack ??
+      extra?.extra?.ctxPack ??
+      extra?.orch?.ctxPack ??
+      null;
+
+    push(cp?.focusLabel);
+    push(cp?.shiftHint);
+    push(cp?.preSeedWriterSeed);
+    push(cp?.preSeedWriterGuidance);
+    push(cp?.flowSeed);
+    push(cp?.flowSeedSyncedForRephraseBridge);
+
+    const slots = extractSlotsForEvidence(extra);
+    if (Array.isArray(slots)) {
+      for (const s of slots) push((s as any)?.content);
+    }
+
+    const rb =
+      extra?.rephraseBlocks ??
+      extra?.rephrase?.blocks ??
+      extra?.rephrase?.rephraseBlocks ??
+      null;
+
+    if (Array.isArray(rb)) {
+      for (const b of rb) push((b as any)?.text ?? (b as any)?.content ?? b);
+    }
+  } catch {}
+
+  return parts.join('\n');
+}
+
+function buildRelationProbabilityFlowRescue(outText: string, extra: any): string | null {
+  const visible = String(outText ?? '').replace(/\r\n/g, '\n').trim();
+  if (!visible) return null;
+
+  const guardContext = `${visible}\n${pickDeepVisibleTextForRelationGuard(extra)}`;
+
+  const hasRelationContext =
+    /(好きな人|片思い|相手|恋愛|近づ|重い|返事|反応|気持ち|距離|相手の反応)/u.test(guardContext);
+
+  const isBadCreateLeak =
+    /(いま先に置く形は|自分の立ち位置|自分の中心|その形から外れない|作る現実の形|今日置く入口|言葉または行動への落とし込み|抽象語だけで終わらせない|内部指示を本文に出さず|文脈に合う自然な一歩だけを返す|preseed_image_first_create|image_first_create|imaginal_form_create)/u.test(visible);
+
+  if (!hasRelationContext || !isBadCreateLeak) return null;
+
+  return [
+    'いまは、気持ちを強く見せるより、相手が返しやすい小ささで動くのがいいです。',
+    '',
+    '送るなら、長く説明しないで一言だけにしてください。',
+    '返事が軽ければ、そこで止める。',
+    '相手が広げてきたら、少しだけ返す。',
+    '',
+    '見るのは、相手の気持ちを当てることではなく、返ってくる温度です。'
+  ].join('\n');
 }
 
 /**
@@ -2391,8 +2468,14 @@ pipe('after_renderV2_empty_rescue', content);
   }
   pipe('after_post_sanitize_empty_rescue', content);
 
-
-  // ✅ 最終防衛：directive を人間文に変換（LLM落ち・rephrase reject 含む）
+  const relationProbabilityRescue = buildRelationProbabilityFlowRescue(content, extra);
+  if (relationProbabilityRescue) {
+    content = relationProbabilityRescue;
+    pickedFrom = 'relationProbabilityFlowRescue';
+    fallbackFrom = 'relationProbabilityFlowRescue';
+    pipe('after_relationProbabilityFlowRescue', content);
+  }
+// ✅ 最終防衛：directive を人間文に変換（LLM落ち・rephrase reject 含む）
   const hasDirectiveLeak =
     /\b(TASK|MODE|SLOT|META)\b/.test(content) ||
     /IROS\//.test(content) ||
@@ -2917,5 +3000,3 @@ const blocksCountForLog = Array.isArray(blocksForRender) ? blocksForRender.lengt
 
   return { content, meta };
 }
-
-
