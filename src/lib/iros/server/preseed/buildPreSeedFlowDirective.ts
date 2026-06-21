@@ -37,7 +37,8 @@ function isFlowAcceptanceText(value: unknown): boolean {
 function isImaginalFormCreateRequest(value: unknown): boolean {
   const c = compactText(value);
   const asksNext =
-    /どうすれば|どうしたら|次に|何をすれば|なにをすれば|どう動けば|どう進め|行動|やること/u.test(c);
+    // IMAGE_FIRST_CREATE_PLACE_ASK_FLOW_DIRECTIVE_V1
+    /どうすれば|どうしたら|次に|何をすれば|なにをすれば|どう動けば|どう進め|行動|やること|何を先に置けば|何を置けば|何を先に置く|何を置く|先に.*置けば|先に.*置くもの/u.test(c);
   const asksText =
     /なんて送|何て送|どう返|文面|文章|メッセージ|言葉にして|返信/u.test(c);
 
@@ -128,7 +129,7 @@ function inferInputIntent(userText: string, decision: PreSeedDecision): PreSeedI
   if (/つまり|どういうこと|意味|わかりやすく|言い換え/u.test(c)) return 'clarify';
   if (/違う|ちょっと違う|そうじゃない|修正|ズレ/u.test(c)) return 'correct';
   if (/なんて送|何て送|どう返|文面|文章|メッセージ|言葉にして/u.test(c)) return 'create';
-  if (/どうすれば|どうしたら|次に|行動|やること/u.test(c)) return 'ask_action';
+  if (/どうすれば|どうしたら|次に|行動|やること|何を先に置けば|何を置けば|何を先に置く|何を置く|先に.*置けば|先に.*置くもの/u.test(c)) return 'ask_action';
   if (/続き|そのまま|このまま/u.test(c)) return 'continue';
 
   return 'unknown';
@@ -364,7 +365,7 @@ export function buildPreSeedFlowDirective(
         ? 'continue'
         : /送るなら|なんて送|何て送|返信|返事|文章|文を|言い方|作って|作る|create/.test(fallbackText)
           ? 'create'
-          : fallbackImageFirstCreate || /行動|どうすれば|どうしたら|次/.test(fallbackText)
+          : fallbackImageFirstCreate || /行動|どうすれば|どうしたら|次|何を先に置けば|何を置けば|何を先に置く|何を置く|先に.*置けば|先に.*置くもの/.test(fallbackText)
             ? 'ask_action'
             : /なぜ|なんで|理由|どうして|結局|つまり|ということ|ってこと/.test(fallbackText)
               ? 'explain_reason'
@@ -595,7 +596,7 @@ export function buildPreSeedFlowDirective(
   const createReady =
     inputIntent === 'create' ||
     inputIntent === 'ask_action' ||
-    /どう返|なんて送|何て送|文面|言葉にして|どうすれば|どうしたら/u.test(userText);
+    /どう返|なんて送|何て送|文面|言葉にして|どうすれば|どうしたら|何を先に置けば|何を置けば|何を先に置く|何を置く|先に.*置けば|先に.*置くもの/u.test(userText);
 
   const createSource = inferCreateSource({
     userText,
