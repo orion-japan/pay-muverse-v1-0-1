@@ -157,19 +157,19 @@ function buildNextHintSlot(args: {
 
   const mode =
     laneKey === 'T_CONCRETIZE'
-      ? 'concretize_hint'
+      ? 'imaginal_create_hint'
       : 'resonance_hint';
 
   const hint =
     laneKey === 'T_CONCRETIZE'
-      ? '比較で止まらず、結論を1本に決める'
+      ? '行動案ではなく、内側の形を一つ置く'
       : laneKey === 'IDEA_BAND'
         ? '候補を増やさず、いま出ている差だけを見やすくする'
         : 'いま触れている輪郭を、説明へ戻さずそのまま残す';
 
         const message =
         laneKey === 'T_CONCRETIZE'
-          ? '次は比較を広げず、どこをひとつ決めるかに絞るのが合っています。'
+          ? '次は行動を増やさず、形象を先に置くのが合っています。'
           : laneKey === 'IDEA_BAND'
             ? '次は候補を増やすより、いま出ている差だけを見やすくするのが合っています。'
             : '次へ進めるより、いま残っている感触をそのまま置く。';
@@ -566,7 +566,7 @@ function buildClarify(
 
     const shiftIntentBase =
       isT
-        ? 'implement_next_step'
+        ? 'place_imaginal_form'
         : shouldMemoryRecallCheck
           ? 'memory_recall_check'
           : questionSuggestsPastReframe
@@ -581,7 +581,7 @@ function buildClarify(
 
     const shiftHintBase =
       isT
-        ? 'clarify_t_concretize_v1'
+        ? 'image_first_create_v1'
         : shouldReanswerCapability
           ? 'repair_capability_reask_v1'
           : shouldAnswerTruthStructure
@@ -599,7 +599,7 @@ function buildClarify(
 
               const shiftLineBase =
               isT
-                ? null
+                ? '相手の反応待ちから、自分の時間を先に戻す形'
                 : shouldMemoryRecallCheck
                   ? '過去の記憶参照が取れるかを確認している'
                   : questionSuggestsPastReframe
@@ -645,7 +645,7 @@ function buildClarify(
                     hint: shiftHintBase,
                     line: shiftLineBase,
                     source: isT
-                      ? 't_concretize'
+                      ? 'create_progress_bridge'
                       : shouldMemoryRecallCheck
                         ? 'memory_recall'
                         : questionSuggestsPastReframe
@@ -937,10 +937,32 @@ function buildShiftTConcretize(seedText: string, focusLabel?: string) {
       stack: new Error('SHIFT_BUILDER_USED').stack,
     });
 
+  const imageFirstCreateSourceForSlots = [
+    packedSeed,
+    focus,
+    raw,
+  ]
+    .map((v) => String(v ?? '').trim())
+    .filter(Boolean)
+    .join('\n');
 
+  const isImageFirstCreateConvergenceForSlots =
+    imageFirstCreateSourceForSlots.includes('PRESEED_CREATE_DIRECTIVE_FORCE') ||
+    imageFirstCreateSourceForSlots.includes('image_first_create') ||
+    imageFirstCreateSourceForSlots.includes('place_create') ||
+    imageFirstCreateSourceForSlots.includes('相手の反応待ちから、自分の時間を先に戻す形') ||
+    /^では、私は次に何をすればいいですか[？?]?$/.test(String(raw ?? '').trim()) ||
+    /^私は次に何をすればいいですか[？?]?$/.test(String(raw ?? '').trim());
+
+  const imageFirstFocusLabelForSlots =
+    '相手の反応待ちから、自分の時間を先に戻す形';
   const payload = {
     kind: 't_concretize',
-    intent: 'implement_next_step',
+    intent: 'place_imaginal_form',
+    hint: 'image_first_create_v1',
+    line: imageFirstFocusLabelForSlots,
+    source: 'create_progress_bridge',
+    createAxis: 'imaginal_form_create',
     rules: {
       ...(SHIFT_PRESET_T_CONCRETIZE.rules ?? {}),
       no_checklist: true,
@@ -2354,6 +2376,16 @@ export function buildNormalChatSlotPlan(args: {
     slots,
   };
 }
+
+
+
+
+
+
+
+
+
+
 
 
 

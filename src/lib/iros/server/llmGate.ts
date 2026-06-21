@@ -1,4 +1,4 @@
-// src/lib/iros/server/llmGate.ts
+﻿// src/lib/iros/server/llmGate.ts
 // iros — LLM Gate (Policy -> Execute)
 //
 // 目的：
@@ -688,7 +688,35 @@ const rewriteSeedFallbackLen = rewriteSeedFallback ? rewriteSeedFallback.length 
 
     // ✅ FIX: effectiveText が空でも、PP が仕込んだ seed（llmRewriteSeed/slotPlanSeed/ctxPack.seed_text 等）を使って writer に渡す
     const seedTextForFinalRaw = effectiveLen ? effectiveText : rewriteSeedFallbackRaw;
-    const seedTextForFinal = String(seedTextForFinalRaw ?? '').trim();
+    const seedTextForFinalBase = String(seedTextForFinalRaw ?? '').trim();
+
+    const isImageFirstCreateSeedForLlmGate =
+      /PRESEED_CREATE_DIRECTIVE_FORCE\s*\(DO NOT OUTPUT\)/u.test(seedTextForFinalBase) ||
+      /WRITER_PATTERN=IMAGE_FIRST_CREATE_V1/u.test(seedTextForFinalBase) ||
+      /C_DIRECTION=imaginal_form_create/u.test(seedTextForFinalBase) ||
+      /SURFACE_PLAN=image_first_create/u.test(seedTextForFinalBase) ||
+      /image_first_create/u.test(seedTextForFinalBase) ||
+      /place_create/u.test(seedTextForFinalBase);
+
+    const imageFirstCreateSemanticOverrideForLlmGate =
+      isImageFirstCreateSeedForLlmGate
+        ? [
+            'IMAGE_FIRST_CREATE_SEMANTIC_OVERRIDE_FOR_LLM_GATE:',
+            'このターンの small_create / targetKind / future_design / 次の一歩 は、小さな行動・送信・文面作成ではなく「小さな形象」を意味する。',
+            'enableAction は、ユーザーへ行動指示する意味ではなく「内側に形を置いて、動ける状態へ戻す」意味で読む。',
+            '「具体へ落とす」は、送る・連絡する・一文にすることではなく、見える形・場面・姿として具体化すること。',
+            'Writerは、冒頭で送信文・行動案・選択肢・連絡案を出さず、まず内側に立つ形を一つ描写する。',
+            '禁止：送る／送って／送信／一通／1通／一文／文面／ひとこと／一言／連絡／返事ください／今すぐ／手を動かす／紙に書く／メモに書く／片づける。',
+            '最後は行動命令ではなく、その形を崩さない保持で閉じる。',
+            '固定テンプレにはしない。このターンの focusLabel / flowSeed / userText から自然な文で書く。'
+          ].join('\n')
+        : '';
+
+    const seedTextForFinal =
+      imageFirstCreateSemanticOverrideForLlmGate &&
+      !/IMAGE_FIRST_CREATE_SEMANTIC_OVERRIDE_FOR_LLM_GATE/u.test(seedTextForFinalBase)
+        ? [seedTextForFinalBase, imageFirstCreateSemanticOverrideForLlmGate].filter(Boolean).join('\n\n')
+        : seedTextForFinalBase;
 
     const rewriteSeedFinal = seedTextForFinal
       ? buildWriterRewriteSeed({
@@ -946,3 +974,4 @@ export function logLlmGate(
     decisionRewriteSeedLen: decision?.rewriteSeed ? String(decision.rewriteSeed).length : null,
   });
 }
+

@@ -913,7 +913,15 @@ let extraSoT: Record<string, any> = {
     // -------------------------------------------------------
     // スクショ診断の続きでは、今回のスクショ診断本文を正本にする。
     // 過去の似た会話 seed が混ざると、別名・過去文体・古い診断が混入するため止める。
-    if (Boolean((extraSoT as any)?.screenshotDiagnosisContext)) {
+    if (Boolean((extraSoT as any)?.screenshotDiagnosisContext) ||
+        (
+          String((extraSoT as any)?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+          Boolean((extraSoT as any)?.preSeedFlowDirective?.createReady)
+        ) ||
+        (
+          String((extraSoT as any)?.ctxPack?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+          Boolean((extraSoT as any)?.ctxPack?.preSeedFlowDirective?.createReady)
+        )) {
       try {
         delete (extraSoT as any).similarFlowSeed;
         delete (extraSoT as any).similarFlowDebug;
@@ -1249,11 +1257,11 @@ let extraSoT: Record<string, any> = {
         : preSeedConvergesToCreate
           ? {
               goalKind: 'enableAction',
-              targetKind: 'small_create',
-              shiftKind: 'decide_shift',
-              shiftHint: 'preseed_small_create',
-              shiftIntent: 'place_small_action',
-              replyGoal: { kind: 'enableAction' },
+              targetKind: 'imaginal_form_create',
+              shiftKind: 'imaginal_form_shift',
+              shiftHint: 'preseed_image_first_create',
+              shiftIntent: 'place_imaginal_form',
+              replyGoal: { kind: 'enableAction', mode: 'image_first_create', targetKind: 'imaginal_form_create' },
               preSeedWriterGuidance: preSeedFlowDirective.writerGuidance,
               preSeedWriterSeed: preSeedFlowDirective.seedDirection?.writerSeed ?? null,
             preSeedCreateDirective: preSeedFlowDirective.createDirective ?? null,
@@ -1270,6 +1278,33 @@ let extraSoT: Record<string, any> = {
             focusLabel: createProgressBridge?.focusLabel ?? null,
           };
 
+      const imageFirstCreateSemanticOverride = preSeedConvergesToCreate
+        ? [
+            'IMAGE_FIRST_CREATE_SEMANTIC_OVERRIDE:',
+            'このターンの small_create / targetKind は、小さな行動ではなく「小さな形象」を意味する。',
+            'enableAction は、ユーザーへ行動指示する意味ではなく「内側に形を置いて、動ける状態へ戻す」意味で読む。',
+            'future_design / 次の一歩 / 具体へ落とす は、送信・連絡・文面・タスクではなく、見える形・場面・姿として具体化すること。',
+            'Writerは、冒頭で送信文・行動案・選択肢を出さず、まず内側に立つ形を一つ描写する。',
+            '禁止：送る／送って／一通／1通／一文／文面／ひとこと／一言／連絡／今すぐ／手を動かす／紙に書く／メモに書く／片づける。',
+            '最後は行動命令ではなく、その形を崩さない保持で閉じる。',
+            '固定テンプレにはしない。このターンの focusLabel / flowSeed / userText から自然な文で書く。'
+          ].join('\n')
+        : '';
+
+      if (imageFirstCreateSemanticOverride) {
+        const prevPreSeedWriterSeed = String((preSeedCtxPatch as any).preSeedWriterSeed ?? '').trim();
+        const prevPreSeedWriterGuidance = String((preSeedCtxPatch as any).preSeedWriterGuidance ?? '').trim();
+
+        (preSeedCtxPatch as any).preSeedWriterSeed = [
+          prevPreSeedWriterSeed,
+          imageFirstCreateSemanticOverride,
+        ].filter(Boolean).join('\n\n');
+
+        (preSeedCtxPatch as any).preSeedWriterGuidance = [
+          prevPreSeedWriterGuidance,
+          imageFirstCreateSemanticOverride,
+        ].filter(Boolean).join('\n\n');
+      }
       extraSoT = {
         ...extraSoT,
         ...preSeedCtxPatch,
@@ -1777,7 +1812,15 @@ let extraSoT: Record<string, any> = {
         Boolean((preSeedDecision as any)?.shouldUsePreSeedWriter) ||
         Boolean((preSeedDecision as any)?.shouldBypassWriter) ||
         Boolean((extraSoT as any)?.preSeedBypassWriter) ||
-        Boolean((extraSoT as any)?.screenshotDiagnosisContext);
+        Boolean((extraSoT as any)?.screenshotDiagnosisContext) ||
+        (
+          String((extraSoT as any)?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+          Boolean((extraSoT as any)?.preSeedFlowDirective?.createReady)
+        ) ||
+        (
+          String((extraSoT as any)?.ctxPack?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+          Boolean((extraSoT as any)?.ctxPack?.preSeedFlowDirective?.createReady)
+        );
 
       if (shouldSkipSimilarFlowByPreSeed) {
         console.log('[IROS/SIMILAR_FLOW_PRE_WRITER][SKIP_PRE_SEED]', {
@@ -1789,7 +1832,15 @@ let extraSoT: Record<string, any> = {
           shouldSuppressSimilarFlow: (preSeedDecision as any)?.shouldSuppressSimilarFlow ?? null,
           shouldUsePreSeedWriter: (preSeedDecision as any)?.shouldUsePreSeedWriter ?? null,
           shouldBypassWriter: (preSeedDecision as any)?.shouldBypassWriter ?? null,
-          hasScreenshotDiagnosisContext: Boolean((extraSoT as any)?.screenshotDiagnosisContext),
+          hasScreenshotDiagnosisContext: Boolean((extraSoT as any)?.screenshotDiagnosisContext) ||
+        (
+          String((extraSoT as any)?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+          Boolean((extraSoT as any)?.preSeedFlowDirective?.createReady)
+        ) ||
+        (
+          String((extraSoT as any)?.ctxPack?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+          Boolean((extraSoT as any)?.ctxPack?.preSeedFlowDirective?.createReady)
+        ),
         });
       } else {
       const preSimilarFlowLookup = await loadSimilarFlowSnapshots({
@@ -1814,7 +1865,15 @@ let extraSoT: Record<string, any> = {
         String((extraSoT as any)?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
         String((extraSoT as any)?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
         String((extraSoT as any)?.ctxPack?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
-        String((extraSoT as any)?.ctxPack?.createProgressBridge?.mode ?? '').trim() === 'image_first_create';
+        String((extraSoT as any)?.ctxPack?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+        (
+          String((extraSoT as any)?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+          Boolean((extraSoT as any)?.preSeedFlowDirective?.createReady)
+        ) ||
+        (
+          String((extraSoT as any)?.ctxPack?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+          Boolean((extraSoT as any)?.ctxPack?.preSeedFlowDirective?.createReady)
+        );
 
       const shouldDisableSimilarFlowForScreenshotDiagnosisPreWriter =
         /スクショ診断\s*(?:ID|id)?[:：]?\s*\d*/u.test(String((reqMeta as any)?.userText ?? (reqMeta as any)?.text ?? (reqMeta as any)?.currentUserText ?? '')) ||
@@ -2591,6 +2650,14 @@ const shouldBlockForcedLongTermMemoryForMetaQuestion =
 
 const shouldBlockForcedLongTermMemoryForScreenshotDiagnosis =
   Boolean((extraSoT as any)?.screenshotDiagnosisContext) ||
+        (
+          String((extraSoT as any)?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+          Boolean((extraSoT as any)?.preSeedFlowDirective?.createReady)
+        ) ||
+        (
+          String((extraSoT as any)?.ctxPack?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+          Boolean((extraSoT as any)?.ctxPack?.preSeedFlowDirective?.createReady)
+        ) ||
   Boolean((extraSoT as any)?.ctxPack?.screenshotDiagnosisContext) ||
   Boolean((reqMetaRaw as any)?.extra?.screenshotDiagnosisContext);
 
@@ -3507,6 +3574,14 @@ return NextResponse.json({
 
           const hasScreenshotCtx =
             Boolean((extraSoT as any)?.screenshotDiagnosisContext) ||
+        (
+          String((extraSoT as any)?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+          Boolean((extraSoT as any)?.preSeedFlowDirective?.createReady)
+        ) ||
+        (
+          String((extraSoT as any)?.ctxPack?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+          Boolean((extraSoT as any)?.ctxPack?.preSeedFlowDirective?.createReady)
+        ) ||
             Boolean((metaForSave as any)?.extra?.screenshotDiagnosisContext) ||
             Boolean((metaForSave as any)?.extra?.ctxPack?.screenshotDiagnosisContext);
 
@@ -4772,6 +4847,13 @@ if (!skipTraining) {
     );
   }
 }
+
+
+
+
+
+
+
 
 
 

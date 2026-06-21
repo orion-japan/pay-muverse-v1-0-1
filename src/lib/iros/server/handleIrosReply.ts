@@ -2696,7 +2696,7 @@ if (!wantsMicroNow) {
        1) History (single source)
     ---------------------------- */
 
-    const historyForTurn: unknown[] = await buildHistoryForTurn({
+    let historyForTurn: unknown[] = await buildHistoryForTurn({
       supabaseClient: supabase,
       conversationId,
       userCode,
@@ -2705,6 +2705,35 @@ if (!wantsMicroNow) {
       baseLimit: 30,
       maxTotal: 80,
     });
+
+    const isImageFirstCreateConvergenceForHistory =
+      String((extraLocal as any)?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+      String((extraLocal as any)?.ctxPack?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+      String((extraLocal as any)?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+      String((extraLocal as any)?.ctxPack?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+      (
+        String((extraLocal as any)?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+        Boolean((extraLocal as any)?.preSeedFlowDirective?.createReady)
+      ) ||
+      (
+        String((extraLocal as any)?.ctxPack?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+        Boolean((extraLocal as any)?.ctxPack?.preSeedFlowDirective?.createReady)
+      );
+
+    if (isImageFirstCreateConvergenceForHistory && Array.isArray(historyForTurn)) {
+      const beforeLen = historyForTurn.length;
+      historyForTurn = historyForTurn.filter((m: any) => {
+        const role = String(m?.role ?? m?.speaker ?? '').trim().toLowerCase();
+        return role !== 'assistant';
+      });
+
+      console.log('[IROS/HISTORY_IMAGE_FIRST_CREATE_ASSISTANT_DROPPED]', {
+        conversationId,
+        userCode,
+        beforeLen,
+        afterLen: historyForTurn.length,
+      });
+    }
 
 
 // --- 1.0) Remember (period bundle) ---
@@ -5899,6 +5928,57 @@ function normForRecall(v: any): string {
           ).trim() || null,
       });
 
+      const isImageFirstCreateConvergenceForTcf =
+        String((extraLocal as any)?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+        String((extraLocal as any)?.ctxPack?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+        String((orchExtra as any)?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+        String((orchExtra as any)?.ctxPack?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+        String((extraLocal as any)?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+        String((extraLocal as any)?.ctxPack?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+        String((orchExtra as any)?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+        String((orchExtra as any)?.ctxPack?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+        (
+          String((extraLocal as any)?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+          Boolean((extraLocal as any)?.preSeedFlowDirective?.createReady)
+        ) ||
+        (
+          String((extraLocal as any)?.ctxPack?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+          Boolean((extraLocal as any)?.ctxPack?.preSeedFlowDirective?.createReady)
+        ) ||
+        (
+          String((orchExtra as any)?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+          Boolean((orchExtra as any)?.preSeedFlowDirective?.createReady)
+        ) ||
+        (
+          String((orchExtra as any)?.ctxPack?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+          Boolean((orchExtra as any)?.ctxPack?.preSeedFlowDirective?.createReady)
+        );
+
+      if (isImageFirstCreateConvergenceForTcf && tcfRotationDecision) {
+        const imageFirstFocusLabel =
+          String((extraLocal as any)?.createProgressBridge?.focusLabel ?? '').trim() ||
+          String((extraLocal as any)?.ctxPack?.createProgressBridge?.focusLabel ?? '').trim() ||
+          String((orchExtra as any)?.createProgressBridge?.focusLabel ?? '').trim() ||
+          String((orchExtra as any)?.ctxPack?.createProgressBridge?.focusLabel ?? '').trim() ||
+          String((extraLocal as any)?.focusLabel ?? '').trim() ||
+          String((extraLocal as any)?.ctxPack?.focusLabel ?? '').trim() ||
+          String((orchExtra as any)?.focusLabel ?? '').trim() ||
+          String((orchExtra as any)?.ctxPack?.focusLabel ?? '').trim() ||
+          '相手の反応待ちから、自分の時間を先に戻す形';
+
+        (tcfRotationDecision as any).currentFocus = imageFirstFocusLabel;
+        (tcfRotationDecision as any).nextFocus = imageFirstFocusLabel;
+        (tcfRotationDecision as any).cDirection = 'imaginal_form_create';
+        (tcfRotationDecision as any).userReaction = 'ask_more';
+        (tcfRotationDecision as any).convergence = 'partial';
+        (tcfRotationDecision as any).shouldRouteToC = true;
+        (tcfRotationDecision as any).shouldUseTcfPattern = true;
+        (tcfRotationDecision as any).writerPatternKey = 'IMAGE_FIRST_CREATE_V1';
+        (tcfRotationDecision as any).surfacePlanKind = 'image_first_create';
+        (tcfRotationDecision as any).reason =
+          `preseed_image_first_create / focus=${imageFirstFocusLabel}`;
+      }
+
       const tcfRotationSeedText = formatTcfRotationSeed(tcfRotationDecision);
 
       const flowSeedObj = buildFlowSeedV1({
@@ -7473,7 +7553,14 @@ console.log('[IROS/HFW_PICKED_TAIL]', {
 
 
               : shouldPreferPreSeedCreateGoal
-                ? 'small_create'
+                ? (
+                    preSeedCreateModeForGoal === 'image_first_create' ||
+                    String(cpAny?.targetKind ?? '').trim() === 'imaginal_form_create' ||
+                    String(cpAny?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+                    String(cpAny?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create'
+                      ? 'imaginal_form_create'
+                      : 'small_create'
+                  )
                 : normalizedFinalGoalKind === 'resonate'
                   ? 'resonate'
                   : existingStrongTargetKind ??
@@ -13855,10 +13942,74 @@ try {
       relationshipDisplayNameRegistrationText || null,
   });
 } catch {}
+const isImageFirstCreateFinalGuard =
+  String((extraLocal as any)?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+  String((extraLocal as any)?.ctxPack?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+  String((extraLocal as any)?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+  String((extraLocal as any)?.ctxPack?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+  (
+    String((extraLocal as any)?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+    Boolean((extraLocal as any)?.preSeedFlowDirective?.createReady)
+  ) ||
+  (
+    String((extraLocal as any)?.ctxPack?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+    Boolean((extraLocal as any)?.ctxPack?.preSeedFlowDirective?.createReady)
+  ) ||
+  /PRESEED_CREATE_DIRECTIVE_FORCE\s*\(DO NOT OUTPUT\)/u.test(String((out.metaForSave as any)?.extra?.llmRewriteSeed ?? '')) ||
+  /WRITER_PATTERN=IMAGE_FIRST_CREATE_V1/u.test(String((out.metaForSave as any)?.extra?.flowSeed ?? '')) ||
+  /WRITER_PATTERN=IMAGE_FIRST_CREATE_V1/u.test(String((out.metaForSave as any)?.extra?.ctxPack?.flowSeed ?? '')) ||
+  /C_DIRECTION=imaginal_form_create/u.test(String((out.metaForSave as any)?.extra?.ctxPack?.flowSeed ?? '')) ||
+  /SURFACE_PLAN=image_first_create/u.test(String((out.metaForSave as any)?.extra?.ctxPack?.flowSeed ?? '')) ||
+  String((out.metaForSave as any)?.extra?.ctxPack?.preSeedCreateDirective?.mode ?? '').trim() === 'image_first_create' ||
+  String((out.metaForSave as any)?.extra?.ctxPack?.createProgressBridge?.mode ?? '').trim() === 'image_first_create' ||
+  (
+    String((out.metaForSave as any)?.extra?.ctxPack?.preSeedFlowDirective?.flowDirection ?? '').trim() === 'place_create' &&
+    Boolean((out.metaForSave as any)?.extra?.ctxPack?.preSeedFlowDirective?.createReady)
+  );
+
+const imageFirstCreateNgPattern =
+  /(送る|送って|一通|1通|短文|一文|文面|ひとこと|一言|連絡|紙に書|メモに書|書き出|手を動か|今すぐ|片づけ|決めて|1つに絞|一つに絞|今日やること)/u;
+
+let assistantTextForReturn = out.assistantText;
+
+if (false && isImageFirstCreateFinalGuard && imageFirstCreateNgPattern.test(String(out.assistantText ?? ''))) {
+  assistantTextForReturn = [
+    '次にやることを増やすより、まず形を一つ置くところです。',
+    '',
+    '相手の返事を待って止まっているあなたではなく、自分の時間を先に戻しているあなたです。',
+    '',
+    '相手を切る形ではありません。でも、相手の反応が来るまで、自分の一日を止めない形です。',
+    '',
+    'そこまで見えたら、次の一歩は小さくていいです。今日は、その形を崩さないことだけで十分です。'
+  ].join('\n');
+
+  try {
+    (out as any).assistantText = assistantTextForReturn;
+    (out.metaForSave as any).extra = (out.metaForSave as any).extra ?? {};
+    (out.metaForSave as any).extra.imageFirstCreateFinalGuardApplied = true;
+    (out.metaForSave as any).extra.finalAssistantText = assistantTextForReturn;
+    (out.metaForSave as any).extra.finalTextPolicy = 'IMAGE_FIRST_CREATE_FINAL_GUARD';
+
+    resultForReturn.assistantText = assistantTextForReturn;
+    resultForReturn.content = assistantTextForReturn;
+    resultForReturn.text = assistantTextForReturn;
+    resultForReturn.meta = resultForReturn.meta ?? {};
+    resultForReturn.meta.extra = resultForReturn.meta.extra ?? {};
+    resultForReturn.meta.extra.finalAssistantText = assistantTextForReturn;
+    resultForReturn.meta.extra.finalTextPolicy = 'IMAGE_FIRST_CREATE_FINAL_GUARD';
+    resultForReturn.meta.extra.imageFirstCreateFinalGuardApplied = true;
+  } catch {}
+
+  console.log('[IROS/IMAGE_FIRST_CREATE_FINAL_GUARD_APPLIED]', {
+    conversationId,
+    userCode,
+  });
+}
+
 return {
   ok: true,
   result: resultForReturn,
-  assistantText: out.assistantText,
+  assistantText: assistantTextForReturn,
   metaForSave: out.metaForSave,
   finalMode,
 };
@@ -13880,6 +14031,17 @@ return {
     };
   }
 }
+
+
+
+
+
+
+
+
+
+
+
 
 
 

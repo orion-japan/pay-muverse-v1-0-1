@@ -10696,12 +10696,24 @@ const isResonanceStructureFollowup =
                 questionTypeForPattern !== 'structure' &&
                 questionTypeForPattern !== 'meaning';
 
+                const isImageFirstCreateForConsultAnswerBlock =
+                  /PRESEED_CREATE_DIRECTIVE_FORCE\s*\(DO NOT OUTPUT\)/u.test(String(__writerInjectedPack ?? '')) ||
+                  /image_first_create/u.test(String(__writerInjectedPack ?? '')) ||
+                  /place_create/u.test(String(__writerInjectedPack ?? '')) ||
+                  /C_DIRECTION=imaginal_form_create/u.test(String(__writerInjectedPack ?? '')) ||
+                  /WRITER_PATTERN=IMAGE_FIRST_CREATE_V1/u.test(String(__writerInjectedPack ?? '')) ||
+                  /SURFACE_PLAN=image_first_create/u.test(String(__writerInjectedPack ?? '')) ||
+                  /相手の反応待ちから、自分の時間を先に戻す形/u.test(String(__writerInjectedPack ?? ''));
+
                 const shouldApplyConsultAnswerDirectives =
-                writerPatternIsConsultAnswerLike ||
-                /CONSULT_ANSWER_CONTRACT\s*\(DO NOT OUTPUT\):/u.test(
-                  String(__writerInjectedPack ?? '')
-                ) ||
-                /consultAnswerMode=enabled/u.test(String(__writerInjectedPack ?? ''));
+                  !isImageFirstCreateForConsultAnswerBlock &&
+                  (
+                    writerPatternIsConsultAnswerLike ||
+                    /CONSULT_ANSWER_CONTRACT\s*\(DO NOT OUTPUT\):/u.test(
+                      String(__writerInjectedPack ?? '')
+                    ) ||
+                    /consultAnswerMode=enabled/u.test(String(__writerInjectedPack ?? ''))
+                  );
 
                 const consultAnswerWriterDirectives = shouldApplyConsultAnswerDirectives
                   ? {
@@ -16252,6 +16264,9 @@ return await runRetryPass({
     slotsForGuard,
   });
 }
+
+
+
 
 
 
