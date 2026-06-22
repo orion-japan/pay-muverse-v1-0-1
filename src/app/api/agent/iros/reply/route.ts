@@ -3577,6 +3577,28 @@ const n = preserveRawFinalForStyleNorm
           // ✅ 正規化結果を finalText 正本へ
           finalText = practicalSafeText;
 
+          // RELATION_OLD_SHAPE_TEMPLATE_FINAL_RESCUE
+          // 恋愛・相手反応文脈で旧 image_first_create の形象テンプレが画面に出るのを最終段で止める。
+          if (/(いま先に置く形は|自分の立ち位置|自分の中心|その形から外れない)/u.test(String(finalText ?? ''))) {
+            finalText = [
+              'いまは、気持ちを強く見せるより、相手が返しやすい小ささで動くのがいいです。',
+              '',
+              '送るなら、長く説明しないで一言だけにしてください。',
+              '返事が軽ければ、そこで止める。',
+              '相手が広げてきたら、少しだけ返す。',
+              '',
+              '見るのは、相手の気持ちを当てることではなく、返ってくる温度です。',
+            ].join('\n');
+
+            if (metaForSave && typeof metaForSave === 'object') {
+              (metaForSave as any).extra = {
+                ...(((metaForSave as any).extra ?? {}) as any),
+                relationOldShapeTemplateFinalRescue: true,
+                finalTextPolicy: 'FINAL_TEXT_SYNCED_RELATION_OLD_SHAPE_RESCUE',
+              };
+            }
+          }
+
           // ✅ 監査用
           const metaAny2: any = meta as any;
           metaAny2.extra = {
