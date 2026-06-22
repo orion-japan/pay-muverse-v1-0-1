@@ -70,6 +70,26 @@ function norm(s: unknown) {
   return String(s ?? '').replace(/\s+/g, ' ').trim();
 }
 
+function isRelationshipSignalReadingQuestion(text: string) {
+  const t = norm(text);
+  if (!t) return false;
+
+  const hasRelationSubject =
+    /(相手|その人|あの人|好きな人|気になる人|気になっている人|気になっている相手|片思い|恋愛|恋バナ|脈あり|脈なし)/u.test(t);
+
+  const hasSignalAsk =
+    /(脈あり|脈なし|好意|好きなのか|好きなのかな|私を好き|自分を好き|気がある|気があって|探り|恋バナ|ただ聞いて|ただ優しい|どう見れば|どう見る|これは|可能性)/u.test(t);
+
+  const hasQuotedRomanceQuestion =
+    /「[^」]{1,40}(好きな人|気になる人|恋人|彼氏|彼女|付き合|好き|恋愛)[^」]{0,40}」/u.test(t);
+
+  const hasRepeatedRomanceAsk =
+    /(前に|以前|この前|また|何度か|複数回|ちなみに)/u.test(t) &&
+    /(聞いてきた|聞かれた|質問された|言ってきた)/u.test(t) &&
+    /(好きな人|気になる人|恋愛|恋バナ|彼氏|彼女)/u.test(t);
+
+  return (hasRelationSubject && hasSignalAsk) || hasQuotedRomanceQuestion || hasRepeatedRomanceAsk;
+}
 function clamp(s: string, n: number) {
   if (s.length <= n) return s;
   return s.slice(0, Math.max(0, n - 1)) + '…';
@@ -683,10 +703,17 @@ function buildClarify(
       /(地球外生命体|宇宙人)/.test(normalizedUserText) &&
       /(人間|人類)/.test(normalizedUserText) &&
       /(作った|作られた|介入)/.test(normalizedUserText)
-    );
-
-    const isStructureQuestion = questionType === 'structure';
+    );    const isStructureQuestion = questionType === 'structure';
     const isTruthQuestion = questionType === 'truth';
+
+    const shouldRelationshipSignalReading =
+      isRelationshipSignalReadingQuestion(instructionText) ||
+      isRelationshipSignalReadingQuestion(seedText) ||
+      isRelationshipSignalReadingQuestion(normalizedUserText) ||
+      isRelationshipSignalReadingQuestion(normalizedTargetText);
+
+    // 恋愛サイン判定は、T_CONCRETIZE / IMAGE_FIRST_CREATE に吸わせない
+    const isTForClarify = isT && !shouldRelationshipSignalReading;
 
     const shouldAnswerTruthStructure =
       resolvedAskType === 'truth_structure' ||
@@ -698,9 +725,11 @@ function buildClarify(
       resolvedAskType === 'capability_reask';
 
     const shiftIntentBase =
-      isT
-        ? 'place_imaginal_form'
-        : shouldMemoryRecallCheck
+      shouldRelationshipSignalReading
+        ? 'relationship_signal_reading'
+        : isTForClarify
+          ? 'place_imaginal_form'
+          : shouldMemoryRecallCheck
           ? 'memory_recall_check'
           : questionSuggestsPastReframe
             ? 'answer_past_reframe'
@@ -713,9 +742,11 @@ function buildClarify(
                   : 'answer_user_meaning';
 
     const shiftHintBase =
-      isT
-        ? 'image_first_create_v1'
-        : shouldReanswerCapability
+      shouldRelationshipSignalReading
+        ? 'relationship_signal_reading_v1'
+        : isTForClarify
+          ? 'image_first_create_v1'
+          : shouldReanswerCapability
           ? 'repair_capability_reask_v1'
           : shouldAnswerTruthStructure
             ? 'clarify_truth_structure_v1'
@@ -731,9 +762,11 @@ function buildClarify(
                 );
 
               const shiftLineBase =
-              isT
-                ? '相手の反応待ちから、自分の時間を先に戻す形'
-                : shouldMemoryRecallCheck
+              shouldRelationshipSignalReading
+                ? '相手の恋愛質問は、脈あり断定ではなく、探り・恋バナ・好意確認の三つに分けて読む'
+                : isTForClarify
+                  ? '相手の反応待ちから、自分の時間を先に戻す形'
+                  : shouldMemoryRecallCheck
                   ? '過去の記憶参照が取れるかを確認している'
                   : questionSuggestsPastReframe
                     ? '未完了の感じが、まだ戻ってきている'
@@ -773,13 +806,15 @@ function buildClarify(
                   role: 'assistant',
                   style: 'neutral',
                   content: m('SHIFT', {
-                    kind: isT ? 't_concretize' : 'clarify',
+                    kind: isTForClarify ? 't_concretize' : 'clarify',
                     intent: shiftIntentBase,
                     hint: shiftHintBase,
                     line: shiftLineBase,
-                    source: isT
-                      ? 'create_progress_bridge'
-                      : shouldMemoryRecallCheck
+                    source: shouldRelationshipSignalReading
+                      ? 'relationship_signal_reading'
+                      : isTForClarify
+                        ? 'create_progress_bridge'
+                        : shouldMemoryRecallCheck
                         ? 'memory_recall'
                         : questionSuggestsPastReframe
                           ? 'question_engine'
@@ -788,9 +823,11 @@ function buildClarify(
                             : shouldReanswerCapability
                               ? 'resolved_ask'
                               : clarifyMeaning.source,
-                    meaning_kind: isT
-                      ? null
-                      : shouldMemoryRecallCheck
+                    meaning_kind: shouldRelationshipSignalReading
+                      ? 'relationship_signal_reading'
+                      : isTForClarify
+                        ? null
+                        : shouldMemoryRecallCheck
                         ? 'memory_recall_check'
                         : questionSuggestsPastReframe
                           ? 'past_reframe'
@@ -802,9 +839,11 @@ function buildClarify(
                     question_type: questionType || null,
                     t_mode: tMode || null,
                     question_focus: questionFocus || null,
-                    contract: isT
-                      ? ['first_line_is_core', 'one_next_step', 'plain_words']
-                      : shouldMemoryRecallCheck
+                    contract: shouldRelationshipSignalReading
+                      ? ['answer_first', 'no_user_echo', 'no_image_first_create', 'split_signal_possibilities', 'no_mind_reading', 'plain_words']
+                      : isTForClarify
+                        ? ['first_line_is_core', 'one_next_step', 'plain_words']
+                        : shouldMemoryRecallCheck
                         ? ['answer_in_one_shot', 'memory_result_required', 'no_memory_claim_without_source', 'plain_words']
                         : questionSuggestsPastReframe
                           ? ['answer_in_one_shot', 'prefer_past_reframe_over_advice', 'plain_words']
@@ -820,7 +859,17 @@ function buildClarify(
                                     ? ['answer_in_one_shot', 'first_line_is_core_answer', 'plain_words']
                                     : ['answer_in_one_shot', 'plain_words'],
                                   rules: {
-                                    ...(shiftPreset?.rules ?? {}),
+                                    ...((shouldRelationshipSignalReading ? null : shiftPreset)?.rules ?? {}),
+                                    relationship_signal_reading: shouldRelationshipSignalReading
+                                      ? {
+                                          first_line: '今の情報だけでは断定できないが、恋愛状況を複数回聞くのは弱〜中程度の関心シグナル',
+                                          split: ['探り', '恋バナ', '自分への好意確認'],
+                                          observe: '相手が自分の恋愛話を出すか、会う流れにするかを見る',
+                                          no_user_echo: true,
+                                          no_image_first_create: true,
+                                          no_mind_reading: true,
+                                        }
+                                      : null,
                                     answer_user_meaning:
                                       !shouldMemoryRecallCheck &&
                                       !questionSuggestsPastReframe &&
