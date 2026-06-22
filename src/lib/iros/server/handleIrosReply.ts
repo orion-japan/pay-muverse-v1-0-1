@@ -4791,6 +4791,64 @@ function normForRecall(v: any): string {
                                       : null;
 
                 if (!targetLabel) return null;
+              const pickRelationMetaString = (...values: any[]): string | null => {
+                for (const value of values) {
+                  if (typeof value === 'string' && value.trim()) return value.trim();
+                }
+                return null;
+              };
+
+              const displayName = pickRelationMetaString(
+                ctxPack?.displayName,
+                ctxPack?.relationshipContext?.displayName,
+                ctxPack?.relationshipCapture?.displayName,
+                extra?.displayName,
+                extra?.relationshipContext?.displayName,
+                extra?.relationshipCapture?.displayName,
+                meta?.displayName,
+                meta?.relationshipContext?.displayName,
+                meta?.relationshipCapture?.displayName,
+                targetLabel,
+              );
+
+              const personId = pickRelationMetaString(
+                ctxPack?.personId,
+                ctxPack?.relationshipContext?.personId,
+                ctxPack?.relationshipCapture?.personId,
+                extra?.personId,
+                extra?.relationshipContext?.personId,
+                extra?.relationshipCapture?.personId,
+                meta?.personId,
+                meta?.relationshipContext?.personId,
+                meta?.relationshipCapture?.personId,
+              );
+
+              const relationId = pickRelationMetaString(
+                ctxPack?.relationId,
+                ctxPack?.relationshipContext?.relationId,
+                ctxPack?.relationshipCapture?.relationId,
+                extra?.relationId,
+                extra?.relationshipContext?.relationId,
+                extra?.relationshipCapture?.relationId,
+                meta?.relationId,
+                meta?.relationshipContext?.relationId,
+                meta?.relationshipCapture?.relationId,
+              );
+
+              const referenceTarget = pickRelationMetaString(
+                ctxPack?.referenceTarget,
+                ctxPack?.relationshipContext?.referenceTarget,
+                ctxPack?.relationshipCapture?.referenceTarget,
+                extra?.referenceTarget,
+                extra?.relationshipContext?.referenceTarget,
+                extra?.relationshipCapture?.referenceTarget,
+                meta?.referenceTarget,
+                meta?.relationshipContext?.referenceTarget,
+                meta?.relationshipCapture?.referenceTarget,
+                displayName,
+                targetLabel,
+              );
+
 
                 const kind =
                   typeof ctxPack?.relationshipContextCaptureKind === 'string'
@@ -4811,12 +4869,21 @@ function normForRecall(v: any): string {
 
                 return {
                   targetLabel,
+                displayName,
+                personId,
+                relationId,
+                referenceTarget,
                   kind,
                   relationshipContextCaptureTargetLabel: targetLabel,
                   relationshipContextCaptureKind: kind,
                   relationshipContext: {
                     targetLabel,
+                    displayName,
+                    personId,
+                    relationId,
+                    referenceTarget,
                     kind,
+                    identityPatchMarker: 'relationship_context_identity_nested_v1',
                     status:
                       ctxPack?.relationshipContext?.status ??
                       extra?.relationshipContext?.status ??
@@ -4827,11 +4894,16 @@ function normForRecall(v: any): string {
                       extra?.relationshipContext?.confidence ??
                       meta?.relationshipContext?.confidence ??
                       'low',
-                    source: 'history_message_meta_scan',
+                    source: 'history_message_meta_scan_identity_v1',
                   },
                   relationshipCapture: {
                     targetLabel,
+                    displayName,
+                    personId,
+                    relationId,
+                    referenceTarget,
                     kind,
+                    identityPatchMarker: 'relationship_context_identity_nested_v1',
                     status:
                       ctxPack?.relationshipCapture?.status ??
                       extra?.relationshipCapture?.status ??
@@ -4842,7 +4914,7 @@ function normForRecall(v: any): string {
                       extra?.relationshipCapture?.confidence ??
                       meta?.relationshipCapture?.confidence ??
                       'low',
-                    source: 'history_message_meta_scan',
+                    source: 'history_message_meta_scan_identity_v1',
                   },
                 };
               };
@@ -4908,6 +4980,30 @@ function normForRecall(v: any): string {
                 histCtx.relationshipCapture =
                   histCtx.relationshipCapture ??
                   relationContextFromHistoryMetaForPreOrch.relationshipCapture;
+                histCtx.displayName =
+                  histCtx.displayName ??
+                  relationContextFromHistoryMetaForPreOrch.displayName ??
+                  relationContextFromHistoryMetaForPreOrch.relationshipContext?.displayName ??
+                  null;
+                histCtx.personId =
+                  histCtx.personId ??
+                  relationContextFromHistoryMetaForPreOrch.personId ??
+                  relationContextFromHistoryMetaForPreOrch.relationshipContext?.personId ??
+                  null;
+                histCtx.relationId =
+                  histCtx.relationId ??
+                  relationContextFromHistoryMetaForPreOrch.relationId ??
+                  relationContextFromHistoryMetaForPreOrch.relationshipContext?.relationId ??
+                  null;
+                histCtx.referenceTarget =
+                  histCtx.referenceTarget ??
+                  relationContextFromHistoryMetaForPreOrch.referenceTarget ??
+                  relationContextFromHistoryMetaForPreOrch.relationshipContext?.referenceTarget ??
+                  histCtx.displayName ??
+                  histCtx.targetLabel ??
+                  null;
+                histCtx.histCtxIdentityPatchMarker = 'relationship_history_identity_v1';
+
               }
             }
 
@@ -4921,6 +5017,8 @@ function normForRecall(v: any): string {
               histTargetLabel: histCtx?.targetLabel ?? null,
               histRelationshipContextTargetLabel:
                 histCtx?.relationshipContext?.targetLabel ?? null,
+                          relationIdFromHistoryMeta: relationContextFromHistoryMetaForPreOrch?.relationId ?? null,
+              personIdFromHistoryMeta: relationContextFromHistoryMetaForPreOrch?.personId ?? null,
             });
             // MEMORY_SEED_RESTORE_FROM_HISTCTX
             // 保存済み ctxPack から、次ターンの Writer seed 正本に必要な Memory 系を復元する
@@ -5275,12 +5373,179 @@ function normForRecall(v: any): string {
               };
             }
 
+            
+            const pickPreOrchRelationshipStringV1 = (...values: any[]): string | null => {
+              for (const value of values) {
+                if (typeof value === 'string' && value.trim()) return value.trim();
+              }
+              return null;
+            };
+
+            const preOrchRelationshipIdentityV1 = {
+              targetLabel: pickPreOrchRelationshipStringV1(
+                preOrchRelationCtxPack?.targetLabel,
+                preOrchRelationCtxPack?.relationshipContext?.targetLabel,
+                preOrchRelationCtxPack?.relationshipCapture?.targetLabel,
+                preOrchRelationExtraCtxPack?.targetLabel,
+                preOrchRelationExtraCtxPack?.relationshipContext?.targetLabel,
+                preOrchRelationExtraCtxPack?.relationshipCapture?.targetLabel,
+                preOrchRelationExtraCtxPack?.relationshipContextCaptureTargetLabel,
+              ),
+              displayName: pickPreOrchRelationshipStringV1(
+                preOrchRelationCtxPack?.displayName,
+                preOrchRelationCtxPack?.relationshipContext?.displayName,
+                preOrchRelationCtxPack?.relationshipCapture?.displayName,
+                preOrchRelationExtraCtxPack?.displayName,
+                preOrchRelationExtraCtxPack?.relationshipContext?.displayName,
+                preOrchRelationExtraCtxPack?.relationshipCapture?.displayName,
+              ),
+              personId: pickPreOrchRelationshipStringV1(
+                preOrchRelationCtxPack?.personId,
+                preOrchRelationCtxPack?.relationshipContext?.personId,
+                preOrchRelationCtxPack?.relationshipCapture?.personId,
+                preOrchRelationExtraCtxPack?.personId,
+                preOrchRelationExtraCtxPack?.relationshipContext?.personId,
+                preOrchRelationExtraCtxPack?.relationshipCapture?.personId,
+              ),
+              relationId: pickPreOrchRelationshipStringV1(
+                preOrchRelationCtxPack?.relationId,
+                preOrchRelationCtxPack?.relationshipContext?.relationId,
+                preOrchRelationCtxPack?.relationshipCapture?.relationId,
+                preOrchRelationExtraCtxPack?.relationId,
+                preOrchRelationExtraCtxPack?.relationshipContext?.relationId,
+                preOrchRelationExtraCtxPack?.relationshipCapture?.relationId,
+              ),
+              referenceTarget: pickPreOrchRelationshipStringV1(
+                preOrchRelationCtxPack?.referenceTarget,
+                preOrchRelationCtxPack?.relationshipContext?.referenceTarget,
+                preOrchRelationCtxPack?.relationshipCapture?.referenceTarget,
+                preOrchRelationExtraCtxPack?.referenceTarget,
+                preOrchRelationExtraCtxPack?.relationshipContext?.referenceTarget,
+                preOrchRelationExtraCtxPack?.relationshipCapture?.referenceTarget,
+              ),
+              kind: pickPreOrchRelationshipStringV1(
+                preOrchRelationCtxPack?.relationshipContext?.kind,
+                preOrchRelationCtxPack?.relationshipCapture?.kind,
+                preOrchRelationExtraCtxPack?.relationshipContext?.kind,
+                preOrchRelationExtraCtxPack?.relationshipCapture?.kind,
+                preOrchRelationExtraCtxPack?.relationshipContextCaptureKind,
+              ),
+              status: pickPreOrchRelationshipStringV1(
+                preOrchRelationCtxPack?.relationshipContext?.status,
+                preOrchRelationCtxPack?.relationshipCapture?.status,
+                preOrchRelationExtraCtxPack?.relationshipContext?.status,
+                preOrchRelationExtraCtxPack?.relationshipCapture?.status,
+              ),
+              confidence: pickPreOrchRelationshipStringV1(
+                preOrchRelationCtxPack?.relationshipContext?.confidence,
+                preOrchRelationCtxPack?.relationshipCapture?.confidence,
+                preOrchRelationExtraCtxPack?.relationshipContext?.confidence,
+                preOrchRelationExtraCtxPack?.relationshipCapture?.confidence,
+              ),
+            };
+
+            preOrchRelationshipIdentityV1.referenceTarget =
+              preOrchRelationshipIdentityV1.referenceTarget ??
+              preOrchRelationshipIdentityV1.displayName ??
+              preOrchRelationshipIdentityV1.targetLabel;
+
+            if (
+              preOrchRelationshipIdentityV1.targetLabel ||
+              preOrchRelationshipIdentityV1.relationId ||
+              preOrchRelationshipIdentityV1.personId ||
+              preOrchRelationshipIdentityV1.referenceTarget
+            ) {
+              (orchCtxPackInput as any).targetLabel =
+                (orchCtxPackInput as any).targetLabel ??
+                preOrchRelationshipIdentityV1.targetLabel;
+              (orchCtxPackInput as any).displayName =
+                (orchCtxPackInput as any).displayName ??
+                preOrchRelationshipIdentityV1.displayName;
+              (orchCtxPackInput as any).personId =
+                (orchCtxPackInput as any).personId ??
+                preOrchRelationshipIdentityV1.personId;
+              (orchCtxPackInput as any).relationId =
+                (orchCtxPackInput as any).relationId ??
+                preOrchRelationshipIdentityV1.relationId;
+              (orchCtxPackInput as any).referenceTarget =
+                (orchCtxPackInput as any).referenceTarget ??
+                preOrchRelationshipIdentityV1.referenceTarget;
+
+              (orchCtxPackInput as any).relationshipContext = {
+                ...((orchCtxPackInput as any).relationshipContext ?? {}),
+                targetLabel:
+                  (orchCtxPackInput as any).relationshipContext?.targetLabel ??
+                  preOrchRelationshipIdentityV1.targetLabel,
+                displayName:
+                  (orchCtxPackInput as any).relationshipContext?.displayName ??
+                  preOrchRelationshipIdentityV1.displayName,
+                personId:
+                  (orchCtxPackInput as any).relationshipContext?.personId ??
+                  preOrchRelationshipIdentityV1.personId,
+                relationId:
+                  (orchCtxPackInput as any).relationshipContext?.relationId ??
+                  preOrchRelationshipIdentityV1.relationId,
+                referenceTarget:
+                  (orchCtxPackInput as any).relationshipContext?.referenceTarget ??
+                  preOrchRelationshipIdentityV1.referenceTarget,
+                kind:
+                  (orchCtxPackInput as any).relationshipContext?.kind ??
+                  preOrchRelationshipIdentityV1.kind,
+                status:
+                  (orchCtxPackInput as any).relationshipContext?.status ??
+                  preOrchRelationshipIdentityV1.status,
+                confidence:
+                  (orchCtxPackInput as any).relationshipContext?.confidence ??
+                  preOrchRelationshipIdentityV1.confidence,
+                source:
+                  (orchCtxPackInput as any).relationshipContext?.source ??
+                  'pre_orch_relationship_identity_restore',
+              };
+
+              (orchCtxPackInput as any).relationshipCapture = {
+                ...((orchCtxPackInput as any).relationshipCapture ?? {}),
+                targetLabel:
+                  (orchCtxPackInput as any).relationshipCapture?.targetLabel ??
+                  preOrchRelationshipIdentityV1.targetLabel,
+                displayName:
+                  (orchCtxPackInput as any).relationshipCapture?.displayName ??
+                  preOrchRelationshipIdentityV1.displayName,
+                personId:
+                  (orchCtxPackInput as any).relationshipCapture?.personId ??
+                  preOrchRelationshipIdentityV1.personId,
+                relationId:
+                  (orchCtxPackInput as any).relationshipCapture?.relationId ??
+                  preOrchRelationshipIdentityV1.relationId,
+                referenceTarget:
+                  (orchCtxPackInput as any).relationshipCapture?.referenceTarget ??
+                  preOrchRelationshipIdentityV1.referenceTarget,
+                kind:
+                  (orchCtxPackInput as any).relationshipCapture?.kind ??
+                  preOrchRelationshipIdentityV1.kind,
+                status:
+                  (orchCtxPackInput as any).relationshipCapture?.status ??
+                  preOrchRelationshipIdentityV1.status,
+                confidence:
+                  (orchCtxPackInput as any).relationshipCapture?.confidence ??
+                  preOrchRelationshipIdentityV1.confidence,
+                source:
+                  (orchCtxPackInput as any).relationshipCapture?.source ??
+                  'pre_orch_relationship_identity_restore',
+              };
+
+              (orchCtxPackInput as any).preOrchRelationshipIdentityPatchMarker =
+                'relationship_pre_orch_identity_v1';
+            }
             console.log('[IROS/RELATION][PRE_ORCH_RESTORE_SAFE]', {
               traceId: (extraLocal as any)?.traceId ?? null,
               conversationId,
               userCode,
               relationTargetFromPreOrch,
               preTargetLabel: preOrchRelationCtxPack?.targetLabel ?? null,
+              relationIdFromPreOrch: (orchCtxPackInput as any)?.relationshipContext?.relationId ?? null,
+              personIdFromPreOrch: (orchCtxPackInput as any)?.relationshipContext?.personId ?? null,
+              displayNameFromPreOrch: (orchCtxPackInput as any)?.relationshipContext?.displayName ?? null,
+              referenceTargetFromPreOrch: (orchCtxPackInput as any)?.relationshipContext?.referenceTarget ?? null,
               preRelationshipContextTargetLabel:
                 preOrchRelationCtxPack?.relationshipContext?.targetLabel ?? null,
               extraTargetLabel: preOrchRelationExtraCtxPack?.targetLabel ?? null,

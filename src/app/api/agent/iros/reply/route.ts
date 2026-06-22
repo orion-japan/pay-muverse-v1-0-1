@@ -1,3 +1,4 @@
+import { enrichRelationshipIdentity } from '@/lib/iros/relationshipIdentity';
 import { NextRequest, NextResponse } from 'next/server';
 import { buildPreSeedFlowDirective, resolvePreSeedDecision } from '@/lib/iros/server/preseed';
 import { callPreSeedDiagnosisWriter } from '@/lib/iros/server/preseed/callPreSeedDiagnosisWriter';
@@ -1041,7 +1042,33 @@ let extraSoT: Record<string, any> = {
             });
           }
 
-          const metaForRelationshipContextCapture: any = {
+          
+const enrichedRelationshipContextCapture = enrichRelationshipIdentity(
+  {
+    targetLabel: relationshipContextCapture.targetLabel ?? null,
+    kind: relationshipContextCapture.kind ?? null,
+    status: relationshipContextCapture.status ?? 'confirmed_by_user',
+    confidence: relationshipContextCapture.confidence ?? 'high',
+    relationshipContext: {
+      targetLabel: relationshipContextCapture.targetLabel ?? null,
+      kind: relationshipContextCapture.kind ?? null,
+      status: relationshipContextCapture.status ?? 'confirmed_by_user',
+      confidence: relationshipContextCapture.confidence ?? 'high',
+      sensitivity: relationshipContextCapture.sensitivity ?? null,
+      source: 'relationship_context_capture',
+    },
+    relationshipCapture: {
+      targetLabel: relationshipContextCapture.targetLabel ?? null,
+      kind: relationshipContextCapture.kind ?? null,
+      status: relationshipContextCapture.status ?? 'confirmed_by_user',
+      confidence: relationshipContextCapture.confidence ?? 'high',
+      sensitivity: relationshipContextCapture.sensitivity ?? null,
+      source: 'relationship_context_capture',
+    },
+  },
+  userCode,
+);
+const metaForRelationshipContextCapture: any = {
             ...(metaForIros ?? {}),
             mode,
             q_code: 'Q3',
@@ -1054,6 +1081,11 @@ let extraSoT: Record<string, any> = {
               persistAssistantMessage: false,
 
               relationshipContextCapture: true,
+              relationshipIdentityPatchMarker: 'relationship_context_capture_identity_v1',
+              displayName: enrichedRelationshipContextCapture.displayName,
+              personId: enrichedRelationshipContextCapture.personId,
+              relationId: enrichedRelationshipContextCapture.relationId,
+              referenceTarget: enrichedRelationshipContextCapture.referenceTarget,
               relationshipContextCaptureTargetLabel: relationshipContextCapture.targetLabel ?? null,
               relationshipContextCaptureKind: relationshipContextCapture.kind ?? null,
               relationshipContextCaptureValueText: relationshipContextCapture.valueText ?? null,
@@ -1065,39 +1097,31 @@ let extraSoT: Record<string, any> = {
               relationshipContextCaptureNeedsConfirmation: relationshipContextCapture.shouldAskConfirmation ?? false,
               targetLabel: relationshipContextCapture.targetLabel ?? null,
               relationshipContext: {
-                targetLabel: relationshipContextCapture.targetLabel ?? null,
-                kind: relationshipContextCapture.kind ?? null,
-                status: relationshipContextCapture.status ?? null,
-                confidence: relationshipContextCapture.confidence ?? null,
+                ...enrichedRelationshipContextCapture.relationshipContext,
                 sensitivity: relationshipContextCapture.sensitivity ?? null,
                 source: 'relationship_context_capture',
               },
               relationshipCapture: {
-                targetLabel: relationshipContextCapture.targetLabel ?? null,
-                kind: relationshipContextCapture.kind ?? null,
-                status: relationshipContextCapture.status ?? null,
-                confidence: relationshipContextCapture.confidence ?? null,
+                ...enrichedRelationshipContextCapture.relationshipCapture,
                 sensitivity: relationshipContextCapture.sensitivity ?? null,
                 source: 'relationship_context_capture',
               },
               ctxPack: {
                 ...(((metaForIros as any)?.extra ?? {})?.ctxPack ?? {}),
-                targetLabel: relationshipContextCapture.targetLabel ?? null,
-                relationshipContextCaptureTargetLabel: relationshipContextCapture.targetLabel ?? null,
-                relationshipContextCaptureKind: relationshipContextCapture.kind ?? null,
+                targetLabel: enrichedRelationshipContextCapture.targetLabel,
+                displayName: enrichedRelationshipContextCapture.displayName,
+                personId: enrichedRelationshipContextCapture.personId,
+                relationId: enrichedRelationshipContextCapture.relationId,
+                referenceTarget: enrichedRelationshipContextCapture.referenceTarget,
+                relationshipContextCaptureTargetLabel: enrichedRelationshipContextCapture.targetLabel,
+                relationshipContextCaptureKind: enrichedRelationshipContextCapture.kind,
                 relationshipContext: {
-                  targetLabel: relationshipContextCapture.targetLabel ?? null,
-                  kind: relationshipContextCapture.kind ?? null,
-                  status: relationshipContextCapture.status ?? null,
-                  confidence: relationshipContextCapture.confidence ?? null,
+                  ...enrichedRelationshipContextCapture.relationshipContext,
                   sensitivity: relationshipContextCapture.sensitivity ?? null,
                   source: 'relationship_context_capture',
                 },
                 relationshipCapture: {
-                  targetLabel: relationshipContextCapture.targetLabel ?? null,
-                  kind: relationshipContextCapture.kind ?? null,
-                  status: relationshipContextCapture.status ?? null,
-                  confidence: relationshipContextCapture.confidence ?? null,
+                  ...enrichedRelationshipContextCapture.relationshipCapture,
                   sensitivity: relationshipContextCapture.sensitivity ?? null,
                   source: 'relationship_context_capture',
                 },

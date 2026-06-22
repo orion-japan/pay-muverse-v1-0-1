@@ -1,4 +1,76 @@
-﻿export type SriSelfState = {
+
+function pickSriRelationStringIdentityV1(...values: any[]): string | null {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function buildSriRelationIdentityV1(ctxPack: any, extra: any, targetLabel: string | null) {
+  const relationId = pickSriRelationStringIdentityV1(
+    ctxPack?.relationshipContext?.relationId,
+    ctxPack?.relationshipCapture?.relationId,
+    ctxPack?.relationId,
+    extra?.relationshipContext?.relationId,
+    extra?.relationshipCapture?.relationId,
+    extra?.relationId,
+  );
+
+  const personId = pickSriRelationStringIdentityV1(
+    ctxPack?.relationshipContext?.personId,
+    ctxPack?.relationshipCapture?.personId,
+    ctxPack?.personId,
+    extra?.relationshipContext?.personId,
+    extra?.relationshipCapture?.personId,
+    extra?.personId,
+  );
+
+  const displayName = pickSriRelationStringIdentityV1(
+    ctxPack?.relationshipContext?.displayName,
+    ctxPack?.relationshipCapture?.displayName,
+    ctxPack?.displayName,
+    extra?.relationshipContext?.displayName,
+    extra?.relationshipCapture?.displayName,
+    extra?.displayName,
+    targetLabel,
+  );
+
+  const referenceTarget = pickSriRelationStringIdentityV1(
+    ctxPack?.relationshipContext?.referenceTarget,
+    ctxPack?.relationshipCapture?.referenceTarget,
+    ctxPack?.referenceTarget,
+    extra?.relationshipContext?.referenceTarget,
+    extra?.relationshipCapture?.referenceTarget,
+    extra?.referenceTarget,
+    displayName,
+    targetLabel,
+  );
+
+  const kind = pickSriRelationStringIdentityV1(
+    ctxPack?.relationshipContext?.kind,
+    ctxPack?.relationshipCapture?.kind,
+    extra?.relationshipContext?.kind,
+    extra?.relationshipCapture?.kind,
+  );
+
+  const status = pickSriRelationStringIdentityV1(
+    ctxPack?.relationshipContext?.status,
+    ctxPack?.relationshipCapture?.status,
+    extra?.relationshipContext?.status,
+    extra?.relationshipCapture?.status,
+  );
+
+  return {
+    displayName,
+    personId,
+    relationId,
+    referenceTarget,
+    kind,
+    status,
+    hasResolvedAsk: Boolean(targetLabel || relationId || referenceTarget),
+  };
+}
+export type SriSelfState = {
   qCode: string | null;
   depthStage: string | null;
   phase: string | null;
@@ -10,8 +82,13 @@
 
 export type SriRelationContext = {
   targetLabel: string | null;
+  displayName: string | null;
+  personId: string | null;
   relationId: string | null;
   referenceTarget: string | null;
+  kind: string | null;
+  status: string | null;
+  hasResolvedAsk: boolean;
   resolvedAsk: unknown | null;
   relationshipMemoryNote: string | null;
   relationshipDomain: string | null;
@@ -139,37 +216,64 @@ export function buildSriContext(input: {
           flow.return_streak,
       ),
     },
-    relationContext: {
-      targetLabel: firstString(
+    relationContext: (() => {
+      const targetLabel = firstString(
         ctxPack.targetLabel,
         ctxPack.diagnosisFollowupTargetLabel,
         extra.targetLabel,
         relationship.targetLabel,
         relationship.displayName,
-      ),
-      relationId: firstString(
-        ctxPack.relationId,
-        relationship.relationId,
-        relationshipMemory.relation_id,
-        relationshipMemory.relationId,
-      ),
-      referenceTarget: firstString(
-        ctxPack.referenceTarget,
-        resolvedAskRecord.referenceTarget,
-      ),
-      resolvedAsk,
-      relationshipMemoryNote: firstString(
-        ctxPack.relationshipMemoryNote,
-        ctxPack.relationshipMemoryNoteText,
-        ctxPack.relationshipMemoryNoteForWriter,
-      ),
-      relationshipDomain: firstString(
-        ctxPack.relationshipDomain,
-        relationship.domain,
-        relationship.relationshipDomain,
-        relationship.relationshipGoal,
-      ),
-    },
+        ctxPack.relationshipContext?.targetLabel,
+        ctxPack.relationshipCapture?.targetLabel,
+        extra.relationshipContext?.targetLabel,
+        extra.relationshipCapture?.targetLabel,
+      );
+
+      const identity = buildSriRelationIdentityV1(ctxPack, extra, targetLabel);
+
+      return {
+        targetLabel,
+        displayName: identity.displayName,
+        personId: identity.personId,
+        relationId:
+          identity.relationId ??
+          firstString(
+            ctxPack.relationId,
+            relationship.relationId,
+            relationshipMemory.relation_id,
+            relationshipMemory.relationId,
+          ),
+        referenceTarget:
+          identity.referenceTarget ??
+          firstString(
+            ctxPack.referenceTarget,
+            resolvedAskRecord.referenceTarget,
+          ),
+        kind: identity.kind,
+        status: identity.status,
+        hasResolvedAsk:
+          identity.hasResolvedAsk ||
+          Boolean(
+            targetLabel ||
+              identity.relationId ||
+              identity.referenceTarget ||
+              resolvedAsk,
+          ),
+        resolvedAsk,
+        relationshipMemoryNote: firstString(
+          ctxPack.relationshipMemoryNote,
+          ctxPack.relationshipMemoryNoteText,
+          relationshipMemory.note,
+          relationshipMemory.memoryNote,
+          relationshipMemory.summary,
+        ),
+        relationshipDomain: firstString(
+          ctxPack.relationshipDomain,
+          relationship.domain,
+          relationshipMemory.domain,
+        ),
+      };
+    })(),
     intentionContext: {
       intentAnchor,
       itxStep: firstString(
