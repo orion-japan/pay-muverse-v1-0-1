@@ -506,12 +506,71 @@ function isExplicitScreenshotDiagnosisRequest(userTextRaw: string): boolean {
   return /(スクショ診断|スクリーンショット診断|画像診断|screenshotdiagnosis)/u.test(compact);
 }
 
+function normalizePersonFollowupLabel(raw: string): string {
+  return String(raw ?? '')
+    .replace(/^(この|その|あの|さっきの|前の|直前の)/u, '')
+    .replace(/[「」『』"'“”]/g, '')
+    .replace(/(さん|様|ちゃん|くん)$/u, '')
+    .trim();
+}
+
+function isInvalidExplicitPersonFollowupLabel(labelRaw: string): boolean {
+  const label = String(labelRaw ?? '').trim();
+  if (!label) return true;
+  if (label.length > 24) return true;
+
+  // 「前にC」「以前A」「昔好きだった人」など、文脈語を人物名にしない
+  if (/^(前に|以前|昔|過去|今はもう|もう連絡|連絡していない)/u.test(label)) return true;
+  if (/(昔好きだった|今はもう連絡|もう連絡していない|連絡していません)/u.test(label)) return true;
+
+  // 汎用語・代名詞・診断語は人物ID化しない
+  if (/(スクショ|スクリーンショット|診断|結果|内容|相手|自分|あなた|僕|私|これ|それ)/u.test(label)) return true;
+
+  // 文・句っぽいものを人物名にしない
+  if (/[、。？！?！]|(ですが|けど|だけど|なので|という|この場合)/u.test(label)) return true;
+
+  return false;
+}
+
+function extractCurrentFocusPersonFollowupTarget(userTextRaw: string): {
+  targetKey: string;
+  targetLabel: string;
+} | null {
+  const text = String(userTextRaw ?? '').trim();
+  if (!text) return null;
+
+  const patterns: RegExp[] = [
+    /今(?:は|の)?([A-Za-zＡ-Ｚａ-ｚ一-龯ぁ-んァ-ヶー]{1,12}さん)のことで見てほしい/u,
+    /今(?:は|の)?([A-Za-zＡ-Ｚａ-ｚ一-龯ぁ-んァ-ヶー]{1,12}さん)を見てほしい/u,
+    /今(?:気になっている|気になる)([A-Za-zＡ-Ｚａ-ｚ一-龯ぁ-んァ-ヶー]{1,12}さん)/u,
+    /今回は([A-Za-zＡ-Ｚａ-ｚ一-龯ぁ-んァ-ヶー]{1,12}さん)/u,
+    /この場合、?([A-Za-zＡ-Ｚａ-ｚ一-龯ぁ-んァ-ヶー]{1,12}さん)の気持/u,
+    /([A-Za-zＡ-Ｚａ-ｚ一-龯ぁ-んァ-ヶー]{1,12}さん)の気持ちはどう/u,
+  ];
+
+  for (const pattern of patterns) {
+    const m = text.match(pattern);
+    const raw = String(m?.[1] ?? '').trim();
+    const label = normalizePersonFollowupLabel(raw);
+    if (!label || isInvalidExplicitPersonFollowupLabel(label)) continue;
+
+    return {
+      targetKey: label,
+      targetLabel: label,
+    };
+  }
+
+  return null;
+}
 function extractExplicitPersonFollowupTarget(userTextRaw: string): {
   targetKey: string;
   targetLabel: string;
 } | null {
   const text = String(userTextRaw ?? '').trim();
   if (!text) return null;
+
+  const currentFocusTarget = extractCurrentFocusPersonFollowupTarget(text);
+  if (currentFocusTarget) return currentFocusTarget;
 
   if (/(スクショ|スクリーンショット|画像診断|ir診断|診断ID|診断結果|この診断|その診断)/u.test(text)) {
     return null;

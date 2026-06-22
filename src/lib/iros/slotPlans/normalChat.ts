@@ -90,6 +90,45 @@ function isRelationshipSignalReadingQuestion(text: string) {
 
   return (hasRelationSubject && hasSignalAsk) || hasQuotedRomanceQuestion || hasRepeatedRomanceAsk;
 }
+function extractCurrentFocusPersonLabel(text: string): string | null {
+  const t = norm(text);
+  if (!t) return null;
+
+  const patterns = [
+    /今(?:は|の)?([A-Za-zＡ-Ｚａ-ｚ一-龯ぁ-んァ-ヶー]{1,12}さん)のことで見てほしい/u,
+    /今(?:は|の)?([A-Za-zＡ-Ｚａ-ｚ一-龯ぁ-んァ-ヶー]{1,12}さん)を見てほしい/u,
+    /今(?:気になっている|気になる)([A-Za-zＡ-Ｚａ-ｚ一-龯ぁ-んァ-ヶー]{1,12}さん)/u,
+    /今回は([A-Za-zＡ-Ｚａ-ｚ一-龯ぁ-んァ-ヶー]{1,12}さん)/u,
+    /([A-Za-zＡ-Ｚａ-ｚ一-龯ぁ-んァ-ヶー]{1,12}さん)の気持ちは/u,
+    /([A-Za-zＡ-Ｚａ-ｚ一-龯ぁ-んァ-ヶー]{1,12}さん)のことで見てほしい/u,
+  ];
+
+  for (const re of patterns) {
+    const m = t.match(re);
+    if (m?.[1]) return m[1];
+  }
+
+  return null;
+}
+
+function extractBackgroundPersonLabels(text: string): string[] {
+  const t = norm(text);
+  if (!t) return [];
+
+  const labels = new Set<string>();
+  const patterns = [
+    /前に([A-Za-zＡ-Ｚａ-ｚ一-龯ぁ-んァ-ヶー]{1,12}さん)のことで相談/u,
+    /([A-Za-zＡ-Ｚａ-ｚ一-龯ぁ-んァ-ヶー]{1,12}さん)は昔好きだった人/u,
+    /([A-Za-zＡ-Ｚａ-ｚ一-龯ぁ-んァ-ヶー]{1,12}さん)は.*今はもう連絡していません/u,
+  ];
+
+  for (const re of patterns) {
+    const m = t.match(re);
+    if (m?.[1]) labels.add(m[1]);
+  }
+
+  return Array.from(labels);
+}
 function clamp(s: string, n: number) {
   if (s.length <= n) return s;
   return s.slice(0, Math.max(0, n - 1)) + '…';
@@ -704,13 +743,26 @@ function buildClarify(
       /(人間|人類)/.test(normalizedUserText) &&
       /(作った|作られた|介入)/.test(normalizedUserText)
     );    const isStructureQuestion = questionType === 'structure';
-    const isTruthQuestion = questionType === 'truth';
-
-    const shouldRelationshipSignalReading =
+    const isTruthQuestion = questionType === 'truth';    const shouldRelationshipSignalReading =
       isRelationshipSignalReadingQuestion(instructionText) ||
       isRelationshipSignalReadingQuestion(seedText) ||
       isRelationshipSignalReadingQuestion(normalizedUserText) ||
       isRelationshipSignalReadingQuestion(normalizedTargetText);
+
+    const currentFocusPersonLabel =
+      extractCurrentFocusPersonLabel(instructionText) ||
+      extractCurrentFocusPersonLabel(seedText) ||
+      extractCurrentFocusPersonLabel(normalizedUserText) ||
+      extractCurrentFocusPersonLabel(normalizedTargetText);
+
+    const backgroundPersonLabels = Array.from(
+      new Set([
+        ...extractBackgroundPersonLabels(instructionText),
+        ...extractBackgroundPersonLabels(seedText),
+        ...extractBackgroundPersonLabels(normalizedUserText),
+        ...extractBackgroundPersonLabels(normalizedTargetText),
+      ]),
+    ).filter((label) => label !== currentFocusPersonLabel);
 
     // 恋愛サイン判定は、T_CONCRETIZE / IMAGE_FIRST_CREATE に吸わせない
     const isTForClarify = isT && !shouldRelationshipSignalReading;
@@ -840,7 +892,7 @@ function buildClarify(
                     t_mode: tMode || null,
                     question_focus: questionFocus || null,
                     contract: shouldRelationshipSignalReading
-                      ? ['answer_first', 'no_user_echo', 'no_image_first_create', 'split_signal_possibilities', 'no_mind_reading', 'plain_words']
+                      ? ['answer_first', 'no_user_echo', 'no_image_first_create', 'split_signal_possibilities', 'no_mind_reading', 'current_focus_target_first', 'plain_words']
                       : isTForClarify
                         ? ['first_line_is_core', 'one_next_step', 'plain_words']
                         : shouldMemoryRecallCheck
@@ -862,6 +914,10 @@ function buildClarify(
                                     ...((shouldRelationshipSignalReading ? null : shiftPreset)?.rules ?? {}),
                                     relationship_signal_reading: shouldRelationshipSignalReading
                                       ? {
+                                          current_focus_target: currentFocusPersonLabel,
+                                          background_targets: backgroundPersonLabels,
+                                          must_start_from_current_focus_target: Boolean(currentFocusPersonLabel),
+                                          do_not_answer_background_target_first: backgroundPersonLabels.length > 0,
                                           first_line: '今の情報だけでは断定できないが、恋愛状況を複数回聞くのは弱〜中程度の関心シグナル',
                                           split: ['探り', '恋バナ', '自分への好意確認'],
                                           observe: '相手が自分の恋愛話を出すか、会う流れにするかを見る',
