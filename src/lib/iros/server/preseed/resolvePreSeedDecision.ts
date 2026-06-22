@@ -1354,6 +1354,135 @@ async function fetchLatestScreenshotDiagnosisForConversation(args: {
   return null;
 }
 
+function getConversationScopeFromMeta(metaRaw: any): Record<string, any> {
+  const meta = metaRaw && typeof metaRaw === 'object' ? metaRaw : {};
+  const ctxPack =
+    meta.ctxPack && typeof meta.ctxPack === 'object'
+      ? meta.ctxPack
+      : meta.extra?.ctxPack && typeof meta.extra.ctxPack === 'object'
+        ? meta.extra.ctxPack
+        : {};
+
+  const scope =
+    meta.conversationScope && typeof meta.conversationScope === 'object'
+      ? meta.conversationScope
+      : ctxPack.conversationScope && typeof ctxPack.conversationScope === 'object'
+        ? ctxPack.conversationScope
+        : {};
+
+  return scope;
+}
+
+function conversationScopeFlag(metaRaw: any, key: string, fallback: boolean): boolean {
+  const meta = metaRaw && typeof metaRaw === 'object' ? metaRaw : {};
+  const ctxPack =
+    meta.ctxPack && typeof meta.ctxPack === 'object'
+      ? meta.ctxPack
+      : meta.extra?.ctxPack && typeof meta.extra.ctxPack === 'object'
+        ? meta.extra.ctxPack
+        : {};
+
+  const scope = getConversationScopeFromMeta(metaRaw);
+  const value = scope[key] ?? meta[key] ?? ctxPack[key];
+
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function shouldBlockPastContextByConversationScope(metaRaw: any): boolean {
+  const scope = getConversationScopeFromMeta(metaRaw);
+  const reason = String(
+    scope.reason ??
+      metaRaw?.conversationScopeReason ??
+      metaRaw?.ctxPack?.conversationScopeReason ??
+      metaRaw?.extra?.ctxPack?.conversationScopeReason ??
+      '',
+  );
+
+  return (
+    scope.isFreshConversation === true ||
+    reason === 'fresh_conversation_without_explicit_past_reference'
+  );
+}
+
+function isFreshConversationPastReferenceLike(userTextRaw: string): boolean {
+  const compact = String(userTextRaw ?? '')
+    .trim()
+    .replace(/[　\s]+/g, '');
+
+  if (!compact) return false;
+
+  const hasReferenceWord =
+    /(これ|それ|あれ|この|その|あの|さっき|さっきの|前の|直前の|前回|続き|この前|以前)/u.test(compact);
+
+  const hasContextWord =
+    /(診断|診断結果|結果|内容|返答|話|相手|あの人|その人|関係|気持ち|本音|意図)/u.test(compact);
+
+  return hasReferenceWord && hasContextWord;
+}
+
+function buildFreshConversationPastContextGuardDecision(args: {
+  userText: string;
+  reason?: string | null;
+}): PreSeedDecision {
+  const directReply =
+    'この新しい会話の中では、まだ前提になる診断・人物・関係の文脈が確認できません。\n\n' +
+    '続きとして見たい場合は、「前に相談した〇〇さんの件です」や「この前のスクショ診断の続きです」のように、どの話の続きかを一度だけ指定してください。';
+
+  return {
+    kind: 'previous_turn_reference',
+    confidence: 0.98,
+    sourceAuthority: 'user_text',
+    sourceKind: 'fresh_conversation_scope_guard',
+    sourceId: null,
+    sourceText: args.userText,
+    route: 'direct_reply',
+    seedText: null,
+    directReply,
+    writerInput: null,
+    shouldBypassWriter: true,
+    shouldBypassRephrase: true,
+    shouldUsePreSeedWriter: false,
+    shouldSuppressHistoryForWriter: true,
+    shouldSuppressSimilarFlow: true,
+    shouldSuppressSlotPlan: true,
+    shouldSuppressMemoryDelta: true,
+    shouldSuppressIntuitionCandidate: true,
+    shouldSuppressNormalResonance: true,
+    shouldOpenContextThread: false,
+    contextThreadCode: null,
+    ctxPackPatch: {
+      conversationScopeGuard: true,
+      contextReset: true,
+      contextResetReason: args.reason ?? 'fresh_conversation_scope_guard',
+      shouldSuppressPastContext: true,
+      shouldSuppressHistoryForWriter: true,
+      shouldSuppressSimilarFlow: true,
+      historyForWriter: [],
+      similarFlowSeed: '',
+      similarFlowDebug: null,
+      resolvedTarget: null,
+      resolvedRelation: null,
+      relationshipMemory: null,
+      memorySeedText: null,
+      memorySeedResult: null,
+      memorySeedKind: null,
+    },
+    metaPatch: {
+      conversationScopeGuard: true,
+      contextReset: true,
+      contextResetReason: args.reason ?? 'fresh_conversation_scope_guard',
+      shouldSuppressPastContext: true,
+      shouldSuppressHistoryForWriter: true,
+      shouldSuppressSimilarFlow: true,
+    },
+    debug: {
+      reason: args.reason ?? 'fresh_conversation_scope_guard',
+      matchedPattern: 'fresh_conversation_past_reference_like',
+      sourceTextHead: args.userText.slice(0, 120),
+      directReplyHead: directReply.slice(0, 120),
+    },
+  } as any;
+}
 export async function resolvePreSeedDecision(
   args: ResolvePreSeedDecisionArgs
 ): Promise<PreSeedDecision | null> {
@@ -1368,6 +1497,49 @@ export async function resolvePreSeedDecision(
   }
 
   const userText = String(args.userText ?? '').trim();
+  const conversationScopeBlocksPastContext = shouldBlockPastContextByConversationScope(args.meta);
+  const conversationScopeAllowsResolvedReference =
+    conversationScopeFlag(args.meta, 'allowResolvedReferenceFromHistory', true) &&
+    !conversationScopeBlocksPastContext;
+  const conversationScopeAllowsPersonMemory =
+    conversationScopeFlag(args.meta, 'allowPersonMemory', true) &&
+    !conversationScopeBlocksPastContext;
+  const conversationScopeAllowsRelationshipMemory =
+    conversationScopeFlag(args.meta, 'allowRelationshipMemory', true) &&
+    !conversationScopeBlocksPastContext;
+  const conversationScopeAllowsScreenshotContext =
+    conversationScopeFlag(args.meta, 'allowScreenshotDiagnosisContext', true) &&
+    !conversationScopeBlocksPastContext;
+
+  const scopedHistoryForTurn =
+    conversationScopeBlocksPastContext || !conversationScopeAllowsResolvedReference
+      ? []
+      : Array.isArray(args.historyForTurn)
+        ? args.historyForTurn
+        : [];
+
+  if (conversationScopeBlocksPastContext && isFreshConversationPastReferenceLike(userText)) {
+    console.log('[IROS/PRE_SEED_ENGINE][CONVERSATION_SCOPE_GUARD]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode ?? null,
+      userTextHead: userText.slice(0, 120),
+      reason: 'fresh_conversation_past_reference_like',
+    });
+
+    return buildFreshConversationPastContextGuardDecision({
+      userText,
+      reason: 'fresh_conversation_without_explicit_past_reference',
+    });
+  }
+
+  if (!conversationScopeAllowsRelationshipMemory) {
+    args.meta = {
+      ...(args.meta ?? {}),
+      disableRelationshipContext: true,
+      disableRelationshipMemoryByConversationScope: true,
+    };
+  }
 
   const cognitionMap = buildCognitionMap({
     userText,
@@ -1530,13 +1702,12 @@ export async function resolvePreSeedDecision(
     };
   }
 
-  const historyForTurn = Array.isArray(args.historyForTurn)
-    ? args.historyForTurn
-    : [];
+  const historyForTurn = scopedHistoryForTurn;
 
   const explicitPersonFollowupTargetBeforeDiagnosis = extractExplicitPersonFollowupTarget(userText);
 
   if (
+    conversationScopeAllowsPersonMemory &&
     explicitPersonFollowupTargetBeforeDiagnosis?.targetKey &&
     explicitPersonFollowupTargetBeforeDiagnosis?.targetLabel &&
     !isUnsafeImplicitTargetLabel(explicitPersonFollowupTargetBeforeDiagnosis.targetKey)
@@ -1624,17 +1795,24 @@ export async function resolvePreSeedDecision(
   }
 
 
-  const historyDisplayId = extractLatestScreenshotDisplayIdFromHistory(historyForTurn);
-  const strength = getScreenshotDiagnosisFollowupStrength({
-    userText,
-    historyForTurn,
-  });
+  const historyDisplayId = conversationScopeAllowsScreenshotContext
+    ? extractLatestScreenshotDisplayIdFromHistory(historyForTurn)
+    : null;
 
-  const diagnosisContextKind = resolveDiagnosisContextKind({
-    userText,
-    meta: args.meta,
-    historyForTurn,
-  });
+  const strength = conversationScopeAllowsScreenshotContext
+    ? getScreenshotDiagnosisFollowupStrength({
+        userText,
+        historyForTurn,
+      })
+    : 'none';
+
+  const diagnosisContextKind = conversationScopeAllowsScreenshotContext
+    ? resolveDiagnosisContextKind({
+        userText,
+        meta: args.meta,
+        historyForTurn,
+      })
+    : 'none';
 
   console.log('[IROS/PRE_SEED_ENGINE][DIAGNOSIS_CONTEXT_KIND]', {
     traceId: args.traceId ?? null,
@@ -1751,7 +1929,7 @@ export async function resolvePreSeedDecision(
   }
 
   const recentPersonReferenceForDeicticFollowupBeforeWeak =
-    isDeicticDiagnosisOrRelationFollowup(userText)
+    conversationScopeAllowsPersonMemory && isDeicticDiagnosisOrRelationFollowup(userText)
       ? extractLatestPersonReferenceFromHistory(historyForTurn)
       : null;
 
@@ -1846,7 +2024,9 @@ export async function resolvePreSeedDecision(
       matchedPattern: 'active_screenshot_diagnosis_context_deictic_followup',
     }));
   }
-  const historyIrDiagnosisBeforeScreenshotWeak = extractLatestIrDiagnosisFromHistory(historyForTurn);
+  const historyIrDiagnosisBeforeScreenshotWeak = conversationScopeAllowsResolvedReference
+    ? extractLatestIrDiagnosisFromHistory(historyForTurn)
+    : null;
   const compactUserTextBeforeScreenshotWeak = String(userText ?? '')
     .trim()
     .replace(/[　\s]+/g, '');
@@ -1897,7 +2077,9 @@ export async function resolvePreSeedDecision(
     }));
   }
 
-  const recentPersonReferenceForDeicticFollowup = extractLatestPersonReferenceFromHistory(historyForTurn);
+  const recentPersonReferenceForDeicticFollowup = conversationScopeAllowsPersonMemory
+    ? extractLatestPersonReferenceFromHistory(historyForTurn)
+    : null;
 
   if (
     recentPersonReferenceForDeicticFollowup &&
@@ -1997,7 +2179,9 @@ export async function resolvePreSeedDecision(
     Number.isFinite(latestDisplayId) &&
     latestDisplayId > 0 &&
     Boolean(latest?.diagnosis_text);
-  const historyIrDiagnosis = extractLatestIrDiagnosisFromHistory(historyForTurn);
+  const historyIrDiagnosis = conversationScopeAllowsResolvedReference
+    ? extractLatestIrDiagnosisFromHistory(historyForTurn)
+    : null;
   const diagnosisKindClarifySelection = resolveDiagnosisKindClarifySelection({
     userText,
     historyForTurn,
@@ -2236,7 +2420,7 @@ export async function resolvePreSeedDecision(
       conversationId: args.conversationId,
       supabase: args.supabase,
       meta: args.meta,
-      historyForTurn: args.historyForTurn,
+      historyForTurn,
       traceId: args.traceId ?? null,
     });
 
