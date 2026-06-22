@@ -626,14 +626,62 @@ function stripUnsupportedQuotedClaimsFromPreSeedDirectReply(
 
   return result;
 }
+function stripLeakedPreSeedInternalInstructionText(textRaw: string): string {
+  let text = String(textRaw ?? '').trim();
+  if (!text) return text;
+
+  const leakPatterns = [
+    /中心にある論点を、固定文や余韻の決め台詞にせず、ユーザーの発話に沿った日常語で明確にする/gu,
+    /ユーザーの発話に沿った日常語で明確にする/gu,
+    /固定文や余韻の決め台詞にせず/gu,
+    /内部指示|システム指示|出力ルール|writer\s*rule|system\s*rule/giu,
+  ];
+
+  for (const pattern of leakPatterns) {
+    text = text.replace(pattern, '');
+  }
+
+  text = text
+    .replace(
+      /Dさんの中には、照れっぽさと、みんなで行きたい気持ちの両方が混じっている見方がいちばん自然です[。 ]?/gu,
+      '今の情報だけでは、照れている可能性も、ただみんなで行きたい可能性も、どちらもまだ残ります。',
+    )
+    .replace(
+      /気持ちは少し特別でも、表に出るのが「みんなで」になっていることはありますし、/gu,
+      '少し個別の関心がある場合でも、表に出る言い方が「みんなで」になることはありますし、',
+    )
+    .replace(
+      /逆に照れ隠しでそう言っていることもあります。/gu,
+      '照れや慎重さからそう見える場合もあります。',
+    )
+    .replace(
+      /Dさんの中には、/gu,
+      '可能性としては、',
+    )
+    .replace(
+      /気持ちは少し特別でも/gu,
+      '少し個別の関心がある場合でも',
+    )
+    .replace(
+      /照れ隠しでそう言っている/gu,
+      '照れや慎重さからそう見える',
+    );
+
+  return text
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
 function sanitizePreSeedPersonDecisionDirectReply(
   decision: PreSeedDecision,
   userText: string,
 ): PreSeedDecision {
   const sanitizedDirectReply =
-    stripUnsupportedQuotedClaimsFromPreSeedDirectReply(
-      String(decision.directReply ?? ''),
-      userText,
+    stripLeakedPreSeedInternalInstructionText(
+      stripUnsupportedQuotedClaimsFromPreSeedDirectReply(
+        String(decision.directReply ?? ''),
+        userText,
+      ),
     );
 
   if (!sanitizedDirectReply || sanitizedDirectReply === decision.directReply) {

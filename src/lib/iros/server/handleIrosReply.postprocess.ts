@@ -303,6 +303,26 @@ function stripUserTextEchoFromAssistantText(assistantTextRaw: string, userTextRa
 
   return out;
 }
+function stripLeakedInternalInstructionText(textRaw: string): string {
+  let text = String(textRaw ?? '').trim();
+  if (!text) return text;
+
+  const leakPatterns = [
+    /中心にある論点を、固定文や余韻の決め台詞にせず、ユーザーの発話に沿った日常語で明確にする/gu,
+    /ユーザーの発話に沿った日常語で明確にする/gu,
+    /固定文や余韻の決め台詞にせず/gu,
+    /内部指示|システム指示|出力ルール|writer\s*rule|system\s*rule/giu,
+  ];
+
+  for (const pattern of leakPatterns) {
+    text = text.replace(pattern, '');
+  }
+
+  return text
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
 function normalizeQuoteEvidenceText(input: string): string {
   return String(input ?? '')
     .replace(/[「」『』"'“”]/g, '')
@@ -4259,10 +4279,12 @@ const finalPhaseForUnified =
       q_code: (metaForSave as any)?.q_code ?? null,
     });
   // 最終本文の保険：ユーザー入力の丸写し・引用句さん事故を返す直前に除去する
-  finalAssistantText = sanitizeInvalidPersonHonorifics(
-    stripUnsupportedQuotedClaimsFromAssistantText(
-      stripUserTextEchoFromAssistantText(finalAssistantText, userText),
-      userText,
+  finalAssistantText = stripLeakedInternalInstructionText(
+    sanitizeInvalidPersonHonorifics(
+      stripUnsupportedQuotedClaimsFromAssistantText(
+        stripUserTextEchoFromAssistantText(finalAssistantText, userText),
+        userText,
+      ),
     ),
   );
     const analysis = await buildUnifiedAnalysis({
