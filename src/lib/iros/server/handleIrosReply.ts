@@ -1,4 +1,4 @@
-﻿// file: src/lib/iros/server/handleIrosReply.ts
+// file: src/lib/iros/server/handleIrosReply.ts
 // iros — handleIrosReply (V2 / single-writer friendly)
 //
 // ✅ 方針（ここを徹底）
