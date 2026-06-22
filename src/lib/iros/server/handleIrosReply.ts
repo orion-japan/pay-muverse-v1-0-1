@@ -4724,6 +4724,191 @@ function normForRecall(v: any): string {
             ) {
               preOrchCtxPack.returnStreak = histCtx.returnStreak;
             }
+            const relationContextFromHistoryMetaForPreOrch = (() => {
+              const parseRelationMetaObject = (raw: any): any => {
+                if (!raw) return null;
+                if (typeof raw === 'object') return raw;
+                if (typeof raw === 'string') {
+                  try {
+                    const parsed = JSON.parse(raw);
+                    return parsed && typeof parsed === 'object' ? parsed : null;
+                  } catch {
+                    return null;
+                  }
+                }
+                return null;
+              };
+
+              const pickRelationContextFromMessageMeta = (m: any) => {
+                const meta =
+                  parseRelationMetaObject(m?.meta) ??
+                  parseRelationMetaObject(m?.meta_json) ??
+                  parseRelationMetaObject(m?.metadata) ??
+                  null;
+
+                const extra = parseRelationMetaObject(meta?.extra) ?? null;
+
+                const ctxPack =
+                  parseRelationMetaObject(extra?.ctxPack) ??
+                  parseRelationMetaObject(meta?.ctxPack) ??
+                  null;
+
+                const targetLabel =
+                  typeof ctxPack?.targetLabel === 'string' && ctxPack.targetLabel.trim()
+                    ? ctxPack.targetLabel.trim()
+                    : typeof ctxPack?.relationshipContext?.targetLabel === 'string' &&
+                        ctxPack.relationshipContext.targetLabel.trim()
+                      ? ctxPack.relationshipContext.targetLabel.trim()
+                      : typeof ctxPack?.relationshipCapture?.targetLabel === 'string' &&
+                          ctxPack.relationshipCapture.targetLabel.trim()
+                        ? ctxPack.relationshipCapture.targetLabel.trim()
+                        : typeof ctxPack?.relationshipContextCaptureTargetLabel === 'string' &&
+                            ctxPack.relationshipContextCaptureTargetLabel.trim()
+                          ? ctxPack.relationshipContextCaptureTargetLabel.trim()
+                          : typeof extra?.relationshipContextCaptureTargetLabel === 'string' &&
+                              extra.relationshipContextCaptureTargetLabel.trim()
+                            ? extra.relationshipContextCaptureTargetLabel.trim()
+                            : typeof extra?.targetLabel === 'string' && extra.targetLabel.trim()
+                              ? extra.targetLabel.trim()
+                              : typeof extra?.relationshipContext?.targetLabel === 'string' &&
+                                  extra.relationshipContext.targetLabel.trim()
+                                ? extra.relationshipContext.targetLabel.trim()
+                                : typeof meta?.relationshipContextCaptureTargetLabel === 'string' &&
+                                    meta.relationshipContextCaptureTargetLabel.trim()
+                                  ? meta.relationshipContextCaptureTargetLabel.trim()
+                                  : typeof meta?.targetLabel === 'string' && meta.targetLabel.trim()
+                                    ? meta.targetLabel.trim()
+                                    : typeof meta?.relationshipContext?.targetLabel === 'string' &&
+                                        meta.relationshipContext.targetLabel.trim()
+                                      ? meta.relationshipContext.targetLabel.trim()
+                                      : null;
+
+                if (!targetLabel) return null;
+
+                const kind =
+                  typeof ctxPack?.relationshipContextCaptureKind === 'string'
+                    ? ctxPack.relationshipContextCaptureKind
+                    : typeof ctxPack?.relationshipContext?.kind === 'string'
+                      ? ctxPack.relationshipContext.kind
+                      : typeof ctxPack?.relationshipCapture?.kind === 'string'
+                        ? ctxPack.relationshipCapture.kind
+                        : typeof extra?.relationshipContextCaptureKind === 'string'
+                          ? extra.relationshipContextCaptureKind
+                          : typeof extra?.relationshipContext?.kind === 'string'
+                            ? extra.relationshipContext.kind
+                            : typeof meta?.relationshipContextCaptureKind === 'string'
+                              ? meta.relationshipContextCaptureKind
+                              : typeof meta?.relationshipContext?.kind === 'string'
+                                ? meta.relationshipContext.kind
+                                : 'one_sided_love';
+
+                return {
+                  targetLabel,
+                  kind,
+                  relationshipContextCaptureTargetLabel: targetLabel,
+                  relationshipContextCaptureKind: kind,
+                  relationshipContext: {
+                    targetLabel,
+                    kind,
+                    status:
+                      ctxPack?.relationshipContext?.status ??
+                      extra?.relationshipContext?.status ??
+                      meta?.relationshipContext?.status ??
+                      'candidate',
+                    confidence:
+                      ctxPack?.relationshipContext?.confidence ??
+                      extra?.relationshipContext?.confidence ??
+                      meta?.relationshipContext?.confidence ??
+                      'low',
+                    source: 'history_message_meta_scan',
+                  },
+                  relationshipCapture: {
+                    targetLabel,
+                    kind,
+                    status:
+                      ctxPack?.relationshipCapture?.status ??
+                      extra?.relationshipCapture?.status ??
+                      meta?.relationshipCapture?.status ??
+                      'candidate',
+                    confidence:
+                      ctxPack?.relationshipCapture?.confidence ??
+                      extra?.relationshipCapture?.confidence ??
+                      meta?.relationshipCapture?.confidence ??
+                      'low',
+                    source: 'history_message_meta_scan',
+                  },
+                };
+              };
+
+              const relationHistoryForMeta = Array.isArray(historyForTurn) ? historyForTurn : [];
+
+              for (const rawMessage of [...relationHistoryForMeta].reverse()) {
+                const m = rawMessage as any;
+                if (m?.role !== 'assistant') continue;
+                const picked = pickRelationContextFromMessageMeta(m);
+                if (picked?.targetLabel) return picked;
+              }
+
+              return null;
+            })();
+
+            if (
+              !isCategoryOnlyConsultation &&
+              relationContextFromHistoryMetaForPreOrch?.targetLabel &&
+              /(気になっている相手|好きな人|片思い|相手)/u.test(
+                relationContextFromHistoryMetaForPreOrch.targetLabel,
+              )
+            ) {
+              preOrchCtxPack.targetLabel =
+                preOrchCtxPack.targetLabel ??
+                relationContextFromHistoryMetaForPreOrch.targetLabel;
+
+              preOrchCtxPack.relationshipContext = {
+                ...(preOrchCtxPack.relationshipContext &&
+                typeof preOrchCtxPack.relationshipContext === 'object'
+                  ? preOrchCtxPack.relationshipContext
+                  : {}),
+                ...relationContextFromHistoryMetaForPreOrch.relationshipContext,
+              };
+
+              preOrchCtxPack.relationshipCapture = {
+                ...(preOrchCtxPack.relationshipCapture &&
+                typeof preOrchCtxPack.relationshipCapture === 'object'
+                  ? preOrchCtxPack.relationshipCapture
+                  : {}),
+                ...relationContextFromHistoryMetaForPreOrch.relationshipCapture,
+              };
+
+              if (histCtx && typeof histCtx === 'object') {
+                histCtx.targetLabel =
+                  histCtx.targetLabel ??
+                  relationContextFromHistoryMetaForPreOrch.targetLabel;
+                histCtx.relationshipContextCaptureTargetLabel =
+                  histCtx.relationshipContextCaptureTargetLabel ??
+                  relationContextFromHistoryMetaForPreOrch.targetLabel;
+                histCtx.relationshipContextCaptureKind =
+                  histCtx.relationshipContextCaptureKind ??
+                  relationContextFromHistoryMetaForPreOrch.kind;
+                histCtx.relationshipContext =
+                  histCtx.relationshipContext ??
+                  relationContextFromHistoryMetaForPreOrch.relationshipContext;
+                histCtx.relationshipCapture =
+                  histCtx.relationshipCapture ??
+                  relationContextFromHistoryMetaForPreOrch.relationshipCapture;
+              }
+            }
+
+            console.log('[IROS/RELATION][HISTORY_META_SCAN_PRE_HISTCTX]', {
+              traceId: extraLocal?.traceId ?? null,
+              conversationId,
+              userCode,
+              relationTargetFromHistoryMeta:
+                relationContextFromHistoryMetaForPreOrch?.targetLabel ?? null,
+              preTargetLabel: preOrchCtxPack?.targetLabel ?? null,
+              histTargetLabel: histCtx?.targetLabel ?? null,
+              histRelationshipContextTargetLabel:
+                histCtx?.relationshipContext?.targetLabel ?? null,
+            });
             // MEMORY_SEED_RESTORE_FROM_HISTCTX
             // 保存済み ctxPack から、次ターンの Writer seed 正本に必要な Memory 系を復元する
             if (!isCategoryOnlyConsultation && histCtx && typeof histCtx === 'object') {
