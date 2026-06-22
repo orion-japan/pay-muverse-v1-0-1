@@ -1,4 +1,4 @@
-type CaptureArgs = {
+﻿type CaptureArgs = {
   supabase: any;
   userCode: string;
   conversationId: string;
