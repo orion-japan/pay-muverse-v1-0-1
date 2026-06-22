@@ -641,6 +641,70 @@ function buildPersonContextSeed(args: {
   return lines.join('\n');
 }
 
+function getPersonContextConversationScopeFlags(argsRaw: any): {
+  allowDbHistory: boolean;
+  allowPersonMemory: boolean;
+  allowRelationshipMemory: boolean;
+  allowResolvedReferenceFromHistory: boolean;
+  reason: string | null;
+} {
+  const meta =
+    argsRaw?.meta && typeof argsRaw.meta === 'object'
+      ? argsRaw.meta
+      : argsRaw?.extra && typeof argsRaw.extra === 'object'
+        ? argsRaw.extra
+        : {};
+
+  const ctxPack =
+    meta?.ctxPack && typeof meta.ctxPack === 'object'
+      ? meta.ctxPack
+      : meta?.extra?.ctxPack && typeof meta.extra.ctxPack === 'object'
+        ? meta.extra.ctxPack
+        : {};
+
+  const scope =
+    meta?.conversationScope && typeof meta.conversationScope === 'object'
+      ? meta.conversationScope
+      : ctxPack?.conversationScope && typeof ctxPack.conversationScope === 'object'
+        ? ctxPack.conversationScope
+        : {};
+
+  const reason = String(
+    scope.reason ??
+      meta?.conversationScopeReason ??
+      ctxPack?.conversationScopeReason ??
+      '',
+  ) || null;
+
+  const freshBlocked =
+    scope.isFreshConversation === true ||
+    reason === 'fresh_conversation_without_explicit_past_reference';
+
+  const flag = (key: string, fallback: boolean): boolean => {
+    const value = scope[key] ?? meta[key] ?? ctxPack[key];
+    return typeof value === 'boolean' ? value : fallback;
+  };
+
+  return {
+    allowDbHistory:
+      !freshBlocked &&
+      flag('allowDbHistory', true) &&
+      meta?.disableDbHistoryByConversationScope !== true,
+    allowPersonMemory:
+      !freshBlocked &&
+      flag('allowPersonMemory', true) &&
+      meta?.disableLongTermPersonContext !== true,
+    allowRelationshipMemory:
+      !freshBlocked &&
+      flag('allowRelationshipMemory', true) &&
+      meta?.disableRelationshipContext !== true,
+    allowResolvedReferenceFromHistory:
+      !freshBlocked &&
+      flag('allowResolvedReferenceFromHistory', true) &&
+      meta?.disableResolvedReferenceFromHistory !== true,
+    reason,
+  };
+}
 export async function buildPersonContextPreSeed(args: {
   userText: string;
   userCode: string;
@@ -657,6 +721,20 @@ export async function buildPersonContextPreSeed(args: {
     return null;
   }
 
+  const conversationScope = getPersonContextConversationScopeFlags(args as any);
+
+  if (!conversationScope.allowPersonMemory) {
+    console.log('[IROS/PRE_SEED_PERSON_CONTEXT][SCOPE_SKIP]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode,
+      targetLabel,
+      targetKey,
+      reason: conversationScope.reason ?? 'person_memory_disabled_by_conversation_scope',
+    });
+    return null;
+  }
+
   const aliases = buildAliasCandidates(targetLabel, targetKey);
   const relationId = buildRelationId(args.userCode, targetKey);
 
@@ -668,14 +746,15 @@ export async function buildPersonContextPreSeed(args: {
 
   const personIntentNote = buildPersonIntentNote(personIntent);
 
-  const relationshipRows = relationId
-    ? await loadRelationshipMemoriesForTurn({
-        userCode: args.userCode,
-        relationId,
-        displayName: targetLabel,
-        limit: 3,
-      })
-    : [];
+  const relationshipRows =
+    conversationScope.allowRelationshipMemory && relationId
+      ? await loadRelationshipMemoriesForTurn({
+          userCode: args.userCode,
+          relationId,
+          displayName: targetLabel,
+          limit: 3,
+        })
+      : [];
 
   const relationshipNote = buildRelationshipMemoryNoteText({
     rows: relationshipRows,
@@ -683,14 +762,17 @@ export async function buildPersonContextPreSeed(args: {
   });
 
   let diagnosis: any = null;
-  for (const alias of aliases) {
-    diagnosis = await loadLatestIrDiagnosisSnapshot(
-      args.supabase,
-      args.userCode,
-      alias
-    );
 
-    if (diagnosis) break;
+  if (conversationScope.allowResolvedReferenceFromHistory) {
+    for (const alias of aliases) {
+      diagnosis = await loadLatestIrDiagnosisSnapshot(
+        args.supabase,
+        args.userCode,
+        alias
+      );
+
+      if (diagnosis) break;
+    }
   }
 
   const relationshipNoteText = relationshipNote.noteText || null;
@@ -709,18 +791,22 @@ export async function buildPersonContextPreSeed(args: {
       /relationship_context:/iu.test(String(personIntentNote ?? '')) ||
       /relationship\.kind=/iu.test(String(personIntentNote ?? '')));
 
-  const rawConversationMentionNote = await loadPersonMentionConversationContext({
-    supabase: (args as any).supabase,
-    userCode: args.userCode,
-    aliases,
-    currentConversationId: args.conversationId ?? null,
-  });
+  const rawConversationMentionNote = conversationScope.allowDbHistory
+    ? await loadPersonMentionConversationContext({
+        supabase: (args as any).supabase,
+        userCode: args.userCode,
+        aliases,
+        currentConversationId: args.conversationId ?? null,
+      })
+    : null;
 
-  const rawLongTermNote = await loadPersonLongTermContext({
-    supabase: (args as any).supabase,
-    userCode: args.userCode,
-    aliases,
-  });
+  const rawLongTermNote = conversationScope.allowDbHistory
+    ? await loadPersonLongTermContext({
+        supabase: (args as any).supabase,
+        userCode: args.userCode,
+        aliases,
+      })
+    : null;
 
   const conversationMentionNote =
     stripUnsupportedQuotedClaimsFromContextNote(
@@ -794,6 +880,9 @@ export async function buildPersonContextPreSeed(args: {
       hasConversationMentions: Boolean(conversationMentionNote),
       hasLongTerm: Boolean(longTermNote),
       exposeRelationshipContext,
+      allowDbHistoryByConversationScope: conversationScope.allowDbHistory,
+      allowRelationshipMemoryByConversationScope: conversationScope.allowRelationshipMemory,
+      allowResolvedReferenceByConversationScope: conversationScope.allowResolvedReferenceFromHistory,
     },
   });
 
@@ -967,25 +1056,3 @@ export async function buildPersonContextPreSeed(args: {
     },
   };
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
