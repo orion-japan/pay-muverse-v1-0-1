@@ -2720,6 +2720,13 @@ if (!wantsMicroNow) {
         Boolean((extraLocal as any)?.ctxPack?.preSeedFlowDirective?.createReady)
       );
 
+    const historyForTurnBeforeImageFirstCreateAssistantDrop = Array.isArray(historyForTurn)
+
+      ? [...historyForTurn]
+
+      : [];
+
+
     if (isImageFirstCreateConvergenceForHistory && Array.isArray(historyForTurn)) {
       const beforeLen = historyForTurn.length;
       historyForTurn = historyForTurn.filter((m: any) => {
@@ -4840,7 +4847,13 @@ function normForRecall(v: any): string {
                 };
               };
 
-              const relationHistoryForMeta = Array.isArray(historyForTurn) ? historyForTurn : [];
+              const relationHistoryForMeta =
+                Array.isArray(historyForTurnBeforeImageFirstCreateAssistantDrop) &&
+                historyForTurnBeforeImageFirstCreateAssistantDrop.length > 0
+                  ? historyForTurnBeforeImageFirstCreateAssistantDrop
+                  : Array.isArray(historyForTurn)
+                    ? historyForTurn
+                    : [];
 
               for (const rawMessage of [...relationHistoryForMeta].reverse()) {
                 const m = rawMessage as any;
