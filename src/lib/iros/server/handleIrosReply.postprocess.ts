@@ -1,4 +1,4 @@
-﻿// file: src/lib/iros/server/handleIrosReply.postprocess.ts
+// file: src/lib/iros/server/handleIrosReply.postprocess.ts
 // iros - Postprocess (MIN)
 // 目的：
 // - orchResult から assistantText / metaForSave を確定
@@ -210,6 +210,27 @@ function getSaDecision(meta: any): string | null {
   return typeof v === 'string' ? v.trim().toUpperCase() : null;
 }
 
+function looksLikeInvalidPersonHonorificLabel(input: string | null | undefined): boolean {
+  const s = String(input ?? '').trim();
+  if (!s) return false;
+
+  if ([...s].length > 12) return true;
+
+  return /(ても|でも|けど|から|なら|ので|ため|こと|感じ|状態|気持ち|返事|好意|脈あり|ただ優しい|動いている|分からない|わからない|会うため|日程|代案|具体|可能性|段階|様子見|こちらの出方|距離|やり取り|誘い|誘い方|見極め)/u.test(s);
+}
+
+function sanitizeInvalidPersonHonorifics(textRaw: string): string {
+  let out = String(textRaw ?? '');
+
+  out = out.replace(/[「『]([^」』]{1,32})[」』]さん/g, (full, inner) => {
+    return looksLikeInvalidPersonHonorificLabel(inner) ? '相手' : full;
+  });
+
+  out = out.replace(/相手は、/g, '相手は、');
+  out = out.replace(/相手、/g, '相手は、');
+
+  return out;
+}
 function extractAssistantText(orchResult: any): string {
   if (orchResult && typeof orchResult === 'object') {
     const r: any = orchResult;
@@ -1005,7 +1026,7 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
   const { orchResult, supabase, userCode, userText, conversationId, flowSeed } = args;
 
   // 1) 本文抽出
-  let finalAssistantText = extractAssistantText(orchResult);
+  let finalAssistantText = sanitizeInvalidPersonHonorifics(extractAssistantText(orchResult));
 
   // 2) metaForSave clone
   const metaRaw =

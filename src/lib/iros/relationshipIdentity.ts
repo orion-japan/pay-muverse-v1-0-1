@@ -33,6 +33,69 @@ const LOVE_KINDS = new Set([
   'relationship_context',
 ]);
 
+const INVALID_PERSON_TARGET_FRAGMENT_RE =
+  /(ても|でも|けど|から|なら|ので|ため|こと|感じ|状態|気持ち|返事|好意|脈あり|ただ優しい|動いている|分からない|わからない|会うため|日程|代案|具体|可能性|段階|様子見|こちらの出方|距離|やり取り|誘い|誘い方|見極め)/u;
+
+const GENERIC_RELATIONSHIP_TARGETS = new Set([
+  '相手',
+  'その相手',
+  'その人',
+  '好きな人',
+  '気になる人',
+  '気になっている相手',
+  '片思いの相手',
+]);
+
+function stripOuterQuotes(input: string): string {
+  return input
+    .replace(/^「(.+)」$/u, '$1')
+    .replace(/^『(.+)』$/u, '$1')
+    .trim();
+}
+
+export function isInvalidPersonTargetLabel(input: string | null | undefined): boolean {
+  const raw = String(input ?? '').trim();
+  if (!raw) return true;
+
+  const stripped = stripOuterQuotes(raw);
+  if (!stripped) return true;
+
+  // 引用符付きの文章断片は人名にしない
+  if ((/^「.+」$/u.test(raw) || /^『.+』$/u.test(raw)) && INVALID_PERSON_TARGET_FRAGMENT_RE.test(stripped)) {
+    return true;
+  }
+
+  // 文・条件・状態っぽい断片は人名にしない
+  if (INVALID_PERSON_TARGET_FRAGMENT_RE.test(stripped)) {
+    return true;
+  }
+
+  // 助詞や句読点を含む長い断片は人名にしない
+  if (/[、。！？!?]/u.test(stripped)) return true;
+  if ([...stripped].length > 12 && /(は|が|を|に|で|と|から|まで|より|って)/u.test(stripped)) {
+    return true;
+  }
+
+  return false;
+}
+
+export function sanitizeRelationshipTargetLabel(input: string | null | undefined, kind?: string | null): string {
+  const raw = normalizePersonName(stripOuterQuotes(String(input ?? '').trim()));
+  const kindText = String(kind ?? '').trim();
+
+  if (!raw) return LOVE_KINDS.has(kindText) ? '気になっている相手' : '相手';
+
+  if (GENERIC_RELATIONSHIP_TARGETS.has(raw)) {
+    return raw === '相手' && LOVE_KINDS.has(kindText) ? '気になっている相手' : raw;
+  }
+
+  if (isInvalidPersonTargetLabel(raw)) {
+    return LOVE_KINDS.has(kindText) ? '気になっている相手' : '相手';
+  }
+
+  return raw;
+}
+
 export function normalizePersonName(input: string): string {
   return String(input ?? '')
     .replace(/\s+/g, '')
@@ -102,7 +165,7 @@ export function enrichRelationshipIdentity<T extends RelationshipIdentityInput>(
   relationshipContext: any;
   relationshipCapture: any;
 } {
-  const targetLabel =
+  const rawTargetLabel =
     pickString(
       raw?.targetLabel,
       raw?.relationshipContext?.targetLabel,
@@ -115,6 +178,8 @@ export function enrichRelationshipIdentity<T extends RelationshipIdentityInput>(
       raw?.relationshipContext?.kind,
       raw?.relationshipCapture?.kind,
     ) ?? 'one_sided_love';
+
+  const targetLabel = sanitizeRelationshipTargetLabel(rawTargetLabel, kind);
 
   const identity = shouldUsePendingLoveInterestIdentity({ targetLabel, kind })
     ? buildPendingLoveInterestIdentity(userCode)
