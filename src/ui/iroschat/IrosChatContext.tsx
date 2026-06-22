@@ -123,6 +123,20 @@ function normalizeMessages(rows: IrosMessage[]): IrosMessage[] {
   });
 }
 
+function isUuidLike(value: string | null | undefined): value is string {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(value ?? '').trim(),
+  );
+}
+
+function replaceUrlCid(cid: string) {
+  if (typeof window === 'undefined') return;
+
+  const url = new URL(window.location.href);
+  url.searchParams.set('cid', cid);
+  url.searchParams.set('agent', 'iros');
+  window.history.replaceState(null, '', url.toString());
+}
 /**
  * LLMに渡す history を組み立てる（UI側で必要な場合の互換ヘルパー）
  * ✅ role は user/assistant のみに限定する（system を混ぜない）
@@ -179,6 +193,11 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
   } | null>(null);
 
   const firstOnboardingBootstrapStartedRef = useRef(false);
+
+  // Conversation initialization gate:
+  // Prevent sendMessage/bootstrap from creating a new conversation before URL cid is restored.
+  const initializedRef = useRef(false);
+  const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -286,16 +305,18 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
     const list = await irosClient.listConversations();
     setConversations(list);
   }, []);
-
   const startConversation = useCallback(async () => {
     const r = await irosClient.createConversation();
 
-    // ★ 新規会話なので、前のメッセージをクリアしておく
+    // ★ 新規会話なので、前のメッセージ/参照を即時クリアしておく
+    messagesRef.current = [];
+    latestScreenshotDiagnosisRef.current = null;
     setMessages([]);
 
     // 新しい会話をアクティブに
     activeConversationIdRef.current = r.conversationId;
     setActiveConversationId(r.conversationId);
+    replaceUrlCid(r.conversationId);
 
     await reloadConversations();
     return r.conversationId;
@@ -314,6 +335,8 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
       await irosClient.deleteConversation(cid);
       if (activeConversationIdRef.current === cid) {
         activeConversationIdRef.current = null;
+        messagesRef.current = [];
+        latestScreenshotDiagnosisRef.current = null;
         setActiveConversationId(null);
         setMessages([]);
       }
@@ -501,6 +524,11 @@ function normalizeForSend(raw: string): { text: string; blockedReason: string | 
 
 const sendMessage = useCallback(
   async (text: string, mode: string = 'auto'): Promise<SendResult> => {
+    if (!initializedRef.current) {
+      devwarn('[UI/sendMessage] blocked: conversation not initialized');
+      return null;
+    }
+
     let cid = activeConversationIdRef.current;
 
     // 新規ユーザーなどで会話が無い場合は、ここで作成する
@@ -595,6 +623,7 @@ const sendMessage = useCallback(
           : undefined;
 
       const history = buildHistoryForLLM([...(messagesRef.current || []), userMsg], 10);
+      void history;
 
       devlog('[UI/sendMessage] BEFORE replyAndStore', { cid, mode });
       const r: any = await irosClient.replyAndStore({
@@ -603,7 +632,6 @@ const sendMessage = useCallback(
         hintText: screenshotDiagnosisHintText ?? undefined,
         mode,
         style,
-        history,
       });
       devlog('[UI/sendMessage] AFTER replyAndStore', { cid });
 
@@ -635,10 +663,9 @@ const sendMessage = useCallback(
   },
   [reloadConversations, startConversation, style],
 );
-
-
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (!initialized) return;
     if (firstOnboardingBootstrapStartedRef.current) return;
 
     firstOnboardingBootstrapStartedRef.current = true;
@@ -742,7 +769,7 @@ const sendMessage = useCallback(
         console.warn('[mu-first-onboarding/bootstrap] client failed:', e);
       }
     })();
-  }, [sendMessage]);
+  }, [initialized, sendMessage]);
 
   /* ========== NextStep（ギア選択） ========== */
 
@@ -823,6 +850,7 @@ const sendMessage = useCallback(
           [...(messagesRef.current || []), llmUserMsg],
           10,
         );
+        void history;
 
         // ③ reply はタグ無しテキスト + nextStepChoice
         // NOTE: irosApiClient の型定義に extra/nextStepChoice が無い場合があるので、payload を any に落として渡す
@@ -833,7 +861,6 @@ const payload: any = {
   user_text: choiceText, // ✅ LLMには「選択肢だけ」
   mode: 'auto',          // ✅ nextStep を名乗らない（廃止なら auto に戻す）
   style,
-  history,
 };
 
         const r: any = await irosClient.replyAndStore(payload);
@@ -982,12 +1009,10 @@ const payload: any = {
   }, []);
 
   /* ========== 新しいチャット / 会話選択 API ========== */
-
   const newConversation = useCallback(async () => {
     const cid = await startConversation();
-    await fetchMessages(cid);
     return cid;
-  }, [startConversation, fetchMessages]);
+  }, [startConversation]);
 
   const selectConversation = useCallback(
     async (cid: string) => {
@@ -995,15 +1020,56 @@ const payload: any = {
     },
     [fetchMessages],
   );
-
   /* ========== 初期ロード ========== */
 
   useEffect(() => {
+    let cancelled = false;
+
     (async () => {
-      await reloadUserInfo();
-      await reloadConversations();
+      try {
+        await reloadUserInfo();
+
+        const params =
+          typeof window !== 'undefined'
+            ? new URLSearchParams(window.location.search)
+            : new URLSearchParams();
+
+        const cidFromUrl = params.get('cid');
+
+        if (cidFromUrl === 'new') {
+          const cid = await startConversation();
+          if (!cancelled) {
+            activeConversationIdRef.current = cid;
+            setActiveConversationId(cid);
+          }
+        } else if (isUuidLike(cidFromUrl)) {
+          activeConversationIdRef.current = cidFromUrl;
+          setActiveConversationId(cidFromUrl);
+          await fetchMessages(cidFromUrl);
+          await reloadConversations();
+        } else {
+          await reloadConversations();
+        }
+      } catch (e) {
+        devwarn('[IROS/CONVERSATION_INIT] failed', {
+          error: String((e as any)?.message ?? e),
+        });
+        await reloadConversations().catch(() => undefined);
+      } finally {
+        if (!cancelled) {
+          initializedRef.current = true;
+          setInitialized(true);
+          devlog('[IROS/CONVERSATION_INIT]', {
+            activeConversationId: activeConversationIdRef.current,
+          });
+        }
+      }
     })();
-  }, [reloadUserInfo, reloadConversations]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchMessages, reloadConversations, reloadUserInfo, startConversation]);
 
   const lastAssistantMsg =
     [...messages]
@@ -1098,35 +1164,4 @@ const payload: any = {
     </IrosChatContext.Provider>
   );
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
