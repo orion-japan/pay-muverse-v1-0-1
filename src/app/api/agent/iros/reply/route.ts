@@ -243,13 +243,19 @@ function buildConversationScope(input: {
     input.conversationKey === 'new' ||
     input.urlCid === 'new';
 
-  const hasCurrentConversationMessages =
-    Number(input.messageCountBeforeCurrentTurn ?? 0) > 0;
+  const messageCountBeforeCurrentTurn =
+    Number(input.messageCountBeforeCurrentTurn ?? 0);
+
+  const hasCurrentConversationMessages = messageCountBeforeCurrentTurn > 0;
+
+  // The UI saves the current user message before /reply runs.
+  // So count=1 still means "first user turn with no prior conversation context".
+  const hasPriorConversationContext = messageCountBeforeCurrentTurn > 1;
 
   const requestedPastContext = userExplicitlyRequestsPastContext(input.userText);
 
   const isFreshConversation =
-    isExplicitNewChat || !hasCurrentConversationMessages;
+    isExplicitNewChat || !hasPriorConversationContext;
 
   if (isFreshConversation && !requestedPastContext) {
     return {
@@ -275,7 +281,7 @@ function buildConversationScope(input: {
     conversationKey: input.conversationKey,
     isFreshConversation: false,
     isExplicitNewChat,
-    isExistingConversationReload: hasCurrentConversationMessages,
+    isExistingConversationReload: hasPriorConversationContext,
     hasCurrentConversationMessages,
     allowClientHistory: true,
     allowDbHistory: true,
