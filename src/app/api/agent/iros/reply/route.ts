@@ -958,7 +958,107 @@ let extraSoT: Record<string, any> = {
           traceId,
         });
 
+        const isImplicitRelationshipRenameCapture =
+          relationshipContextCapture?.source === 'pending_love_interest_implicit_rename' ||
+          relationshipContextCapture?.targetSource === 'pending_love_interest_implicit_rename';
+
+        if (isImplicitRelationshipRenameCapture && relationshipContextCapture?.captured) {
+          const enrichedImplicitRelationshipContextCapture = enrichRelationshipIdentity(
+            {
+              targetLabel: relationshipContextCapture.targetLabel ?? null,
+              kind: relationshipContextCapture.kind ?? null,
+              status: relationshipContextCapture.status ?? 'renamed',
+              confidence: relationshipContextCapture.confidence ?? 'high',
+              relationshipContext: {
+                targetLabel: relationshipContextCapture.targetLabel ?? null,
+                kind: relationshipContextCapture.kind ?? null,
+                status: relationshipContextCapture.status ?? 'renamed',
+                confidence: relationshipContextCapture.confidence ?? 'high',
+                sensitivity: relationshipContextCapture.sensitivity ?? null,
+                source: 'relationship_context_capture_implicit_rename',
+              },
+              relationshipCapture: {
+                targetLabel: relationshipContextCapture.targetLabel ?? null,
+                kind: relationshipContextCapture.kind ?? null,
+                status: relationshipContextCapture.status ?? 'renamed',
+                confidence: relationshipContextCapture.confidence ?? 'high',
+                sensitivity: relationshipContextCapture.sensitivity ?? null,
+                source: 'relationship_context_capture_implicit_rename',
+              },
+            },
+            userCode,
+          );
+
+          const previousCtxPack =
+            (extraSoT as any)?.ctxPack && typeof (extraSoT as any).ctxPack === 'object'
+              ? (extraSoT as any).ctxPack
+              : {};
+
+          extraSoT = {
+            ...extraSoT,
+            relationshipContextCapture: true,
+            relationshipContextCaptureContinueToPreSeed: true,
+            relationshipContextCaptureSource: relationshipContextCapture.source ?? null,
+            relationshipContextCaptureTargetLabel: enrichedImplicitRelationshipContextCapture.targetLabel,
+            relationshipContextCaptureKind: enrichedImplicitRelationshipContextCapture.kind,
+            relationshipContextCaptureStatus: relationshipContextCapture.status ?? 'renamed',
+            relationshipContextCaptureConfidence: relationshipContextCapture.confidence ?? 'high',
+            targetLabel: enrichedImplicitRelationshipContextCapture.targetLabel,
+            displayName: enrichedImplicitRelationshipContextCapture.displayName,
+            personId: enrichedImplicitRelationshipContextCapture.personId,
+            relationId: enrichedImplicitRelationshipContextCapture.relationId,
+            referenceTarget: enrichedImplicitRelationshipContextCapture.referenceTarget,
+            relationshipContext: {
+              ...enrichedImplicitRelationshipContextCapture.relationshipContext,
+              sensitivity: relationshipContextCapture.sensitivity ?? null,
+              source: 'relationship_context_capture_implicit_rename',
+            },
+            relationshipCapture: {
+              ...enrichedImplicitRelationshipContextCapture.relationshipCapture,
+              sensitivity: relationshipContextCapture.sensitivity ?? null,
+              source: 'relationship_context_capture_implicit_rename',
+            },
+            ctxPack: {
+              ...previousCtxPack,
+              relationshipContextCapture: true,
+              relationshipContextCaptureContinueToPreSeed: true,
+              relationshipContextCaptureSource: relationshipContextCapture.source ?? null,
+              targetLabel: enrichedImplicitRelationshipContextCapture.targetLabel,
+              displayName: enrichedImplicitRelationshipContextCapture.displayName,
+              personId: enrichedImplicitRelationshipContextCapture.personId,
+              relationId: enrichedImplicitRelationshipContextCapture.relationId,
+              referenceTarget: enrichedImplicitRelationshipContextCapture.referenceTarget,
+              relationshipContextCaptureTargetLabel: enrichedImplicitRelationshipContextCapture.targetLabel,
+              relationshipContextCaptureKind: enrichedImplicitRelationshipContextCapture.kind,
+              relationshipContextCaptureStatus: relationshipContextCapture.status ?? 'renamed',
+              relationshipContextCaptureConfidence: relationshipContextCapture.confidence ?? 'high',
+              relationshipContext: {
+                ...enrichedImplicitRelationshipContextCapture.relationshipContext,
+                sensitivity: relationshipContextCapture.sensitivity ?? null,
+                source: 'relationship_context_capture_implicit_rename',
+              },
+              relationshipCapture: {
+                ...enrichedImplicitRelationshipContextCapture.relationshipCapture,
+                sensitivity: relationshipContextCapture.sensitivity ?? null,
+                source: 'relationship_context_capture_implicit_rename',
+              },
+            },
+          };
+
+          console.log('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][IMPLICIT_RENAME_CONTINUE_TO_PRESEED]', {
+            traceId,
+            conversationId,
+            userCode,
+            mode,
+            targetLabel: enrichedImplicitRelationshipContextCapture.targetLabel,
+            displayName: enrichedImplicitRelationshipContextCapture.displayName,
+            personId: enrichedImplicitRelationshipContextCapture.personId,
+            relationId: enrichedImplicitRelationshipContextCapture.relationId,
+            source: relationshipContextCapture.source ?? null,
+          });
+        }
         if (
+          !isImplicitRelationshipRenameCapture &&
           (relationshipContextCapture?.captured || relationshipContextCapture?.shouldAskConfirmation) &&
           relationshipContextCapture.directReply
         ) {
