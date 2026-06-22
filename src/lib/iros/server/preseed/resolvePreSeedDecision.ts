@@ -1417,7 +1417,10 @@ function isFreshConversationPastReferenceLike(userTextRaw: string): boolean {
   const hasContextWord =
     /(診断|診断結果|結果|内容|返答|話|相手|あの人|その人|関係|気持ち|本音|意図)/u.test(compact);
 
-  return hasReferenceWord && hasContextWord;
+  const hasNamedPersonDeepening =
+    /[一-龯ぁ-んァ-ヶA-Za-z0-9]{1,24}(さん|ちゃん|くん|君|氏|様|先生)?(のこと|について|との関係|の関係)?(を)?(深めて|詳しく|見て|教えて|整理して|分析して|診断して)/u.test(compact);
+
+  return (hasReferenceWord && hasContextWord) || hasNamedPersonDeepening;
 }
 
 function buildFreshConversationPastContextGuardDecision(args: {
