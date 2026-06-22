@@ -62,7 +62,7 @@ type CaptureResult = {
   status?: RelationshipStatus;
   confidence?: RelationshipConfidence;
   sensitivity?: string;
-  source?: 'conversation' | 'pending_love_interest_rename';
+  source?: 'conversation' | 'pending_love_interest_rename' | 'pending_love_interest_implicit_rename';
   valueText?: string;
   valueNormalized?: string | null;
   directReply?: string;
@@ -357,6 +357,60 @@ function extractPendingLoveInterestRename(userText: string): string | null {
 
   return null;
 }
+function hasDifferentPersonMarker(userText: string): boolean {
+  const text = norm(userText);
+  return /(別の人|別人|別で|別に|他にも|もう一人|前の人とは違う|その人とは違う|みゆとは別|違う人)/u.test(text);
+}
+
+function extractImplicitPendingLoveInterestNamedQuestion(userText: string): string | null {
+  const text = norm(userText)
+    .replace(/[「」『』]/g, '')
+    .replace(/[ \t\r\n　]+/g, '');
+
+  if (!text) return null;
+  if (PROJECT_LIKE_RE.test(text)) return null;
+  if (hasDifferentPersonMarker(text)) return null;
+
+  const patterns = [
+    /^([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,24}?)(?:は|って)(?:今)?(?:どういう状態|どんな状態|どういう感じ|どんな感じ)(?:ですか|でしょうか|かな)?[。.!！?？]*$/u,
+    /^([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,24}?)(?:は|って)(?:どう思って|どう感じて|何を思って|気持ちは|気持ち)(?:いますか|るかな|ますか|ですか|でしょうか|かな)?[。.!！?？]*$/u,
+    /^([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,24}?)(?:に|へ)(?:LINE|ライン|連絡|メッセージ)(?:してもいい|送ってもいい|送るべき|した方がいい)(?:ですか|でしょうか|かな)?[。.!！?？]*$/u,
+    /^([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,24}?)(?:との関係|とはどう|とどう|とは)(?:ですか|でしょうか|かな)?[。.!！?？]*$/u,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const candidate = normalizePersonLabel(match?.[1] ?? null);
+    if (candidate && !/^(その人|相手|好きな人|気になっている相手|気になる人|片思いの相手)$/u.test(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function hasPendingLoveInterestContext(args: CaptureArgs): Promise<boolean> {
+  const { data, error } = await args.supabase
+    .from('iros_person_intent_state')
+    .select('guidance_hint')
+    .eq('owner_user_code', args.userCode)
+    .eq('target_type', 'person')
+    .eq('target_label', '気になっている相手')
+    .maybeSingle();
+
+  if (error) {
+    console.warn('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][PENDING_LOOKUP_ERROR]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId,
+      userCode: args.userCode,
+      message: error?.message ?? String(error),
+    });
+    return false;
+  }
+
+  const hint = String(data?.guidance_hint ?? '');
+  return hint.includes('relationship.kind=one_sided_love') || hint.includes('気になっている相手');
+}
 function buildGuidanceHint(args: {
   targetLabel: string;
   ctx: ExtractedRelationshipContext;
@@ -563,6 +617,101 @@ export async function captureRelationshipContextFromConversation(args: CaptureAr
       directReply: buildRenameReply(identity.displayName),
       reason: saved ? 'pending_love_interest_renamed' : 'pending_love_interest_rename_save_failed',
     };
+  }
+
+  const implicitRenamedName = extractImplicitPendingLoveInterestNamedQuestion(userText);
+  if (implicitRenamedName) {
+    const hasPending = await hasPendingLoveInterestContext(args);
+
+    if (hasPending) {
+      const identity = buildNamedPersonIdentity(args.userCode, implicitRenamedName);
+
+      const renamedCtx: ExtractedRelationshipContext = {
+        kind: 'one_sided_love',
+        valueText: '気になっている相手',
+        valueNormalized: 'one_sided_love',
+        status: 'renamed',
+        confidence: 'high',
+        sensitivity: 'relationship_context',
+        visibility: 'normal',
+        reusePolicy: 'allowed_for_relationship_context',
+        userRole: 'has_feelings',
+        note: userText,
+        detailLines: [
+          'relationship_context:',
+          'relationship.kind=one_sided_love',
+          'relationship.status=renamed',
+          'relationship.confidence=high',
+          'relationship.rename_from=person_pending_love_interest',
+          'relationship.alias=気になっている相手',
+          'relationship.rename_mode=implicit_named_question',
+        ],
+      };
+
+      const { data: existing } = await args.supabase
+        .from('iros_person_intent_state')
+        .select('guidance_hint')
+        .eq('owner_user_code', args.userCode)
+        .eq('target_type', 'person')
+        .eq('target_label', identity.targetLabel)
+        .maybeSingle();
+
+      const guidanceHint = buildGuidanceHint({
+        targetLabel: identity.targetLabel,
+        ctx: renamedCtx,
+        previousGuidanceHint: existing?.guidance_hint ?? null,
+      });
+
+      const saved = await saveGuidanceHint({
+        supabase: args.supabase,
+        userCode: args.userCode,
+        targetLabel: identity.targetLabel,
+        guidanceHint,
+        traceId: args.traceId ?? null,
+        conversationId: args.conversationId,
+        kind: renamedCtx.kind,
+      });
+
+      console.info('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][PENDING_IMPLICIT_RENAMED]', {
+        traceId: args.traceId ?? null,
+        conversationId: args.conversationId,
+        userCode: args.userCode,
+        fromPersonId: 'person_pending_love_interest',
+        targetLabel: identity.targetLabel,
+        displayName: identity.displayName,
+        personId: identity.personId,
+        relationId: identity.relationId,
+        saved,
+      });
+
+      return {
+        captured: saved,
+        shouldAskConfirmation: false,
+        targetLabel: identity.targetLabel,
+        targetSource: 'pending_love_interest_implicit_rename',
+        displayName: identity.displayName,
+        personId: identity.personId,
+        relationId: identity.relationId,
+        referenceTarget: identity.referenceTarget,
+        alias: ['気になっている相手'],
+        kind: 'one_sided_love',
+        status: 'renamed',
+        confidence: 'high',
+        sensitivity: 'relationship_context',
+        source: 'pending_love_interest_implicit_rename',
+        valueText: '気になっている相手',
+        valueNormalized: 'one_sided_love',
+        directReply: buildRenameReply(identity.displayName),
+        reason: saved ? 'pending_love_interest_implicit_renamed' : 'pending_love_interest_implicit_rename_save_failed',
+      };
+    }
+
+    console.info('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][IMPLICIT_RENAME_SKIPPED_NO_PENDING]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId,
+      userCode: args.userCode,
+      targetLabel: implicitRenamedName,
+    });
   }
 
   const ctx = extractRelationshipContext(userText);
