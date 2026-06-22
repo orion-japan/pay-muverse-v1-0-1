@@ -1,4 +1,4 @@
-import { enrichRelationshipIdentity } from '@/lib/iros/relationshipIdentity';
+﻿import { enrichRelationshipIdentity } from '@/lib/iros/relationshipIdentity';
 import { NextRequest, NextResponse } from 'next/server';
 import { buildPreSeedFlowDirective, resolvePreSeedDecision } from '@/lib/iros/server/preseed';
 import { callPreSeedDiagnosisWriter } from '@/lib/iros/server/preseed/callPreSeedDiagnosisWriter';
@@ -208,6 +208,87 @@ function sanitizeIrosReplyMetaForClient(metaInput: any): any {
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+type ConversationScope = {
+  conversationId: string | null;
+  conversationKey: string | null;
+  isFreshConversation: boolean;
+  isExplicitNewChat: boolean;
+  isExistingConversationReload: boolean;
+  hasCurrentConversationMessages: boolean;
+  allowClientHistory: boolean;
+  allowDbHistory: boolean;
+  allowSimilarFlow: boolean;
+  allowResolvedReferenceFromHistory: boolean;
+  allowPersonMemory: boolean;
+  allowRelationshipMemory: boolean;
+  allowScreenshotDiagnosisContext: boolean;
+  reason: string;
+};
+
+function userExplicitlyRequestsPastContext(userText: string): boolean {
+  return /前(の|に)|この前|前回|前の会話|続き|前に相談|前の診断|以前|前相談|前話した/u.test(
+    String(userText ?? ''),
+  );
+}
+
+function buildConversationScope(input: {
+  conversationKey: string | null;
+  conversationId: string | null;
+  urlCid?: string | null;
+  messageCountBeforeCurrentTurn: number;
+  userText: string;
+  clientHistoryLength: number;
+}): ConversationScope {
+  const isExplicitNewChat =
+    input.conversationKey === 'new' ||
+    input.urlCid === 'new';
+
+  const hasCurrentConversationMessages =
+    Number(input.messageCountBeforeCurrentTurn ?? 0) > 0;
+
+  const requestedPastContext = userExplicitlyRequestsPastContext(input.userText);
+
+  const isFreshConversation =
+    isExplicitNewChat || !hasCurrentConversationMessages;
+
+  if (isFreshConversation && !requestedPastContext) {
+    return {
+      conversationId: input.conversationId,
+      conversationKey: input.conversationKey,
+      isFreshConversation: true,
+      isExplicitNewChat,
+      isExistingConversationReload: false,
+      hasCurrentConversationMessages,
+      allowClientHistory: false,
+      allowDbHistory: false,
+      allowSimilarFlow: false,
+      allowResolvedReferenceFromHistory: false,
+      allowPersonMemory: false,
+      allowRelationshipMemory: false,
+      allowScreenshotDiagnosisContext: false,
+      reason: 'fresh_conversation_without_explicit_past_reference',
+    };
+  }
+
+  return {
+    conversationId: input.conversationId,
+    conversationKey: input.conversationKey,
+    isFreshConversation: false,
+    isExplicitNewChat,
+    isExistingConversationReload: hasCurrentConversationMessages,
+    hasCurrentConversationMessages,
+    allowClientHistory: true,
+    allowDbHistory: true,
+    allowSimilarFlow: true,
+    allowResolvedReferenceFromHistory: true,
+    allowPersonMemory: true,
+    allowRelationshipMemory: true,
+    allowScreenshotDiagnosisContext: true,
+    reason: requestedPastContext
+      ? 'explicit_past_context_requested'
+      : 'existing_conversation',
+  };
+}
 type IrosReplyBody = {
   conversationId?: unknown;
   conversation_id?: unknown;
@@ -691,6 +772,61 @@ const metaForIros: any = (() => {
 
     const userTextClean = (cleanText.length ? cleanText : rawText).trim();
 
+    const { count: messageCountBeforeCurrentTurn, error: messageCountErr } = await supabase
+      .from('iros_messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('conversation_id', conversationId);
+
+    if (messageCountErr) {
+      console.warn('[IROS/CONVERSATION_SCOPE][MESSAGE_COUNT_FAILED]', {
+        traceId,
+        conversationId,
+        userCode,
+        error: (messageCountErr as any)?.message ?? messageCountErr,
+      });
+    }
+
+    const conversationScope = buildConversationScope({
+      conversationKey: conversationKey ?? null,
+      conversationId: conversationId ?? null,
+      urlCid: req.nextUrl.searchParams.get('cid'),
+      messageCountBeforeCurrentTurn: messageCountBeforeCurrentTurn ?? 0,
+      userText: userTextClean,
+      clientHistoryLength: Array.isArray(chatHistory) ? chatHistory.length : 0,
+    });
+
+    const effectiveChatHistory = conversationScope.allowClientHistory && Array.isArray(chatHistory)
+      ? chatHistory
+      : [];
+
+    console.info('[IROS/CONVERSATION_SCOPE]', {
+      traceId,
+      conversationId,
+      conversationKey,
+      userCode,
+      messageCountBeforeCurrentTurn: messageCountBeforeCurrentTurn ?? 0,
+      clientHistoryLength: Array.isArray(chatHistory) ? chatHistory.length : 0,
+      effectiveClientHistoryLength: effectiveChatHistory.length,
+      isFreshConversation: conversationScope.isFreshConversation,
+      allowClientHistory: conversationScope.allowClientHistory,
+      allowDbHistory: conversationScope.allowDbHistory,
+      allowSimilarFlow: conversationScope.allowSimilarFlow,
+      allowResolvedReferenceFromHistory: conversationScope.allowResolvedReferenceFromHistory,
+      allowPersonMemory: conversationScope.allowPersonMemory,
+      allowRelationshipMemory: conversationScope.allowRelationshipMemory,
+      allowScreenshotDiagnosisContext: conversationScope.allowScreenshotDiagnosisContext,
+      reason: conversationScope.reason,
+    });
+
+    if (!conversationScope.allowClientHistory && Array.isArray(chatHistory) && chatHistory.length > 0) {
+      console.info('[IROS/CONVERSATION_SCOPE][CLIENT_HISTORY_DROP]', {
+        traceId,
+        conversationId,
+        userCode,
+        clientHistoryLength: chatHistory.length,
+        reason: conversationScope.reason,
+      });
+    }
 // -------------------------------------------------------
 // 11) extra sanitize（route.tsでIT強制は扱わない）
 // -------------------------------------------------------
@@ -757,6 +893,32 @@ let extraSoT: Record<string, any> = {
       persistedByRoute: true,
       persistPolicy: PERSIST_POLICY,
       persistAssistantMessage: false,
+    };
+
+    const previousScopeCtxPack =
+      extraSoT.ctxPack && typeof extraSoT.ctxPack === 'object'
+        ? extraSoT.ctxPack
+        : {};
+
+    extraSoT = {
+      ...extraSoT,
+      conversationScope,
+      conversationScopeReason: conversationScope.reason,
+      disableDbHistoryByConversationScope: !conversationScope.allowDbHistory,
+      disableLongTermPersonContext: !conversationScope.allowPersonMemory,
+      disableRelationshipContext: !conversationScope.allowRelationshipMemory,
+      disableResolvedReferenceFromHistory: !conversationScope.allowResolvedReferenceFromHistory,
+      disableScreenshotDiagnosisContext: !conversationScope.allowScreenshotDiagnosisContext,
+      ctxPack: {
+        ...previousScopeCtxPack,
+        conversationScope,
+        conversationScopeReason: conversationScope.reason,
+        disableDbHistoryByConversationScope: !conversationScope.allowDbHistory,
+        disableLongTermPersonContext: !conversationScope.allowPersonMemory,
+        disableRelationshipContext: !conversationScope.allowRelationshipMemory,
+        disableResolvedReferenceFromHistory: !conversationScope.allowResolvedReferenceFromHistory,
+        disableScreenshotDiagnosisContext: !conversationScope.allowScreenshotDiagnosisContext,
+      },
     };
 
     // ✅ IMPORTANT:
@@ -864,7 +1026,11 @@ let extraSoT: Record<string, any> = {
         });
       }
 
-      if (screenshotDiagnosisHintText && isExplicitScreenshotDiagnosisTurnForContextGate) {
+      if (
+        conversationScope.allowScreenshotDiagnosisContext &&
+        screenshotDiagnosisHintText &&
+        isExplicitScreenshotDiagnosisTurnForContextGate
+      ) {
         const previousCtxPack =
           extraSoT.ctxPack && typeof extraSoT.ctxPack === 'object'
             ? extraSoT.ctxPack
@@ -1385,7 +1551,7 @@ const metaForRelationshipContextCapture: any = {
       conversationId,
       supabase: supabase as any,
       meta: preSeedMeta,
-      historyForTurn: Array.isArray(chatHistory) ? chatHistory : [],
+      historyForTurn: effectiveChatHistory,
       traceId,
     });
 
@@ -1393,7 +1559,7 @@ const metaForRelationshipContextCapture: any = {
       userText: userTextClean,
       decision: preSeedDecision,
       meta: preSeedMeta,
-      historyForTurn: Array.isArray(chatHistory) ? chatHistory : [],
+      historyForTurn: effectiveChatHistory,
     });
 
     {
@@ -2013,6 +2179,7 @@ const metaForRelationshipContextCapture: any = {
     // -------------------------------------------------------
     try {
       const shouldSkipSimilarFlowByPreSeed =
+        !conversationScope.allowSimilarFlow ||
         Boolean((preSeedDecision as any)?.shouldSuppressSimilarFlow) ||
         Boolean((preSeedDecision as any)?.shouldUsePreSeedWriter) ||
         Boolean((preSeedDecision as any)?.shouldBypassWriter) ||
@@ -2035,6 +2202,8 @@ const metaForRelationshipContextCapture: any = {
           preSeedKind: (preSeedDecision as any)?.kind ?? null,
           preSeedRoute: (preSeedDecision as any)?.route ?? null,
           shouldSuppressSimilarFlow: (preSeedDecision as any)?.shouldSuppressSimilarFlow ?? null,
+          conversationScopeReason: conversationScope.reason,
+          allowSimilarFlowByConversationScope: conversationScope.allowSimilarFlow,
           shouldUsePreSeedWriter: (preSeedDecision as any)?.shouldUsePreSeedWriter ?? null,
           shouldBypassWriter: (preSeedDecision as any)?.shouldBypassWriter ?? null,
           hasScreenshotDiagnosisContext: Boolean((extraSoT as any)?.screenshotDiagnosisContext) ||
@@ -2292,7 +2461,7 @@ const irosResult: HandleIrosReplyOutput = await handleIrosReply({
       traceId,
       userProfile,
       style: styleInput ?? (userProfile?.style ?? null),
-      history: chatHistory,
+      history: effectiveChatHistory,
       extra: extraSoT,
     });
 
@@ -5095,3 +5264,4 @@ if (!skipTraining) {
     );
   }
 }
+
