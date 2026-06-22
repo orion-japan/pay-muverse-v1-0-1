@@ -1,4 +1,4 @@
-// file: src/lib/iros/server/handleIrosReply.ts
+﻿// file: src/lib/iros/server/handleIrosReply.ts
 // iros — handleIrosReply (V2 / single-writer friendly)
 //
 // ✅ 方針（ここを徹底）
@@ -4988,6 +4988,109 @@ function normForRecall(v: any): string {
               : {};
 
           try {
+            const preOrchRelationCtxPack = orchCtxPackInput as any;
+            const preOrchRelationExtraCtxPack =
+              ((baseMetaMergedForTurn as any)?.extra?.ctxPack &&
+              typeof (baseMetaMergedForTurn as any).extra.ctxPack === 'object'
+                ? (baseMetaMergedForTurn as any).extra.ctxPack
+                : {}) as any;
+
+            const relationTargetFromPreOrch =
+              typeof preOrchRelationCtxPack?.targetLabel === 'string' &&
+              preOrchRelationCtxPack.targetLabel.trim()
+                ? preOrchRelationCtxPack.targetLabel.trim()
+                : typeof preOrchRelationCtxPack?.relationshipContext?.targetLabel === 'string' &&
+                    preOrchRelationCtxPack.relationshipContext.targetLabel.trim()
+                  ? preOrchRelationCtxPack.relationshipContext.targetLabel.trim()
+                  : typeof preOrchRelationCtxPack?.relationshipCapture?.targetLabel === 'string' &&
+                      preOrchRelationCtxPack.relationshipCapture.targetLabel.trim()
+                    ? preOrchRelationCtxPack.relationshipCapture.targetLabel.trim()
+                    : typeof preOrchRelationExtraCtxPack?.targetLabel === 'string' &&
+                        preOrchRelationExtraCtxPack.targetLabel.trim()
+                      ? preOrchRelationExtraCtxPack.targetLabel.trim()
+                      : typeof preOrchRelationExtraCtxPack?.relationshipContext?.targetLabel === 'string' &&
+                          preOrchRelationExtraCtxPack.relationshipContext.targetLabel.trim()
+                        ? preOrchRelationExtraCtxPack.relationshipContext.targetLabel.trim()
+                        : typeof preOrchRelationExtraCtxPack?.relationshipCapture?.targetLabel === 'string' &&
+                            preOrchRelationExtraCtxPack.relationshipCapture.targetLabel.trim()
+                          ? preOrchRelationExtraCtxPack.relationshipCapture.targetLabel.trim()
+                          : typeof preOrchRelationExtraCtxPack?.relationshipContextCaptureTargetLabel === 'string' &&
+                              preOrchRelationExtraCtxPack.relationshipContextCaptureTargetLabel.trim()
+                            ? preOrchRelationExtraCtxPack.relationshipContextCaptureTargetLabel.trim()
+                            : typeof preOrchRelationExtraCtxPack?.relationshipCaptureTargetLabel === 'string' &&
+                                preOrchRelationExtraCtxPack.relationshipCaptureTargetLabel.trim()
+                              ? preOrchRelationExtraCtxPack.relationshipCaptureTargetLabel.trim()
+                              : null;
+
+            if (
+              relationTargetFromPreOrch &&
+              /(気になっている相手|好きな人|片思い|相手)/u.test(relationTargetFromPreOrch)
+            ) {
+              preOrchRelationCtxPack.targetLabel =
+                preOrchRelationCtxPack.targetLabel ?? relationTargetFromPreOrch;
+
+              const relationKindFromPreOrch =
+                typeof preOrchRelationCtxPack?.relationshipContext?.kind === 'string'
+                  ? preOrchRelationCtxPack.relationshipContext.kind
+                  : typeof preOrchRelationCtxPack?.relationshipCapture?.kind === 'string'
+                    ? preOrchRelationCtxPack.relationshipCapture.kind
+                    : typeof preOrchRelationExtraCtxPack?.relationshipContextCaptureKind === 'string'
+                      ? preOrchRelationExtraCtxPack.relationshipContextCaptureKind
+                      : typeof preOrchRelationExtraCtxPack?.relationshipContext?.kind === 'string'
+                        ? preOrchRelationExtraCtxPack.relationshipContext.kind
+                        : 'one_sided_love';
+
+              preOrchRelationCtxPack.relationshipContext = {
+                ...(preOrchRelationCtxPack.relationshipContext &&
+                typeof preOrchRelationCtxPack.relationshipContext === 'object'
+                  ? preOrchRelationCtxPack.relationshipContext
+                  : {}),
+                targetLabel: relationTargetFromPreOrch,
+                kind: relationKindFromPreOrch,
+                status:
+                  preOrchRelationCtxPack.relationshipContext?.status ??
+                  preOrchRelationExtraCtxPack.relationshipContext?.status ??
+                  'candidate',
+                confidence:
+                  preOrchRelationCtxPack.relationshipContext?.confidence ??
+                  preOrchRelationExtraCtxPack.relationshipContext?.confidence ??
+                  'low',
+                source: 'pre_orch_sri_relation_restore',
+              };
+
+              preOrchRelationCtxPack.relationshipCapture = {
+                ...(preOrchRelationCtxPack.relationshipCapture &&
+                typeof preOrchRelationCtxPack.relationshipCapture === 'object'
+                  ? preOrchRelationCtxPack.relationshipCapture
+                  : {}),
+                targetLabel: relationTargetFromPreOrch,
+                kind: relationKindFromPreOrch,
+                status:
+                  preOrchRelationCtxPack.relationshipCapture?.status ??
+                  preOrchRelationExtraCtxPack.relationshipCapture?.status ??
+                  'candidate',
+                confidence:
+                  preOrchRelationCtxPack.relationshipCapture?.confidence ??
+                  preOrchRelationExtraCtxPack.relationshipCapture?.confidence ??
+                  'low',
+                source: 'pre_orch_sri_relation_restore',
+              };
+            }
+
+            console.log('[IROS/RELATION][PRE_ORCH_RESTORE_SAFE]', {
+              traceId: (extraLocal as any)?.traceId ?? null,
+              conversationId,
+              userCode,
+              relationTargetFromPreOrch,
+              preTargetLabel: preOrchRelationCtxPack?.targetLabel ?? null,
+              preRelationshipContextTargetLabel:
+                preOrchRelationCtxPack?.relationshipContext?.targetLabel ?? null,
+              extraTargetLabel: preOrchRelationExtraCtxPack?.targetLabel ?? null,
+              extraRelationshipContextTargetLabel:
+                preOrchRelationExtraCtxPack?.relationshipContext?.targetLabel ?? null,
+              extraRelationshipContextCaptureTargetLabel:
+                preOrchRelationExtraCtxPack?.relationshipContextCaptureTargetLabel ?? null,
+            });
             const preOrchSriContext = buildSriContext({
               ctxPack: orchCtxPackInput,
               extra:
@@ -14078,6 +14181,8 @@ return {
     };
   }
 }
+
+
 
 
 
