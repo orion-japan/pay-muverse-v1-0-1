@@ -1,4 +1,4 @@
-﻿import type { PreSeedDecision } from './types';
+import type { PreSeedDecision } from './types';
 import { buildCognitionMap } from '../../cognition/buildCognitionMap';
 import { cognitionMapToSeedText } from '../../cognition/cognitionMap';
 import { buildPreSeedTcfStarter } from './preSeedTcfStarter';
@@ -415,6 +415,7 @@ async function buildVisiblePersonContextReplyWithLlm(args: {
     '内部語は絶対に出さないでください。DB、ログ、Pre-SEED、Memory、seed、targetKey、relationId、source、diagnosis snapshot、材料、いただいた材料、この情報内、この範囲の情報、source内 などは禁止です。',
     '「名前しか分からない」「情報が足りない」と言わないでください。渡された人物文脈がある前提でまとめてください。',
     'ただし、人物文脈にない事実は足さないでください。',
+    '過去文脈にある引用発言でも、今回のユーザー入力にない発言は、今回の対象人物が言った事実として書かないでください。',
     '年齢、誕生日、生年月日、子供の有無、息子・娘、家族構成などの事実質問では、人物文脈に明示されている場合だけ答えてください。',
     '質問された事実の明示がない場合は、内部情報や材料という言い方をせず、「今ここで確認できる範囲では、はっきりとは確認できません」と答えてください。',
     'children.normalized=has_children がある場合は「子供がいる」と答えてください。children.count があれば人数も答えてください。children.kind=son なら息子、daughter なら娘として答えてください。children.name があれば名前も添えてください。',
@@ -481,6 +482,81 @@ async function buildVisiblePersonContextReplyWithLlm(args: {
     });
     return null;
   }
+}
+function normalizeContextQuoteEvidenceText(input: unknown): string {
+  return String(input ?? '')
+    .replace(/[「」『』"'“”]/g, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
+function stripUnsupportedQuotedClaimsFromContextNote(
+  noteRaw: string | null | undefined,
+  userTextRaw: string,
+): string | null {
+  const note = String(noteRaw ?? '').trim();
+  const userText = String(userTextRaw ?? '');
+
+  if (!note || !userText) return note || null;
+
+  const userEvidence = normalizeContextQuoteEvidenceText(userText);
+  const lines = note.split(/\r?\n/u);
+
+  const kept: string[] = [];
+  let keptContentLineCount = 0;
+
+  for (const lineRaw of lines) {
+    const line = String(lineRaw ?? '').trimEnd();
+    const compact = line.trim();
+
+    if (!compact) {
+      kept.push(line);
+      continue;
+    }
+
+    // 見出し・メタ行は残す。ただし本文行が全削除なら最後にnoteごと捨てる。
+    if (
+      /^(PAST_PERSON_MENTIONS|LONG_TERM_PERSON_CONTEXT|matchedAliases=)/u.test(compact)
+    ) {
+      kept.push(line);
+      continue;
+    }
+
+    const quoted = Array.from(
+      compact.matchAll(/[「『]([\s\S]{2,160}?)[」』]/gu),
+    )
+      .map((m) => String(m?.[1] ?? '').trim())
+      .filter(Boolean);
+
+    let hasUnsupportedQuote = false;
+
+    for (const inner of quoted) {
+      const normalizedInner = normalizeContextQuoteEvidenceText(inner);
+
+      // 「みんな」などの短い概念ラベルは、要約語として許容。
+      if (normalizedInner.length <= 4) continue;
+
+      // 今回のユーザー入力に存在しない引用発言は、過去文脈の表面事実混入として除外。
+      if (!userEvidence.includes(normalizedInner)) {
+        hasUnsupportedQuote = true;
+        break;
+      }
+    }
+
+    if (hasUnsupportedQuote) continue;
+
+    kept.push(line);
+    keptContentLineCount += 1;
+  }
+
+  if (keptContentLineCount <= 0) return null;
+
+  const cleaned = kept
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return cleaned || null;
 }
 function buildPersonContextSeed(args: {
   userText: string;
@@ -628,18 +704,30 @@ export async function buildPersonContextPreSeed(args: {
       /relationship_context:/iu.test(String(personIntentNote ?? '')) ||
       /relationship\.kind=/iu.test(String(personIntentNote ?? '')));
 
-  const conversationMentionNote = await loadPersonMentionConversationContext({
+  const rawConversationMentionNote = await loadPersonMentionConversationContext({
     supabase: (args as any).supabase,
     userCode: args.userCode,
     aliases,
     currentConversationId: args.conversationId ?? null,
   });
 
-  const longTermNote = await loadPersonLongTermContext({
+  const rawLongTermNote = await loadPersonLongTermContext({
     supabase: (args as any).supabase,
     userCode: args.userCode,
     aliases,
   });
+
+  const conversationMentionNote =
+    stripUnsupportedQuotedClaimsFromContextNote(
+      rawConversationMentionNote,
+      args.userText,
+    );
+
+  const longTermNote =
+    stripUnsupportedQuotedClaimsFromContextNote(
+      rawLongTermNote,
+      args.userText,
+    );
 
   const hasAnySource =
     Boolean(personIntentNote) ||
