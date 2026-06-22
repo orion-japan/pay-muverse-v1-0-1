@@ -1,4 +1,4 @@
-﻿import type { UniversalPreSeedDecision } from './types';
+import type { UniversalPreSeedDecision } from './types';
 import { classifyMemoryIntent } from './classifyMemoryIntent';
 import { detectExitToNormal } from './detectExitToNormal';
 import { resolveTargetForPreSeed } from './resolveTarget';
@@ -6,6 +6,86 @@ import { resolveRelationForPreSeed } from './resolveRelation';
 import { routeMemorySpace } from './routeMemorySpace';
 import { buildUniversalSeed } from './buildUniversalSeed';
 
+function getUniversalConversationScopeFlags(metaRaw: any): {
+  blockPastContext: boolean;
+  allowResolvedReferenceFromHistory: boolean;
+  allowPersonMemory: boolean;
+  allowRelationshipMemory: boolean;
+  reason: string | null;
+} {
+  const meta = metaRaw && typeof metaRaw === 'object' ? metaRaw : {};
+
+  const ctxPack =
+    meta?.ctxPack && typeof meta.ctxPack === 'object'
+      ? meta.ctxPack
+      : meta?.extra?.ctxPack && typeof meta.extra.ctxPack === 'object'
+        ? meta.extra.ctxPack
+        : {};
+
+  const scope =
+    meta?.conversationScope && typeof meta.conversationScope === 'object'
+      ? meta.conversationScope
+      : ctxPack?.conversationScope && typeof ctxPack.conversationScope === 'object'
+        ? ctxPack.conversationScope
+        : {};
+
+  const reason = String(
+    scope.reason ??
+      meta?.conversationScopeReason ??
+      ctxPack?.conversationScopeReason ??
+      '',
+  ) || null;
+
+  const blockPastContext =
+    scope.isFreshConversation === true ||
+    reason === 'fresh_conversation_without_explicit_past_reference';
+
+  const flag = (key: string, fallback: boolean): boolean => {
+    const value = scope[key] ?? meta[key] ?? ctxPack[key];
+    return typeof value === 'boolean' ? value : fallback;
+  };
+
+  return {
+    blockPastContext,
+    allowResolvedReferenceFromHistory:
+      !blockPastContext &&
+      flag('allowResolvedReferenceFromHistory', true) &&
+      meta?.disableResolvedReferenceFromHistory !== true,
+    allowPersonMemory:
+      !blockPastContext &&
+      flag('allowPersonMemory', true) &&
+      meta?.disableLongTermPersonContext !== true,
+    allowRelationshipMemory:
+      !blockPastContext &&
+      flag('allowRelationshipMemory', true) &&
+      meta?.disableRelationshipContext !== true,
+    reason,
+  };
+}
+
+function shouldSuppressUniversalMemoryIntentByScope(
+  memoryIntent: string,
+  scope: ReturnType<typeof getUniversalConversationScopeFlags>,
+): boolean {
+  if (scope.blockPastContext) return true;
+
+  if (memoryIntent === 'ir_diagnosis_recall') {
+    return !scope.allowResolvedReferenceFromHistory;
+  }
+
+  if (
+    memoryIntent === 'person_state_recall' ||
+    memoryIntent === 'active_thread_followup'
+  ) {
+    return !scope.allowPersonMemory;
+  }
+
+  if (memoryIntent === 'relationship_recall') {
+    return !scope.allowRelationshipMemory;
+  }
+
+  return false;
+}
 export async function resolveUniversalPreSeed(args: {
   userText: string;
   userCode: string;
@@ -108,11 +188,29 @@ export async function resolveUniversalPreSeed(args: {
     return null;
   }
 
+  const conversationScope = getUniversalConversationScopeFlags(args.meta);
+
+  if (shouldSuppressUniversalMemoryIntentByScope(memoryIntent, conversationScope)) {
+    console.log('[IROS/PRE_SEED/UNIVERSAL][SCOPE_SKIP]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode,
+      memoryIntent,
+      reason: conversationScope.reason ?? 'memory_intent_disabled_by_conversation_scope',
+      blockPastContext: conversationScope.blockPastContext,
+    });
+    return null;
+  }
+
+  const scopedHistoryForTurn = conversationScope.allowResolvedReferenceFromHistory
+    ? (Array.isArray(args.historyForTurn) ? args.historyForTurn : [])
+    : [];
+
   const ctxPack = args.meta?.extra?.ctxPack ?? args.meta?.ctxPack ?? null;
 
   const resolvedTarget = await resolveTargetForPreSeed({
     userText,
-    historyForTurn: args.historyForTurn ?? [],
+    historyForTurn: scopedHistoryForTurn,
     ctxPack,
     supabase: args.supabase,
     userCode: args.userCode,
@@ -165,6 +263,7 @@ export async function resolveUniversalPreSeed(args: {
     memoryIntent,
     memorySpace,
     sourceAuthority,
+    conversationScopeReason: conversationScope.reason,
     targetKey: resolvedTarget.targetKey,
     relationId: resolvedRelation.relationId,
     userTextHead: userText.slice(0, 120),
@@ -245,5 +344,3 @@ export async function resolveUniversalPreSeed(args: {
     },
   };
 }
-
-
