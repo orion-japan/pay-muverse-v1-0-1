@@ -232,7 +232,7 @@ function sanitizeInvalidPersonHonorifics(textRaw: string): string {
   return out;
 }
 function escapeEchoRegExp(input: string): string {
-  return String(input ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\function extractAssistantText(');
+  return String(input ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function stripUserTextEchoFromAssistantText(assistantTextRaw: string, userTextRaw: string): string {
