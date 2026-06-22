@@ -303,6 +303,71 @@ function stripUserTextEchoFromAssistantText(assistantTextRaw: string, userTextRa
 
   return out;
 }
+function normalizeQuoteEvidenceText(input: string): string {
+  return String(input ?? '')
+    .replace(/[「」『』"'“”]/g, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
+function stripUnsupportedQuotedClaimsFromAssistantText(
+  assistantTextRaw: string,
+  userTextRaw: string,
+): string {
+  const assistantText = String(assistantTextRaw ?? '').trim();
+  const userText = String(userTextRaw ?? '');
+
+  if (!assistantText || !userText) return assistantText;
+
+  const userEvidence = normalizeQuoteEvidenceText(userText);
+
+  // 日本語の文単位でゆるく分割。改行も文境界として扱う。
+  const parts = assistantText
+    .split(/(?<=[。！？!?])\s*|\n+/u)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length === 0) return assistantText;
+
+  const kept: string[] = [];
+
+  for (const part of parts) {
+    const quoted = Array.from(part.matchAll(/[「『]([^」』]{2,80})[」』]/gu))
+      .map((m) => String(m?.[1] ?? '').trim())
+      .filter(Boolean);
+
+    if (quoted.length === 0) {
+      kept.push(part);
+      continue;
+    }
+
+    let hasUnsupportedQuote = false;
+
+    for (const inner of quoted) {
+      const normalizedInner = normalizeQuoteEvidenceText(inner);
+
+      // 短い概念ラベルは除外しない。「みんな」などは文脈上の要約として許容。
+      if (normalizedInner.length <= 4) continue;
+
+      // ユーザー入力にない引用発言は、過去相談・similar flow 混入として扱う。
+      if (!userEvidence.includes(normalizedInner)) {
+        hasUnsupportedQuote = true;
+        break;
+      }
+    }
+
+    if (!hasUnsupportedQuote) {
+      kept.push(part);
+    }
+  }
+
+  const result = kept.join('\n\n').trim();
+
+  // 削りすぎ防止。短くなりすぎるなら元文を返す。
+  if (result.length < 40) return assistantText;
+
+  return result;
+}
 function extractAssistantText(orchResult: any): string {
   if (orchResult && typeof orchResult === 'object') {
     const r: any = orchResult;
@@ -4195,7 +4260,10 @@ const finalPhaseForUnified =
     });
   // 最終本文の保険：ユーザー入力の丸写し・引用句さん事故を返す直前に除去する
   finalAssistantText = sanitizeInvalidPersonHonorifics(
-    stripUserTextEchoFromAssistantText(finalAssistantText, userText),
+    stripUnsupportedQuotedClaimsFromAssistantText(
+      stripUserTextEchoFromAssistantText(finalAssistantText, userText),
+      userText,
+    ),
   );
     const analysis = await buildUnifiedAnalysis({
       userText,

@@ -562,6 +562,92 @@ function extractCurrentFocusPersonFollowupTarget(userTextRaw: string): {
 
   return null;
 }
+function normalizePreSeedQuoteEvidenceText(input: string): string {
+  return String(input ?? '')
+    .replace(/[「」『』"'“”]/g, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
+function stripUnsupportedQuotedClaimsFromPreSeedDirectReply(
+  directReplyRaw: string,
+  userTextRaw: string,
+): string {
+  const directReply = String(directReplyRaw ?? '').trim();
+  const userText = String(userTextRaw ?? '');
+
+  if (!directReply || !userText) return directReply;
+
+  const userEvidence = normalizePreSeedQuoteEvidenceText(userText);
+
+  const parts = directReply
+    .split(/(?<=[。！？!?])\s*|\n+/u)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length === 0) return directReply;
+
+  const kept: string[] = [];
+
+  for (const part of parts) {
+    const quoted = Array.from(part.matchAll(/[「『]([^」』]{2,80})[」』]/gu))
+      .map((m) => String(m?.[1] ?? '').trim())
+      .filter(Boolean);
+
+    if (quoted.length === 0) {
+      kept.push(part);
+      continue;
+    }
+
+    let hasUnsupportedQuote = false;
+
+    for (const inner of quoted) {
+      const normalizedInner = normalizePreSeedQuoteEvidenceText(inner);
+
+      // 「みんな」などの短い概念ラベルは、文脈要約として許容する。
+      if (normalizedInner.length <= 4) continue;
+
+      // 今回のユーザー入力に存在しない引用発言は、過去文脈混入として削る。
+      if (!userEvidence.includes(normalizedInner)) {
+        hasUnsupportedQuote = true;
+        break;
+      }
+    }
+
+    if (!hasUnsupportedQuote) {
+      kept.push(part);
+    }
+  }
+
+  const result = kept.join('\n\n').trim();
+
+  // 削りすぎ防止
+  if (result.length < 40) return directReply;
+
+  return result;
+}
+function sanitizePreSeedPersonDecisionDirectReply(
+  decision: PreSeedDecision,
+  userText: string,
+): PreSeedDecision {
+  const sanitizedDirectReply =
+    stripUnsupportedQuotedClaimsFromPreSeedDirectReply(
+      String(decision.directReply ?? ''),
+      userText,
+    );
+
+  if (!sanitizedDirectReply || sanitizedDirectReply === decision.directReply) {
+    return decision;
+  }
+
+  return {
+    ...decision,
+    directReply: sanitizedDirectReply,
+    debug: {
+      ...(decision.debug ?? {}),
+    },
+  };
+}
 function extractExplicitPersonFollowupTarget(userTextRaw: string): {
   targetKey: string;
   targetLabel: string;
@@ -1474,7 +1560,9 @@ export async function resolvePreSeedDecision(
         route: enhancedPersonDecision.route,
       });
 
-      return withCognitionMap(enhancedPersonDecision);
+      return withCognitionMap(
+        sanitizePreSeedPersonDecisionDirectReply(enhancedPersonDecision, userText),
+      );
     }
 
     console.warn('[IROS/PRE_SEED_ENGINE][EXPLICIT_PERSON_REFERENCE_BEFORE_DIAGNOSIS_SOURCE_NOT_FOUND]', {
@@ -1689,7 +1777,9 @@ export async function resolvePreSeedDecision(
         route: enhancedPersonDecision.route,
       });
 
-      return withCognitionMap(enhancedPersonDecision);
+      return withCognitionMap(
+        sanitizePreSeedPersonDecisionDirectReply(enhancedPersonDecision, userText),
+      );
     }
   }
   if (historyDisplayId && isDeicticDiagnosisOrRelationFollowup(userText)) {
@@ -1834,7 +1924,9 @@ export async function resolvePreSeedDecision(
         route: enhancedPersonDecision.route,
       });
 
-      return withCognitionMap(enhancedPersonDecision);
+      return withCognitionMap(
+        sanitizePreSeedPersonDecisionDirectReply(enhancedPersonDecision, userText),
+      );
     }
 
     console.warn('[IROS/PRE_SEED_ENGINE][DEICTIC_PERSON_REFERENCE_SOURCE_NOT_FOUND]', {
@@ -2160,7 +2252,9 @@ export async function resolvePreSeedDecision(
             seedLen: String((personDecision as any).seedText ?? '').length,
           });
 
-          return withCognitionMap(personDecision);
+          return withCognitionMap(
+            sanitizePreSeedPersonDecisionDirectReply(personDecision, userText),
+          );
         }
       }
 if (
@@ -2221,7 +2315,9 @@ if (
             seedLen: String((personDecision as any).seedText ?? '').length,
           });
 
-          return withCognitionMap(personDecision);
+          return withCognitionMap(
+            sanitizePreSeedPersonDecisionDirectReply(personDecision, userText),
+          );
         }
       }
   } catch (e: any) {
