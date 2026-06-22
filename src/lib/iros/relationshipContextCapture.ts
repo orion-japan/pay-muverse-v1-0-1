@@ -350,11 +350,18 @@ function buildGuidanceHint(args: {
 }
 
 function buildSavedReply(targetLabel: string, ctx: ExtractedRelationshipContext): string {
+  const label = String(targetLabel ?? '').trim() || '気になっている相手';
+  const valueText = String(ctx.valueText ?? '').trim();
+
   if (ctx.sensitivity === 'private_relationship') {
-    return `うん、${targetLabel}との関係には、表に出しにくい前提があるものとして扱います。通常の人物情報としては出さず、関係相談の時だけ慎重に見ます。`;
+    return label + 'との関係には、表に出しにくい前提があるものとして扱います。通常の人物情報としては出さず、関係相談の時だけ慎重に見ます。';
   }
 
-  return `うん、${targetLabel}との関係は「${ctx.valueText}」として見ていきます。`;
+  if (!valueText || valueText === label || ctx.kind === 'one_sided_love') {
+    return label + 'との関係として、いったん受け取ります。決めつけずに、関係相談の文脈で見ていきます。';
+  }
+
+  return label + 'との関係は「' + valueText + '」として見ていきます。';
 }
 
 function buildConfirmationReply(targetLabel: string | null): string {
