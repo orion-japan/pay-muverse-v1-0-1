@@ -1,4 +1,5 @@
-﻿type CaptureArgs = {
+import { buildNamedPersonIdentity } from './relationshipIdentity';
+type CaptureArgs = {
   supabase: any;
   userCode: string;
   conversationId: string;
@@ -6,7 +7,7 @@
   traceId?: string | null;
 };
 
-type RelationshipStatus = 'confirmed_by_user' | 'candidate' | 'needs_confirmation';
+type RelationshipStatus = 'confirmed_by_user' | 'candidate' | 'needs_confirmation' | 'renamed';
 type RelationshipConfidence = 'high' | 'middle' | 'low';
 
 type RelationshipKind =
@@ -52,11 +53,16 @@ type CaptureResult = {
   shouldAskConfirmation?: boolean;
   targetLabel?: string | null;
   targetSource?: string | null;
+  displayName?: string | null;
+  personId?: string | null;
+  relationId?: string | null;
+  referenceTarget?: string | null;
+  alias?: string[];
   kind?: RelationshipKind;
   status?: RelationshipStatus;
   confidence?: RelationshipConfidence;
   sensitivity?: string;
-  source?: 'conversation';
+  source?: 'conversation' | 'pending_love_interest_rename';
   valueText?: string;
   valueNormalized?: string | null;
   directReply?: string;
@@ -321,6 +327,36 @@ function extractRelationshipContext(userText: string): ExtractedRelationshipCont
   return null;
 }
 
+function buildRcStabilizeFallbackReply(): string {
+  return '見えているのは、相手の気持ちそのものより、分からないまま近づく怖さです。だから今は、答えを急いで確かめるより、軽く話しかけられる距離を作る方が合っています。返しやすい短い言葉を一つ置いて、返ってくる温度を見てください。';
+}
+
+function buildRenameReply(displayName: string): string {
+  const name = String(displayName ?? '').trim() || 'その人';
+  return `${name}のこととして見ると、前に出ていた不安は、相手の答えが見えないことより、近づいた後に関係が変わる怖さに触れています。だから今は、急に深い確認をするより、返しやすい短い言葉で温度を見る方が合っています。名前が見えた分、次はその人の反応の小さな変化を見てください。`;
+}
+
+function extractPendingLoveInterestRename(userText: string): string | null {
+  const text = norm(userText)
+    .replace(/[「」『』]/g, '')
+    .replace(/[ \t\r\n　]+/g, '');
+
+  if (!text) return null;
+  if (PROJECT_LIKE_RE.test(text)) return null;
+
+  const patterns = [
+    /^(?:その人|相手|好きな人|気になっている相手|気になる人|片思いの相手)(?:の名前)?は([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,24})です[。.!！]?$/u,
+    /^(?:その人|相手|好きな人|気になっている相手|気になる人|片思いの相手)(?:の名前)?は([一-龠ぁ-んァ-ンA-Za-z0-9_ー]{1,24})[。.!！]?$/u,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const name = normalizePersonLabel(match?.[1] ?? null);
+    if (name) return name;
+  }
+
+  return null;
+}
 function buildGuidanceHint(args: {
   targetLabel: string;
   ctx: ExtractedRelationshipContext;
@@ -354,14 +390,14 @@ function buildSavedReply(targetLabel: string, ctx: ExtractedRelationshipContext)
   const valueText = String(ctx.valueText ?? '').trim();
 
   if (ctx.sensitivity === 'private_relationship') {
-    return label + 'との関係には、表に出しにくい前提があるものとして扱います。通常の人物情報としては出さず、関係相談の時だけ慎重に見ます。';
+    return buildRcStabilizeFallbackReply();
   }
 
   if (!valueText || valueText === label || ctx.kind === 'one_sided_love') {
-    return label + 'との関係として、いったん受け取ります。決めつけずに、関係相談の文脈で見ていきます。';
+    return buildRcStabilizeFallbackReply();
   }
 
-  return label + 'との関係は「' + valueText + '」として見ていきます。';
+  return buildRcStabilizeFallbackReply();
 }
 
 function buildConfirmationReply(targetLabel: string | null): string {
@@ -445,6 +481,89 @@ export async function captureRelationshipContextFromConversation(args: CaptureAr
   const userText = norm(args.userText);
 
   if (!userText) return { captured: false, reason: 'empty_user_text' };
+
+  const renamedName = extractPendingLoveInterestRename(userText);
+  if (renamedName) {
+    const identity = buildNamedPersonIdentity(args.userCode, renamedName);
+
+    const renamedCtx: ExtractedRelationshipContext = {
+      kind: 'one_sided_love',
+      valueText: '気になっている相手',
+      valueNormalized: 'one_sided_love',
+      status: 'renamed',
+      confidence: 'high',
+      sensitivity: 'relationship_context',
+      visibility: 'normal',
+      reusePolicy: 'allowed_for_relationship_context',
+      userRole: 'has_feelings',
+      note: userText,
+      detailLines: [
+        'relationship_context:',
+        'relationship.kind=one_sided_love',
+        'relationship.status=renamed',
+        'relationship.confidence=high',
+        'relationship.rename_from=person_pending_love_interest',
+        'relationship.alias=気になっている相手',
+      ],
+    };
+
+    const { data: existing } = await args.supabase
+      .from('iros_person_intent_state')
+      .select('guidance_hint')
+      .eq('owner_user_code', args.userCode)
+      .eq('target_type', 'person')
+      .eq('target_label', identity.targetLabel)
+      .maybeSingle();
+
+    const guidanceHint = buildGuidanceHint({
+      targetLabel: identity.targetLabel,
+      ctx: renamedCtx,
+      previousGuidanceHint: existing?.guidance_hint ?? null,
+    });
+
+    const saved = await saveGuidanceHint({
+      supabase: args.supabase,
+      userCode: args.userCode,
+      targetLabel: identity.targetLabel,
+      guidanceHint,
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId,
+      kind: renamedCtx.kind,
+    });
+
+    console.info('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][PENDING_RENAMED]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId,
+      userCode: args.userCode,
+      fromPersonId: 'person_pending_love_interest',
+      targetLabel: identity.targetLabel,
+      displayName: identity.displayName,
+      personId: identity.personId,
+      relationId: identity.relationId,
+      saved,
+    });
+
+    return {
+      captured: saved,
+      shouldAskConfirmation: false,
+      targetLabel: identity.targetLabel,
+      targetSource: 'pending_love_interest_rename',
+      displayName: identity.displayName,
+      personId: identity.personId,
+      relationId: identity.relationId,
+      referenceTarget: identity.referenceTarget,
+      alias: ['気になっている相手'],
+      kind: 'one_sided_love',
+      status: 'renamed',
+      confidence: 'high',
+      sensitivity: 'relationship_context',
+      source: 'pending_love_interest_rename',
+      valueText: '気になっている相手',
+      valueNormalized: 'one_sided_love',
+      directReply: buildRenameReply(identity.displayName),
+      reason: saved ? 'pending_love_interest_renamed' : 'pending_love_interest_rename_save_failed',
+    };
+  }
 
   const ctx = extractRelationshipContext(userText);
   if (!ctx) {
