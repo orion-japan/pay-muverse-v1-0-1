@@ -345,6 +345,24 @@ function derivePressure(
   return 'observe';
 }
 
+
+function isEthicalAbundanceRefusal(text: string): boolean {
+  const t = normalizeLite(text);
+
+  const hasAiOrBeautifulWords =
+    /AI|きれいごと|綺麗事|自由|好きなことで働く|好きなことで稼ぐ|自分の価値/.test(t);
+
+  const hasMoneyFlow =
+    /儲け|儲か|お金|稼ぐ|売る|商品|課金|ビジネス|豊か/.test(t);
+
+  const hasAnxietyUse =
+    /不安|弱さ|痛み|悩み|刺激|あおる|煽る|つけこむ|つけ込む|見つけて/.test(t);
+
+  const hasMoralRejection =
+    /だけじゃないですか|同じじゃないですか|変えるだけ|嫌|いや|うんざり|拒否/.test(t);
+
+  return hasAiOrBeautifulWords && hasMoneyFlow && hasAnxietyUse && hasMoralRejection;
+}
 function deriveMeaningFromContext(args: {
   focus: string;
   userCore: string | null;
@@ -361,7 +379,26 @@ function deriveMeaningFromContext(args: {
 
   const source = user || history || focus || 'いまの中心';
 
-  const has = (re: RegExp) => re.test(merged);
+  
+  const ethicalAbundanceText = `${merged} ${focus}`.trim();
+
+  if (isEthicalAbundanceRefusal(ethicalAbundanceText)) {
+    return `この入力は、AI批判やお金の否定ではありません。
+
+ユーザーは、人の不安を見つけ、きれいな言葉で包み、
+最後にお金へ変える流れに拒否感を示しています。
+
+ここで必要なのは、広告っぽさを整理することではありません。
+
+拒否の奥にある、
+「誠実なまま自由になれるのか」
+「人の不安を使わずに豊かさを生めるのか」
+という問いを映すことです。
+
+最後は行動提案ではなく、
+ユーザー自身もまだ言葉にしきれていない願いとして返してください。`;
+  }
+const has = (re: RegExp) => re.test(merged);
 
   // -----------------------------
   // 深いCの基本方針

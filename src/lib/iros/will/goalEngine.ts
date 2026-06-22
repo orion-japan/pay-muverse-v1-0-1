@@ -396,7 +396,7 @@ function containsStuckLoopWords(text: string): boolean {
     'わかってる',
     'どうすれば',
     'どうしたら',
-    '結局',
+    // '結局', // ethical_abundance: 単独では行動要求にしない
     'それで？',
     'じゃあどうする',
   ];
@@ -553,6 +553,3 @@ function chooseGoalKindFromDepth(depth?: Depth): IrosGoalKind {
   if (depth.startsWith('T')) return 'reframeIntention';
   return 'uncover';
 }
-
-
-

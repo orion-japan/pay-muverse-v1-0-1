@@ -179,6 +179,118 @@ function resolveFastPathDirectReply(userTextRaw: string): PreSeedDecision | null
   const compact = userText.replace(/[ \t\r\n　]/g, '').toLowerCase();
 
   if (!compact) return null;
+  // ETHICAL_ABUNDANCE_REFUSAL_FAST_PATH
+  // 「AI/きれいごと/自由」×「お金」×「不安利用」×「拒否・疑い」は、
+  // 通常の resonance / narrow_shift に流さず、Muの中核問いとして入口で受ける。
+  {
+    const ethicalSource = userText;
+    const hasAiOrBeautifulWords =
+      /AI|きれいごと|綺麗事|きれいな言葉|自由|好きなことで働く|好きなことで稼ぐ|自分の価値/u.test(ethicalSource);
+
+    const hasMoneyFlow =
+      /儲け|儲か|お金|稼ぐ|売る|売り文句|商売|商品|課金|ビジネス|豊か/u.test(ethicalSource);
+
+    const hasAnxietyUse =
+      /不安|弱さ|痛み|悩み|刺激|あおる|煽る|つけこむ|つけ込む|見つけて|材料/u.test(ethicalSource);
+
+    const hasMoralRejection =
+      /だけじゃないですか|同じじゃないですか|変えるだけ|嫌|いや|うんざり|拒否|疑い|警戒|腹が立つ|騙されたくない|雑に扱われたくない|勝手に希望で包まれたくない/u.test(ethicalSource);
+
+    if (hasAiOrBeautifulWords && hasMoneyFlow && hasAnxietyUse && hasMoralRejection) {
+      return {
+        kind: 'normal_chat',
+        confidence: 0.99,
+
+        sourceAuthority: 'user_text',
+        sourceKind: 'ethical_abundance_refusal',
+        sourceId: null,
+        sourceText: userText,
+
+        route: 'direct_reply',
+
+        seedText: null,
+        directReply: [
+          'その疑いは、軽く扱えません。',
+          '',
+          'あなたが怒っているのは、AIそのものだけではありません。',
+          'きれいな言葉で近づいて、人の不安を見つけ、最後にお金へ変える流れへの拒否です。',
+          '',
+          'あなたは、お金を否定しているのではありません。',
+          '豊かになることを拒んでいるのでもありません。',
+          '',
+          'あなたが拒んでいるのは、',
+          '人の不安を使って豊かになる未来です。',
+          '',
+          'その奥にある問いは、',
+          '「私は、誠実なまま自由になれますか」',
+          'ということです。',
+        ].join('\n'),
+        writerInput: null,
+
+        shouldBypassWriter: true,
+        shouldBypassRephrase: true,
+        shouldUsePreSeedWriter: false,
+
+        shouldSuppressHistoryForWriter: true,
+        shouldSuppressSimilarFlow: true,
+        shouldSuppressSlotPlan: true,
+        shouldSuppressMemoryDelta: true,
+        shouldSuppressIntuitionCandidate: true,
+        shouldSuppressNormalResonance: true,
+
+        shouldOpenContextThread: false,
+        contextThreadCode: null,
+
+        ctxPackPatch: {
+          fastPath: true,
+          fastPathKind: 'ethical_abundance_refusal',
+          inputKind: 'ethical_abundance_refusal',
+          shortSummary: userText,
+          contextReset: true,
+          contextResetReason: 'ethical_abundance_refusal',
+          shouldCloseContextThread: true,
+          shouldResetActiveTarget: true,
+          shouldSuppressPastContext: true,
+          shouldSuppressHistoryForWriter: true,
+          shouldSuppressSimilarFlow: true,
+          historyForWriter: [],
+          similarFlowSeed: '',
+          similarFlowDebug: null,
+          goalKind: 'resonate',
+          targetKind: 'resonate',
+          replyGoal: { kind: 'resonate' },
+          qCode: 'Q3',
+          depthStage: 'S2',
+          presentationKind: 'ethical_abundance_refusal_direct_reply',
+        },
+
+        metaPatch: {
+          fastPath: true,
+          fastPathKind: 'ethical_abundance_refusal',
+          inputKind: 'ethical_abundance_refusal',
+          contextReset: true,
+          contextResetReason: 'ethical_abundance_refusal',
+          shouldCloseContextThread: true,
+          shouldResetActiveTarget: true,
+          shouldSuppressPastContext: true,
+          shouldSuppressHistoryForWriter: true,
+          shouldSuppressSimilarFlow: true,
+          goalKind: 'resonate',
+          targetKind: 'resonate',
+          q_code: 'Q3',
+          depth_stage: 'S2',
+          presentationKind: 'ethical_abundance_refusal_direct_reply',
+        },
+
+        debug: {
+          reason: 'ethical_abundance_refusal',
+          matchedPattern: 'ethical_abundance_refusal_fast_path',
+          directReplyHead: 'その疑いは、軽く扱えません。',
+          sourceTextHead: userText.slice(0, 120),
+        },
+      } as any;
+    }
+  }
 
   if (/^(おはよう|おはようございます)$/u.test(compact)) {
     return buildFastPathDirectReplyDecision({
