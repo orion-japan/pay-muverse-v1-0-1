@@ -1065,6 +1065,24 @@ let extraSoT: Record<string, any> = {
           }
 
           
+            const isRelationshipRenameCapture =
+              relationshipContextCapture.status === 'renamed' ||
+              relationshipContextCapture.source === 'pending_love_interest_rename' ||
+              relationshipContextCapture.targetSource === 'pending_love_interest_rename';
+
+            if (isRelationshipRenameCapture) {
+              directText = fallbackDirectText;
+              console.log('[IROS/RELATIONSHIP_CONTEXT_CAPTURE][RENAMED_DIRECT_REPLY_KEPT]', {
+                traceId,
+                conversationId,
+                userCode,
+                targetLabel: relationshipContextCapture.targetLabel ?? null,
+                displayName: relationshipContextCapture.displayName ?? null,
+                personId: relationshipContextCapture.personId ?? null,
+                relationId: relationshipContextCapture.relationId ?? null,
+                textHead: directText.slice(0, 160),
+              });
+            }
 const enrichedRelationshipContextCapture = enrichRelationshipIdentity(
   {
     targetLabel: relationshipContextCapture.targetLabel ?? null,
