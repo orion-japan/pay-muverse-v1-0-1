@@ -231,6 +231,78 @@ function sanitizeInvalidPersonHonorifics(textRaw: string): string {
 
   return out;
 }
+function escapeEchoRegExp(input: string): string {
+  return String(input ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\function extractAssistantText(');
+}
+
+function stripUserTextEchoFromAssistantText(assistantTextRaw: string, userTextRaw: string): string {
+  let out = String(assistantTextRaw ?? '');
+  const userText = String(userTextRaw ?? '').replace(/\r\n/g, '\n').trim();
+
+  if (!out.trim() || !userText || [...userText].length < 20) {
+    return out;
+  }
+
+  let removed = false;
+
+  const candidates = Array.from(
+    new Set([
+      userText,
+      userText.replace(/\n{3,}/g, '\n\n'),
+      userText.replace(/\s+/g, ' ').trim(),
+    ].filter((v) => v && [...v].length >= 20)),
+  );
+
+  for (const candidate of candidates) {
+    if (out.includes(candidate)) {
+      out = out.split(candidate).join('');
+      removed = true;
+    }
+
+    const loosePattern = candidate
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(escapeEchoRegExp)
+      .join('\\s+');
+
+    if (loosePattern && loosePattern.length >= 20) {
+      const re = new RegExp(loosePattern, 'gu');
+      if (re.test(out)) {
+        out = out.replace(re, '');
+        removed = true;
+      }
+    }
+  }
+
+  // 段落単位でも、ユーザー文そのものを貼り返している場合は削る
+  const userParagraphs = userText
+    .split(/\n{1,}/)
+    .map((v) => v.trim())
+    .filter((v) => [...v].length >= 18);
+
+  for (const p of userParagraphs) {
+    if (out.includes(p)) {
+      out = out.split(p).join('');
+      removed = true;
+    }
+  }
+
+  out = out
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  // 削った結果が薄すぎる場合、恋愛相談向けの最低限の答えに戻す
+  if (removed && [...out].length < 30) {
+    if (/(好きな人|脈あり|恋バナ|気になる人|相手|私を好き|恋愛)/u.test(userText)) {
+      return '今の情報だけでは、はっきり断定はできません。ただ、相手が恋愛状況を何度か聞いているなら、少なくともあなたの恋愛対象や距離感には関心を向けています。見るなら、次に相手が自分の話を出してくるか、会う流れを作るかです。';
+    }
+
+    return '今の情報だけでは、はっきり断定はできません。ただ、見るべき点は、言葉だけでなく、その後に相手が具体的に動くかどうかです。';
+  }
+
+  return out;
+}
 function extractAssistantText(orchResult: any): string {
   if (orchResult && typeof orchResult === 'object') {
     const r: any = orchResult;
@@ -4121,6 +4193,10 @@ const finalPhaseForUnified =
       qCode: (metaForSave as any)?.qCode ?? null,
       q_code: (metaForSave as any)?.q_code ?? null,
     });
+  // 最終本文の保険：ユーザー入力の丸写し・引用句さん事故を返す直前に除去する
+  finalAssistantText = sanitizeInvalidPersonHonorifics(
+    stripUserTextEchoFromAssistantText(finalAssistantText, userText),
+  );
     const analysis = await buildUnifiedAnalysis({
       userText,
       assistantText: finalAssistantText,
