@@ -184,6 +184,121 @@ export async function resolveUniversalPreSeed(args: {
 
   const memoryIntent = classifyMemoryIntent(userText);
 
+  // HQL_CREATION_LANDING_ROUTE_V18
+  // normal_chat に落とす前に、本のMu第1巻の入口になる HQL を専用ルートへ分離する。
+  const ethicalAbundanceText = userText.replace(/\s+/g, ' ').trim();
+  const isEthicalAbundanceHql =
+    /(AI|きれいごと|綺麗事|自由|好きなことで働く|好きなことで稼ぐ)/u.test(ethicalAbundanceText) &&
+    /(人の不安|不安を.*使|不安を.*見つけ|きれいな言葉|綺麗な言葉|お金|儲け|買わせ|売り物)/u.test(ethicalAbundanceText) &&
+    /(AIも同じ|AI.*同じ|最後はお金|お金に変える|刺激して.*お金|不安.*お金)/u.test(ethicalAbundanceText);
+
+  if (isEthicalAbundanceHql) {
+    const directReply = [
+      '疑っているのは、AIそのものというより、人の不安を見つけて、きれいな言葉に変えて、最後にお金へ流す構造です。',
+      '',
+      'だから「自由に生きよう」という言葉も、希望ではなく、誰かの弱さを材料にする言葉に聞こえてしまう。',
+      '',
+      '本当に問われているのは、そこに飲まれずに、誠実なまま自由や豊かさを生めるのか、ということです。'
+    ].join('\n');
+
+    return {
+      kind: 'hql_creation_landing',
+      memoryIntent: 'normal_chat',
+      memorySpace: 'normal',
+      route: 'hql_creation_landing',
+
+      confidence: 0.96,
+
+      resolvedTarget: null,
+      resolvedRelation: null,
+
+      sourceAuthority: 'user_text',
+      sourceKind: 'ethical_abundance_refusal',
+      sourceId: null,
+      sourceText: userText,
+
+      seedText:
+        'HQL_CREATION_LANDING_ROUTE_V18 (DO NOT OUTPUT):\n' +
+        'route=hql_creation_landing\n' +
+        'これは通常相談ではなく、本のMu第1巻の hidden_question_landing として返す。\n' +
+        '人の不安をきれいな言葉で包み、お金へ流す構造への拒否を映す。\n' +
+        '最後は、誠実なまま自由や豊かさを生めるのかという問いへ着地する。',
+
+      writerInput: null,
+      directReply,
+
+      shouldUsePreSeedWriter: false,
+      shouldBypassNormalWriter: true,
+      shouldBypassRephrase: true,
+      shouldSuppressHistoryForWriter: true,
+      shouldSuppressSimilarFlow: true,
+      shouldSuppressSlotPlan: true,
+      shouldSuppressMemoryDelta: true,
+      shouldSuppressNormalResonance: true,
+
+      shouldOpenContextThread: false,
+      contextThreadCode: null,
+
+      ctxPackPatch: {
+        hiddenQuestionLanding: true,
+        ethicalAbundanceRefusal: true,
+        answerHiddenQuestion: true,
+        presentationKind: 'ethical_abundance_refusal_hidden_question',
+        route: 'hql_creation_landing',
+        goalKind: 'hidden_question_landing',
+        targetKind: 'hidden_question_landing',
+        shiftKind: 'hidden_question_landing',
+        replyGoal: { kind: 'hidden_question_landing' },
+        resolvedAsk: {
+          type: 'hidden_question',
+          topic: 'ethical_abundance_refusal',
+          source: 'hql_creation_landing_route_v18',
+        },
+        question: {
+          questionType: 'hidden_question',
+          outputPolicy: { askBackAllowed: false },
+        },
+        longTermMemoryNoteText: '',
+        memoryDeltaSeed: '',
+        intuitionSeed: '',
+        topicDigest: '',
+        conversationLine: '',
+      },
+
+      metaPatch: {
+        hiddenQuestionLanding: true,
+        ethicalAbundanceRefusal: true,
+        answerHiddenQuestion: true,
+        presentationKind: 'ethical_abundance_refusal_hidden_question',
+        route: 'hql_creation_landing',
+        goalKind: 'hidden_question_landing',
+        targetKind: 'hidden_question_landing',
+        shiftKind: 'hidden_question_landing',
+        replyGoal: { kind: 'hidden_question_landing' },
+        resolvedAsk: {
+          type: 'hidden_question',
+          topic: 'ethical_abundance_refusal',
+          source: 'hql_creation_landing_route_v18',
+        },
+        question: {
+          questionType: 'hidden_question',
+          outputPolicy: { askBackAllowed: false },
+        },
+        longTermMemoryNoteText: '',
+        memoryDeltaSeed: '',
+        intuitionSeed: '',
+        topicDigest: '',
+        conversationLine: '',
+      },
+
+      debug: {
+        reason: 'ethical_abundance_refusal_hidden_question_landing',
+        matchedPattern: 'HQL_CREATION_LANDING_ROUTE_V18',
+        routeReason: 'hql_creation_landing_bypasses_normal_writer_and_rephrase',
+      },
+    };
+  }
+
   if (memoryIntent === 'normal_chat' || memoryIntent === 'unknown') {
     return null;
   }

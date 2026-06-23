@@ -55,6 +55,7 @@ export type UniversalPreSeedRoute =
   | 'project_writer'
   | 'memory_writer'
   | 'normal_writer'
+  | 'hql_creation_landing'
   | 'direct_reply'
   | 'clarify'
   | 'blocked';
@@ -202,6 +203,7 @@ export type UniversalPreSeedDecision = {
     | 'pending_offer_followup'
     | 'active_thread_followup'
     | 'memory_recall'
+    | 'hql_creation_landing'
     | 'normal_chat'
     | 'ambiguous'
     | 'blocked';

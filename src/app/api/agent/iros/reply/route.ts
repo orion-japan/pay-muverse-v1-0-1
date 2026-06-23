@@ -2075,7 +2075,13 @@ const metaForRelationshipContextCapture: any = {
       });
     }
     if (
-      (preSeedDecision?.route === 'direct_reply' || preSeedDecision?.route === 'clarify') &&
+      preSeedDecision &&
+      (
+        preSeedDecision.route === 'direct_reply' ||
+        preSeedDecision.route === 'clarify' ||
+        // PRE_SEED_HQL_CREATION_LANDING_RETURN_V18
+        String((preSeedDecision as any).route || '') === 'hql_creation_landing'
+      ) &&
       preSeedDecision.shouldBypassWriter &&
       preSeedDecision.directReply
     ) {
