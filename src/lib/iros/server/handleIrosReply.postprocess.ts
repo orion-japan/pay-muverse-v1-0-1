@@ -736,6 +736,21 @@ function renderSlotPlanText(slotPlan: any[]): string {
     const meaningKind = normText(obj?.meaning_kind ?? obj?.meaningKind);
     const seed = pickSeedText(obj);
 
+    if (kind === 'hidden_question_landing' || intent === 'answer_hidden_question') {
+      const hiddenKind = normText(obj?.hiddenQuestionLandingKind);
+
+      if (hiddenKind === 'ethical_abundance_refusal') {
+        out.push('あなたが拒んでいるのは、お金そのものではありません。');
+        out.push('拒んでいるのは、人の不安を使って豊かになる未来です。');
+        out.push('奥にある問いは、「私は、誠実なまま自由になれますか」です。');
+        return out;
+      }
+
+      if (seed) out.push(seed);
+      out.push('表面の反応ではなく、その奥にある問いをひとつだけ見ます。');
+      return out;
+    }
+
     if (meaningKind === 'topic_recall') {
       if (seed) {
         out.push(`「${seed}」がまだ途中で終わっていないからです。`);
@@ -779,7 +794,7 @@ function renderSlotPlanText(slotPlan: any[]): string {
       return out;
     }
 
-    if (line) {
+    if (line && !/固定文|余韻の決め台詞|ユーザーの発話に沿った日常語|中心にある論点/.test(line)) {
       out.push(line.endsWith('。') ? line : `${line}。`);
       out.push('その背景には、まだひとつに決まりきらない流れが残っています。');
       out.push('急いで結論に寄せるより、何がこの動きを生んでいるかをつかむほうが先です。');

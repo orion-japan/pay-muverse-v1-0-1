@@ -1425,8 +1425,28 @@ function buildFlowReply(args: {
     (args as any)?.meta?.extra?.ctxPack?.preSeedFlowDirective ??
     (args as any)?.meta?.preSeedFlowDirective ??
     null;
+
+  const resolvedAskTypeForHidden =
+    String((args as any)?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
+    String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.askType ?? '').trim() ||
+    String((args as any)?.resolvedAskType ?? '').trim() ||
+    '';
+
+  const resolvedAskTopicForHidden =
+    String((args as any)?.ctxPack?.resolvedAsk?.topic ?? '').trim() ||
+    String((args as any)?.meta?.extra?.ctxPack?.resolvedAsk?.topic ?? '').trim() ||
+    '';
+
+  const shiftKindForHidden =
+    String((args as any)?.ctxPack?.shiftKind ?? '').trim() ||
+    String((args as any)?.meta?.extra?.ctxPack?.shiftKind ?? '').trim() ||
+    '';
+
   const hiddenQuestionLandingNow =
     isEthicalAbundanceRefusalInput(args.userText) ||
+    shiftKindForHidden === 'hidden_question_landing' ||
+    resolvedAskTypeForHidden === 'hidden_question' ||
+    resolvedAskTopicForHidden === 'ethical_abundance_refusal' ||
     (args as any)?.ctxPack?.hiddenQuestionLanding === true ||
     (args as any)?.meta?.extra?.ctxPack?.hiddenQuestionLanding === true ||
     (args as any)?.meta?.extra?.hiddenQuestionLanding === true ||
@@ -1435,6 +1455,7 @@ function buildFlowReply(args: {
     preSeedFlowDirectiveNow?.writerGuidance?.shouldLandHiddenQuestion === true;
   const hiddenQuestionLandingKindNow =
     isEthicalAbundanceRefusalInput(args.userText) ||
+    resolvedAskTopicForHidden === 'ethical_abundance_refusal' ||
     (args as any)?.ctxPack?.ethicalAbundanceRefusal === true ||
     (args as any)?.meta?.extra?.ctxPack?.ethicalAbundanceRefusal === true
       ? 'ethical_abundance_refusal'
@@ -1733,7 +1754,8 @@ function buildFlowReply(args: {
             | 'distance_shift'
             | 'repair_shift'
             | 'decide_shift'
-            | 'narrow_shift',
+            | 'narrow_shift'
+            | 'hidden_question_landing',
           extras?: {
             goalKind?:
               | 'clarify'
@@ -1763,30 +1785,34 @@ function buildFlowReply(args: {
           },
     ) => {
       const shiftHint =
-        shiftKind === 'clarify_shift'
-          ? (resolvedAskType === 'truth_structure' ? 'clarify_truth_structure_v1' : 'clarify_meaning_v2')
-          : shiftKind === 'stabilize_shift'
-            ? 'stabilize_shift_v1'
-            : shiftKind === 'distance_shift'
-              ? 'distance_shift_v1'
-              : shiftKind === 'repair_shift'
-                ? 'repair_shift_v1'
-                : shiftKind === 'decide_shift'
-                  ? 'decide_shift_v1'
-                  : 'narrow_shift_v1';
+        shiftKind === 'hidden_question_landing'
+          ? 'hidden_question_landing_v1'
+          : shiftKind === 'clarify_shift'
+            ? (resolvedAskType === 'truth_structure' ? 'clarify_truth_structure_v1' : 'clarify_meaning_v2')
+            : shiftKind === 'stabilize_shift'
+              ? 'stabilize_shift_v1'
+              : shiftKind === 'distance_shift'
+                ? 'distance_shift_v1'
+                : shiftKind === 'repair_shift'
+                  ? 'repair_shift_v1'
+                  : shiftKind === 'decide_shift'
+                    ? 'decide_shift_v1'
+                    : 'narrow_shift_v1';
 
       const shiftIntent =
-        shiftKind === 'clarify_shift'
-          ? (resolvedAskType === 'truth_structure' ? 'answer_truth_structure' : 'meaning_reframe')
-          : shiftKind === 'stabilize_shift'
-            ? 'stabilize_direction'
-            : shiftKind === 'distance_shift'
-              ? 'distance_tuning'
-              : shiftKind === 'repair_shift'
-                ? 'repair_entry'
-                : shiftKind === 'decide_shift'
-                  ? 'answer_in_one_shot'
-                  : 'narrow_focus';
+        shiftKind === 'hidden_question_landing'
+          ? 'answer_hidden_question'
+          : shiftKind === 'clarify_shift'
+            ? (resolvedAskType === 'truth_structure' ? 'answer_truth_structure' : 'meaning_reframe')
+            : shiftKind === 'stabilize_shift'
+              ? 'stabilize_direction'
+              : shiftKind === 'distance_shift'
+                ? 'distance_tuning'
+                : shiftKind === 'repair_shift'
+                  ? 'repair_entry'
+                  : shiftKind === 'decide_shift'
+                    ? 'answer_in_one_shot'
+                    : 'narrow_focus';
 
       try {
         if ((args as any)?.ctxPack) {
@@ -1844,7 +1870,7 @@ function buildFlowReply(args: {
     // ② 司令塔 goalKind を最優先
     if (goalKind2 === 'resonate') {
       if (hiddenQuestionLandingNow) {
-        return stampShiftMeta('clarify_shift', {
+        return stampShiftMeta('hidden_question_landing', {
           goalKind: 'uncover' as any,
           targetKind: 'uncover' as any,
           laneKey: null,
@@ -1861,7 +1887,7 @@ function buildFlowReply(args: {
 
     if (goalKind2 === 'uncover') {
       if (hiddenQuestionLandingNow) {
-        return stampShiftMeta('clarify_shift', {
+        return stampShiftMeta('hidden_question_landing', {
           goalKind: 'uncover' as any,
           targetKind: 'uncover' as any,
           laneKey: null,
@@ -2149,6 +2175,7 @@ function buildFlowReply(args: {
 
     if (goalKindForShiftMeta2 === 'stabilize') return 'stabilize_shift_v1';
     if (goalKindForShiftMeta2 === 'decide') return 'decide_shift_v1';
+    if (goalKindForShiftMeta2 === 'uncover' && hiddenQuestionLandingNow) return 'hidden_question_landing_v1';
     if (goalKindForShiftMeta2 === 'uncover') return 'narrow_shift_v1';
 
     if (shiftKind2 === 'clarify_shift') {
@@ -2171,6 +2198,7 @@ function buildFlowReply(args: {
 
     if (goalKindForShiftMeta2 === 'stabilize') return 'stabilize_direction';
     if (goalKindForShiftMeta2 === 'decide') return 'answer_in_one_shot';
+    if (goalKindForShiftMeta2 === 'uncover' && hiddenQuestionLandingNow) return 'answer_hidden_question';
     if (goalKindForShiftMeta2 === 'uncover') return 'narrow_focus';
 
     if (shiftKind2 === 'clarify_shift') {
