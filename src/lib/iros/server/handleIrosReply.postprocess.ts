@@ -70,18 +70,6 @@ export type PostProcessReplyOutput = {
   metaForSave: any;
 };
 
-function shouldUseHiddenQuestionFinalGuard(value: unknown): boolean {
-  const s = String(value ?? '').replace(/\s+/g, ' ');
-  return /AI/.test(s) && /きれい/.test(s) && /不安/.test(s) && /お金|儲け/.test(s);
-}
-
-function buildHiddenQuestionFinalGuard(): string {
-  return [
-    'あなたが拒んでいるのは、お金そのものではありません。',
-    '拒んでいるのは、人の不安を使って豊かになる未来です。',
-    '奥にある問いは、「私は、誠実なまま自由になれますか」です。',
-  ].join('\n');
-}
 function buildResonanceSeedText(state: any): string {
   const parts: string[] = [];
 
@@ -1212,13 +1200,6 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
 
   // 1) 本文抽出
   let finalAssistantText = sanitizeInvalidPersonHonorifics(extractAssistantText(orchResult));
-
-  if (shouldUseHiddenQuestionFinalGuard(userText)) {
-    finalAssistantText = buildHiddenQuestionFinalGuard();
-    try {
-      console.log('[IROS/HIDDEN_QUESTION_LANDING][FINAL_GUARD]', { conversationId, userCode });
-    } catch {}
-  }
 
   // 2) metaForSave clone
   const metaRaw =
