@@ -198,8 +198,23 @@ function buildWriterRewriteSeed(args: {
     meta?.shift ??
     null;
 
-  const normGoal = (v: any): 'STABILIZE' | 'ADVANCE' | 'CLARIFY' | 'SAFE' => {
+  const normGoal = (v: any): 'STABILIZE' | 'ADVANCE' | 'CLARIFY' | 'SAFE' | 'HIDDEN_QUESTION_LANDING' => {
     const s = String(v ?? '').trim().toLowerCase();
+
+    // HQL_LLM_GATE_GOAL_V17
+    // hidden_question_landing / ethical_abundance_refusal は安定化ではなく、奥の問いへの着地として扱う。
+    const metaAny: any = meta ?? {};
+    const extraAny: any = metaAny?.extra ?? {};
+    const ctxAny: any = extraAny?.ctxPack ?? metaAny?.ctxPack ?? {};
+    const isHql =
+      metaAny?.hiddenQuestionLanding === true ||
+      extraAny?.hiddenQuestionLanding === true ||
+      ctxAny?.hiddenQuestionLanding === true ||
+      String(metaAny?.shiftKind ?? extraAny?.shiftKind ?? ctxAny?.shiftKind ?? '').trim() === 'hidden_question_landing' ||
+      String(metaAny?.presentationKind ?? extraAny?.presentationKind ?? ctxAny?.presentationKind ?? '').trim() === 'ethical_abundance_refusal_hidden_question' ||
+      String(metaAny?.resolvedAsk?.topic ?? extraAny?.resolvedAsk?.topic ?? ctxAny?.resolvedAsk?.topic ?? '').trim() === 'ethical_abundance_refusal';
+
+    if (isHql) return 'HIDDEN_QUESTION_LANDING';
     if (s === 'advance' || s === 'adv' || s === 'go' || s === 'forward') return 'ADVANCE';
     if (s === 'clarify' || s === 'deep' || s === 'explain') return 'CLARIFY';
     if (s === 'safe' || s === 'safety' || s === 'crisis') return 'SAFE';
@@ -294,7 +309,7 @@ function buildWriterRewriteSeed(args: {
     questionTypeNow === 'meaning' && questionModeNow === 'confirm';
 
   const defaultQuestionsMax =
-    goal === 'STABILIZE' || goal === 'SAFE'
+    goal === 'STABILIZE' || goal === 'SAFE' || goal === 'HIDDEN_QUESTION_LANDING'
       ? 0
       : isMeaningConfirm
         ? 0
@@ -303,7 +318,9 @@ function buildWriterRewriteSeed(args: {
   const defaultLinesMax =
     goal === 'SAFE'
       ? 4
-      : isMeaningConfirm
+      : goal === 'HIDDEN_QUESTION_LANDING'
+        ? 5
+        : isMeaningConfirm
         ? 10
         : 8;
 

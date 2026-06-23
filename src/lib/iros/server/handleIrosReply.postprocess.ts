@@ -972,6 +972,30 @@ if (Array.isArray(obj.blocks) && obj.blocks.length > 0) {
     }
   }
 
+  // HQL_SEED_SOURCE_CREATION_V17
+  // hidden_question_landing / ethical_abundance_refusal のときは、
+  // slotPlanSeedを「怒りの安定化」や「話の芯」ではなく、本のMuの創造方向seedにする。
+  const hasEthicalAbundanceHql = shiftObjs.some((obj: any) => {
+    const kind = normText(obj?.kind);
+    const intent = normText(obj?.intent);
+    const hiddenKind = normText(obj?.hiddenQuestionLandingKind);
+    const line = normText(obj?.line);
+    return (
+      kind === 'hidden_question_landing' ||
+      intent === 'answer_hidden_question' ||
+      hiddenKind === 'ethical_abundance_refusal' ||
+      /人の不安.*お金|きれいな言葉.*お金|誠実.*自由|豊かさ/u.test(line)
+    );
+  });
+
+  if (hasEthicalAbundanceHql) {
+    push('これは怒りを安定させる場面ではなく、人の不安をきれいな言葉で包み、お金へ変える構造への拒否を映す場面です。');
+    push('拒んでいるのは豊かさそのものではなく、人の不安を燃料にして進む豊かさです。');
+    push('ここではAI批判の是非や使い方ではなく、きれいな希望が売り物になる構造を見ます。');
+    push('最後は、誠実さを失わずに自由や豊かさを生めるのか、創造の方向へ開く問いとして置きます。');
+    return lines.join('\\n').trim();
+  }
+
   for (const obj of obsObjs) {
     buildObsLines(obj).forEach(push);
   }
