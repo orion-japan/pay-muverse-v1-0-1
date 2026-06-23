@@ -2,6 +2,7 @@ import { enrichRelationshipIdentity } from '@/lib/iros/relationshipIdentity';
 import { NextRequest, NextResponse } from 'next/server';
 import { buildPreSeedFlowDirective, resolvePreSeedDecision } from '@/lib/iros/server/preseed';
 import { callPreSeedDiagnosisWriter } from '@/lib/iros/server/preseed/callPreSeedDiagnosisWriter';
+import { callHqlCreationLandingWriter } from '@/lib/iros/server/preseed/callHqlCreationLandingWriter';
 import { createClient } from '@supabase/supabase-js';
 
 import { verifyFirebaseAndAuthorize } from '@/lib/authz';
@@ -1733,13 +1734,14 @@ const metaForRelationshipContextCapture: any = {
         );
 
       if (isEthicalAbundanceHql && String((preSeedDecision as any)?.route || '') !== 'hql_creation_landing') {
-        const directReply = [
-          '疑っているのは、AIそのものというより、人の不安を見つけて、きれいな言葉に変えて、最後にお金へ流す構造です。',
-          '',
-          'だから「自由に生きよう」という言葉も、希望ではなく、誰かの弱さを材料にする言葉に聞こえてしまう。',
-          '',
-          '本当に問われているのは、そこに飲まれずに、誠実なまま自由や豊かさを生めるのか、ということです。'
-        ].join('\n');
+        // HQL_CREATION_LANDING_LLM_WRITER_V19
+        // 通常writer/rephraseへ戻さず、HQL専用LLM writerだけを通す。
+        const directReply = await callHqlCreationLandingWriter({
+          userText: userTextClean,
+          traceId,
+          conversationId,
+          userCode,
+        });
 
         preSeedDecision = {
           ...((preSeedDecision as any) ?? {}),
