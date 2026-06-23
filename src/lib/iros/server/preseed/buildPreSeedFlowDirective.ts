@@ -29,6 +29,15 @@ function includesAny(text: string, words: string[]): boolean {
   return words.some((word) => text.includes(word));
 }
 
+function isHiddenQuestionLandingInput(value: unknown): boolean {
+  const t = compactText(value);
+  const hasAiOrBeautifulWords = /ai|きれいごと|綺麗事|きれいな言葉|自由|好きなことで働く|好きなことで稼ぐ|自分の価値/u.test(t);
+  const hasMoneyFlow = /儲け|儲か|お金|稼ぐ|売る|売り文句|商売|商品|課金|ビジネス|豊か/u.test(t);
+  const hasAnxietyUse = /不安|弱さ|痛み|悩み|刺激|あおる|煽る|つけこむ|つけ込む|見つけて|材料/u.test(t);
+  const hasMoralRejection = /だけじゃないですか|同じじゃないですか|変えるだけ|嫌|いや|うんざり|拒否|疑い|警戒|腹が立つ|騙されたくない|雑に扱われたくない|勝手に希望で包まれたくない/u.test(t);
+  return hasAiOrBeautifulWords && hasMoneyFlow && hasAnxietyUse && hasMoralRejection;
+}
+
 function isFlowAcceptanceText(value: unknown): boolean {
   const c = compactText(value);
   return /やってみます|動いてみます|試してみます|進めてみます|その方向で|少し動|一歩や|それで行|その形で|置いてみます/u.test(c);
@@ -344,9 +353,14 @@ function buildWriterSeed(args: {
   wordCreate: boolean;
   actionCreate: boolean;
   flowAcceptance: boolean;
+  hiddenQuestionLanding: boolean;
 }): string | null {
   if (args.shouldHoldAction) {
     return 'このターンでは行動提案を急がず、関係圧や不安反応から出たCreateを小さくし、自分の方向を失っていないかを先に整える。';
+  }
+
+  if (args.hiddenQuestionLanding) {
+    return 'PRESEED_HIDDEN_QUESTION_LANDING: 表面的な批判・怒りとして受け止めて終わらせない。拒んでいる未来を名付け、お金否定・豊かさ否定ではないことを分け、その奥の問いを一つ置く。AI側の姿勢表明や安全な受け止めで閉じない。';
   }
 
   if (args.flowAcceptance) {
@@ -392,6 +406,7 @@ export function buildPreSeedFlowDirective(
 
   if (!decision) {
     const fallbackText = normalizeText(userText);
+    const fallbackHiddenQuestionLanding = isHiddenQuestionLandingInput(fallbackText);
 
     const fallbackFlowAcceptance = isFlowAcceptanceText(fallbackText);
     const fallbackWordCreate = isWordCreateRequest(fallbackText);
@@ -493,7 +508,7 @@ export function buildPreSeedFlowDirective(
       hasIntentionSignal && !fallbackCreateReady;
 
     const fallbackShouldLimitDeepening =
-      fallbackIntentionReached || fallbackCreateReady;
+      fallbackCreateReady;
 
     const fallbackFlowDirection: PreSeedFlowDirective['flowDirection'] =
       fallbackFlowAcceptance
@@ -533,9 +548,11 @@ export function buildPreSeedFlowDirective(
               : fallbackImageFirstCreate
               ? 'PRESEED_CREATE_DIRECTIVE: このCreateは行動指示ではない。Imaginal Form（形象）を先に立てる。返信の冒頭を、文案・行動案・質問・選択肢から始めてはいけない。まず本人の内側に見える場面・姿・形を一つ置く。本人に考えさせたり選ばせたりしない。形象を置いたあと、必要なら自然に出る小さな一歩だけを添える。'
               : fallbackShouldUseSmallAction
-              ? 'ユーザーは言葉や行動の形を求めているため、大きな結論にせず、先に形象を置き、そこから小さく実行できる一歩へ収束させる。'
-              : fallbackIntentionReached
-                ? 'ユーザー入力だけでも意図の輪郭が出ているため、これ以上の相手分析・原因分析を増やさず、核心を短く言葉にして収束させる。'
+               ? 'ユーザーは言葉や行動の形を求めているため、大きな結論にせず、先に形象を置き、そこから小さく実行できる一歩へ収束させる。'
+               : fallbackHiddenQuestionLanding
+                 ? 'PRESEED_HIDDEN_QUESTION_LANDING: 表面的な批判として扱わず、拒んでいる未来と奥の問いを名付ける。AI側の姿勢表明や安全な受け止めで閉じない。'
+               : fallbackIntentionReached
+                 ? 'ユーザー入力だけでも意図の輪郭が出ている。深掘りを止めるのではなく、奥の問いを一つ名付け、扱える言葉として置く。'
                 : null;
 
     return {
@@ -554,8 +571,11 @@ export function buildPreSeedFlowDirective(
       tInsightReady: fallbackIntentionReached,
       intentionConvergence: {
         intentionReached: fallbackIntentionReached,
-        shouldStopAnalysis: fallbackIntentionReached,
-        shouldNameCore: fallbackIntentionReached,
+        shouldStopAnalysis: fallbackShouldLimitDeepening,
+        shouldNameCore: fallbackIntentionReached || fallbackHiddenQuestionLanding,
+        answerHiddenQuestion: fallbackHiddenQuestionLanding || fallbackIntentionReached,
+        shouldLandHiddenQuestion: fallbackHiddenQuestionLanding,
+        shouldNameRefusedFuture: fallbackHiddenQuestionLanding,
         shouldPlaceCreate: fallbackShouldUseCreate,
         shouldMoveToSmallAction: fallbackShouldUseSmallAction,
         shouldLetFlowContinue: fallbackShouldUseSmallAction,
@@ -587,7 +607,7 @@ export function buildPreSeedFlowDirective(
       writerGuidance: {
         mustKeepTarget: false,
         mustNotOverDeepen: fallbackShouldLimitDeepening,
-        shouldShiftFromAnalysisToPlacement: fallbackIntentionReached || fallbackShouldUseCreate,
+        shouldShiftFromAnalysisToPlacement: fallbackIntentionReached || fallbackShouldUseCreate || fallbackHiddenQuestionLanding,
         shouldOfferSmallCreate: fallbackShouldUseSmallAction || fallbackShouldUseCreate,
         shouldAvoidOtherMindAssertion: true,
         shouldAvoidLargeAction: true,
@@ -595,6 +615,9 @@ export function buildPreSeedFlowDirective(
         shouldUseImaginalForm: fallbackImageFirstCreate || (fallbackShouldUseCreate && !fallbackWordCreate && !fallbackActionCreate),
         shouldAvoidHomework: true,
         shouldAvoidTooManyOptions: true,
+        shouldLandHiddenQuestion: fallbackHiddenQuestionLanding,
+        shouldNameRefusedFuture: fallbackHiddenQuestionLanding,
+        hiddenQuestionLandingKind: fallbackHiddenQuestionLanding ? 'ethical_abundance_refusal' : null,
       },
       evidence: {
         fromUserInput: [
@@ -629,6 +652,8 @@ export function buildPreSeedFlowDirective(
     previousDirective,
   });
 
+  const hiddenQuestionLanding = isHiddenQuestionLandingInput(userText);
+
   const tInsightReady =
     intentionFormed &&
     currentBand === 'IT' &&
@@ -658,7 +683,6 @@ export function buildPreSeedFlowDirective(
   });
 
   const shouldLimitDeepening =
-    intentionFormed ||
     sameTargetStreak >= 3 ||
     sameGoalStreak >= 3 ||
     (shortInput && (inputIntent === 'deepen' || inputIntent === 'continue')) ||
@@ -666,6 +690,7 @@ export function buildPreSeedFlowDirective(
 
   const shouldDeepen =
     !shouldLimitDeepening &&
+    !hiddenQuestionLanding &&
     (inputIntent === 'deepen' ||
       inputIntent === 'explain_reason' ||
       inputIntent === 'continue');
@@ -712,7 +737,7 @@ export function buildPreSeedFlowDirective(
     intentionFormed ? 'toward_intention' :
     'none';
 
-  const intentionReached = intentionFormed && shouldLimitDeepening;
+  const intentionReached = (intentionFormed || hiddenQuestionLanding) && !createReady;
 
   const writerSeed = buildWriterSeed({
     shouldLimitDeepening,
@@ -725,11 +750,13 @@ export function buildPreSeedFlowDirective(
     wordCreate,
     actionCreate,
     flowAcceptance,
+    hiddenQuestionLanding,
   });
 
   const avoidSeed: string[] = [];
 
   if (shouldLimitDeepening) avoidSeed.push('相手分析・原因分析を増やしすぎない');
+  if (hiddenQuestionLanding) avoidSeed.push('AI側の姿勢表明や安全な受け止めだけで閉じない');
   if (shouldHoldAction) avoidSeed.push('関係圧や不安反応から大きな行動へ進めない');
   avoidSeed.push('相手の本心を断定しない');
   avoidSeed.push('大きな行動提案にしない');
@@ -768,8 +795,11 @@ export function buildPreSeedFlowDirective(
     tInsightReady,
     intentionConvergence: {
       intentionReached,
-      shouldStopAnalysis: intentionReached || shouldLimitDeepening,
-      shouldNameCore: intentionReached || flowDirection === 'name_intention',
+      shouldStopAnalysis: shouldLimitDeepening,
+      shouldNameCore: intentionReached || flowDirection === 'name_intention' || hiddenQuestionLanding,
+      answerHiddenQuestion: hiddenQuestionLanding || (intentionFormed && !createReady && !flowAcceptance),
+      shouldLandHiddenQuestion: hiddenQuestionLanding || (intentionFormed && !createReady && !flowAcceptance),
+      shouldNameRefusedFuture: hiddenQuestionLanding,
       shouldPlaceCreate: shouldUseCreate,
       shouldMoveToSmallAction: shouldUseSmallAction,
       shouldLetFlowContinue: flowDirection === 'let_flow_continue',
@@ -797,7 +827,7 @@ export function buildPreSeedFlowDirective(
     writerGuidance: {
       mustKeepTarget: Boolean(targetLabel || targetType),
       mustNotOverDeepen: shouldLimitDeepening,
-      shouldShiftFromAnalysisToPlacement: shouldLimitDeepening || shouldUseCreate,
+      shouldShiftFromAnalysisToPlacement: shouldLimitDeepening || shouldUseCreate || hiddenQuestionLanding,
       shouldOfferSmallCreate: shouldUseSmallAction || shouldUseCreate,
       shouldAvoidOtherMindAssertion: true,
       shouldAvoidLargeAction: true,
@@ -805,6 +835,9 @@ export function buildPreSeedFlowDirective(
       shouldUseImaginalForm: imageFirstCreate || (shouldUseCreate && !wordCreate && !actionCreate),
       shouldAvoidHomework: true,
       shouldAvoidTooManyOptions: true,
+      shouldLandHiddenQuestion: hiddenQuestionLanding || (intentionFormed && !createReady && !flowAcceptance),
+      shouldNameRefusedFuture: hiddenQuestionLanding,
+      hiddenQuestionLandingKind: hiddenQuestionLanding ? 'ethical_abundance_refusal' : (intentionFormed && !createReady && !flowAcceptance ? 'intention_refusal' : null),
     },
     evidence: {
       fromUserInput: [

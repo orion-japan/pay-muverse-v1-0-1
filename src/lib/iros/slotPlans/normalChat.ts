@@ -186,6 +186,15 @@ function normalizeLaneKeyOrNull(v: unknown): LaneKey | null {
   return v === 'IDEA_BAND' || v === 'T_CONCRETIZE' ? v : null;
 }
 
+function isEthicalAbundanceRefusalInput(value: unknown): boolean {
+  const t = String(value ?? '').replace(/[ \t\r\n　]/g, '').toLowerCase();
+  const hasAiOrBeautifulWords = /ai|きれいごと|綺麗事|きれいな言葉|自由|好きなことで働く|好きなことで稼ぐ|自分の価値/u.test(t);
+  const hasMoneyFlow = /儲け|儲か|お金|稼ぐ|売る|売り文句|商売|商品|課金|ビジネス|豊か/u.test(t);
+  const hasAnxietyUse = /不安|弱さ|痛み|悩み|刺激|あおる|煽る|つけこむ|つけ込む|見つけて|材料/u.test(t);
+  const hasMoralRejection = /だけじゃないですか|同じじゃないですか|変えるだけ|嫌|いや|うんざり|拒否|疑い|警戒|腹が立つ|騙されたくない|雑に扱われたくない|勝手に希望で包まれたくない/u.test(t);
+  return hasAiOrBeautifulWords && hasMoneyFlow && hasAnxietyUse && hasMoralRejection;
+}
+
 function resolveConcretizeCreateContext(args: {
   userText: string;
   laneKey?: LaneKey | null;
@@ -326,7 +335,7 @@ function buildNextHintSlot(args: {
   const mode =
     laneKey === 'T_CONCRETIZE'
       ? createMode === 'imaginal_create'
-        ? 'tc_create_hint'
+        ? 'imaginal_create_hint'
         : createMode === 'stabilize_action'
           ? 'rc_stabilize_hint'
           : createMode === 'unstuck_action'
@@ -1061,85 +1070,47 @@ function buildShiftIdeaBand(seedText: string) {
    * ==================================================
    * IDEA_BAND（一点照射 / spotlight）
    *
-   * - デフォルト 3行
-   * - ユーザーが「4つ」「5案」など明示したら従う（最大5行）
-   * - 最後の1行が “最有力（照射）”
-   * - 候補行オンリー（質問/講義/手順なし）
+   * - 添え候補 2本
+   * - 推し 1本
+   * - 合計3行
+   * - 説明しない / 理由を書かない / 質問しない
    * ==================================================
    */
-
-  // -----------------------------
-  // ユーザーが指定した個数を抽出
-  // -----------------------------
-  const detectRequestedCount = (text: string): number | null => {
-    const t0 = String(text ?? '');
-
-    // ✅ 全角数字 → 半角へ（２〜５ / ４ / ５ を確実に拾う）
-    const toHalfWidth = (s: string) =>
-      s.replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0));
-
-    const t = toHalfWidth(t0);
-
-    // 例: "4つ" "5案" "4個" "5候補" "5行" "4パターン"
-    const m = t.match(/([2-5])\s*(?:つ|案|個|パターン|候補|行)\b/);
-    if (m) {
-      const n = Number(m[1]);
-      if (n >= 2 && n <= 5) return n;
-    }
-
-    // 漢数字（簡易）
-    if (/(?:二|２)\s*(?:つ|案|個|パターン|候補|行)/.test(t0)) return 2;
-    if (/(?:三|３)\s*(?:つ|案|個|パターン|候補|行)/.test(t0)) return 3;
-    if (/(?:四|４)\s*(?:つ|案|個|パターン|候補|行)/.test(t0)) return 4;
-    if (/(?:五|５)\s*(?:つ|案|個|パターン|候補|行)/.test(t0)) return 5;
-
-    return null;
-  };
-
-
-  const requested = detectRequestedCount(seedText);
-
-  const lineCount = requested ?? 3; // デフォルト3
-
-  const variants = [
-    {
-      kind: 'idea_band',
-      intent: 'propose_candidates',
-      rules: {
-        ...SHIFT_PRESET_C_SENSE_HINT.rules,
-
-        candidates_min: lineCount,
-        candidates_max: lineCount,
-        lines_max: lineCount,
-
-        questions_max: 0,
-        no_decision: true,
-        no_action_commit: true,
-        no_lecture: true,
-        no_future_instruction: true,
-        no_checklist: false,
-
-        mode: 'spotlight',
-        spotlight_last_line: true,
-        spotlight_style: 'most_specific_no_label',
-      },
-
-      tone: SHIFT_PRESET_C_SENSE_HINT.tone ?? undefined,
-
-      allow: { ...(SHIFT_PRESET_C_SENSE_HINT.allow ?? {}), short_reply_ok: false },
-
-      format: {
-        lines: lineCount,
-        schema: [`candidates(${lineCount}_lines_last_is_spotlight)`],
-        line_contract: 'each_line_must_be_candidate',
-      },
-    },
-  ];
-
-  const picked = pickRandom(variants);
+  const lineCount = 3;
 
   return m('SHIFT', {
-    ...picked,
+    kind: 'idea_band',
+    intent: 'spotlight_one',
+    hint: 'idea_band_spotlight_v1',
+    rules: {
+      ...SHIFT_PRESET_C_SENSE_HINT.rules,
+      candidates_min: lineCount,
+      candidates_max: lineCount,
+      lines_max: lineCount,
+      support_candidates: 2,
+      spotlight_candidates: 1,
+      questions_max: 0,
+      no_question_back: true,
+      no_question_end: true,
+      no_decision: false,
+      no_action_commit: true,
+      no_lecture: true,
+      no_future_instruction: true,
+      no_checklist: true,
+      no_explanation: true,
+      no_reason: true,
+      mode: 'spotlight',
+      spotlight_last_line: true,
+      spotlight_label: '🌀 推し',
+      spotlight_style: 'confident_hypothesis',
+    },
+    tone: SHIFT_PRESET_C_SENSE_HINT.tone ?? undefined,
+    allow: { ...(SHIFT_PRESET_C_SENSE_HINT.allow ?? {}), short_reply_ok: false },
+    format: {
+      lines: lineCount,
+      schema: ['support_candidate_line', 'support_candidate_line', 'spotlight_line_with_label'],
+      line_contract: 'two_support_candidates_then_one_spotlight',
+    },
     seed_text: clamp(seedText, 240),
   });
 }
@@ -1170,7 +1141,7 @@ function buildImageFirstCreateSlots(args: { userText: string; ctxPack?: any; met
     { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { laneKey: 'T_CONCRETIZE', createAxis: 'imaginal_form_create', focusDomain: domain, user: null }) },
     { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 't_concretize', intent: 'place_imaginal_form', hint: 'image_first_create_v1', line, source: 'tcf_rotation', createAxis: 'imaginal_form_create', focusDomain: domain, writerPattern: 'IMAGE_FIRST_CREATE_V1', contract: ['first_line_places_imaginal_form', 'no_action_plan', 'no_message_draft', 'no_checklist', 'plain_words'], rules: { no_action_plan: true, no_message_draft: true, no_send_decision: true, no_checklist: true, no_bullets: true, questions_max: 0, lines_max: 4, forbidden_words: ['紙に書く', 'メモする', '一つに絞る', '短く送る', '送るなら', '送るか送らないか', '一通', '文面', '返信', '返事', '連絡'] }, seed_text: ['形象：' + line, '出力ルール：行動案・文案例・送る/送らない判断を冒頭に出さない。', 'まず内側に置く形を一つ提示し、その意味を短く説明する。', '最後に必要なら、その形を崩さない小さな保持だけを添える。'].join('\n') }) },
     { key: 'NEXT', role: 'assistant', style: 'neutral', content: '@NEXT_HINT ' + JSON.stringify({
-      mode: 'tc_create_hint',
+      mode: 'imaginal_create_hint',
       laneKey: 'T_CONCRETIZE',
       delta: args.flowDelta ?? null,
       concretizeOrigin: 'TC_CREATE',
@@ -1449,6 +1420,25 @@ function buildFlowReply(args: {
   }
 
   const t = norm(args.userText);
+  const preSeedFlowDirectiveNow =
+    (args as any)?.ctxPack?.preSeedFlowDirective ??
+    (args as any)?.meta?.extra?.ctxPack?.preSeedFlowDirective ??
+    (args as any)?.meta?.preSeedFlowDirective ??
+    null;
+  const hiddenQuestionLandingNow =
+    isEthicalAbundanceRefusalInput(args.userText) ||
+    (args as any)?.ctxPack?.hiddenQuestionLanding === true ||
+    (args as any)?.meta?.extra?.ctxPack?.hiddenQuestionLanding === true ||
+    (args as any)?.meta?.extra?.hiddenQuestionLanding === true ||
+    preSeedFlowDirectiveNow?.intentionConvergence?.answerHiddenQuestion === true ||
+    preSeedFlowDirectiveNow?.intentionConvergence?.shouldLandHiddenQuestion === true ||
+    preSeedFlowDirectiveNow?.writerGuidance?.shouldLandHiddenQuestion === true;
+  const hiddenQuestionLandingKindNow =
+    isEthicalAbundanceRefusalInput(args.userText) ||
+    (args as any)?.ctxPack?.ethicalAbundanceRefusal === true ||
+    (args as any)?.meta?.extra?.ctxPack?.ethicalAbundanceRefusal === true
+      ? 'ethical_abundance_refusal'
+      : 'intention_refusal';
   const createAxisNow = String((args as any)?.ctxPack?.createAxis ?? '').trim() || String((args as any)?.ctxPack?.targetKind ?? '').trim() || String((args as any)?.ctxPack?.tcfStarter?.createAxis ?? '').trim() || String((args as any)?.ctxPack?.tcfStarter?.cDirection ?? '').trim() || String((args as any)?.meta?.extra?.ctxPack?.createAxis ?? '').trim() || String((args as any)?.meta?.extra?.ctxPack?.targetKind ?? '').trim() || String((args as any)?.meta?.extra?.ctxPack?.tcfStarter?.createAxis ?? '').trim() || String((args as any)?.meta?.extra?.ctxPack?.tcfStarter?.cDirection ?? '').trim();
   const writerPatternNow = String((args as any)?.ctxPack?.writerPatternKey ?? '').trim() || String((args as any)?.ctxPack?.tcfStarter?.writerPatternKey ?? '').trim() || String((args as any)?.meta?.extra?.ctxPack?.writerPatternKey ?? '').trim() || String((args as any)?.meta?.extra?.ctxPack?.tcfStarter?.writerPatternKey ?? '').trim();
   if (createAxisNow === 'imaginal_form_create' || writerPatternNow === 'IMAGE_FIRST_CREATE_V1') {
@@ -1853,6 +1843,14 @@ function buildFlowReply(args: {
 
     // ② 司令塔 goalKind を最優先
     if (goalKind2 === 'resonate') {
+      if (hiddenQuestionLandingNow) {
+        return stampShiftMeta('clarify_shift', {
+          goalKind: 'uncover' as any,
+          targetKind: 'uncover' as any,
+          laneKey: null,
+          replyGoalKind: 'uncover' as any,
+        });
+      }
       return stampShiftMeta('narrow_shift', {
         goalKind: 'resonate' as any,
         targetKind: 'resonate' as any,
@@ -1862,6 +1860,14 @@ function buildFlowReply(args: {
     }
 
     if (goalKind2 === 'uncover') {
+      if (hiddenQuestionLandingNow) {
+        return stampShiftMeta('clarify_shift', {
+          goalKind: 'uncover' as any,
+          targetKind: 'uncover' as any,
+          laneKey: null,
+          replyGoalKind: 'uncover' as any,
+        });
+      }
       const targetKindNowRaw = String((args as any)?.targetKind ?? '').trim();
 
       const targetKindNow:
@@ -2350,32 +2356,86 @@ function buildFlowReply(args: {
     });
   } catch {}
 
+  const hiddenQuestionLandingSeedText = [
+    hiddenQuestionLandingKindNow === 'ethical_abundance_refusal'
+      ? '表面的なAI批判として扱わない。'
+      : '表面的な反応として扱わず、奥の問いを名付ける。',
+    hiddenQuestionLandingKindNow === 'ethical_abundance_refusal'
+      ? '拒んでいる未来: 人の不安を使って豊かになる未来。'
+      : '拒んでいる未来または違和感の方向を、短く名付ける。',
+    hiddenQuestionLandingKindNow === 'ethical_abundance_refusal'
+      ? '奥の問い: 私は、誠実なまま自由になれますか。'
+      : '奥の問いを一つだけ置く。',
+    'AI側の姿勢表明、「筋が通っています」、「一緒に見ます」で閉じない。',
+    '行動提案・説明羅列・質問返しをしない。',
+  ].join('\n');
+
   const shift =
-    useUncoverShift
+    hiddenQuestionLandingNow
       ? m('SHIFT', {
-          kind: 'narrow_shift',
-          intent: 'resonance_focus',
-          hint: 'resonance_focus_v1',
-          line: shiftLine2,
-          source: 'goalKind_uncover_as_resonance',
+          kind: 'hidden_question_landing',
+          intent: 'answer_hidden_question',
+          hint: 'hidden_question_landing_v1',
+          line: '拒んでいる未来を名付け、その奥の問いで閉じる',
+          source: 'preseed_hidden_question',
+          hiddenQuestionLandingKind: hiddenQuestionLandingKindNow,
+          contract: [
+            'do_not_treat_as_surface_criticism',
+            'name_refused_future',
+            'split_money_from_anxiety_extraction',
+            'name_core_question',
+            'no_ai_defense',
+            'no_action_plan',
+            'no_question_end',
+            'plain_words',
+          ],
           rules: {
-            answer_user_meaning: true,
-            answer_in_one_shot: true,
-            first_line_is_core_answer: true,
+            answer_user_meaning: false,
+            answer_hidden_question: true,
+            name_refused_future: hiddenQuestionLandingKindNow === 'ethical_abundance_refusal',
+            name_core_question: true,
+            no_ai_defense: true,
+            no_safe_posture_only: true,
+            no_action_plan: true,
+            no_checklist: true,
             no_question_back: true,
-            no_question_end: false,
-            keep_it_simple: true,
-            no_flow_lecture: true,
-            no_meta_explain: true,
-            questions_max: 0,
+            no_question_end: true,
+            output_only: true,
+            no_bullets: true,
+            lines_max: 8,
           },
           allow: {
             concrete_reply: false,
-            short_reply_ok: true,
+            short_reply_ok: false,
           },
-          seed_text: seedText,
+          seed_text: hiddenQuestionLandingSeedText,
         })
-      : useTConcretize
+      : useUncoverShift
+        ? m('SHIFT', {
+            kind: 'hidden_question_landing',
+            intent: 'answer_hidden_question',
+            hint: 'hidden_question_landing_v1',
+            line: shiftLine2,
+            source: 'goalKind_uncover_hidden_question',
+            contract: ['answer_hidden_question', 'name_core_question', 'no_action_plan', 'plain_words'],
+            rules: {
+              answer_user_meaning: false,
+              answer_hidden_question: true,
+              name_core_question: true,
+              no_question_back: true,
+              no_question_end: true,
+              keep_it_simple: true,
+              no_flow_lecture: true,
+              no_meta_explain: true,
+              no_action_plan: true,
+              questions_max: 0,
+            },
+            allow: {
+              concrete_reply: false,
+              short_reply_ok: true,
+            },
+            seed_text: seedText,
+          })      : useTConcretize
         ? buildShiftTConcretize(seedText, args.focusLabel)
         : useIdeaBand
           ? buildShiftIdeaBand(seedText)
@@ -2412,7 +2472,7 @@ function buildFlowReply(args: {
                       : null,
             source: 'phase2_shift',
             rules: {
-              answer_user_meaning: shiftKind2 !== 'decide_shift',
+              answer_user_meaning: shiftKind2 !== 'decide_shift' && !hiddenQuestionLandingNow,
               answer_in_one_shot: shiftKind2 === 'decide_shift',
               first_line_is_core_answer: shiftKind2 === 'decide_shift',
               must_start_with_conclusion: shiftKind2 === 'decide_shift',

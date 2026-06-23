@@ -127,6 +127,9 @@ export type PreSeedFlowDirective = {
     shouldPlaceCreate: boolean;
     shouldMoveToSmallAction: boolean;
     shouldLetFlowContinue: boolean;
+    answerHiddenQuestion?: boolean;
+    shouldLandHiddenQuestion?: boolean;
+    shouldNameRefusedFuture?: boolean;
   };
 
   createReady: boolean;
@@ -172,6 +175,9 @@ export type PreSeedFlowDirective = {
     shouldUseImaginalForm?: boolean;
     shouldAvoidHomework?: boolean;
     shouldAvoidTooManyOptions?: boolean;
+    shouldLandHiddenQuestion?: boolean;
+    shouldNameRefusedFuture?: boolean;
+    hiddenQuestionLandingKind?: 'ethical_abundance_refusal' | 'intention_refusal' | null;
   };
 
   evidence: {

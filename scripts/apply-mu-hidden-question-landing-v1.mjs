@@ -15,7 +15,7 @@ function abs(rel) {
 }
 
 function read(rel) {
-  return fs.readFileSync(abs(rel), 'utf8');
+  return fs.readFileSync(abs(rel), 'utf8').replace(/\r\n/g, '\n');
 }
 
 function write(rel, text) {
@@ -69,6 +69,16 @@ function replaceAllLiteral(rel, from, to, label) {
     return;
   }
   write(rel, text.split(from).join(to));
+}
+
+function replaceRegexOnce(rel, pattern, replacement, label) {
+  const text = read(rel);
+  const next = text.replace(pattern, replacement);
+  if (next === text) {
+    throw new Error(`Pattern not found: ${label}`);
+  }
+  write(rel, next);
+  console.log(`[patched] ${rel}`);
 }
 
 function patchTypes() {
@@ -135,10 +145,15 @@ function patchPreSeedFlowDirective() {
     'preseedFlow:fallback intention no longer limits deepening',
   );
 
-  replaceOnce(
+  replaceRegexOnce(
     files.preseedFlow,
-    `               : fallbackShouldUseSmallAction\n               ? 'ユーザーは言葉や行動の形を求めているため、大きな結論にせず、先に形象を置き、そこから小さく実行できる一歩へ収束させる。'\n               : fallbackIntentionReached\n                 ? 'ユーザー入力だけでも意図の輪郭が出ているため、これ以上の相手分析・原因分析を増やさず、核心を短く言葉にして収束させる。'\n                 : null;`,
-    `               : fallbackShouldUseSmallAction\n               ? 'ユーザーは言葉や行動の形を求めているため、大きな結論にせず、先に形象を置き、そこから小さく実行できる一歩へ収束させる。'\n               : fallbackHiddenQuestionLanding\n                 ? 'PRESEED_HIDDEN_QUESTION_LANDING: 表面的な批判として扱わず、拒んでいる未来と奥の問いを名付ける。AI側の姿勢表明や安全な受け止めで閉じない。'\n               : fallbackIntentionReached\n                 ? 'ユーザー入力だけでも意図の輪郭が出ている。深掘りを止めるのではなく、奥の問いを一つ名付け、扱える言葉として置く。'\n                 : null;`,
+    /: fallbackShouldUseSmallAction\s*\?\s*'ユーザーは言葉や行動の形を求めているため、大きな結論にせず、先に形象を置き、そこから小さく実行できる一歩へ収束させる。'\s*: fallbackIntentionReached\s*\?\s*'ユーザー入力だけでも意図の輪郭が出ているため、これ以上の相手分析・原因分析を増やさず、核心を短く言葉にして収束させる。'/,
+    `: fallbackShouldUseSmallAction
+               ? 'ユーザーは言葉や行動の形を求めているため、大きな結論にせず、先に形象を置き、そこから小さく実行できる一歩へ収束させる。'
+               : fallbackHiddenQuestionLanding
+                 ? 'PRESEED_HIDDEN_QUESTION_LANDING: 表面的な批判として扱わず、拒んでいる未来と奥の問いを名付ける。AI側の姿勢表明や安全な受け止めで閉じない。'
+               : fallbackIntentionReached
+                 ? 'ユーザー入力だけでも意図の輪郭が出ている。深掘りを止めるのではなく、奥の問いを一つ名付け、扱える言葉として置く。'`,
     'preseedFlow:fallback writerSeed hidden question',
   );
 

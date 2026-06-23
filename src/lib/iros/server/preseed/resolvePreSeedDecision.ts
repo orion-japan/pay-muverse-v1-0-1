@@ -179,9 +179,9 @@ function resolveFastPathDirectReply(userTextRaw: string): PreSeedDecision | null
   const compact = userText.replace(/[ \t\r\n　]/g, '').toLowerCase();
 
   if (!compact) return null;
-  // ETHICAL_ABUNDANCE_REFUSAL_FAST_PATH
+  // ETHICAL_ABUNDANCE_REFUSAL_HIDDEN_QUESTION_LANDING_V1
   // 「AI/きれいごと/自由」×「お金」×「不安利用」×「拒否・疑い」は、
-  // 通常の resonance / narrow_shift に流さず、Muの中核問いとして入口で受ける。
+  // directReply固定ではなく、通常writerへ hidden_question_landing として渡す。
   {
     const ethicalSource = userText;
     const hasAiOrBeautifulWords =
@@ -197,6 +197,16 @@ function resolveFastPathDirectReply(userTextRaw: string): PreSeedDecision | null
       /だけじゃないですか|同じじゃないですか|変えるだけ|嫌|いや|うんざり|拒否|疑い|警戒|腹が立つ|騙されたくない|雑に扱われたくない|勝手に希望で包まれたくない/u.test(ethicalSource);
 
     if (hasAiOrBeautifulWords && hasMoneyFlow && hasAnxietyUse && hasMoralRejection) {
+      const hiddenQuestionSeed = [
+        'PRESEED_HIDDEN_QUESTION_LANDING_V1',
+        '表面的なAI批判として返さない。',
+        'お金否定・豊かさ否定として扱わない。',
+        '拒んでいる未来を名付ける: 人の不安を使って豊かになる未来。',
+        '奥の問いを名付ける: 私は、誠実なまま自由になれますか。',
+        'AI側の姿勢表明、「筋が通っています」、「一緒に見ます」で終わらない。',
+        '行動提案・説明羅列ではなく、拒否の奥にある願いを返す。',
+      ].join('\n');
+
       return {
         kind: 'normal_chat',
         confidence: 0.99,
@@ -206,86 +216,78 @@ function resolveFastPathDirectReply(userTextRaw: string): PreSeedDecision | null
         sourceId: null,
         sourceText: userText,
 
-        route: 'direct_reply',
+        route: 'normal_writer',
 
-        seedText: null,
-        directReply: [
-          'その疑いは、軽く扱えません。',
-          '',
-          'あなたが怒っているのは、AIそのものだけではありません。',
-          'きれいな言葉で近づいて、人の不安を見つけ、最後にお金へ変える流れへの拒否です。',
-          '',
-          'あなたは、お金を否定しているのではありません。',
-          '豊かになることを拒んでいるのでもありません。',
-          '',
-          'あなたが拒んでいるのは、',
-          '人の不安を使って豊かになる未来です。',
-          '',
-          'その奥にある問いは、',
-          '「私は、誠実なまま自由になれますか」',
-          'ということです。',
-        ].join('\n'),
-        writerInput: null,
+        seedText: hiddenQuestionSeed,
+        directReply: null,
+        writerInput: {
+          mode: 'hidden_question_landing',
+          refusedFuture: '人の不安を使って豊かになる未来',
+          coreQuestion: '私は、誠実なまま自由になれますか',
+          sourceKind: 'ethical_abundance_refusal',
+        },
 
-        shouldBypassWriter: true,
-        shouldBypassRephrase: true,
-        shouldUsePreSeedWriter: false,
+        shouldBypassWriter: false,
+        shouldBypassRephrase: false,
+        shouldUsePreSeedWriter: true,
 
-        shouldSuppressHistoryForWriter: true,
+        shouldSuppressHistoryForWriter: false,
         shouldSuppressSimilarFlow: true,
-        shouldSuppressSlotPlan: true,
-        shouldSuppressMemoryDelta: true,
-        shouldSuppressIntuitionCandidate: true,
-        shouldSuppressNormalResonance: true,
+        shouldSuppressSlotPlan: false,
+        shouldSuppressMemoryDelta: false,
+        shouldSuppressIntuitionCandidate: false,
+        shouldSuppressNormalResonance: false,
 
         shouldOpenContextThread: false,
         contextThreadCode: null,
 
         ctxPackPatch: {
-          fastPath: true,
-          fastPathKind: 'ethical_abundance_refusal',
+          ethicalAbundanceRefusal: true,
+          hiddenQuestionLanding: true,
+          answerHiddenQuestion: true,
+          nameRefusedFuture: true,
+          nameCoreQuestion: true,
           inputKind: 'ethical_abundance_refusal',
+          sourceKind: 'ethical_abundance_refusal',
           shortSummary: userText,
-          contextReset: true,
-          contextResetReason: 'ethical_abundance_refusal',
-          shouldCloseContextThread: true,
-          shouldResetActiveTarget: true,
-          shouldSuppressPastContext: true,
-          shouldSuppressHistoryForWriter: true,
-          shouldSuppressSimilarFlow: true,
-          historyForWriter: [],
-          similarFlowSeed: '',
-          similarFlowDebug: null,
-          goalKind: 'resonate',
-          targetKind: 'resonate',
-          replyGoal: { kind: 'resonate' },
+          goalKind: 'uncover',
+          targetKind: 'uncover',
+          replyGoal: { kind: 'uncover', questionsMax: 0 },
+          resolvedAsk: { askType: 'hidden_question', topic: 'ethical_abundance_refusal' },
+          question: { questionType: 'truth', outputPolicy: { askBackAllowed: false } },
+          shiftKind: 'hidden_question_landing',
+          shiftIntent: 'answer_hidden_question',
+          shiftHint: 'hidden_question_landing_v1',
           qCode: 'Q3',
-          depthStage: 'S2',
-          presentationKind: 'ethical_abundance_refusal_direct_reply',
+          depthStage: 'I1',
+          presentationKind: 'ethical_abundance_refusal_hidden_question',
         },
 
         metaPatch: {
-          fastPath: true,
-          fastPathKind: 'ethical_abundance_refusal',
+          ethicalAbundanceRefusal: true,
+          hiddenQuestionLanding: true,
+          answerHiddenQuestion: true,
+          nameRefusedFuture: true,
+          nameCoreQuestion: true,
           inputKind: 'ethical_abundance_refusal',
-          contextReset: true,
-          contextResetReason: 'ethical_abundance_refusal',
-          shouldCloseContextThread: true,
-          shouldResetActiveTarget: true,
-          shouldSuppressPastContext: true,
-          shouldSuppressHistoryForWriter: true,
-          shouldSuppressSimilarFlow: true,
-          goalKind: 'resonate',
-          targetKind: 'resonate',
+          sourceKind: 'ethical_abundance_refusal',
+          goalKind: 'uncover',
+          targetKind: 'uncover',
+          replyGoal: { kind: 'uncover', questionsMax: 0 },
+          resolvedAsk: { askType: 'hidden_question', topic: 'ethical_abundance_refusal' },
+          question: { questionType: 'truth', outputPolicy: { askBackAllowed: false } },
+          shiftKind: 'hidden_question_landing',
+          shiftIntent: 'answer_hidden_question',
+          shiftHint: 'hidden_question_landing_v1',
           q_code: 'Q3',
-          depth_stage: 'S2',
-          presentationKind: 'ethical_abundance_refusal_direct_reply',
+          depth_stage: 'I1',
+          presentationKind: 'ethical_abundance_refusal_hidden_question',
         },
 
         debug: {
-          reason: 'ethical_abundance_refusal',
-          matchedPattern: 'ethical_abundance_refusal_fast_path',
-          directReplyHead: 'その疑いは、軽く扱えません。',
+          reason: 'ethical_abundance_refusal_hidden_question',
+          matchedPattern: 'ethical_abundance_refusal_hidden_question_landing',
+          seedHead: hiddenQuestionSeed.slice(0, 120),
           sourceTextHead: userText.slice(0, 120),
         },
       } as any;
