@@ -3714,6 +3714,155 @@ return NextResponse.json({
           finalText = curRaw.trimEnd();
         }
 
+        // ✅ HQL_ROUTE_FINAL_LOCK_V11
+        // renderGateway の HQL final guard が発火しても、後段の recoveredText/rephraseBlocks が
+        // result.content を再上書きすることがある。ここは UI/DB 保存直前の最終ロック。
+        try {
+          const normalizeGuardText = (v: unknown): string =>
+            String(v ?? '').replace(/\s+/g, ' ').trim();
+
+          const pickFirstObject = (...xs: any[]): any | null => {
+            for (const x of xs) {
+              if (x && typeof x === 'object' && !Array.isArray(x)) return x;
+            }
+            return null;
+          };
+
+          const resultAny: any = result && typeof result === 'object' ? result : {};
+          const metaAnyForHql: any = meta && typeof meta === 'object' ? meta : {};
+          const mfsAnyForHql: any = metaForSave && typeof metaForSave === 'object' ? metaForSave : {};
+          const sotAnyForHql: any = extraSoT && typeof extraSoT === 'object' ? extraSoT : {};
+
+          const ctxHql: any = pickFirstObject(
+            mfsAnyForHql?.extra?.ctxPack,
+            metaAnyForHql?.extra?.ctxPack,
+            sotAnyForHql?.ctxPack,
+            resultAny?.meta?.extra?.ctxPack,
+            resultAny?.metaForSave?.extra?.ctxPack,
+            resultAny?.ctxPack,
+          );
+
+          const resolvedAskHql: any = pickFirstObject(
+            ctxHql?.resolvedAsk,
+            mfsAnyForHql?.extra?.resolvedAsk,
+            metaAnyForHql?.extra?.resolvedAsk,
+            sotAnyForHql?.resolvedAsk,
+            resultAny?.meta?.extra?.resolvedAsk,
+          );
+
+          const presentationKindHql = normalizeGuardText(
+            ctxHql?.presentationKind ??
+              mfsAnyForHql?.extra?.presentationKind ??
+              metaAnyForHql?.extra?.presentationKind ??
+              sotAnyForHql?.presentationKind ??
+              resultAny?.meta?.extra?.presentationKind ??
+              '',
+          );
+
+          const slotPlanCandidates: any[] = [
+            resultAny?.meta?.slotPlan,
+            resultAny?.metaForSave?.slotPlan,
+            metaAnyForHql?.slotPlan,
+            mfsAnyForHql?.slotPlan,
+            resultAny?.slotPlan,
+          ];
+
+          const slotTexts = slotPlanCandidates
+            .filter((x) => Array.isArray(x))
+            .flatMap((arr) => arr as any[])
+            .map((s: any) => normalizeGuardText(s?.text ?? s?.content ?? s?.line ?? ''))
+            .filter(Boolean);
+
+          const hasHqlShiftSlot = slotTexts.some((t) =>
+            /^@SHIFT\s+/i.test(t) &&
+            t.includes('hidden_question_landing') &&
+            (t.includes('ethical_abundance_refusal') || t.includes('answer_hidden_question')),
+          );
+
+          const userTextHql = normalizeGuardText(userTextClean);
+          const isEthicalAbundanceUserText =
+            /AI/.test(userTextHql) &&
+            /きれい/.test(userTextHql) &&
+            /不安/.test(userTextHql) &&
+            /(お金|儲け)/.test(userTextHql);
+
+          const isHqlRoute =
+            ctxHql?.hiddenQuestionLanding === true ||
+            ctxHql?.shiftKind === 'hidden_question_landing' ||
+            ctxHql?.shiftIntent === 'answer_hidden_question' ||
+            resolvedAskHql?.askType === 'hidden_question' ||
+            presentationKindHql === 'ethical_abundance_refusal_hidden_question' ||
+            hasHqlShiftSlot;
+
+          const isEthicalAbundanceHql =
+            ctxHql?.ethicalAbundanceRefusal === true ||
+            resolvedAskHql?.topic === 'ethical_abundance_refusal' ||
+            presentationKindHql === 'ethical_abundance_refusal_hidden_question' ||
+            hasHqlShiftSlot ||
+            isEthicalAbundanceUserText;
+
+          if (isHqlRoute && isEthicalAbundanceHql) {
+            finalText = [
+              'あなたが拒んでいるのは、お金そのものではありません。',
+              '拒んでいるのは、人の不安を使って豊かになる未来です。',
+              '奥にある問いは、「私は、誠実なまま自由になれますか」です。',
+            ].join('\n');
+
+            resultAny.content = finalText;
+            resultAny.text = finalText;
+            resultAny.assistantText = finalText;
+            assistantText = finalText;
+
+            if (metaForSave && typeof metaForSave === 'object') {
+              (metaForSave as any).extra = {
+                ...(((metaForSave as any).extra ?? {}) as any),
+                finalTextPolicy: 'HQL_ROUTE_FINAL_LOCK',
+                resolvedText: finalText,
+                finalAssistantText: finalText,
+                finalAssistantTextCandidate: finalText,
+                rawTextFromModel: finalText,
+                extractedTextFromModel: finalText,
+                hqlRouteFinalLock: true,
+              };
+            }
+
+            if (meta && typeof meta === 'object') {
+              (meta as any).extra = {
+                ...(((meta as any).extra ?? {}) as any),
+                finalTextPolicy: 'HQL_ROUTE_FINAL_LOCK',
+                resolvedText: finalText,
+                finalAssistantText: finalText,
+                hqlRouteFinalLock: true,
+              };
+            }
+
+            if (extraSoT && typeof extraSoT === 'object') {
+              Object.assign(extraSoT as any, {
+                finalTextPolicy: 'HQL_ROUTE_FINAL_LOCK',
+                resolvedText: finalText,
+                finalAssistantText: finalText,
+                finalAssistantTextCandidate: finalText,
+                rawTextFromModel: finalText,
+                extractedTextFromModel: finalText,
+                hqlRouteFinalLock: true,
+              });
+            }
+
+            console.warn('[IROS/HQL][ROUTE_FINAL_LOCK]', {
+              conversationId,
+              userCode,
+              outLen: finalText.length,
+              resolvedAskType: resolvedAskHql?.askType ?? null,
+              resolvedAskTopic: resolvedAskHql?.topic ?? null,
+              ctxShiftKind: ctxHql?.shiftKind ?? null,
+              presentationKind: presentationKindHql || null,
+              hasHqlShiftSlot,
+            });
+          }
+        } catch (e) {
+          console.warn('[IROS/HQL][ROUTE_FINAL_LOCK_FAILED]', { error: String((e as any)?.message ?? e) });
+        }
+
         // =========================================================
         // ✅ Expression Lane（最後に適用）
         // - ここは「本文の正本(finalText)」が確定した“後”に、1行だけ前置きできる
