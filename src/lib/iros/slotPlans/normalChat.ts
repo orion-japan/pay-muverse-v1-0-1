@@ -782,7 +782,7 @@ function buildClarify(
             kind: 'hidden_question_landing',
             intent: 'answer_hidden_question',
             hint: 'hidden_question_landing_v1',
-            line: '拒んでいる未来を名付け、その奥の問いで閉じる',
+            line: '人の不安をきれいな言葉に変えて、お金へつなげる流れへの拒否。その奥に、誠実なまま自由になれるのかという問いがある',
             source: 'clarify_hidden_question',
             hiddenQuestionLandingKind: hiddenKind,
             contract: [

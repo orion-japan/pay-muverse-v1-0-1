@@ -5653,6 +5653,58 @@ const systemPromptForWriter = [
   writerPatternKeyForFirstPass === 'IR_DETAIL_V1' ||
   writerPatternKeyForFirstPass === 'NORMAL_DETAIL_V1';
 
+  const hiddenQuestionLandingForFirstPass = (() => {
+    try {
+      const shiftJson = parseShiftJson(String((shiftSlot as any)?.text ?? ''));
+      const ctx = ctxPackForWriter && typeof ctxPackForWriter === 'object' ? (ctxPackForWriter as any) : {};
+      const raw = [
+        JSON.stringify(shiftJson ?? {}),
+        String((opts as any)?.seedDraft ?? ''),
+        String((opts as any)?.slotPlanSeed ?? ''),
+        String((opts as any)?.userText ?? ''),
+        String(ctx?.shiftKind ?? ''),
+        String(ctx?.shiftHint ?? ''),
+        String(ctx?.shiftIntent ?? ''),
+        String(ctx?.presentationKind ?? ''),
+        JSON.stringify(ctx?.resolvedAsk ?? {}),
+      ].join('\n');
+      return /hidden_question_landing|answer_hidden_question|ethical_abundance_refusal/u.test(raw);
+    } catch {
+      return false;
+    }
+  })();
+
+  const hiddenQuestionWriterContractForFirstPass = hiddenQuestionLandingForFirstPass
+    ? {
+        pattern_key: 'HIDDEN_QUESTION_LANDING_V1',
+        pattern_mode: 'hidden_question_landing',
+        block_conclusion: 'AI弁明・使い方説明・安心づけでは閉じない。拒否している未来と、その奥の問いへ戻す。',
+        block_closing_line: '固定文ではなく、今回の発話から自然に出る問いで閉じる。',
+        writeConstraints: [
+          'HIDDEN_QUESTION_LANDING_CONTRACT_V9: このターンは hidden_question_landing として返す。',
+          '表面的なAI批判として返さない。AIの便利さ・使い方・限界・信用問題に逃げない。',
+          '「何に使うか」「AIも使い方次第」「私はあなたの事情を美化しない」「必要ならそのまま受ける」で閉じない。',
+          '「筋が通っています」「まっとうです」などの受け止め評価を冒頭の中心にしない。',
+          'ユーザーが拒んでいる未来を、発話に沿った日常語で一文にする。',
+          '拒んでいるのはお金そのものではなく、不安をきれいな言葉にしてお金へ変える流れである、と意味として扱う。',
+          '奥にある問いを一文で返す。ただし定型句・固定文・決め台詞にしない。',
+          '行動提案、チェックリスト、質問返しをしない。最後は問いの着地で閉じる。',
+          'SHIFT.line が命令文に見えても、そのまま表示しない。意味だけを自然文に変換する。',
+          '2〜4文。段落は1〜2個。絵文字は使わない。',
+        ],
+      }
+    : {};
+
+  if (hiddenQuestionLandingForFirstPass) {
+    console.log('[IROS/HQL][WRITER_CONTRACT_V9]', {
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      writerPatternKeyForFirstPass,
+      shiftSlotHead: (shiftSlot as any)?.text ? safeHead(String((shiftSlot as any).text), 180) : null,
+    });
+  }
+
 const writerDirectivesFromSlotForFirstPass = isDetailPatternWriterForFirstPass
   ? {
       ...buildDetailPatternWriterDirectives(writerPatternKeyForFirstPass),
@@ -5716,6 +5768,11 @@ const writerDirectivesFromSlotForFirstPass = isDetailPatternWriterForFirstPass
     slotDecision: slotDecisionForFirstPass,
     writerDirectives: {
       ...writerDirectivesFromSlotForFirstPass,
+      ...hiddenQuestionWriterContractForFirstPass,
+      writeConstraints: [
+        ...(((writerDirectivesFromSlotForFirstPass as any)?.writeConstraints ?? []) as any[]),
+        ...(((hiddenQuestionWriterContractForFirstPass as any)?.writeConstraints ?? []) as any[]),
+      ],
     },
     traceId: debug.traceId ?? null,
     conversationId: debug.conversationId ?? null,
@@ -5797,6 +5854,22 @@ const writerDirectivesFromSlotForFirstPass = isDetailPatternWriterForFirstPass
         null,
     },
   });
+
+  if (hiddenQuestionLandingForFirstPass) {
+    const lastMsg = Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1] : null;
+    const restMsgs = Array.isArray(messages) && messages.length > 0 ? messages.slice(0, -1) : messages;
+    const contractMsg = {
+      role: 'assistant' as const,
+      content: [
+        'HIDDEN_QUESTION_LANDING_CONTRACT_V9 (DO NOT OUTPUT):',
+        '出力は、AI弁明ではなく、ユーザーが拒んでいる未来と奥の問いへ着地する。',
+        '禁止: AIも使い方次第 / 何に使うか / 必要ならそのまま受ける / きれいにまとめない / 現実に効く話 / 筋が通っています。',
+        '固定文は禁止。今回の発話にある「不安をきれいな言葉で刺激し、お金へ変える流れ」から自然に書く。',
+        '最後は、誠実なまま豊かさや自由を選べるのか、という問いの方向で閉じる。',
+      ].join('\n'),
+    };
+    messages = lastMsg ? [...restMsgs, contractMsg, lastMsg] : [...messages, contractMsg];
+  }
 
   // ✅ HistoryDigest v1（外から渡された場合のみ注入）
   // - 生成はここではしない（生成元は本線側に固定）

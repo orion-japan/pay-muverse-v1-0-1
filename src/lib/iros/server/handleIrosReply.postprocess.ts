@@ -741,9 +741,11 @@ function renderSlotPlanText(slotPlan: any[]): string {
       const hiddenKind = normText(obj?.hiddenQuestionLandingKind);
 
       if (hiddenKind === 'ethical_abundance_refusal') {
-        out.push('あなたが拒んでいるのは、お金そのものではありません。');
-        out.push('拒んでいるのは、人の不安を使って豊かになる未来です。');
-        out.push('奥にある問いは、「私は、誠実なまま自由になれますか」です。');
+        out.push('この返答は、AI批判の是非や使い方の話で閉じない。');
+        out.push('ユーザーが拒んでいる未来を、発話に合わせた自然な言葉で一度だけ名づける。');
+        out.push('お金そのものの否定ではなく、人の不安を材料にする豊かさへの拒否として扱う。');
+        out.push('最後は、「奥にある問いは」などの定型句を使わず、誠実さと自由が両立するかという問いを自然に置く。');
+        out.push('禁止: あなたが拒んでいるのは / 奥にある問いは / 私は、誠実なまま自由になれますか / 何に使うか / AIを信じるか疑うか');
         return out;
       }
 
