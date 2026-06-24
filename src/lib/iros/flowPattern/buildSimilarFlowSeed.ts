@@ -1,4 +1,4 @@
-import type { SimilarFlowSnapshot } from './loadSimilarFlowSnapshots';
+﻿import type { SimilarFlowSnapshot } from './loadSimilarFlowSnapshots';
 
 export type BuildSimilarFlowSeedInput = {
   matches: SimilarFlowSnapshot[];
@@ -48,6 +48,25 @@ const isBadCreateTemplate = (value: unknown): boolean => {
     /戻りたい現実のイメージ/u.test(t) ||
     /その形から外れないことだけで十分/u.test(t);
 };
+const isBadDiagnosisFollowupTemplate = (value: unknown): boolean => {
+  const t = cleanText(value);
+  return (
+    /直前のassistant返答を、?ユーザーにわかる普通の言葉へ言い換える/u.test(t) ||
+    /現在のユーザー文そのものを翻訳・英訳・意味説明しない/u.test(t) ||
+    /直前のassistant返答/u.test(t) ||
+    /ユーザー文そのものを翻訳/u.test(t) ||
+    /ここで言う「[^」]+の診断」は/u.test(t) ||
+    /診断本文では/u.test(t) ||
+    /補足すると/u.test(t) ||
+    /という文脈で出ています/u.test(t) ||
+    /という内容ともつながっています/u.test(t)
+  );
+};
+
+const isBadSimilarFlowTemplate = (value: unknown): boolean => {
+  return isBadCreateTemplate(value) || isBadDiagnosisFollowupTemplate(value);
+};
+
 
 export function buildSimilarFlowSeed(input: BuildSimilarFlowSeedInput): string | null {
   const matches = Array.isArray(input.matches) ? input.matches : [];
@@ -58,7 +77,7 @@ export function buildSimilarFlowSeed(input: BuildSimilarFlowSeedInput): string |
 
   const limit = Math.max(1, Math.min(Number(input.limit ?? 3), 5));
   const maxChars = Math.max(600, Math.min(Number(input.maxChars ?? 1600), 4000));
-  const picked = matches.filter((match) => !isBadCreateTemplate(match.assistantTextHead)).slice(0, limit);
+  const picked = matches.filter((match) => !isBadSimilarFlowTemplate(match.assistantTextHead)).slice(0, limit);
 
   const currentState = input.currentState ?? {};
 
@@ -87,3 +106,5 @@ export function buildSimilarFlowSeed(input: BuildSimilarFlowSeedInput): string |
 
   return clamp(lines.join('\n').trim(), maxChars);
 }
+
+
