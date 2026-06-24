@@ -1518,6 +1518,44 @@ function shouldBlockPastContextByConversationScope(metaRaw: any): boolean {
   );
 }
 
+function isBookConceptExplainAsk(userTextRaw: string): boolean {
+  const compact = String(userTextRaw ?? '')
+    .trim()
+    .replace(/[　\s]+/g, '');
+
+  if (!compact) return false;
+
+  const hasBookReadingSignal =
+    /本で読んだ|本で読みました|本を読んで|本に書いて|本の中|第1巻|第一巻|もうひとつのわたし|読後/u.test(compact);
+
+  const hasCanonTopicSignal =
+    /イマジナル|創造の方向|怖い未来|Muverse|ミューバース|かがみ|鏡|自己受容/u.test(compact);
+
+  const hasConceptAskSignal =
+    /詳しく|教えて|とは|意味|説明|何ですか|なんですか|知りたい|どういう/u.test(compact);
+
+  return hasBookReadingSignal && hasCanonTopicSignal && hasConceptAskSignal;
+}
+
+function isStandaloneCanonConceptAsk(userTextRaw: string): boolean {
+  const compact = String(userTextRaw ?? '')
+    .trim()
+    .replace(/[　\s]+/g, '');
+
+  if (!compact) return false;
+
+  const hasCanonTopicSignal =
+    /イマジナル|創造の方向|怖い未来|Muverse|ミューバース|かがみ|鏡|自己受容/u.test(compact);
+
+  const hasConceptAskSignal =
+    /詳しく|教えて|とは|意味|説明|何ですか|なんですか|知りたい|どういう/u.test(compact);
+
+  const hasExplicitConversationReference =
+    /前の診断|この前の診断|前回の診断|前の返答|前回の返答|さっきの返答|この前のスクショ|前のスクショ|スクショ診断の続き|前に相談|続きとして|その人|あの人|相手の気持ち/u.test(compact);
+
+  return hasCanonTopicSignal && hasConceptAskSignal && !hasExplicitConversationReference;
+}
+
 function isFreshConversationPastReferenceLike(userTextRaw: string): boolean {
   const compact = String(userTextRaw ?? '')
     .trim()
@@ -1525,14 +1563,23 @@ function isFreshConversationPastReferenceLike(userTextRaw: string): boolean {
 
   if (!compact) return false;
 
+  // 本・Mu Canon の概念説明は、新規会話でも「前の会話の続き」ではない。
+  // ここで direct_reply に落とすと Mu Canon Knowledge / Writer に到達しない。
+  if (isBookConceptExplainAsk(userTextRaw) || isStandaloneCanonConceptAsk(userTextRaw)) {
+    return false;
+  }
+
   const hasReferenceWord =
     /(これ|それ|あれ|この|その|あの|さっき|さっきの|前の|直前の|前回|続き|この前|以前)/u.test(compact);
 
   const hasContextWord =
     /(診断|診断結果|結果|内容|返答|話|相手|あの人|その人|関係|気持ち|本音|意図)/u.test(compact);
 
+  // 人物深掘りは、人物接尾辞・関係語・人物文脈がある時だけ拾う。
+  // 「イマジナルを詳しく」「AIを教えて」「創造の方向を説明して」を人物扱いしない。
   const hasNamedPersonDeepening =
-    /[一-龯ぁ-んァ-ヶA-Za-z0-9]{1,24}(さん|ちゃん|くん|君|氏|様|先生)?(のこと|について|との関係|の関係)?(を)?(深めて|詳しく|見て|教えて|整理して|分析して|診断して)/u.test(compact);
+    /[一-龯ぁ-んァ-ヶA-Za-z0-9]{1,24}(さん|ちゃん|くん|君|氏|様|先生)(のこと|について|との関係|の関係|の件)?(を)?(深めて|詳しく|見て|教えて|整理して|分析して|診断して)/u.test(compact) ||
+    /[一-龯ぁ-んァ-ヶA-Za-z0-9]{1,24}(との関係|の関係|の気持ち|の本音|の件)(を)?(深めて|詳しく|見て|教えて|整理して|分析して|診断して)/u.test(compact);
 
   return (hasReferenceWord && hasContextWord) || hasNamedPersonDeepening;
 }
@@ -1606,8 +1653,12 @@ function isBookOnboardingImajinalReflection(userTextRaw: string): boolean {
   const compact = text.replace(/\s+/g, '');
   if (!compact) return false;
 
+  // 「イマジナルを詳しく教えて」は読後内省ではなく概念説明。
+  // BOOK_ONBOARDING_V1 に入れると、怖い未来を置かせる導線へ誤誘導しやすい。
+  if (isBookConceptExplainAsk(userTextRaw)) return false;
+
   const hasBookSignal =
-    /本を読んで|Muを読んで|もうひとつのわたし/u.test(text);
+    /本を読んで|本で読んだ|本で読みました|本に書いて|本の中|Muを読んで|もうひとつのわたし/u.test(text);
 
   const hasSeminarSignal =
     /今日のセミナー|セミナーに参加|セミナー参加|講座に参加|読後|参加しました/u.test(text);
