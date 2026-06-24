@@ -1,4 +1,4 @@
-// file: src/lib/iros/server/handleIrosReply.postprocess.ts
+﻿// file: src/lib/iros/server/handleIrosReply.postprocess.ts
 // iros - Postprocess (MIN)
 // 目的：
 // - orchResult から assistantText / metaForSave を確定
@@ -1178,6 +1178,45 @@ function ensureUiCue(metaForSave: any): void {
  * seed sanitize（writerへ渡す本文化）
  * ========================= */
 
+
+
+function isDiagnosisFollowupPostProcessTurn(metaForSave: any): boolean {
+  const ex: any = metaForSave?.extra ?? {};
+  const cp: any = ex?.ctxPack ?? {};
+  const seed = String(
+    ex?.preSeedAssistSeedText ??
+      cp?.preSeedAssistSeedText ??
+      ex?.memoryPreSeedText ??
+      cp?.memoryPreSeedText ??
+      ex?.llmRewriteSeed ??
+      ''
+  );
+
+  return (
+    String(ex?.preSeedAssistKind ?? cp?.preSeedAssistKind ?? '').trim() === 'diagnosis_followup' ||
+    Boolean(ex?.diagnosisFollowup) ||
+    Boolean(cp?.diagnosisFollowup) ||
+    /DIAGNOSIS_FOLLOWUP|PRE_SEED_DIAGNOSIS_FOLLOWUP|ir診断|診断の続き/u.test(seed)
+  );
+}
+
+function safeVisibleSeedForFinalCommit(v: unknown): string {
+  const s = String(v ?? '').trim();
+  if (!s) return '';
+  if (isInternalRewriteInstructionText(s)) return '';
+  if (/DO NOT OUTPUT|WRITER_RULE|WRITER_DIRECTIVE|HUMAN_CONTEXT_ORCHESTRATION|TCF_ROTATION_SEED/u.test(s)) return '';
+  if (/直前のassistant返答|ユーザー文そのものを翻訳/u.test(s)) return '';
+  return s;
+}
+function isInternalRewriteInstructionText(v: unknown): boolean {
+  const s = String(v ?? '').replace(/\r\n/g, '\n').trim();
+  return (
+    /直前のassistant返答を、?ユーザーにわかる普通の言葉へ言い換える/.test(s) ||
+    /現在のユーザー文そのものを翻訳・英訳・意味説明しない/.test(s) ||
+    /直前のassistant返答/.test(s) ||
+    /ユーザー文そのものを翻訳/.test(s)
+  );
+}
 function sanitizeLlmRewriteSeed(seedRaw: unknown, userText?: string | null): string {
   const s = String(seedRaw ?? '').replace(/\r\n/g, '\n').trim();
   if (!s) return '';
@@ -1226,6 +1265,7 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
 
   // 1) 本文抽出
   let finalAssistantText = sanitizeInvalidPersonHonorifics(extractAssistantText(orchResult));
+  if (isInternalRewriteInstructionText(finalAssistantText)) finalAssistantText = '';
 
   // 2) metaForSave clone
   const metaRaw =
@@ -3754,6 +3794,7 @@ try {
       .replace(/[🌀🪔]/g, '')
       .trim();
 
+    if (!isDiagnosisFollowupPostProcessTurn(metaForSave)) {
     const prevReplyRephraseSeed = [
       '直前のassistant返答を、ユーザーにわかる普通の言葉へ言い換える。',
       '現在のユーザー文そのものを翻訳・英訳・意味説明しない。',
@@ -3764,6 +3805,7 @@ try {
     ].join('\n');
 
     seedForWriterRaw = prevReplyRephraseSeed;
+    }
   }
 } catch {}
 // ✅ NEW: Concept Lock (RECALL) を seed の先頭に強制注入（PPが llmRewriteSeed を上書きしても残る）
@@ -3992,7 +4034,7 @@ try {
       if (shouldDeterministicCommit) {
         const commitText =
           String(shortFixed?.reply ?? '').trim() ||
-          String(seedForWriterSanitized ?? '').trim() ||
+          safeVisibleSeedForFinalCommit(seedForWriterSanitized) ||
           String(coreLine ?? '').trim() ||
           '（受信しました）';
 
@@ -4209,6 +4251,7 @@ try {
   });
 
   finalAssistantText = n.text;
+  if (isInternalRewriteInstructionText(finalAssistantText)) finalAssistantText = '';
 
   // ✅ identity / provider leakage guard（最終本文の保険）
   {
@@ -4357,6 +4400,8 @@ const finalPhaseForUnified =
 
   return { assistantText: finalAssistantText, metaForSave };
 }
+
+
 
 
 

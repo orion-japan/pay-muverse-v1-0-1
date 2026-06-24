@@ -1,4 +1,9 @@
-﻿// file: src/lib/iros/server/handleIrosReply.context.ts
+﻿
+function isDiagnosisFollowupGeneralDetailRequest(v: unknown): boolean {
+  const s = String(v ?? '').replace(/\s+/g, '').trim();
+  return /(診断を詳しく|診断内容を詳しく|詳しくしてください|詳しくして|深めて|深掘り|もう少し見て|もっと見て|解説して)/u.test(s);
+}
+// file: src/lib/iros/server/handleIrosReply.context.ts
 // iros - Turn context builder (minimal + frame plan)
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -33,6 +38,17 @@ import { resolveTurnFrame } from '@/lib/iros/turnFrame/resolveTurnFrame';
 // ✅ 外部conversationId(string) -> DB conversation_id(uuid) 変換
 import { ensureIrosConversationUuid } from './ensureIrosConversationUuid';
 
+
+function isBadDiagnosisFollowupDirectReplyText(v: unknown): boolean {
+  const s = String(v ?? '');
+  return (
+    /ここで言う「[^」]+の診断」は/.test(s) ||
+    /診断本文では、/.test(s) ||
+    /という文脈で出ています/.test(s) ||
+    /補足すると、/.test(s) ||
+    /という内容ともつながっています/.test(s)
+  );
+}
 function normOptString(v: unknown): string | undefined {
   const s = String(v ?? '').trim();
   return s.length > 0 ? s : undefined;
@@ -627,7 +643,7 @@ export async function buildTurnContext(
     '';
 
   const wantsDetail =
-    /詳しく|詳細|もう少し|深く|深めて|深める|掘り下げ|掘って|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(
+    /詳しく|詳細|もう少し|深く|深めて|深める|掘り下げ|掘って|どういう意味|意味を教えて|意味は|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(
       detailSourceText
     );
 
@@ -913,7 +929,7 @@ export async function buildTurnContext(
     (baseMetaForTurn as any).extra.ctxPack.memoryRecallMode = memoryDecision.recallMode;
   }
   const isFollowupRequest =
-    /詳しく|詳しく教えて|詳しく説明|部分|この部分|その部分|という部分|と言う部分|箇所|この箇所|その箇所|とはどんな状態|とはどういう状態|とは何|ってどんな状態|ってどういう状態|どんな状態ですか|どういう状態ですか|具体的に|具体化|わかりやすく|分かりやすく|つまり|どういうこと|それって|どうすれば|何をすれば|何から|どこから|どう扱えば|どう受け取れば|どう見れば|続き|続きを|診断の続き|言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|説明して|解説して|補足して|もう少し|もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|どうしてそうなる|どうして|なんでそうなる|なんで|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|どんな内容|その内容|内容でした|内容を教えて|中身|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(
+    /詳しく|詳しく教えて|詳しく説明|部分|この部分|その部分|という部分|と言う部分|箇所|この箇所|その箇所|とはどんな状態|とはどういう状態|とは何|ってどんな状態|ってどういう状態|どんな状態ですか|どういう状態ですか|具体的に|具体化|わかりやすく|分かりやすく|つまり|どういう意味|意味を教えて|意味は|どういうこと|それって|どうすれば|何をすれば|何から|どこから|どう扱えば|どう受け取れば|どう見れば|続き|続きを|診断の続き|言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|説明して|解説して|補足して|もう少し|もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|どうしてそうなる|どうして|なんでそうなる|なんで|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|どんな内容|その内容|内容でした|内容を教えて|中身|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(
       followupSourceText
     );
 
@@ -927,6 +943,7 @@ export async function buildTurnContext(
 
   const previousTurnLooksDiagnosisForFollowup =
     hasActiveDiagnosisFrameForFollowup ||
+    hasHistoryDiagnosisFrameForFollowup ||
     Boolean(prevIrMeta) ||
     (baseMetaForTurn as any)?.prevMeta?.presentationKind === 'diagnosis' ||
     (baseMetaForTurn as any)?.prevMeta?.extra?.presentationKind === 'diagnosis' ||
@@ -1592,7 +1609,10 @@ export async function buildTurnContext(
     }
   }
 
-  const hasDiagnosisSource = !!prevIrMeta || !!lastIrDiagnosis;
+  const hasDiagnosisSource =
+    !!prevIrMeta ||
+    !!lastIrDiagnosis ||
+    hasHistoryDiagnosisFrameForFollowup;
 
   const isDiagnosisFollowup =
     !isCreativeContinuationRequest &&
@@ -1606,7 +1626,7 @@ export async function buildTurnContext(
       ? null
       : /どうすれば|何をすれば|次は|どう動く|何から|どこから|どう扱えば|どう進める|進め方|一歩|行動|対処/.test(followupSourceText)
         ? 'action'
-        : /言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|わかりやすく|分かりやすく|つまり|どういうこと|説明して|解説して|補足して|どんなでしたっけ|どんなでしたか|何でしたっけ|診断の結果/.test(followupSourceText)
+        : /言い換えて|言い換え|翻訳して|翻訳|簡単に|一言で|わかりやすく|分かりやすく|つまり|どういう意味|意味を教えて|意味は|どういうこと|説明して|解説して|補足して|どんなでしたっけ|どんなでしたか|何でしたっけ|診断の結果/.test(followupSourceText)
           ? 'rephrase'
           : /詳しく|詳しく教えて|詳しく説明|部分|この部分|その部分|という部分|と言う部分|箇所|この箇所|その箇所|とはどんな状態|とはどういう状態|とは何|ってどんな状態|ってどういう状態|どんな状態ですか|どういう状態ですか|もう少し深く|深く|深めて|深める|掘り下げ|掘って|その理由|理由|なぜそうなる|なぜ|どうしてそうなる|どうして|なんでそうなる|なんで|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|診断内容|診断結果|診断の結果|以前の診断|前回の診断|さっきの診断|前の診断|この診断|今の診断/.test(followupSourceText)
             ? 'deepen'
@@ -1858,7 +1878,7 @@ export async function buildTurnContext(
 
         if (
           existingMemoryPreSeedText.startsWith('DIAGNOSIS_FOLLOWUP_ANALYSIS_SEED:') ||
-          existingMemoryPreSeedText.startsWith('PRE_SEED_DIAGNOSIS_FOLLOWUP_PHRASE_DETAIL_DIRECT:')
+          existingMemoryPreSeedText.startsWith('PRE_SEED_DIAGNOSIS_FOLLOWUP_DETAIL_TO_WRITER:')
         ) {
           delete extraAny.memoryPreSeedText;
           delete ctxPackAny.memoryPreSeedText;
@@ -2016,13 +2036,13 @@ export async function buildTurnContext(
           preSeedAssistResult = {
             ...preSeedAssistResult,
             kind: 'diagnosis_followup',
-            directReply: diagnosisFollowupPhraseDetailDirectReply,
-            shouldBypassWriter: true,
+            directReply: isDiagnosisFollowupGeneralDetailRequest(followupSourceText) ? null : diagnosisFollowupPhraseDetailDirectReply,
+            shouldBypassWriter: isDiagnosisFollowupGeneralDetailRequest(followupSourceText) ? false : true,
             seedText: [
-              'PRE_SEED_DIAGNOSIS_FOLLOWUP_PHRASE_DETAIL_DIRECT:',
+              'PRE_SEED_DIAGNOSIS_FOLLOWUP_DETAIL_TO_WRITER:',
               'targetLabel=' + String(resolvedDiagnosisTargetLabel ?? ''),
               'sourcePhrase=' + diagnosisFollowupSourcePhrase,
-              'rule=診断フォローの指定部分説明なので、Writerへ流さず directReply で返す。',
+              'rule=診断フォローはDirect Replyで返さず、Writerへ流して診断本文を説明・深掘りへ変換する。',
             ].join('\n'),
             reason:
               String(preSeedAssistResult.reason ?? '') +
@@ -2235,7 +2255,7 @@ export async function buildTurnContext(
         Boolean(preSeedAssistSeedTextForMemory) &&
         !(preSeedAssistResult.directReply && preSeedAssistResult.shouldBypassWriter) &&
         !preSeedAssistSeedTextForMemory.startsWith('DIAGNOSIS_FOLLOWUP_ANALYSIS_SEED:') &&
-        !preSeedAssistSeedTextForMemory.startsWith('PRE_SEED_DIAGNOSIS_FOLLOWUP_PHRASE_DETAIL_DIRECT:');
+        !preSeedAssistSeedTextForMemory.startsWith('PRE_SEED_DIAGNOSIS_FOLLOWUP_DETAIL_TO_WRITER:');
 
       if (shouldPersistPreSeedAssistSeedText) {
         (baseMetaForTurn as any).extra.memoryPreSeedText = preSeedAssistSeedTextForMemory;
@@ -3281,6 +3301,9 @@ export async function buildTurnContext(
     },
   };
 }
+
+
+
 
 
 
