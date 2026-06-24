@@ -1602,18 +1602,20 @@ function buildFreshConversationPastContextGuardDecision(args: {
 }
 
 function isBookOnboardingImajinalReflection(userTextRaw: string): boolean {
-  const text = String(userTextRaw ?? '').trim();
-  const compact = text.replace(/[　\s]+/g, '');
-
+  const text = normalizeLite(userTextRaw);
+  const compact = text.replace(/\s+/g, '');
   if (!compact) return false;
 
-  const hasBookEntry =
+  const hasBookSignal =
     /本を読んで|Muを読んで|もうひとつのわたし/u.test(text);
 
-  const hasImajinalReflection =
-    /怖い未来|どんな未来を見ている|創造の方向|願いではなく/u.test(text);
+  const hasSeminarSignal =
+    /今日のセミナー|セミナーに参加|セミナー参加|講座に参加|読後|参加しました/u.test(text);
 
-  return hasBookEntry && hasImajinalReflection;
+  const hasImajinalReflectionSignal =
+    /イマジナル|未来を見ている|怖い未来|創造の方向|願いではなく|自分のイマジナル|どんな未来/u.test(text);
+
+  return (hasBookSignal || hasSeminarSignal) && hasImajinalReflectionSignal;
 }
 
 function buildBookOnboardingImajinalReflectionDecision(args: {
