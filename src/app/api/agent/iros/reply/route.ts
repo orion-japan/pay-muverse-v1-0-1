@@ -2290,12 +2290,16 @@ const metaForRelationshipContextCapture: any = {
       const forbiddenMuCanonConcept =
         /(ユング|ラカン|imaginary|頭の中で思い描く力|透明な地図|子どもが.*まね|本で使われる文脈によって|もし本の文脈|たぶん|言葉になる前|言葉になる前から|設計になる前から|心の内側|内側|はい、見えます)/u;
 
+      const hasImajinalCorePhrase =
+        /内面に立ち上がる.{0,24}未来の景色/u.test(normalizedWriterText) ||
+        /未来の景色.{0,24}内面に立ち上が/u.test(normalizedWriterText);
+
       const writerTextOk =
         normalizedWriterText.length > 0 &&
         !forbiddenMuCanonConcept.test(normalizedWriterText) &&
         (
           !/イマジナル/u.test(userTextClean) ||
-          /内面に立ち上がる未来の景色/u.test(normalizedWriterText)
+          hasImajinalCorePhrase
         );
 
       const directText = writerTextOk ? normalizedWriterText : fallbackText;
