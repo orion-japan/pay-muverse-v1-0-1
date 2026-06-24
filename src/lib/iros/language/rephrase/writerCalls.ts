@@ -1,4 +1,4 @@
-﻿// =============================================
+// =============================================
 // file: src/lib/iros/language/rephrase/writerCalls.ts
 // ✅ buildFirstPassMessages を「最後 user で終わる」ように拡張
 // ✅ HistoryDigest v1 をここで注入できるようにする（唯一の choke point）
@@ -405,6 +405,35 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
 
   const ctxPack = (args?.ctxPack ?? args?.ctx_pack ?? args?.meta?.extra?.ctxPack ?? null) as any;
   const extra = (args?.extra ?? args?.meta?.extra ?? null) as any;
+
+  const bookAuthorKnowledgeForWriter = String(
+    firstNonNull(
+      (ctxPack as any)?.bookAuthorKnowledge,
+      (extra as any)?.bookAuthorKnowledge,
+      (extra as any)?.ctxPack?.bookAuthorKnowledge,
+      (args as any)?.bookAuthorKnowledge,
+      (args as any)?.userContext?.ctxPack?.bookAuthorKnowledge,
+      (args as any)?.userContext?.meta?.extra?.bookAuthorKnowledge,
+      (args as any)?.userContext?.meta?.extra?.ctxPack?.bookAuthorKnowledge,
+      null,
+    ) ?? '',
+  ).trim();
+
+  const isBookAuthorModeForWriter =
+    String(
+      firstNonNull(
+        (ctxPack as any)?.muCanonKnowledgeMode,
+        (extra as any)?.muCanonKnowledgeMode,
+        (extra as any)?.ctxPack?.muCanonKnowledgeMode,
+        (args as any)?.muCanonKnowledgeMode,
+        (args as any)?.userContext?.ctxPack?.muCanonKnowledgeMode,
+        null,
+      ) ?? '',
+    ).trim() === 'book_author' ||
+    (ctxPack as any)?.bookAuthorMode === true ||
+    (extra as any)?.bookAuthorMode === true ||
+    (extra as any)?.ctxPack?.bookAuthorMode === true;
+
   const flow = (args?.flow ?? ctxPack?.flow ?? extra?.flow ?? null) as any;
 
   const qCode = pick(
@@ -1051,6 +1080,9 @@ const mirrorFlowV1ForSeed: any =
 
     const seedTextRawBase = String(
       pick(
+        // ✅ Book Author Mode は通常Flowより優先して Writer に渡す
+        isBookAuthorModeForWriter ? bookAuthorKnowledgeForWriter : '',
+
         // 正本
         args?.internalPack,
 
@@ -1076,6 +1108,9 @@ const mirrorFlowV1ForSeed: any =
         /INTUITION_CANDIDATE\s*\(DO NOT OUTPUT\)/.test(memorySeedTextBaseForWriter);
 
       const parts = [
+        isBookAuthorModeForWriter && bookAuthorKnowledgeForWriter
+          ? bookAuthorKnowledgeForWriter
+          : '',
         hasMirrorFlowAlready ? '' : mirrorFlowSeedText,
         hasReferenceCheckRuleAlready ? '' : referenceCheckRuleSeedText,
         hasMemorySeedAlready ? '' : memorySeedTextBaseForWriter,
@@ -1097,6 +1132,9 @@ const mirrorFlowV1ForSeed: any =
         memoryDeltaSeedForWriterHead: String(memoryDeltaSeedForWriter ?? '').slice(0, 200),
         intuitionSeedForWriterLen: String(intuitionSeedForWriter ?? '').length,
         intuitionSeedForWriterHead: String(intuitionSeedForWriter ?? '').slice(0, 200),
+        isBookAuthorModeForWriter,
+        bookAuthorKnowledgeLen: String(bookAuthorKnowledgeForWriter ?? '').length,
+        bookAuthorKnowledgeHead: String(bookAuthorKnowledgeForWriter ?? '').slice(0, 200),
         seedTextRawBaseHead: String(seedTextRawBase ?? '').slice(0, 200),
         seedTextRawHead: String(seedTextRaw ?? '').slice(0, 360),
         seedTextRawHasMirrorFlowSeed: /MIRROR_FLOW_SEED_V1\b/.test(String(seedTextRaw ?? '')),

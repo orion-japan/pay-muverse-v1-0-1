@@ -1,4 +1,4 @@
-﻿import { buildCognitionMap } from '../../cognition/buildCognitionMap';
+import { buildCognitionMap } from '../../cognition/buildCognitionMap';
 import { cognitionMapToSeedText, type CognitionMap } from '../../cognition/cognitionMap';
 import { buildIrDiagnosisPreSeed } from './buildIrDiagnosisPreSeed';
 import { resolveUniversalPreSeed } from './universal';
@@ -1751,10 +1751,10 @@ function buildMuBookAuthorModeDecision(args: {
 
     shouldSuppressHistoryForWriter: false,
     shouldSuppressSimilarFlow: true,
-    shouldSuppressSlotPlan: false,
+    shouldSuppressSlotPlan: true,
     shouldSuppressMemoryDelta: false,
     shouldSuppressIntuitionCandidate: false,
-    shouldSuppressNormalResonance: false,
+    shouldSuppressNormalResonance: true,
 
     shouldOpenContextThread: false,
     contextThreadCode: null,
@@ -1778,6 +1778,10 @@ function buildMuBookAuthorModeDecision(args: {
       qCode: 'Q3',
       depthStage: 'I1',
       shouldSuppressSimilarFlow: true,
+      shouldSuppressSlotPlan: true,
+      shouldSuppressNormalResonance: true,
+      slotPlanPolicy: 'BOOK_AUTHOR_MODE',
+      writerPatternKey: 'BOOK_AUTHOR_MODE_V1',
       similarFlowSeed: '',
       similarFlowDebug: null,
     } as any,
@@ -1803,6 +1807,10 @@ function buildMuBookAuthorModeDecision(args: {
       e_turn: 'e3',
       eTurn: 'e3',
       shouldSuppressSimilarFlow: true,
+      shouldSuppressSlotPlan: true,
+      shouldSuppressNormalResonance: true,
+      slotPlanPolicy: 'BOOK_AUTHOR_MODE',
+      writerPatternKey: 'BOOK_AUTHOR_MODE_V1',
       finalTextPolicy: 'FINAL_TEXT_BOOK_AUTHOR_MODE_NO_TEMPLATE',
     } as any,
 
