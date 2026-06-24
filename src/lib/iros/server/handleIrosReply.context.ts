@@ -2657,9 +2657,32 @@ export async function buildTurnContext(
     (baseMetaForTurn as any).extra ??= {};
     (baseMetaForTurn as any).extra.ctxPack ??= {};
 
+    const forceBookAuthorMuCanonModeFromText =
+      /もうひとつのわたし|もう一つのわたし|Mu|ミュー|イマジナル/u.test(String(text ?? '')) &&
+      /イマジナル|創造の方向|未来の景色|かがみ|鏡/u.test(String(text ?? '')) &&
+      /教えて|詳しく|知りたい|わかりますか|分かりますか|見たい|見て/u.test(String(text ?? ''));
+
+    const forceBookAuthorMuCanonMode =
+      forceBookAuthorMuCanonModeFromText ||
+      (baseMetaForTurn as any)?.extra?.bookAuthorMode === true ||
+      (baseMetaForTurn as any)?.extra?.ctxPack?.bookAuthorMode === true ||
+      (baseMetaForTurn as any)?.extra?.muCanonKnowledgeMode === 'book_author' ||
+      (baseMetaForTurn as any)?.extra?.ctxPack?.muCanonKnowledgeMode === 'book_author' ||
+      (baseMetaForTurn as any)?.extra?.presentationKind === 'book_author' ||
+      (baseMetaForTurn as any)?.extra?.ctxPack?.presentationKind === 'book_author' ||
+      (baseMetaForTurn as any)?.extra?.inputKind === 'book_author' ||
+      (baseMetaForTurn as any)?.extra?.ctxPack?.inputKind === 'book_author' ||
+      (baseMetaForTurn as any)?.extra?.sourceKind === 'mu_volume_1_author' ||
+      (baseMetaForTurn as any)?.extra?.ctxPack?.sourceKind === 'mu_volume_1_author' ||
+      (baseMetaForTurn as any)?.extra?.writerPatternKey === 'BOOK_AUTHOR_MODE_V1' ||
+      (baseMetaForTurn as any)?.extra?.ctxPack?.writerPatternKey === 'BOOK_AUTHOR_MODE_V1' ||
+      (baseMetaForTurn as any)?.extra?.resolvedAsk?.askType === 'book_author_reflection' ||
+      (baseMetaForTurn as any)?.extra?.ctxPack?.resolvedAsk?.askType === 'book_author_reflection';
+
     const muCanonKnowledge = resolveMuCanonKnowledge({
       userText: text,
       ctxPack: (baseMetaForTurn as any).extra.ctxPack,
+      modeHint: forceBookAuthorMuCanonMode ? 'book_author' : null,
     });
 
     (baseMetaForTurn as any).extra.muCanonKnowledge = muCanonKnowledge;
@@ -2670,6 +2693,8 @@ export async function buildTurnContext(
       JSON.stringify({
         enabled: muCanonKnowledge.enabled,
         mode: muCanonKnowledge.mode,
+        forceBookAuthorMuCanonMode,
+        forceBookAuthorMuCanonModeFromText,
         reason: muCanonKnowledge.reason,
         quoteAllowed: muCanonKnowledge.quoteAllowed,
         mentionBookAllowed: muCanonKnowledge.mentionBookAllowed,

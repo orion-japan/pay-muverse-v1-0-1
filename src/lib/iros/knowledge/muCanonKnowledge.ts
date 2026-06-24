@@ -9,6 +9,7 @@ export type MuCanonKnowledgeMode =
   | 'background'
   | 'concept_explain'
   | 'book_reader'
+  | 'book_author'
   | 'quote'
   | 'app_integration';
 
@@ -57,6 +58,7 @@ function detectMuCanonMode(input: ResolveMuCanonKnowledgeInput): {
     modeHint === 'background' ||
     modeHint === 'concept_explain' ||
     modeHint === 'book_reader' ||
+    modeHint === 'book_author' ||
     modeHint === 'quote' ||
     modeHint === 'app_integration'
   ) {
@@ -65,9 +67,20 @@ function detectMuCanonMode(input: ResolveMuCanonKnowledgeInput): {
       reason: 'mode_hint',
       referencesBook: false,
       asksQuote: modeHint === 'quote',
-      asksConcept: modeHint === 'concept_explain',
+      asksConcept: modeHint === 'concept_explain' || modeHint === 'book_author',
     };
   }
+
+  const bookAuthorActive =
+    ctxPack?.bookAuthorMode === true ||
+    ctxPack?.book_author_mode === true ||
+    ctxPack?.muCanonKnowledgeMode === 'book_author' ||
+    ctxPack?.presentationKind === 'book_author' ||
+    ctxPack?.inputKind === 'book_author' ||
+    ctxPack?.sourceKind === 'mu_volume_1_author' ||
+    ctxPack?.writerPatternKey === 'BOOK_AUTHOR_MODE_V1' ||
+    ctxPack?.writerPatternKey === 'book_author_mode_v1' ||
+    ctxPack?.resolvedAsk?.askType === 'book_author_reflection';
 
   const appLinked =
     ctxPack?.bookLinked === true ||
@@ -91,6 +104,16 @@ function detectMuCanonMode(input: ResolveMuCanonKnowledgeInput): {
 
   if (asksQuote) {
     return { mode: 'quote', reason: 'quote_requested', referencesBook, asksQuote, asksConcept };
+  }
+
+  if (bookAuthorActive) {
+    return {
+      mode: 'book_author',
+      reason: 'book_author_context',
+      referencesBook: true,
+      asksQuote,
+      asksConcept: true,
+    };
   }
 
   if (asksConcept) {
@@ -168,6 +191,28 @@ function buildSeedText(args: {
     );
   }
 
+  if (mode === 'book_author') {
+    lines.push(
+      '',
+      'BOOK_AUTHOR_MODE:',
+      'priority=highest',
+      'answerType=reader_self_reflection',
+      'rule=これは概念説明ではなく、第1巻の本文世界を背負った読者への応答である',
+      'rule=定義だけで終わらせない',
+      'rule=一般心理説明にしない',
+      'rule=「現実にいるもう一人」「想像された自分」「別のあなた」「見せる自分」「隠している願い」「内側」は使わない',
+      'rule=必ず「内面」を使う',
+      'rule=「もうひとつのわたし」は、読者の内面に立ち上がる創造の入口として扱う',
+      'rule=「イマジナル」は、現実になる前に内面に立ち上がる未来の景色として扱う',
+      'rule=みゆの疑い、怖い未来、人の不安でお金が動く世界、置いてきた叡智、創造の方向のどれかに接続する',
+      'rule=「たぶん」「おそらく」「かもしれない」「かも」で中心判断を弱めない',
+      'rule=「言葉になる前」「内側」「別の見方」「別のあなた」「一つに決めなくていい」を中心表現に使わない',
+      'rule=「言葉になる前」ではなく「現実になる前」「形になる前」を使う',
+      'rule=「内側」ではなく必ず「内面」を使う',
+      'output_shape=問いを受け取る→第1巻のかがみで映す→内面に立ち上がる未来の景色→創造の方向→次に置ける一文',
+    );
+  }
+
   if (mode === 'book_reader' || mode === 'app_integration') {
     lines.push(
       '',
@@ -207,6 +252,7 @@ export function resolveMuCanonKnowledge(
   const mentionBookAllowed =
     mode === 'quote' ||
     mode === 'book_reader' ||
+    mode === 'book_author' ||
     mode === 'app_integration' ||
     (mode === 'concept_explain' && detected.referencesBook);
 

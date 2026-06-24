@@ -8,6 +8,9 @@ export type SelectSlotPatternInput = {
   userText?: string | null;
   targetLabel?: string | null;
   hasPriorDiagnosis?: boolean | null;
+  writerPatternKey?: string | null;
+  muCanonKnowledgeMode?: string | null;
+  bookAuthorMode?: boolean | null;
 };
 
 function normalizeLite(value: unknown): string {
@@ -188,6 +191,9 @@ export function selectSlotPattern(input: SelectSlotPatternInput): PatternKey {
   const userText = String(input?.userText ?? '').trim();
   const detailMode = Boolean(input?.detailMode);
   const hasPriorDiagnosis = Boolean(input?.hasPriorDiagnosis);
+  const writerPatternKey = normalizeLite(input?.writerPatternKey);
+  const muCanonKnowledgeMode = normalizeLite(input?.muCanonKnowledgeMode);
+  const bookAuthorMode = Boolean(input?.bookAuthorMode);
 
   const irLike = isIrLikeLine(line);
   const truthLike = isTruthLikeQuestionType(questionType);
@@ -201,6 +207,20 @@ export function selectSlotPattern(input: SelectSlotPatternInput): PatternKey {
     looksLikeDeepReadingRequest(userText);
 
   const declarationLike = looksLikeDeclarationResonance(followupText || userText);
+
+  // BOOK_AUTHOR_MODE_DIRECT_PATTERN_V1
+  // Book Author Mode は通常共鳴に落とさず、専用の出力構造を使う。
+  if (
+    line === 'book_author' ||
+    line === 'mu_book_author_mode' ||
+    line === 'book_author_reflection' ||
+    bookAuthorMode === true ||
+    writerPatternKey === 'book_author_mode_v1' ||
+    writerPatternKey === 'book_author_mode' ||
+    muCanonKnowledgeMode === 'book_author'
+  ) {
+    return 'BOOK_AUTHOR_MODE_V1';
+  }
 
   // ir診断の詳細化は IR_DETAIL_V1
   // ✅ 診断履歴がある followup だけ、診断詳細として扱う。

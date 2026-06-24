@@ -1,4 +1,4 @@
-﻿// file: src/lib/iros/server/handleIrosReply.postprocess.ts
+// file: src/lib/iros/server/handleIrosReply.postprocess.ts
 // iros - Postprocess (MIN)
 // 目的：
 // - orchResult から assistantText / metaForSave を確定
@@ -3924,7 +3924,23 @@ try {
           userText: String(userText ?? '').trim(),
           targetLabel: null,
           hasPriorDiagnosis: false,
-        });
+    writerPatternKey:
+      (metaForSave as any)?.extra?.writerPatternKey ??
+      (metaForSave as any)?.extra?.ctxPack?.writerPatternKey ??
+      (metaForSave as any)?.writerPatternKey ??
+      null,
+    muCanonKnowledgeMode:
+      (metaForSave as any)?.extra?.muCanonKnowledgeMode ??
+      (metaForSave as any)?.extra?.ctxPack?.muCanonKnowledgeMode ??
+      (metaForSave as any)?.muCanonKnowledgeMode ??
+      null,
+    bookAuthorMode:
+      Boolean(
+        (metaForSave as any)?.extra?.bookAuthorMode === true ||
+        (metaForSave as any)?.extra?.ctxPack?.bookAuthorMode === true ||
+        (metaForSave as any)?.bookAuthorMode === true
+      ),
+  });
 
         if (postprocessPatternKey === 'DECLARATION_RESONANCE_V1') {
           seedForWriterSanitized = '';
