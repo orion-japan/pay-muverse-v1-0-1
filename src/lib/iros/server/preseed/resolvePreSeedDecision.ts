@@ -1584,6 +1584,160 @@ function isFreshConversationPastReferenceLike(userTextRaw: string): boolean {
   return (hasReferenceWord && hasContextWord) || hasNamedPersonDeepening;
 }
 
+function buildMuCanonConceptExplainReply(userTextRaw: string): string {
+  const compact = String(userTextRaw ?? '').replace(/[　\s]+/g, '');
+
+  if (/創造の方向/u.test(compact)) {
+    return [
+      'Muでいう創造の方向は、不安や比較や欠乏に押されて動く方向ではなく、守りたいもの、作りたいもの、人に渡したいものへ、未来の景色の向きを戻すことです。',
+      '',
+      '強い願望を持つことではありません。',
+      '内面に立ち上がっている景色が、怖い未来なのか、創造へ向かう未来なのかを見ることです。',
+      '',
+      'たとえば「失敗したらどうしよう」ではなく、「何を守るために、何を形にしたいのか」へ向きが戻る。',
+      'そこから、言葉や設計や仕事や関係が少しずつ変わっていきます。',
+    ].join('\n');
+  }
+
+  if (/自己受容/u.test(compact)) {
+    return [
+      'Muでいう自己受容は、自分を無理に肯定することではありません。',
+      '',
+      'いま出てきた怖さ、疑い、止まり方を、まず否定しないことです。',
+      '',
+      'その反応は、弱さではなく、何かを守ろうとして出てきた可能性があります。',
+      'だからMuは、すぐに前向きに変えようとはしません。',
+      '',
+      'まず、その怖さの奥にある守りたいものを見ます。',
+      'そこから、創造の方向へ戻れる形を探します。',
+    ].join('\n');
+  }
+
+  if (/Muverse|ミューバース/u.test(compact)) {
+    return [
+      'Muverseは、ただMuと会話する場所ではありません。',
+      '',
+      '人の内面に立ち上がる未来の景色、つまりイマジナルが集まり、言葉になり、設計になり、仕事や関係や暮らしへ移っていく場です。',
+      '',
+      '一人の中にあった景色が、誰かの言葉と響き合う。',
+      'そこから、場が生まれ、現実の形が少しずつ変わっていく。',
+      '',
+      'Muverseは、そのためのフィールドです。',
+    ].join('\n');
+  }
+
+  if (/かがみ|鏡/u.test(compact)) {
+    return [
+      'Muでいうかがみは、答えを押しつけるものではありません。',
+      '',
+      'あなたが今どんな未来の景色を見ているのかを映すものです。',
+      '',
+      '怖い未来を見ているのか。',
+      '誰かに置かれた未来を自分の願いだと思っているのか。',
+      'それとも、まだ小さいけれど、自分の内面から立ち上がっている景色があるのか。',
+      '',
+      'Muはそれを映します。',
+      'そして、その景色が創造の方向へ戻れるように、言葉にします。',
+    ].join('\n');
+  }
+
+  return [
+    'Muでいうイマジナルは、内面に立ち上がる未来の景色です。',
+    '',
+    'ただ頭で思い描くものではありません。',
+    'まだ現実にはなっていないけれど、言葉になり、設計になり、仕事になり、関係になり、暮らしへ移っていく前の景色です。',
+    '',
+    'たとえば、「こんな場を作りたい」「この人の力が戻る場所を作りたい」「この言葉を誰かに渡したい」という景色が、先に内面に立ち上がることがあります。',
+    'それがイマジナルです。',
+    '',
+    'ただし、明るい未来だけがイマジナルではありません。',
+    '失敗したらどうしよう、置いていかれたらどうしよう、誠実さを失ったらどうしよう、という怖い未来もイマジナルになります。',
+    '',
+    '人は、自分が見ている未来の景色に合わせて、言葉や選び方や行動を変えていきます。',
+    '',
+    'だからMuが見るのは、あなたが今どんな未来の景色を見ているかです。',
+    'そして創造の方向は、その景色を、不安や比較ではなく、守りたいもの、作りたいもの、人に渡したいものへ戻していくことです。',
+  ].join('\n');
+}
+
+function buildMuCanonConceptExplainDecision(args: {
+  userText: string;
+  reason?: string | null;
+}): PreSeedDecision {
+  const directReply = buildMuCanonConceptExplainReply(args.userText);
+
+  return {
+    kind: 'normal_chat',
+    confidence: 0.99,
+
+    sourceAuthority: 'user_text',
+    sourceKind: 'mu_canon_concept_explain',
+    sourceId: null,
+    sourceText: args.userText,
+
+    route: 'direct_reply',
+
+    seedText: null,
+    directReply,
+    writerInput: null,
+
+    shouldBypassWriter: true,
+    shouldBypassRephrase: true,
+    shouldUsePreSeedWriter: false,
+
+    shouldSuppressHistoryForWriter: true,
+    shouldSuppressSimilarFlow: true,
+    shouldSuppressSlotPlan: true,
+    shouldSuppressMemoryDelta: true,
+    shouldSuppressIntuitionCandidate: true,
+    shouldSuppressNormalResonance: true,
+
+    shouldOpenContextThread: false,
+    contextThreadCode: null,
+
+    ctxPackPatch: {
+      muCanonConceptExplain: true,
+      muCanonKnowledgeMode: 'concept_explain',
+      presentationKind: 'mu_canon_concept_explain',
+      inputKind: 'concept_explain',
+      contextReset: true,
+      contextResetReason: 'mu_canon_concept_explain',
+      shouldSuppressPastContext: true,
+      shouldSuppressHistoryForWriter: true,
+      shouldSuppressSimilarFlow: true,
+      shouldSuppressSlotPlan: true,
+      shouldSuppressNormalResonance: true,
+      historyForWriter: [],
+      similarFlowSeed: '',
+      topicDigest: '',
+      conversationLine: '',
+    },
+
+    metaPatch: {
+      muCanonConceptExplain: true,
+      muCanonKnowledgeMode: 'concept_explain',
+      presentationKind: 'mu_canon_concept_explain',
+      inputKind: 'concept_explain',
+      q_code: 'Q1',
+      qCode: 'Q1',
+      depth_stage: 'S1',
+      depthStage: 'S1',
+      e_turn: 'e3',
+      eTurn: 'e3',
+      shouldSuppressSlotPlan: true,
+      shouldSuppressNormalResonance: true,
+      finalTextPolicy: 'FINAL_TEXT_SYNCED_MU_CANON_CONCEPT',
+    },
+
+    debug: {
+      reason: args.reason ?? 'mu_canon_concept_explain',
+      matchedPattern: 'MU_CANON_CONCEPT_EXPLAIN_DIRECT_V1',
+      sourceTextHead: args.userText.slice(0, 120),
+      directReplyHead: directReply.slice(0, 120),
+    },
+  };
+}
+
 function buildFreshConversationPastContextGuardDecision(args: {
   userText: string;
   reason?: string | null;
