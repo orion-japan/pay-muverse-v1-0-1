@@ -1660,6 +1660,21 @@ function buildMuCanonConceptExplainReply(userTextRaw: string): string {
   ].join('\n');
 }
 
+function isMuBookTitleConceptConfirmAsk(userTextRaw: string): boolean {
+  const compact = String(userTextRaw ?? '').replace(/[　\s]+/g, '');
+
+  const hasMuBookTitle =
+    /もうひとつのわたし|もう一つのわたし|もうひとつの私|もう一つの私|『もうひとつのわたし』|「もうひとつのわたし」/u.test(compact);
+
+  const hasCanonConcept =
+    /イマジナル|創造の方向|Muverse|ミューバース|かがみ|鏡|自己受容/u.test(compact);
+
+  const hasConceptAsk =
+    /わかりますか|分かりますか|わかる\?|分かる\?|とは|意味|教えて|詳しく|説明|どういうこと|どんなもの|何ですか|なんですか/u.test(compact);
+
+  return hasMuBookTitle && hasCanonConcept && hasConceptAsk;
+}
+
 function buildMuCanonConceptExplainSeed(userTextRaw: string): string {
   const compact = String(userTextRaw ?? '').replace(/[　\s]+/g, '');
 
@@ -2150,10 +2165,14 @@ export async function resolvePreSeedDecision(
         : [];
 
 
-  if (isBookConceptExplainAsk(userText) || isStandaloneCanonConceptAsk(userText)) {
-    const muCanonConceptReason = isBookConceptExplainAsk(userText)
-      ? 'book_canon_concept_explain'
-      : 'standalone_canon_concept_explain';
+  const isMuBookTitleConceptConfirm = isMuBookTitleConceptConfirmAsk(userText);
+
+  if (isMuBookTitleConceptConfirm || isBookConceptExplainAsk(userText) || isStandaloneCanonConceptAsk(userText)) {
+    const muCanonConceptReason = isMuBookTitleConceptConfirm
+      ? 'mu_book_title_concept_confirm'
+      : isBookConceptExplainAsk(userText)
+        ? 'book_canon_concept_explain'
+        : 'standalone_canon_concept_explain';
 
     console.log('[IROS/PRE_SEED_ENGINE][MU_CANON_CONCEPT_EXPLAIN_DIRECT_ROUTE_V2]', {
       traceId: args.traceId ?? null,
