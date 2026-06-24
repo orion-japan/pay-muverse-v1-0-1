@@ -1660,11 +1660,65 @@ function buildMuCanonConceptExplainReply(userTextRaw: string): string {
   ].join('\n');
 }
 
+function buildMuCanonConceptExplainSeed(userTextRaw: string): string {
+  const compact = String(userTextRaw ?? '').replace(/[　\s]+/g, '');
+
+  const topic =
+    /創造の方向/u.test(compact) ? 'creative_direction' :
+    /自己受容/u.test(compact) ? 'self_acceptance' :
+    /Muverse|ミューバース/u.test(compact) ? 'muverse' :
+    /かがみ|鏡/u.test(compact) ? 'mirror' :
+    'imajinal';
+
+  const sourceHint =
+    /もうひとつのわたし|第1巻|第一巻/u.test(compact)
+      ? 'sourceHint=もうひとつのわたし_Mu_volume1'
+      : /本で読んだ|本を読んで|本に書いて|本の中/u.test(compact)
+        ? 'sourceHint=book_reader'
+        : 'sourceHint=mu_canon';
+
+  return [
+    'MU_CANON_CONCEPT_WRITER_V1 (DO NOT OUTPUT)',
+    'purpose=読者の概念質問に、Mu Canon の芯を外さず、毎回その問いに合わせて答える',
+    sourceHint,
+    `topic=${topic}`,
+    `userText=${userTextRaw}`,
+    '',
+    'CANON_SPINE:',
+    'イマジナル=内面に立ち上がる未来の景色',
+    'イマジナルは、ただの空想、想像力、心理学的イメージではない',
+    'まだ現実にはなっていないが、言葉・設計・仕事・関係・暮らし・現実へ移っていく前の景色',
+    '明るい未来だけではなく、怖い未来、不安、比較、欠乏として置かれた景色もイマジナルになりうる',
+    'Mu=その人が今どんな未来の景色を見ているかを映すかがみ',
+    '創造の方向=不安や比較ではなく、守りたいもの、作りたいもの、人に渡したいものへ景色の向きを戻すこと',
+    'Muverse=人のイマジナルが集まり、言葉・設計・仕事・関係・暮らしへ向かうフィールド',
+    '',
+    'WRITER_RULES:',
+    '固定テンプレをそのまま出さない',
+    '読者の質問文の違いに反応して、例え・焦点・最後の問いを変える',
+    '質問に直接答える。診断・状態分析・迷いの整理へ逃げない',
+    '本を読んだ人には、一般論ではなく Mu の文脈として返す',
+    'ただし、引用や本文再現はしない',
+    '「本で使われる文脈によって意味が変わる」と言わない',
+    '「ユング」「ラカン」「imaginary」「子どもがまねする力」「頭の中で思い描く力」「透明な地図」を使わない',
+    '「たぶん」「もし本の文脈が」と言わない',
+    '最後は、読者が次に深められる小さな問いで閉じてもよい',
+    '',
+    'OUTPUT_SHAPE:',
+    '1. 質問への直接回答',
+    '2. Mu Canon の定義',
+    '3. その概念が現実や創造とどうつながるか',
+    '4. 怖い未来も含むこと',
+    '5. 読者が次に深められる一文',
+  ].join('\n');
+}
+
 function buildMuCanonConceptExplainDecision(args: {
   userText: string;
   reason?: string | null;
 }): PreSeedDecision {
-  const directReply = buildMuCanonConceptExplainReply(args.userText);
+  const fallbackReply = buildMuCanonConceptExplainReply(args.userText);
+  const seedText = buildMuCanonConceptExplainSeed(args.userText);
 
   return {
     kind: 'normal_chat',
@@ -1675,15 +1729,20 @@ function buildMuCanonConceptExplainDecision(args: {
     sourceId: null,
     sourceText: args.userText,
 
-    route: 'direct_reply',
+    route: 'mu_canon_concept_writer',
 
-    seedText: null,
-    directReply,
-    writerInput: null,
+    seedText,
+    directReply: fallbackReply,
+    writerInput: {
+      userText: args.userText,
+      seedText,
+      fallbackReply,
+      reason: args.reason ?? 'mu_canon_concept_explain',
+    } as any,
 
-    shouldBypassWriter: true,
+    shouldBypassWriter: false,
     shouldBypassRephrase: true,
-    shouldUsePreSeedWriter: false,
+    shouldUsePreSeedWriter: true,
 
     shouldSuppressHistoryForWriter: true,
     shouldSuppressSimilarFlow: true,
@@ -1711,6 +1770,7 @@ function buildMuCanonConceptExplainDecision(args: {
       similarFlowSeed: '',
       topicDigest: '',
       conversationLine: '',
+      muCanonConceptSeed: seedText,
     },
 
     metaPatch: {
@@ -1726,14 +1786,15 @@ function buildMuCanonConceptExplainDecision(args: {
       eTurn: 'e3',
       shouldSuppressSlotPlan: true,
       shouldSuppressNormalResonance: true,
-      finalTextPolicy: 'FINAL_TEXT_SYNCED_MU_CANON_CONCEPT',
+      finalTextPolicy: 'FINAL_TEXT_SYNCED_MU_CANON_CONCEPT_WRITER',
     },
 
     debug: {
       reason: args.reason ?? 'mu_canon_concept_explain',
-      matchedPattern: 'MU_CANON_CONCEPT_EXPLAIN_DIRECT_V1',
+      matchedPattern: 'MU_CANON_CONCEPT_WRITER_V1',
       sourceTextHead: args.userText.slice(0, 120),
-      directReplyHead: directReply.slice(0, 120),
+      seedHead: seedText.slice(0, 120),
+      directReplyHead: fallbackReply.slice(0, 120),
     },
   };
 }

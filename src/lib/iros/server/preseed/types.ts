@@ -1,4 +1,4 @@
-﻿import type { CognitionMap } from '../../cognition/cognitionMap';
+import type { CognitionMap } from '../../cognition/cognitionMap';
 import type {
   TcfCDirection,
   TcfUserReaction,
@@ -36,6 +36,7 @@ export type PreSeedRoute =
   | 'diagnosis_writer'
   | 'preseed_llm_reply'
   | 'direct_reply'
+  | 'mu_canon_concept_writer'
   | 'clarify'
   | 'tool_action'
   | 'blocked';

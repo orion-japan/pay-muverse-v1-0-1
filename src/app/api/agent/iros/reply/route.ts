@@ -2209,6 +2209,190 @@ const metaForRelationshipContextCapture: any = {
       });
     }
     if (
+      preSeedDecision?.route === 'mu_canon_concept_writer' &&
+      (preSeedDecision as any).shouldUsePreSeedWriter &&
+      (preSeedDecision as any).writerInput
+    ) {
+      const writerInput = (preSeedDecision as any).writerInput ?? {};
+      const seedTextForWriter = String(writerInput.seedText ?? preSeedDecision.seedText ?? '').trim();
+      const fallbackText = String(writerInput.fallbackReply ?? preSeedDecision.directReply ?? '').trim();
+
+      let writerText = '';
+
+      try {
+        writerText = await chatComplete({
+          purpose: 'reply',
+          traceId,
+          conversationId,
+          userCode,
+          max_tokens: 520,
+          audit: {
+            slotPlanPolicy: 'MU_CANON_CONCEPT_WRITER',
+            mode,
+            qCode: 'Q1',
+            depthStage: 'S1',
+          },
+          messages: [
+            {
+              role: 'system',
+              content: [
+                'あなたは Mu の概念説明専用Writerです。',
+                '目的は、読者の質問に対して、Mu Canon の芯を外さず、自然な本文で答えることです。',
+                '',
+                '最重要:',
+                '- 固定テンプレをそのまま出さない',
+                '- ただし定義の芯は変えない',
+                '- 質問文の違いに応じて、例え・焦点・最後の問いを変える',
+                '- 一般心理学、ユング、ラカン、imaginaryへ逃げない',
+                '- 「頭の中で思い描く力」「透明な地図」「子どもがまねする力」を使わない',
+                '- 「言葉になる前」「言葉になる前から」「設計になる前から」を使わない',
+                '- 「本で使われる文脈によって意味が変わる」「たぶん」「もし本の文脈が」と言わない',
+                '- 診断や状態分析にしない',
+                '',
+                '必須:',
+                '- イマジナルを説明する場合は「内面に立ち上がる未来の景色」を必ず含める',
+                '- 怖い未来もイマジナルになりうることを必要に応じて含める',
+                '- Muは、今どんな未来の景色を見ているかを映すかがみとして扱う',
+                '- 創造の方向は、守りたいもの・作りたいもの・人に渡したいものへ景色の向きを戻すこととして扱う',
+                '',
+                '文体:',
+                '- Muとして自然に返す',
+                '- 説明しすぎず、でも読者が次に質問したくなる余白を残す',
+                '- 8〜12文程度',
+                '- 箇条書きにしすぎない',
+              ].join('\n'),
+            },
+            {
+              role: 'user',
+              content: [
+                `ユーザーの質問: ${userTextClean}`,
+                '',
+                seedTextForWriter,
+                '',
+                'この質問に、固定テンプレではなく、Mu Canon の芯を保った自然な返答を書いてください。',
+              ].join('\n'),
+            },
+          ],
+        });
+      } catch (e: any) {
+        console.warn('[IROS/ROUTE][MU_CANON_CONCEPT_WRITER_FAILED]', {
+          traceId,
+          conversationId,
+          userCode,
+          error: e?.message ?? e,
+        });
+      }
+
+      const normalizedWriterText = String(writerText ?? '').trim();
+
+      const forbiddenMuCanonConcept =
+        /(ユング|ラカン|imaginary|頭の中で思い描く力|透明な地図|子どもが.*まね|本で使われる文脈によって|もし本の文脈|たぶん|言葉になる前|言葉になる前から|設計になる前から)/u;
+
+      const writerTextOk =
+        normalizedWriterText.length > 0 &&
+        !forbiddenMuCanonConcept.test(normalizedWriterText) &&
+        (
+          !/イマジナル/u.test(userTextClean) ||
+          /内面に立ち上がる未来の景色/u.test(normalizedWriterText)
+        );
+
+      const directText = writerTextOk ? normalizedWriterText : fallbackText;
+
+      const metaForMuCanonConceptWriter: any = {
+        ...(metaForIros ?? {}),
+        extra: {
+          ...((metaForIros as any)?.extra ?? {}),
+          ...((preSeedDecision as any)?.metaPatch ?? {}),
+          persistedByRoute: true,
+          persistPolicy: 'REPLY_SINGLE_WRITER',
+          preSeedDecision,
+          preSeedWriter: true,
+          preSeedWriterKind: 'mu_canon_concept_writer',
+          preSeedBypassWriter: false,
+          preSeedBypassRephrase: true,
+          finalTextPolicy: 'FINAL_TEXT_SYNCED_MU_CANON_CONCEPT_WRITER',
+          resolvedText: directText,
+          finalAssistantText: directText,
+          rawTextFromModel: normalizedWriterText || directText,
+          extractedTextFromModel: directText,
+          ctxPack: {
+            ...(((metaForIros as any)?.extra ?? {})?.ctxPack ?? {}),
+            ...((preSeedDecision as any)?.ctxPackPatch ?? {}),
+            preSeedDecision,
+            preSeedWriter: true,
+            preSeedWriterKind: 'mu_canon_concept_writer',
+          },
+        },
+      };
+
+      let muCanonConceptSaved: any = null;
+
+      try {
+        muCanonConceptSaved = await persistAssistantMessageToIrosMessages({
+          supabase,
+          conversationId,
+          userCode,
+          content: directText,
+          meta: metaForMuCanonConceptWriter,
+        } as any);
+
+        console.log('[IROS/ROUTE][MU_CANON_CONCEPT_WRITER_PERSIST]', {
+          traceId,
+          conversationId,
+          userCode,
+          ok: muCanonConceptSaved?.ok ?? null,
+          inserted: muCanonConceptSaved?.inserted ?? null,
+          messageId: muCanonConceptSaved?.messageId ?? null,
+          usedFallback: !writerTextOk,
+          error: muCanonConceptSaved?.error ?? null,
+        });
+      } catch (e: any) {
+        console.warn('[IROS/ROUTE][MU_CANON_CONCEPT_WRITER_PERSIST_FAILED]', {
+          traceId,
+          conversationId,
+          userCode,
+          error: e?.message ?? e,
+        });
+      }
+
+      console.log('[IROS/ROUTE][MU_CANON_CONCEPT_WRITER_RETURN]', {
+        traceId,
+        conversationId,
+        userCode,
+        usedFallback: !writerTextOk,
+        textLen: directText.length,
+        textHead: directText.slice(0, 160),
+      });
+
+      return NextResponse.json(
+        {
+          ok: true,
+          result: {
+            text: directText,
+            content: directText,
+            assistantText: directText,
+            mode,
+            meta: metaForMuCanonConceptWriter,
+          },
+          text: directText,
+          content: directText,
+          assistantText: directText,
+          assistantMessageId: muCanonConceptSaved?.messageId ?? null,
+          mode,
+          finalMode: mode,
+          meta: metaForMuCanonConceptWriter,
+          metaForSave: metaForMuCanonConceptWriter,
+          credit: {
+            ref: creditRef,
+            amount: CREDIT_AMOUNT,
+            authorize: authRes,
+            lowWarn,
+          },
+        },
+        { status: 200, headers: withTrace(CORS_HEADERS, traceId) },
+      );
+    }
+    if (
       preSeedDecision &&
       (
         preSeedDecision.route === 'direct_reply' ||
