@@ -49,6 +49,27 @@ function isBadDiagnosisFollowupDirectReplyText(v: unknown): boolean {
     /という内容ともつながっています/.test(s)
   );
 }
+function isConceptQuestionPreferCurrentTopic(v: unknown): boolean {
+  const raw = String(v ?? '').trim();
+  const s = raw.replace(/[\s　、。！？!?「」『』（）()]/g, '');
+
+  if (!s) return false;
+
+  const hasConceptTerm =
+    /(イマジナル|形象|未来|怖い未来|意図|創造|フィールド|現実化|豊かさ|欠乏|不安|黒い構造|かがみ|鏡)/u.test(s);
+
+  const hasQuestionShape =
+    /(ですか|ますか|なんですか|何ですか|とは|って何|どういう|どう見れば|どう考えれば|どう扱えば|どう受け取れば)/u.test(s);
+
+  const hasExplicitDiagnosisReference =
+    /(診断|ir診断|IR診断|診断内容|診断結果|診断の結果|前回の診断|さっきの診断|前の診断|この診断|今の診断|以前の診断|診断を元に|診断をもとに|診断に基づいて|診断にもとづいて|診断を踏まえて|診断ベース|診断から|観測対象)/u.test(s);
+
+  const hasExplicitDiagnosisTarget =
+    /(リナ|相手|彼|彼女|あの人|その人|二人|ふたり|好意|連絡|返事|反応|距離感|気持ち)/u.test(s);
+
+  return hasConceptTerm && hasQuestionShape && !hasExplicitDiagnosisReference && !hasExplicitDiagnosisTarget;
+}
+
 function normOptString(v: unknown): string | undefined {
   const s = String(v ?? '').trim();
   return s.length > 0 ? s : undefined;
@@ -941,6 +962,16 @@ export async function buildTurnContext(
       followupSourceText
     );
 
+  const preferConceptQuestionOverDiagnosisFollowup =
+    isConceptQuestionPreferCurrentTopic(followupSourceText);
+
+  if (preferConceptQuestionOverDiagnosisFollowup) {
+    console.log('[IROS/DIAG_FOLLOWUP_CLASSIFY][PREFER_CONCEPT_QUESTION]', {
+      userCode,
+      userTextHead: followupSourceText.slice(0, 120),
+      reason: 'current_input_is_concept_question',
+    });
+  }
   const previousTurnLooksDiagnosisForFollowup =
     hasActiveDiagnosisFrameForFollowup ||
     hasHistoryDiagnosisFrameForFollowup ||
@@ -972,6 +1003,7 @@ export async function buildTurnContext(
     !hasExplicitScreenshotDiagnosisContinuationHint;
 
   const canEnterDiagnosisFollowup =
+    !preferConceptQuestionOverDiagnosisFollowup &&
     !shouldBlockDiagnosisFollowupByObservationLock &&
     (hasExplicitDiagnosisReferenceForFollowup || previousTurnLooksDiagnosisForFollowup);
 
@@ -1652,6 +1684,7 @@ export async function buildTurnContext(
       isDiagnosisDetailTurn,
       hasExplicitDiagnosisReferenceForFollowup,
       previousTurnLooksDiagnosisForFollowup,
+      preferConceptQuestionOverDiagnosisFollowup,
       canEnterDiagnosisFollowup,
       hasActiveDiagnosisFrameForFollowup,
       activeDiagnosisFramePrimaryEntityId: activeDiagnosisFramePrimaryEntityId || null,
@@ -3301,6 +3334,7 @@ export async function buildTurnContext(
     },
   };
 }
+
 
 
 
