@@ -1734,7 +1734,7 @@ function buildMuBookAuthorModeDecision(args: {
     sourceId: null,
     sourceText: args.userText,
 
-    route: 'normal_writer',
+    route: 'mu_canon_concept_writer',
 
     seedText,
     directReply: null,
@@ -1746,7 +1746,7 @@ function buildMuBookAuthorModeDecision(args: {
     } as any,
 
     shouldBypassWriter: false,
-    shouldBypassRephrase: false,
+    shouldBypassRephrase: true,
     shouldUsePreSeedWriter: true,
 
     shouldSuppressHistoryForWriter: false,
