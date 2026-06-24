@@ -1600,6 +1600,122 @@ function buildFreshConversationPastContextGuardDecision(args: {
     },
   } as any;
 }
+
+function isBookOnboardingImajinalReflection(userTextRaw: string): boolean {
+  const text = String(userTextRaw ?? '').trim();
+  const compact = text.replace(/[　\s]+/g, '');
+
+  if (!compact) return false;
+
+  const hasBookEntry =
+    /本を読んで|Muを読んで|もうひとつのわたし/u.test(text);
+
+  const hasImajinalReflection =
+    /怖い未来|どんな未来を見ている|創造の方向|願いではなく/u.test(text);
+
+  return hasBookEntry && hasImajinalReflection;
+}
+
+function buildBookOnboardingImajinalReflectionDecision(args: {
+  userText: string;
+  reason?: string | null;
+}): PreSeedDecision {
+  const seedText = [
+    'BOOK_ONBOARDING_V1 (DO NOT OUTPUT)',
+    'source=book_onboarding_imajinal_reflection',
+    'turnTask=first_book_reading_self_reflection',
+    'rule=この入力は「もうひとつのわたし、Mu」読後の初回自己内省入力。',
+    'rule=過去会話・診断・人物・関係・スクショ診断の続きとして扱わない。',
+    'rule=文脈確認をしない。',
+    'rule=ユーザーの言葉だけを材料にする。',
+    'rule=中心テーマは「今見ている怖い未来」と「その奥にある創造の方向」。',
+    'rule=怖い未来を否定せず、そこに含まれる守ろうとする力、回避しようとする痛み、まだ形になっていない創造の方向を映す。',
+    'rule=最後は、怖い未来をひとつ置く入力へ自然につなげる。',
+    'mustNotSay=この新しい会話の中では、まだ前提になる診断・人物・関係の文脈が確認できません。',
+    'mustNotSay=続きとして見たい場合は',
+    '',
+    'USER_TEXT:',
+    args.userText,
+  ].join('\n');
+
+  return {
+    kind: 'book_onboarding_imajinal_reflection' as any,
+    confidence: 0.99,
+    sourceAuthority: 'user_text',
+    sourceKind: 'book_onboarding_v1',
+    sourceId: null,
+    sourceText: args.userText,
+    route: 'normal_writer' as any,
+    seedText,
+    directReply: null,
+    writerInput: {
+      mode: 'book_onboarding_imajinal_reflection',
+      sourceKind: 'book_onboarding_v1',
+      userText: args.userText,
+      seedText,
+    } as any,
+    shouldBypassWriter: false,
+    shouldBypassRephrase: false,
+    shouldUsePreSeedWriter: true,
+    shouldSuppressHistoryForWriter: true,
+    shouldSuppressSimilarFlow: true,
+    shouldSuppressSlotPlan: false,
+    shouldSuppressMemoryDelta: true,
+    shouldSuppressIntuitionCandidate: false,
+    shouldSuppressNormalResonance: false,
+    shouldOpenContextThread: false,
+    contextThreadCode: null,
+    ctxPackPatch: {
+      bookOnboardingV1: true,
+      bookOnboardingImajinalReflection: true,
+      disablePastReferenceGuard: true,
+      contextReset: true,
+      contextResetReason: args.reason ?? 'book_onboarding_v1',
+      shouldSuppressPastContext: true,
+      shouldSuppressHistoryForWriter: true,
+      shouldSuppressSimilarFlow: true,
+      historyForWriter: [],
+      similarFlowSeed: '',
+      similarFlowDebug: null,
+      goalKind: 'self_reflection',
+      targetKind: 'imajinal_reflection',
+      replyGoal: { kind: 'self_reflection', questionsMax: 1 },
+      resolvedAsk: {
+        askType: 'imajinal_reflection',
+        topic: 'book_onboarding_v1',
+      },
+      qCode: 'Q3',
+      depthStage: 'I1',
+      presentationKind: 'book_onboarding_imajinal_reflection',
+    } as any,
+    metaPatch: {
+      bookOnboardingV1: true,
+      bookOnboardingImajinalReflection: true,
+      disablePastReferenceGuard: true,
+      contextReset: true,
+      contextResetReason: args.reason ?? 'book_onboarding_v1',
+      shouldSuppressPastContext: true,
+      shouldSuppressHistoryForWriter: true,
+      shouldSuppressSimilarFlow: true,
+      goalKind: 'self_reflection',
+      targetKind: 'imajinal_reflection',
+      replyGoal: { kind: 'self_reflection', questionsMax: 1 },
+      resolvedAsk: {
+        askType: 'imajinal_reflection',
+        topic: 'book_onboarding_v1',
+      },
+      q_code: 'Q3',
+      depth_stage: 'I1',
+      presentationKind: 'book_onboarding_imajinal_reflection',
+    } as any,
+    debug: {
+      reason: args.reason ?? 'book_onboarding_v1',
+      matchedPattern: 'book_onboarding_imajinal_reflection',
+      seedHead: seedText.slice(0, 120),
+      sourceTextHead: args.userText.slice(0, 120),
+    },
+  } as any;
+}
 export async function resolvePreSeedDecision(
   args: ResolvePreSeedDecisionArgs
 ): Promise<PreSeedDecision | null> {
@@ -1635,6 +1751,21 @@ export async function resolvePreSeedDecision(
         ? args.historyForTurn
         : [];
 
+
+  if (conversationScopeBlocksPastContext && isBookOnboardingImajinalReflection(userText)) {
+    console.log('[IROS/PRE_SEED_ENGINE][BOOK_ONBOARDING_V1]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode ?? null,
+      userTextHead: userText.slice(0, 120),
+      reason: 'book_onboarding_imajinal_reflection',
+    });
+
+    return buildBookOnboardingImajinalReflectionDecision({
+      userText,
+      reason: 'book_onboarding_v1',
+    });
+  }
   if (conversationScopeBlocksPastContext && isFreshConversationPastReferenceLike(userText)) {
     console.log('[IROS/PRE_SEED_ENGINE][CONVERSATION_SCOPE_GUARD]', {
       traceId: args.traceId ?? null,
@@ -2680,3 +2811,5 @@ if (
 
   return null;
 }
+
+
