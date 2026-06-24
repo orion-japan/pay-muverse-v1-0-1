@@ -756,7 +756,29 @@ function buildWriterHintsFromMeta(meta: any): {
           `mode=${String(muCanonKnowledge.mode ?? 'background')}`,
           `quoteAllowed=${muCanonKnowledge.quoteAllowed === true ? 'true' : 'false'}`,
           `mentionBookAllowed=${muCanonKnowledge.mentionBookAllowed === true ? 'true' : 'false'}`,
-          muCanonSeedText.slice(0, 1400),
+          ...(String(muCanonKnowledge.mode ?? '') === 'concept_explain'
+            ? [
+                '',
+                'MU_CANON_CONCEPT_EXPLAIN_CONTRACT (DO NOT OUTPUT)',
+                'priority=highest',
+                'answerType=direct_concept_answer',
+                'rule=質問に直接答える。ユーザーの心理状態分析へ戻さない',
+                'rule=「迷っている」「一つに絞る」「どこで迷っているか」を使わない',
+                'rule=ラカン、ユング、一般心理学、imaginary、透明な地図へ寄せない',
+                'rule=「たぶん」「もし本の文脈が」「本の中でどういう意味なら」と言わない',
+                'rule=第1巻の意味を知っている前提で答える',
+                'must_start=Muでいうイマジナルは、内面に立ち上がる未来の景色です。',
+                'must_define=イマジナルは、現実になる前に内面に現れる景色であり、言葉・設計・仕事・関係・暮らし・現実へ移っていく前の種です。',
+                'must_include=怖い未来や不安、比較、欠乏として置かれた景色もイマジナルになりうる。',
+                'must_include=Muは、今どんな未来の景色を見ているかを映すかがみです。',
+                'must_not=思い描く力',
+                'must_not=透明な地図',
+                'must_not=ラカン',
+                'must_not=imaginary',
+                'must_not=たぶん',
+              ]
+            : []),
+          muCanonSeedText.slice(0, 1800),
         ]
       : [];
 

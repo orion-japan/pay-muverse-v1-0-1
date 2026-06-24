@@ -729,8 +729,31 @@ const obsCard = (() => {
     parts.push(
       '',
       'MU_CANON_KNOWLEDGE_V1 (DO NOT OUTPUT)',
-      clampLines(muCanonSeedText, 18),
+      clampLines(muCanonSeedText, 22),
     );
+
+    if (String(muCanonKnowledge?.mode ?? '') === 'concept_explain') {
+      parts.push(
+        '',
+        'MU_CANON_CONCEPT_EXPLAIN_CONTRACT (DO NOT OUTPUT)',
+        [
+          'priority=highest',
+          'answerType=direct_concept_answer',
+          'must_start=Muでいうイマジナルは、内面に立ち上がる未来の景色です。',
+          'must_define=現実になる前に内面に現れ、言葉・設計・仕事・関係・暮らし・現実へ移っていく前の種として説明する',
+          'must_include=怖い未来や不安、比較、欠乏として置かれた景色もイマジナルになりうる',
+          'must_include=Muは、今どんな未来の景色を見ているかを映すかがみ',
+          'must_not=思い描く力',
+          'must_not=透明な地図',
+          'must_not=ラカン',
+          'must_not=imaginary',
+          'must_not=たぶん',
+          'must_not=もし本の文脈が',
+          'must_not=どこで迷っている',
+          'do_not_follow=NORMAL_DETAIL_V1 generic concept wording when it conflicts with this contract',
+        ].join('\n'),
+      );
+    }
   }
 
   // FLOW（短く）※生文/オブジェクト事故を落とす
