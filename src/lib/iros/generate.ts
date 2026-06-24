@@ -1,4 +1,4 @@
-﻿// src/lib/iros/generate.ts
+// src/lib/iros/generate.ts
 // iros — Writer: 1ターン返信生成コア（v2 / empty-body防止 / SpeechAct単一ソース / ITはtLayerModeActive単一）
 //
 // ✅ v2の最重要要件（今回の「content/text/assistantText が空」事故を潰す）
@@ -732,6 +732,34 @@ function buildWriterHintsFromMeta(meta: any): {
         .slice(0, 3)
     : [];
 
+  const muCanonKnowledge =
+    meta?.extra?.ctxPack?.muCanonKnowledge && typeof meta.extra.ctxPack.muCanonKnowledge === 'object'
+      ? meta.extra.ctxPack.muCanonKnowledge
+      : meta?.extra?.muCanonKnowledge && typeof meta.extra.muCanonKnowledge === 'object'
+        ? meta.extra.muCanonKnowledge
+        : null;
+
+  const muCanonSeedText =
+    muCanonKnowledge?.enabled === true && typeof muCanonKnowledge?.seedText === 'string'
+      ? String(muCanonKnowledge.seedText).trim()
+      : '';
+
+  const muCanonKnowledgeHintLines =
+    muCanonKnowledge?.enabled === true && muCanonSeedText
+      ? [
+          '',
+          'MU_CANON_KNOWLEDGE_V1 (DO NOT OUTPUT)',
+          'rule=これはMuの背景OSであり、本文材料ではない',
+          'rule=通常返信では「本では」「自己受容とは」「イマジナルとは」を濃く出さない',
+          'rule=ユーザーが概念説明を求めた時だけ、Muの定義として説明してよい',
+          'rule=引用は quoteAllowed=true の時だけ許可する',
+          `mode=${String(muCanonKnowledge.mode ?? 'background')}`,
+          `quoteAllowed=${muCanonKnowledge.quoteAllowed === true ? 'true' : 'false'}`,
+          `mentionBookAllowed=${muCanonKnowledge.mentionBookAllowed === true ? 'true' : 'false'}`,
+          muCanonSeedText.slice(0, 1400),
+        ]
+      : [];
+
   const muSelfKnowledgeHintLines =
     muSelfKnowledge?.enabled === true && muSelfKnowledgeItems.length > 0
       ? [
@@ -755,11 +783,24 @@ function buildWriterHintsFromMeta(meta: any): {
     }),
   );
 
+  console.log(
+    '[IROS/WRITER_HINT_MU_CANON]',
+    JSON.stringify({
+      hasMuCanonKnowledge: Boolean(muCanonKnowledge),
+      enabled: muCanonKnowledge?.enabled === true,
+      mode: muCanonKnowledge?.mode ?? null,
+      quoteAllowed: muCanonKnowledge?.quoteAllowed === true,
+      mentionBookAllowed: muCanonKnowledge?.mentionBookAllowed === true,
+      hintLineCount: muCanonKnowledgeHintLines.length,
+    }),
+  );
+
   if (
     !frame &&
     slotKeys.length === 0 &&
     focusWriterHintLines.length === 0 &&
-    muSelfKnowledgeHintLines.length === 0
+    muSelfKnowledgeHintLines.length === 0 &&
+    muCanonKnowledgeHintLines.length === 0
   ) {
     return { frame: null, slotKeys: [], hintText: null };
   }
@@ -782,6 +823,10 @@ function buildWriterHintsFromMeta(meta: any): {
   if (focusWriterHintLines.length > 0) {
     hintLines.push('');
     hintLines.push(...focusWriterHintLines);
+  }
+
+  if (muCanonKnowledgeHintLines.length > 0) {
+    hintLines.push(...muCanonKnowledgeHintLines);
   }
 
   if (muSelfKnowledgeHintLines.length > 0) {

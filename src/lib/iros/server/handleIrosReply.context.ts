@@ -1,4 +1,4 @@
-﻿
+
 function isDiagnosisFollowupGeneralDetailRequest(v: unknown): boolean {
   const s = String(v ?? '').replace(/\s+/g, '').trim();
   return /(診断を詳しく|診断内容を詳しく|詳しくしてください|詳しくして|深めて|深掘り|もう少し見て|もっと見て|解説して)/u.test(s);
@@ -33,6 +33,7 @@ import {
 import { buildFramePlan, type InputKind, type IrosStateLite } from '@/lib/iros/language/frameSlots';
 import { resolveFocusResolution } from '@/lib/iros/conversation/focusResolution';
 import { resolveMuSelfKnowledge } from '@/lib/iros/knowledge/muSelfKnowledge';
+import { resolveMuCanonKnowledge } from '@/lib/iros/knowledge/muCanonKnowledge';
 import { resolveTurnFrame } from '@/lib/iros/turnFrame/resolveTurnFrame';
 
 // ✅ 外部conversationId(string) -> DB conversation_id(uuid) 変換
@@ -2644,6 +2645,39 @@ export async function buildTurnContext(
     );
   } catch (e) {
     console.warn('[IROS/FOCUS_RESOLUTION][FAILED]', { error: e });
+  }
+
+  // =========================
+  // ✅ Mu Canon Knowledge OS
+  // =========================
+  // - 本文は生成しない。
+  // - 通常返信にも薄く常時入るMuの背景OS。
+  // - 自己受容は濃く出さず、返答姿勢として扱う。
+  try {
+    (baseMetaForTurn as any).extra ??= {};
+    (baseMetaForTurn as any).extra.ctxPack ??= {};
+
+    const muCanonKnowledge = resolveMuCanonKnowledge({
+      userText: text,
+      ctxPack: (baseMetaForTurn as any).extra.ctxPack,
+    });
+
+    (baseMetaForTurn as any).extra.muCanonKnowledge = muCanonKnowledge;
+    (baseMetaForTurn as any).extra.ctxPack.muCanonKnowledge = muCanonKnowledge;
+
+    console.log(
+      '[IROS/MU_CANON_KNOWLEDGE]',
+      JSON.stringify({
+        enabled: muCanonKnowledge.enabled,
+        mode: muCanonKnowledge.mode,
+        reason: muCanonKnowledge.reason,
+        quoteAllowed: muCanonKnowledge.quoteAllowed,
+        mentionBookAllowed: muCanonKnowledge.mentionBookAllowed,
+        concepts: muCanonKnowledge.concepts,
+      }),
+    );
+  } catch (e) {
+    console.warn('[IROS/MU_CANON_KNOWLEDGE][FAILED]', { error: e });
   }
 
   // ✅ eventFrame / seedMode / sourceKind:

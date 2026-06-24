@@ -1,4 +1,4 @@
-﻿/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 // src/lib/iros/language/rephraseEngine.ts
 // iros — Rephrase/Generate Engine (slot-preserving)
@@ -713,6 +713,24 @@ const obsCard = (() => {
   // META（さらに短く）※STATEはここに入れない
   if (mergedMetaTextForInternalPack && String(mergedMetaTextForInternalPack).trim()) {
     parts.push('', 'META:', clampLines(String(mergedMetaTextForInternalPack), 12));
+  }
+
+  // Mu Canon Knowledge（薄いOSヒント）
+  const muCanonKnowledge = (ctxPack as any)?.muCanonKnowledge && typeof (ctxPack as any).muCanonKnowledge === 'object'
+    ? (ctxPack as any).muCanonKnowledge
+    : null;
+
+  const muCanonSeedText =
+    muCanonKnowledge?.enabled === true && typeof muCanonKnowledge?.seedText === 'string'
+      ? String(muCanonKnowledge.seedText).trim()
+      : '';
+
+  if (muCanonSeedText) {
+    parts.push(
+      '',
+      'MU_CANON_KNOWLEDGE_V1 (DO NOT OUTPUT)',
+      clampLines(muCanonSeedText, 18),
+    );
   }
 
   // FLOW（短く）※生文/オブジェクト事故を落とす
