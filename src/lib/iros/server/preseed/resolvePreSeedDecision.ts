@@ -2089,6 +2089,25 @@ export async function resolvePreSeedDecision(
         : [];
 
 
+  if (isBookConceptExplainAsk(userText) || isStandaloneCanonConceptAsk(userText)) {
+    const muCanonConceptReason = isBookConceptExplainAsk(userText)
+      ? 'book_canon_concept_explain'
+      : 'standalone_canon_concept_explain';
+
+    console.log('[IROS/PRE_SEED_ENGINE][MU_CANON_CONCEPT_EXPLAIN_DIRECT_ROUTE_V2]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode ?? null,
+      userTextHead: userText.slice(0, 120),
+      reason: muCanonConceptReason,
+    });
+
+    return buildMuCanonConceptExplainDecision({
+      userText,
+      reason: muCanonConceptReason,
+    });
+  }
+
   if (conversationScopeBlocksPastContext && isBookOnboardingImajinalReflection(userText)) {
     console.log('[IROS/PRE_SEED_ENGINE][BOOK_ONBOARDING_V1]', {
       traceId: args.traceId ?? null,
