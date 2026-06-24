@@ -6,6 +6,7 @@ import type { PreSeedDecision, ResolvePreSeedDecisionArgs } from './types';
 import { detectPreSeedIntent } from './detectPreSeedIntent';
 import { buildScreenshotDiagnosisPreSeed } from './buildScreenshotDiagnosisPreSeed';
 import { buildPersonContextPreSeed } from './buildPersonContextPreSeed';
+import { buildMuBookVolume1AuthorKnowledge } from '../../knowledge/muBookVolume1AuthorKnowledge';
 
 function normalizeLite(v: any): string {
   return String(v ?? '')
@@ -1565,7 +1566,7 @@ function isFreshConversationPastReferenceLike(userTextRaw: string): boolean {
 
   // 本・Mu Canon の概念説明は、新規会話でも「前の会話の続き」ではない。
   // ここで direct_reply に落とすと Mu Canon Knowledge / Writer に到達しない。
-  if (isBookConceptExplainAsk(userTextRaw) || isStandaloneCanonConceptAsk(userTextRaw)) {
+  if (isBookAuthorModeAsk(userTextRaw) || isBookConceptExplainAsk(userTextRaw) || isStandaloneCanonConceptAsk(userTextRaw)) {
     return false;
   }
 
@@ -1675,6 +1676,152 @@ function isMuBookTitleConceptConfirmAsk(userTextRaw: string): boolean {
   return hasMuBookTitle && hasCanonConcept && hasConceptAsk;
 }
 
+
+function isBookAuthorModeAsk(userTextRaw: string): boolean {
+  const compact = String(userTextRaw ?? '')
+    .trim()
+    .replace(/[　\s]+/g, '');
+
+  if (!compact) return false;
+
+  const hasPersonalSignal =
+    /私|わたし|僕|自分|もうひとつのわたし|もう一つのわたし|もうひとつの私|もう一つの私/u.test(compact);
+
+  const hasImajinalOrCreativeSignal =
+    /イマジナル|創造の方向|未来の景色|内面に立ち上がる|Muは.*(見|わか|分か)|見てください|見てほしい|映して/u.test(compact);
+
+  const hasBookWorldSignal =
+    /本を読んで|本で読んだ|本で読みました|第1巻|第一巻|もうひとつのわたし|みゆ|セミナー|きれいな言葉|綺麗な言葉|人の不安|お金が動く|怖い未来|置いてきた叡智/u.test(compact);
+
+  const hasSelfReflectionAsk =
+    /わかりますか|分かりますか|見えますか|見て|知りたい|ありますか|あるのでしょうか|でしょうか|ですか/u.test(compact);
+
+  const personalImajinalAsk =
+    hasPersonalSignal && hasImajinalOrCreativeSignal && hasSelfReflectionAsk;
+
+  const authorDepthAsk =
+    hasBookWorldSignal &&
+    (
+      hasPersonalSignal ||
+      hasImajinalOrCreativeSignal ||
+      /信じられない|怖い|不安|疑|身構え|人の悩み|誠実|豊か|仕事|相談|創造/u.test(compact)
+    );
+
+  // 純粋な定義質問は concept_explain へ残す
+  const pureConceptExplain =
+    /^(イマジナル|創造の方向|Muverse|ミューバース|かがみ|鏡|自己受容)(とは|を教えて|を詳しく|の意味|って何|ってなに|とは何|とはなに)/u.test(compact);
+
+  if (pureConceptExplain && !hasPersonalSignal && !hasBookWorldSignal) return false;
+
+  return personalImajinalAsk || authorDepthAsk;
+}
+
+function buildMuBookAuthorModeDecision(args: {
+  userText: string;
+  reason?: string | null;
+}): PreSeedDecision {
+  const seedText = buildMuBookVolume1AuthorKnowledge({
+    userText: args.userText,
+    quoteAllowed: false,
+  });
+
+  return {
+    kind: 'normal_chat',
+    confidence: 0.99,
+
+    sourceAuthority: 'user_text',
+    sourceKind: 'mu_book_author_mode',
+    sourceId: null,
+    sourceText: args.userText,
+
+    route: 'mu_canon_concept_writer',
+
+    seedText,
+    directReply: null,
+    writerInput: {
+      mode: 'book_author',
+      userText: args.userText,
+      seedText,
+      reason: args.reason ?? 'mu_book_author_mode',
+    } as any,
+
+    shouldBypassWriter: false,
+    shouldBypassRephrase: true,
+    shouldUsePreSeedWriter: true,
+
+    shouldSuppressHistoryForWriter: false,
+    shouldSuppressSimilarFlow: true,
+    shouldSuppressSlotPlan: true,
+    shouldSuppressMemoryDelta: false,
+    shouldSuppressIntuitionCandidate: false,
+    shouldSuppressNormalResonance: true,
+
+    shouldOpenContextThread: false,
+    contextThreadCode: null,
+
+    ctxPackPatch: {
+      muCanonKnowledge: true,
+      muCanonKnowledgeMode: 'book_author',
+      bookAuthorMode: true,
+      bookAuthorKnowledge: seedText,
+      presentationKind: 'book_author',
+      inputKind: 'book_author',
+      sourceKind: 'mu_book_author_mode',
+      shortSummary: args.userText,
+      goalKind: 'self_reflection',
+      targetKind: 'imajinal_reflection',
+      replyGoal: { kind: 'self_reflection', questionsMax: 1 },
+      resolvedAsk: {
+        askType: 'book_author_reflection',
+        topic: 'mu_volume_1',
+      },
+      qCode: 'Q3',
+      depthStage: 'I1',
+      shouldSuppressSimilarFlow: true,
+      shouldSuppressSlotPlan: true,
+      shouldSuppressNormalResonance: true,
+      slotPlanPolicy: 'BOOK_AUTHOR_MODE',
+      writerPatternKey: 'BOOK_AUTHOR_MODE_V1',
+      similarFlowSeed: '',
+      similarFlowDebug: null,
+    } as any,
+
+    metaPatch: {
+      muCanonKnowledge: true,
+      muCanonKnowledgeMode: 'book_author',
+      bookAuthorMode: true,
+      presentationKind: 'book_author',
+      inputKind: 'book_author',
+      sourceKind: 'mu_book_author_mode',
+      goalKind: 'self_reflection',
+      targetKind: 'imajinal_reflection',
+      replyGoal: { kind: 'self_reflection', questionsMax: 1 },
+      resolvedAsk: {
+        askType: 'book_author_reflection',
+        topic: 'mu_volume_1',
+      },
+      q_code: 'Q3',
+      qCode: 'Q3',
+      depth_stage: 'I1',
+      depthStage: 'I1',
+      e_turn: 'e3',
+      eTurn: 'e3',
+      shouldSuppressSimilarFlow: true,
+      shouldSuppressSlotPlan: true,
+      shouldSuppressNormalResonance: true,
+      slotPlanPolicy: 'BOOK_AUTHOR_MODE',
+      writerPatternKey: 'BOOK_AUTHOR_MODE_V1',
+      finalTextPolicy: 'FINAL_TEXT_BOOK_AUTHOR_MODE_NO_TEMPLATE',
+    } as any,
+
+    debug: {
+      reason: args.reason ?? 'mu_book_author_mode',
+      matchedPattern: 'BOOK_AUTHOR_MODE_V1',
+      sourceTextHead: args.userText.slice(0, 120),
+      seedHead: seedText.slice(0, 160),
+    },
+  } as any;
+}
 function buildMuCanonConceptExplainSeed(userTextRaw: string): string {
   const compact = String(userTextRaw ?? '').replace(/[　\s]+/g, '');
 
@@ -2166,6 +2313,22 @@ export async function resolvePreSeedDecision(
 
 
   const isMuBookTitleConceptConfirm = isMuBookTitleConceptConfirmAsk(userText);
+  const isBookAuthorMode = isBookAuthorModeAsk(userText);
+
+  if (isBookAuthorMode) {
+    console.log('[IROS/PRE_SEED_ENGINE][BOOK_AUTHOR_MODE_DIRECT_ROUTE_V1]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode ?? null,
+      userTextHead: userText.slice(0, 120),
+      reason: 'book_author_self_reflection',
+    });
+
+    return buildMuBookAuthorModeDecision({
+      userText,
+      reason: 'book_author_self_reflection',
+    });
+  }
 
   if (isMuBookTitleConceptConfirm || isBookConceptExplainAsk(userText) || isStandaloneCanonConceptAsk(userText)) {
     const muCanonConceptReason = isMuBookTitleConceptConfirm
@@ -3247,5 +3410,6 @@ if (
 
   return null;
 }
+
 
 

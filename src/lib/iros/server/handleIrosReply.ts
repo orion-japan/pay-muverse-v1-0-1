@@ -6973,14 +6973,95 @@ function normForRecall(v: any): string {
               },
       });
 
-      const flowSeed = formatFlowSeedV1(flowSeedObj).trim();
+      const bookAuthorModeForFlowSeed =
+        (extraLocal as any)?.bookAuthorMode === true ||
+        (extraLocal as any)?.ctxPack?.bookAuthorMode === true ||
+        (extraLocal as any)?.muCanonKnowledgeMode === 'book_author' ||
+        (extraLocal as any)?.ctxPack?.muCanonKnowledgeMode === 'book_author' ||
+        (extraLocal as any)?.muCanonKnowledge?.mode === 'book_author' ||
+        (extraLocal as any)?.ctxPack?.muCanonKnowledge?.mode === 'book_author' ||
+        (extraLocal as any)?.resolvedAsk?.askType === 'book_author_reflection' ||
+        (extraLocal as any)?.ctxPack?.resolvedAsk?.askType === 'book_author_reflection' ||
+        (extraLocal as any)?.writerPatternKey === 'BOOK_AUTHOR_MODE_V1' ||
+        (extraLocal as any)?.ctxPack?.writerPatternKey === 'BOOK_AUTHOR_MODE_V1' ||
+        (
+          /もうひとつのわたし|もう一つのわたし|Mu|ミュー|イマジナル/u.test(String(text ?? '')) &&
+          /イマジナル|創造の方向|未来の景色|かがみ|鏡/u.test(String(text ?? '')) &&
+          /教えて|詳しく|知りたい|わかりますか|分かりますか|見たい|見て/u.test(String(text ?? ''))
+        );
+
+      let flowSeed = formatFlowSeedV1(flowSeedObj).trim();
+
+      if (bookAuthorModeForFlowSeed) {
+        flowSeed = [
+          'SEED (DO NOT OUTPUT):',
+          'BOOK_AUTHOR_MODE_FINAL_CONTRACT:',
+          'priority=highest',
+          'WRITER_PATTERN=BOOK_AUTHOR_MODE_V1',
+          'SURFACE_PLAN=book_author_reflection',
+          'PRESSURE=book_author',
+          'DEPTH=I1',
+          'answerType=reader_self_reflection',
+          'rule=これは概念説明ではなく、第1巻の本文世界を背負った読者応答として返す',
+          'rule=本の説明Botにならない',
+          'rule=著者本人を名乗らない',
+          'rule=「もうひとつのわたし」は、読者の内面に立ち上がる創造の入口として扱う',
+          'rule=「イマジナル」は、現実になる前に内面に立ち上がる未来の景色として扱う',
+          'rule=みゆの疑い、怖い未来、人の不安でお金が動く世界、かがみ、創造の方向のいずれかに接続する',
+          'rule=「言葉になる前」「内側」「別の見方」「別のあなた」「別の呼び方の自分」「一つに決めなくていい」を中心表現に使わない',
+          'rule=「もし本の文脈なら」「どの作品か」は言わない。第1巻の文脈として迷わず返す',
+          'must_start=あなたが知りたいのは、ただの概念ではありません。',
+          'must_include=内面',
+          'must_include=現実になる前',
+          'must_include=未来の景色',
+          'must_include=創造の方向',
+          'must_not_use=言葉になる前 / 内側 / 別の見方 / 別のあなた / 別の呼び方の自分 / 一つに決めなくていい',
+          `USER_QUESTION=${String(text ?? '').trim()}`,
+        ].join('\n');
+
+        (extraLocal as any).ctxPack ??= {};
+        (extraLocal as any).ctxPack.flowSeed = flowSeed;
+        (extraLocal as any).ctxPack.flowSeedSyncedForRephraseBridge = flowSeed;
+        (extraLocal as any).ctxPack.bookAuthorMode = true;
+        (extraLocal as any).ctxPack.muCanonKnowledgeMode = 'book_author';
+        (extraLocal as any).ctxPack.presentationKind = 'book_author';
+        (extraLocal as any).ctxPack.inputKind = 'book_author';
+        (extraLocal as any).ctxPack.sourceKind = 'mu_volume_1_author';
+        (extraLocal as any).ctxPack.slotPlanPolicy = 'BOOK_AUTHOR_MODE';
+        (extraLocal as any).ctxPack.writerPatternKey = 'BOOK_AUTHOR_MODE_V1';
+        (extraLocal as any).ctxPack.shouldSuppressNormalResonance = true;
+        (extraLocal as any).ctxPack.shouldSuppressSimilarFlow = true;
+        (extraLocal as any).ctxPack.shouldSuppressSlotPlan = true;
+        (extraLocal as any).ctxPack.goalKind = 'self_reflection';
+        (extraLocal as any).ctxPack.targetKind = 'book_author';
+        (extraLocal as any).ctxPack.replyGoal = 'book_author_reflection';
+
+        // Book Author Mode では、過去の通常自己分析SEEDが混ざると
+        // 「内側」「別の見方」「もう一人の自分」へ戻るため、Writer注入前に切る。
+        (extraLocal as any).ctxPack.mirrorFlowV1 = null;
+        (extraLocal as any).ctxPack.mirrorFlowSeed = '';
+        (extraLocal as any).ctxPack.pastStateNoteText = '';
+        (extraLocal as any).ctxPack.historyDigestV1 = null;
+        (extraLocal as any).ctxPack.recallCandidates = [];
+        (extraLocal as any).ctxPack.recallUsed = false;
+        (extraLocal as any).ctxPack.recallHit = false;
+
+        (extraLocal as any).flowSeed = flowSeed;
+        (extraLocal as any).flowSeedSyncedForRephraseBridge = flowSeed;
+        (extraLocal as any).writerPatternKey = 'BOOK_AUTHOR_MODE_V1';
+        (extraLocal as any).slotPlanPolicy = 'BOOK_AUTHOR_MODE';
+        (extraLocal as any).shouldSuppressNormalResonance = true;
+      }
+
       console.log('[IROS/FLOW_SEED_RESOLVED_REFERENCE_DIAG]', {
+        bookAuthorModeForFlowSeed,
         hasResolvedAskForSeedAnchor: Boolean(resolvedAskForSeedAnchor),
         hasResolvedReferenceInFlowSeed: flowSeed.includes('RESOLVED_REFERENCE:'),
         hasReferenceCheckInFlowSeed: flowSeed.includes('askType=reference_check'),
         hasExpiresAfterTurnInFlowSeed: flowSeed.includes('expiresAfterTurn=true'),
         hasTcfRotationSeed: flowSeed.includes('TCF_ROTATION_SEED'),
         hasTcfRotationDecision: flowSeed.includes('TCF_ROTATION_DECISION'),
+        hasBookAuthorFinalContract: flowSeed.includes('BOOK_AUTHOR_MODE_FINAL_CONTRACT'),
         flowSeedHead: flowSeed.slice(0, 900),
         flowSeedFull: flowSeed.slice(0, 5000),
       });

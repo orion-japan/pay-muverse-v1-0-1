@@ -739,6 +739,24 @@ function buildWriterHintsFromMeta(meta: any): {
         ? meta.extra.muCanonKnowledge
         : null;
 
+  const bookAuthorModeFromCtxPack =
+    meta?.extra?.ctxPack?.bookAuthorMode === true ||
+    meta?.extra?.ctxPack?.book_author_mode === true ||
+    meta?.extra?.ctxPack?.muCanonKnowledgeMode === 'book_author' ||
+    meta?.extra?.ctxPack?.presentationKind === 'book_author' ||
+    meta?.extra?.ctxPack?.inputKind === 'book_author' ||
+    meta?.extra?.ctxPack?.sourceKind === 'mu_volume_1_author' ||
+    meta?.extra?.ctxPack?.writerPatternKey === 'BOOK_AUTHOR_MODE_V1' ||
+    meta?.extra?.ctxPack?.writerPatternKey === 'book_author_mode_v1' ||
+    meta?.extra?.bookAuthorMode === true ||
+    meta?.extra?.muCanonKnowledgeMode === 'book_author' ||
+    meta?.extra?.writerPatternKey === 'BOOK_AUTHOR_MODE_V1' ||
+    meta?.extra?.writerPatternKey === 'book_author_mode_v1';
+
+  const effectiveMuCanonMode = bookAuthorModeFromCtxPack
+    ? 'book_author'
+    : String(muCanonKnowledge?.mode ?? 'background');
+
   const muCanonSeedText =
     muCanonKnowledge?.enabled === true && typeof muCanonKnowledge?.seedText === 'string'
       ? String(muCanonKnowledge.seedText).trim()
@@ -756,7 +774,26 @@ function buildWriterHintsFromMeta(meta: any): {
           `mode=${String(muCanonKnowledge.mode ?? 'background')}`,
           `quoteAllowed=${muCanonKnowledge.quoteAllowed === true ? 'true' : 'false'}`,
           `mentionBookAllowed=${muCanonKnowledge.mentionBookAllowed === true ? 'true' : 'false'}`,
-          ...(String(muCanonKnowledge.mode ?? '') === 'concept_explain'
+          ...(effectiveMuCanonMode === 'book_author'
+            ? [
+                '',
+                'MU_CANON_BOOK_AUTHOR_CONTRACT (DO NOT OUTPUT)',
+                'priority=highest',
+                'answerType=reader_self_reflection',
+                'rule=概念説明ではなく、第1巻の本文世界を背負った読者応答として返す',
+                'rule=一般心理説明にしない',
+                'rule=「現実にいるもう一人」「想像された自分」「別のあなた」「見せる自分」「隠している願い」「内側」は使わない',
+                'rule=必ず「内面」を使う',
+                'rule=みゆの疑い、怖い未来、人の不安でお金が動く世界、置いてきた叡智、創造の方向のどれかに接続する',
+                'rule=「たぶん」「おそらく」「かもしれない」「かも」で中心判断を弱めない',
+                'must_start=あなたが知りたいのは、ただの概念ではありません。',
+                'must_include=内面に立ち上がる未来の景色',
+                'must_include=創造の方向',
+                'must_not_use=言葉になる前 / 内側 / 別の見方 / 別のあなた / 一つに決めなくていい',
+                'must_use=現実になる前 / 形になる前 / 内面',
+              ]
+            : []),
+          ...(effectiveMuCanonMode === 'concept_explain'
             ? [
                 '',
                 'MU_CANON_CONCEPT_EXPLAIN_CONTRACT (DO NOT OUTPUT)',
@@ -811,6 +848,8 @@ function buildWriterHintsFromMeta(meta: any): {
       hasMuCanonKnowledge: Boolean(muCanonKnowledge),
       enabled: muCanonKnowledge?.enabled === true,
       mode: muCanonKnowledge?.mode ?? null,
+      effectiveMode: effectiveMuCanonMode,
+      bookAuthorModeFromCtxPack,
       quoteAllowed: muCanonKnowledge?.quoteAllowed === true,
       mentionBookAllowed: muCanonKnowledge?.mentionBookAllowed === true,
       hintLineCount: muCanonKnowledgeHintLines.length,

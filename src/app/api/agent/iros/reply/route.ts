@@ -2285,7 +2285,25 @@ const metaForRelationshipContextCapture: any = {
         });
       }
 
-      const normalizedWriterText = String(writerText ?? '').trim();
+      const normalizedWriterTextRaw = String(writerText ?? '').trim();
+      const isBookAuthorConceptWriter =
+        String((writerInput as any)?.mode ?? '') === 'book_author' ||
+        String((preSeedDecision as any)?.sourceKind ?? '') === 'mu_book_author_mode' ||
+        String(((preSeedDecision as any)?.ctxPackPatch ?? {})?.presentationKind ?? '') === 'book_author';
+
+      const normalizedWriterText = isBookAuthorConceptWriter
+        ? normalizedWriterTextRaw
+            .replace(/静かに/g, '創造の方向へ')
+            .replace(/もうひとり/g, 'もうひとつのわたし')
+            .replace(/もう一人/g, 'もうひとつのわたし')
+            .replace(/秘密の別人格/g, '隠れた人格')
+            .replace(/失いたくない自分/g, '守りたいもの')
+            .replace(/置いていかれたくない自分/g, '怖い未来に急がされる景色')
+            .replace(/強く見せたい自分/g, '不安に形を借りた景色')
+            .replace(/足りない/g, '未来が閉じていく')
+            .replace(/欠けている/g, '未来が閉じていく')
+            .trim()
+        : normalizedWriterTextRaw;
 
       const forbiddenMuCanonConcept =
         /(ユング|ラカン|imaginary|頭の中で思い描く力|透明な地図|子どもが.*まね|本で使われる文脈によって|もし本の文脈|たぶん|言葉になる前|言葉になる前から|設計になる前から|心の内側|内側|はい、見えます)/u;
