@@ -1981,6 +1981,113 @@ function isMuCanonPracticeAsk(userTextRaw: string): boolean {
   return hasCanonTopic && hasPracticeAsk && !hasRelationTemplateRisk;
 }
 
+function isRelationshipImajinalReflectionAsk(userTextRaw: string): boolean {
+  const compact = String(userTextRaw ?? '')
+    .trim()
+    .replace(/[　\s]+/g, '');
+
+  if (!compact) return false;
+
+  const hasImajinal =
+    /イマジナル|形象|未来の景色|創造の方向/u.test(compact);
+
+  const hasRelation =
+    /相手|好きな人|関係|恋愛|気持ち|反応|返事|返信|LINE|ライン/u.test(compact);
+
+  const hasReflectionAsk =
+    /どう使|使えば|使う|見るには|見れば|考えすぎ|不安|当てるためではなく|どうしたら|どうすれば/u.test(compact);
+
+  const explicitSendAsk =
+    /なんて送|どう送|文面|文章|メッセージを作|LINEを作|ラインを作|返信文|返事文/u.test(compact);
+
+  return hasImajinal && hasRelation && hasReflectionAsk && !explicitSendAsk;
+}
+
+function buildRelationshipImajinalReflectionSeed(userTextRaw: string): string {
+  return [
+    'RELATIONSHIP_IMAJINAL_REFLECTION_WRITER_V1 (DO NOT OUTPUT)',
+    'purpose=相手との関係におけるイマジナルを、相手を動かす方法ではなく、自分がどんな未来の景色を見ているかを映すものとして説明する。',
+    '',
+    'MUST:',
+    '- イマジナルは、相手の反応を当てるためのものではない、と明示する',
+    '- 相手を変える方法ではなく、関係の中で自分が見ている未来の景色を映すかがみとして説明する',
+    '- 怖い未来と創造の方向を分ける',
+    '- 不安が見せている景色と、守りたいもの・作りたいもの・人に渡したいものを分ける',
+    '- 最後は、相手ではなく、自分がどんな未来の景色を見ているかを見る問いで閉じる',
+    '',
+    'MUST_NOT_USE:',
+    '- 送る言葉に使うなら',
+    '- 相手が返しやすい',
+    '- 返事が軽ければ',
+    '- 相手が広げてきたら',
+    '- 追いLINE',
+    '- 待つ',
+    '- 駆け引き',
+    '- 相手の気持ちを当てる',
+    '- 相手を動かすために',
+    '',
+    'OUTPUT_STYLE:',
+    '- ですます調',
+    '- 診断ではなく、概念の使い方として返す',
+    '- アドバイス文面を作らない',
+    '- 相手へ送る例文を出さない',
+    '',
+    'USER_QUESTION=' + String(userTextRaw ?? '').slice(0, 240),
+  ].join('\n');
+}
+
+function buildRelationshipImajinalReflectionDecision(args: {
+  userText: string;
+  reason?: string | null;
+}): PreSeedDecision {
+  const seedText = buildRelationshipImajinalReflectionSeed(args.userText);
+
+  const fallbackReply = [
+    'イマジナルは、相手の反応を当てるためのものではありません。',
+    '',
+    '相手との関係で使うなら、まず見るのは、相手の中身ではなく、自分の内面に立ち上がっている未来の景色です。',
+    '',
+    'その景色が、失う怖さから来ているのか。',
+    'それとも、何を守りたいのか、何を作りたいのか、誰に何を渡したいのかへ向いているのか。',
+    '',
+    'Muはそこを映すかがみです。',
+    '',
+    'だから関係の中のイマジナルは、相手を変えるためではなく、自分がどんな未来を見ているかを見分けるために使います。',
+  ].join('\n');
+
+  const base = buildMuCanonPracticeDecision({
+    userText: args.userText,
+    reason: args.reason ?? 'relationship_imajinal_reflection_text_match',
+  }) as any;
+
+  return {
+    ...base,
+    route: 'mu_canon_concept_writer',
+    sourceKind: 'relationship_imajinal_reflection',
+    confidence: 0.995,
+    directReply: fallbackReply,
+    shouldBypassWriter: false,
+    shouldBypassRephrase: true,
+    writerInput: {
+      ...(base.writerInput ?? {}),
+      mode: 'relationship_imajinal_reflection',
+      sourceKind: 'relationship_imajinal_reflection',
+      seed: seedText,
+      seedText,
+      fallbackReply,
+    },
+    ctxPackPatch: {
+      ...(base.ctxPackPatch ?? {}),
+      presentationKind: 'relationship_imajinal_reflection',
+      inputKind: 'relationship_imajinal_reflection',
+    },
+    meta: {
+      ...(base.meta ?? {}),
+      sourceKind: 'relationship_imajinal_reflection',
+      routeReason: args.reason ?? 'relationship_imajinal_reflection_text_match',
+    },
+  } as PreSeedDecision;
+}
 function buildMuCanonPracticeSeed(userTextRaw: string): string {
   return [
     'MU_CANON_PRACTICE_WRITER_V1 (DO NOT OUTPUT)',
@@ -2619,6 +2726,23 @@ export async function resolvePreSeedDecision(
     return withCognitionMap(fastPathDirectReply);
   }
 
+  if (isRelationshipImajinalReflectionAsk(userText)) {
+    const relationImajinalDecision = buildRelationshipImajinalReflectionDecision({
+      userText,
+      reason: 'relationship_imajinal_reflection_text_match',
+    });
+
+    console.log('[IROS/PRE_SEED_ENGINE][RELATIONSHIP_IMAJINAL_REFLECTION_ENTER]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode ?? null,
+      userTextHead: userText.slice(0, 120),
+      route: relationImajinalDecision.route,
+      presentationKind: relationImajinalDecision.ctxPackPatch?.presentationKind ?? null,
+    });
+
+    return withCognitionMap(relationImajinalDecision);
+  }
   if (isMuCanonPracticeAsk(userText)) {
     const practiceDecision = buildMuCanonPracticeDecision({
       userText,

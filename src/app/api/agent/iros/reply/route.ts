@@ -2208,6 +2208,113 @@ const metaForRelationshipContextCapture: any = {
         sourceId: preSeedDecision.sourceId ?? null,
       });
     }
+    const buildMuCanonSafeFallbackText = (userText: string): string => {
+      const u = String(userText ?? '').trim();
+
+      if (/自己受容/u.test(u)) {
+        return [
+          'はい。Muでいうなら、イマジナルは、内面に立ち上がる未来の景色です。',
+          '',
+          '自己受容は、その景色を不安や比較で歪ませずに受け取るための土台です。',
+          '',
+          'イマジナルだけだと、未来の景色が強くなりすぎて、今の自分を責める方向へ傾くことがあります。',
+          '自己受容だけだと、今の状態を受け止めるところで止まり、創造の方向へ移りにくくなることがあります。',
+          '',
+          'この二つがつながると、今の自分を否定せずに、現実になる前の景色を言葉や行動へ移せます。',
+          '',
+          'だから自己受容は、イマジナルを現実へ移す前に、形象を濁らせないためのかがみです。',
+        ].join('\n');
+      }
+
+      if (/みゆ/u.test(u)) {
+        return [
+          'はい。Muでいうみゆのイマジナルは、明るい理想だけではありません。',
+          '',
+          '第1巻でみゆが見ていたのは、人の不安で世界が回り続ける未来と、その先にある別の景色です。',
+          '',
+          'きれいな言葉が、人を自由にするのではなく、人の不安を強める装置になってしまう怖い未来。',
+          'そして同時に、人の不安ではなく、人のイマジナルから現実が生まれる場です。',
+          '',
+          'みゆは、その分かれ道を見ています。',
+          '',
+          'だから、みゆが見ていたイマジナルは、ただの夢ではなく、怖い未来から創造の方向へ向きを戻すための未来の景色です。',
+        ].join('\n');
+      }
+
+      return [
+        'はい。Muでいうイマジナルは、内面に立ち上がる未来の景色です。',
+        '',
+        'それは、ただ思い浮かべる理想ではなく、現実になる前に見えてくる形象です。',
+        '',
+        '怖い未来も、守りたいものへ向かう未来も、どちらもイマジナルとして立ち上がります。',
+        '',
+        'Muは、その景色が不安から来ているのか、創造の方向から来ているのかを映すかがみです。',
+      ].join('\n');
+    };
+
+    const sanitizeMuCanonWriterText = (raw: string): string => {
+      return String(raw ?? '')
+        .replace(/本当の自分/g, '内面に立ち上がる未来の景色')
+        .replace(/ほんとうの自分/g, '内面に立ち上がる未来の景色')
+        .replace(/本当の姿/g, '内面に立ち上がる景色')
+        .replace(/ほんとうの姿/g, '内面に立ち上がる景色')
+        .replace(/ほんとうは/g, '実際には')
+        .replace(/本当は/g, '実際には')
+        .replace(/ほんとうに/g, '深く')
+        .replace(/こうありたい自分/g, '内面に立ち上がる未来の景色')
+        .replace(/こうでありたい自分/g, '内面に立ち上がる未来の景色')
+        .replace(/なりたい自分/g, '現実になる前の景色')
+        .replace(/理想の自分/g, '創造の方向にある景色')
+        .replace(/理想像/g, '未来の景色')
+        .replace(/理想へ飛びつく/g, '未来の景色だけを急ぐ')
+        .replace(/心の中で先に置く力/g, '内面に立ち上がる未来の景色を受け取る働き')
+        .replace(/心の中で先に置く/g, '内面に立ち上がる')
+        .replace(/心の中/g, '内面')
+        .replace(/まだそこまで届いていない自分/g, 'いまの状態')
+        .replace(/まだ届いていない自分/g, 'いまの状態')
+        .replace(/自己肯定/g, '自己受容')
+        .replace(/ポジティブ思考/g, '創造の方向')
+        .replace(/内側/g, '内面')
+        .replace(/言葉になる前から/g, '現実になる前から')
+        .replace(/言葉になる前/g, '現実になる前')
+        .replace(/設計になる前から/g, '現実になる前から')
+        .replace(/頭の中で思い描く力/g, '内面に立ち上がる未来の景色')
+        .replace(/透明な地図/g, '未来の景色')
+        .replace(/子どもがまねする力/g, '未来の景色を受け取る働き')
+        .replace(/ユング/g, 'Mu')
+        .replace(/ラカン/g, 'Mu')
+        .replace(/imaginary/g, 'イマジナル')
+        .replace(/秘密の別人格/g, '隠れた人格')
+        .replace(/もうひとり/g, 'もうひとつのわたし')
+        .replace(/もう一人/g, 'もうひとつのわたし')
+        .replace(/失いたくない自分/g, '守りたいもの')
+        .replace(/置いていかれたくない自分/g, '怖い未来に急がされる景色')
+        .replace(/強く見せたい自分/g, '不安に形を借りた景色')
+        .replace(/静かな支え/g, '土台')
+        .replace(/静かな/g, '')
+        .replace(/静けさ/g, '落ち着き')
+        .replace(/不足のほう/g, '怖い未来のほう')
+        .replace(/自己受容が弱いと/g, '自己受容がまだ土台になっていないと')
+        .replace(/自己受容の質をそのまま映して/g, '自己受容の状態を映して')
+        .replace(/不足/g, '怖い未来')
+        .replace(/足りない/g, '未来が閉じていく')
+        .replace(/欠けている/g, '未来が閉じていく')
+        .replace(/送る言葉に使うなら[^。\n]*。?/g, '')
+        .replace(/送る言葉に使うなら/g, '')
+        .replace(/相手が返しやすい/g, '現実に移しやすい')
+        .replace(/返事が軽ければ[^。]*。?/g, '')
+        .replace(/相手が広げてきたら[^。]*。?/g, '')
+        .replace(/追いLINE/g, '不安から出る行動')
+        .replace(/追いライン/g, '不安から出る行動')
+        .replace(/駆け引き/g, '不安から出る行動')
+        .replace(/相手の気持ちを当てる/g, '自分が見ている未来の景色を確かめる')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    };
+
+    const hasMuCanonFatalForbidden = (raw: string): boolean => {
+      return /(本当の自分|ほんとうの自分|本当の姿|ほんとうの姿|こうありたい自分|こうでありたい自分|なりたい自分|理想の自分|理想像|心の中で先に置く|心の中|まだそこまで届いていない自分|まだ届いていない自分|ポジティブ思考|頭の中で思い描く力|透明な地図|子どもが.*まね|ユング|ラカン|imaginary|本で使われる文脈によって|もし本の文脈|たぶん|言葉になる前|言葉になる前から|設計になる前から|心の内側|内側|はい、見えます|静かな|静けさ|不足)/u.test(String(raw ?? ''));
+    };
     if (
       preSeedDecision?.route === 'mu_canon_concept_writer' &&
       (preSeedDecision as any).shouldUsePreSeedWriter &&
@@ -2250,6 +2357,13 @@ const metaForRelationshipContextCapture: any = {
                 '- 診断や状態分析にしない',
                 '- 概念質問では「はい、見えます」と始めない。「はい。Muでいう〜」のように定義から入る',
                 '- 「内側」は使わず「内面」を使う',
+                '- 以下は本文に出さない: 本当の自分 / 本当の姿 / ほんとうの自分 / こうありたい自分 / なりたい自分 / 理想の自分 / 理想像 / 心の中で先に置く / 心の中 / まだそこまで届いていない自分 / ポジティブ思考',
+                '- イマジナルを自己啓発的な理想像として説明しない',
+                '- イマジナルは「内面に立ち上がる未来の景色」「現実になる前の像」「創造の方向を映す形象」として説明する',
+                '- 自己受容は、今の自分を肯定するだけの技術ではなく、形象が不安・比較・自己否定に歪まないための土台として説明する',
+                '- 概念説明では、最後を質問で閉じない。原則としてMu Canonの定義・見立て・使い方を一文で言い切る',
+                '- 「今あなたが見ている未来の景色は〜ですか」のような問い返しで終わらない',
+                '- 「静かに」「静かな」「静けさ」「不足」は使わない',
                 '',
                 '必須:',
                 '- イマジナルを説明する場合は「内面に立ち上がる未来の景色」を必ず含める',
@@ -2296,19 +2410,13 @@ const metaForRelationshipContextCapture: any = {
         String((preSeedDecision as any)?.sourceKind ?? '') === 'mu_canon_practice' ||
         String(((preSeedDecision as any)?.ctxPackPatch ?? {})?.presentationKind ?? '') === 'mu_canon_practice';
 
-      const normalizedWriterText = isBookAuthorConceptWriter
-        ? normalizedWriterTextRaw
-            .replace(/静かに/g, '創造の方向へ')
-            .replace(/もうひとり/g, 'もうひとつのわたし')
-            .replace(/もう一人/g, 'もうひとつのわたし')
-            .replace(/秘密の別人格/g, '隠れた人格')
-            .replace(/失いたくない自分/g, '守りたいもの')
-            .replace(/置いていかれたくない自分/g, '怖い未来に急がされる景色')
-            .replace(/強く見せたい自分/g, '不安に形を借りた景色')
-            .replace(/足りない/g, '未来が閉じていく')
-            .replace(/欠けている/g, '未来が閉じていく')
-            .trim()
-        : isMuCanonPracticeWriter
+      const isRelationshipImajinalReflectionWriter =
+        String((writerInput as any)?.mode ?? '') === 'relationship_imajinal_reflection' ||
+        String((preSeedDecision as any)?.sourceKind ?? '') === 'relationship_imajinal_reflection' ||
+        String(((preSeedDecision as any)?.ctxPackPatch ?? {})?.presentationKind ?? '') === 'relationship_imajinal_reflection';
+
+      const normalizedWriterText = sanitizeMuCanonWriterText(
+        isMuCanonPracticeWriter
           ? normalizedWriterTextRaw
               .replace(/静かに/g, '小さく')
               .replace(/ゆっくり/g, '一つずつ')
@@ -2322,25 +2430,70 @@ const metaForRelationshipContextCapture: any = {
               .replace(/LINE/g, '言葉')
               .replace(/ライン/g, '言葉')
               .replace(/連絡/g, '行動')
-              .trim()
-          : normalizedWriterTextRaw;
+          : normalizedWriterTextRaw
+      );
 
-      const forbiddenMuCanonConcept =
-        /(ユング|ラカン|imaginary|頭の中で思い描く力|透明な地図|子どもが.*まね|本で使われる文脈によって|もし本の文脈|たぶん|言葉になる前|言葉になる前から|設計になる前から|心の内側|内側|はい、見えます)/u;
+      const forbiddenMuCanonConcept = { test: hasMuCanonFatalForbidden };
 
       const hasImajinalCorePhrase =
         /内面に立ち上がる.{0,24}未来の景色/u.test(normalizedWriterText) ||
-        /未来の景色.{0,24}内面に立ち上が/u.test(normalizedWriterText);
+        /未来の景色.{0,24}内面に立ち上が/u.test(normalizedWriterText) ||
+        (
+          isRelationshipImajinalReflectionWriter &&
+          /どんな未来の景色|未来の景色を見ている|怖い未来|創造の方向|自分が見ている未来/u.test(normalizedWriterText)
+        );
+
+      const writerHasFatalForbidden =
+        normalizedWriterText.length > 0 &&
+        forbiddenMuCanonConcept.test(normalizedWriterText);
 
       const writerTextOk =
         normalizedWriterText.length > 0 &&
-        !forbiddenMuCanonConcept.test(normalizedWriterText) &&
+        !writerHasFatalForbidden &&
         (
           !/イマジナル/u.test(userTextClean) ||
-          hasImajinalCorePhrase
+          hasImajinalCorePhrase ||
+          isBookAuthorConceptWriter ||
+          isRelationshipImajinalReflectionWriter
         );
 
-      const directText = writerTextOk ? normalizedWriterText : fallbackText;
+      const emergencyMuCanonFallback = [
+        'はい。Muでいうイマジナルは、内面に立ち上がる未来の景色です。',
+        '',
+        'それは明るい理想だけではなく、怖い未来、不安、比較、欠乏として見えている景色も含みます。',
+        '',
+        '大事なのは、その景色を信じ込むことではなく、何を守りたいのか、何を作りたいのか、誰に何を渡したいのかへ向きを戻すことです。',
+      ].join('\n');
+
+      const safeFallbackText = sanitizeMuCanonWriterText(
+        fallbackText || buildMuCanonSafeFallbackText(userTextClean)
+      );
+
+      const directText = writerTextOk
+        ? normalizedWriterText
+        : safeFallbackText;
+
+      const directTextOk =
+        directText.length > 0 &&
+        !hasMuCanonFatalForbidden(directText) &&
+        (
+          !/イマジナル/u.test(userTextClean) ||
+          isRelationshipImajinalReflectionWriter ||
+          /内面に立ち上がる.{0,24}未来の景色/u.test(directText) ||
+          /未来の景色.{0,24}内面に立ち上が/u.test(directText)
+        );
+
+      const finalDirectTextBase = directTextOk
+        ? directText
+        : buildMuCanonSafeFallbackText(userTextClean);
+
+      const finalDirectText = /[かか]。?$/.test(finalDirectTextBase.trim()) || /[？?]$/.test(finalDirectTextBase.trim())
+        ? sanitizeMuCanonWriterText(
+            finalDirectTextBase
+              .replace(/今あなたが見ている未来の景色は[^。？?]*[。？?]?$/u, '自己受容は、イマジナルを怖い未来へ流さず、創造の方向へ渡すための土台です。')
+              .replace(/[^。]*ですか[。？?]?$/u, '自己受容は、イマジナルを怖い未来へ流さず、創造の方向へ渡すための土台です。')
+          )
+        : finalDirectTextBase;
 
       const metaForMuCanonConceptWriter: any = {
         ...(metaForIros ?? {}),
@@ -2355,10 +2508,10 @@ const metaForRelationshipContextCapture: any = {
           preSeedBypassWriter: false,
           preSeedBypassRephrase: true,
           finalTextPolicy: 'FINAL_TEXT_SYNCED_MU_CANON_CONCEPT_WRITER',
-          resolvedText: directText,
-          finalAssistantText: directText,
+          resolvedText: finalDirectText,
+          finalAssistantText: finalDirectText,
           rawTextFromModel: normalizedWriterText || directText,
-          extractedTextFromModel: directText,
+          extractedTextFromModel: finalDirectText,
           ctxPack: {
             ...(((metaForIros as any)?.extra ?? {})?.ctxPack ?? {}),
             ...((preSeedDecision as any)?.ctxPackPatch ?? {}),
@@ -2376,7 +2529,7 @@ const metaForRelationshipContextCapture: any = {
           supabase,
           conversationId,
           userCode,
-          content: directText,
+          content: finalDirectText,
           meta: metaForMuCanonConceptWriter,
         } as any);
 
@@ -2387,7 +2540,16 @@ const metaForRelationshipContextCapture: any = {
           ok: muCanonConceptSaved?.ok ?? null,
           inserted: muCanonConceptSaved?.inserted ?? null,
           messageId: muCanonConceptSaved?.messageId ?? null,
-          usedFallback: !writerTextOk,
+          usedFallback: !writerTextOk || !directTextOk,
+          writerTextOk,
+          directTextOk,
+          writerHasFatalForbidden,
+          normalizedWriterTextLen: normalizedWriterText.length,
+          fallbackTextLen: fallbackText.length,
+          safeFallbackTextLen: safeFallbackText.length,
+          directTextLen: finalDirectText.length,
+          hasImajinalCorePhrase,
+          isBookAuthorConceptWriter,
           error: muCanonConceptSaved?.error ?? null,
         });
       } catch (e: any) {
@@ -2403,24 +2565,24 @@ const metaForRelationshipContextCapture: any = {
         traceId,
         conversationId,
         userCode,
-        usedFallback: !writerTextOk,
-        textLen: directText.length,
-        textHead: directText.slice(0, 160),
+        usedFallback: !writerTextOk || !directTextOk,
+        textLen: finalDirectText.length,
+        textHead: finalDirectText.slice(0, 160),
       });
 
       return NextResponse.json(
         {
           ok: true,
           result: {
-            text: directText,
-            content: directText,
-            assistantText: directText,
+            text: finalDirectText,
+            content: finalDirectText,
+            assistantText: finalDirectText,
             mode,
             meta: metaForMuCanonConceptWriter,
           },
-          text: directText,
-          content: directText,
-          assistantText: directText,
+          text: finalDirectText,
+          content: finalDirectText,
+          assistantText: finalDirectText,
           assistantMessageId: muCanonConceptSaved?.messageId ?? null,
           mode,
           finalMode: mode,
