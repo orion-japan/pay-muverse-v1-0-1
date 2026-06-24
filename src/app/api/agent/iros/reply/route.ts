@@ -2248,6 +2248,8 @@ const metaForRelationshipContextCapture: any = {
                 '- 「言葉になる前」「言葉になる前から」「設計になる前から」を使わない',
                 '- 「本で使われる文脈によって意味が変わる」「たぶん」「もし本の文脈が」と言わない',
                 '- 診断や状態分析にしない',
+                '- 概念質問では「はい、見えます」と始めない。「はい。Muでいう〜」のように定義から入る',
+                '- 「内側」は使わず「内面」を使う',
                 '',
                 '必須:',
                 '- イマジナルを説明する場合は「内面に立ち上がる未来の景色」を必ず含める',
@@ -2286,7 +2288,7 @@ const metaForRelationshipContextCapture: any = {
       const normalizedWriterText = String(writerText ?? '').trim();
 
       const forbiddenMuCanonConcept =
-        /(ユング|ラカン|imaginary|頭の中で思い描く力|透明な地図|子どもが.*まね|本で使われる文脈によって|もし本の文脈|たぶん|言葉になる前|言葉になる前から|設計になる前から)/u;
+        /(ユング|ラカン|imaginary|頭の中で思い描く力|透明な地図|子どもが.*まね|本で使われる文脈によって|もし本の文脈|たぶん|言葉になる前|言葉になる前から|設計になる前から|心の内側|内側|はい、見えます)/u;
 
       const writerTextOk =
         normalizedWriterText.length > 0 &&
