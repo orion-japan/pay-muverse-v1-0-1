@@ -2291,6 +2291,11 @@ const metaForRelationshipContextCapture: any = {
         String((preSeedDecision as any)?.sourceKind ?? '') === 'mu_book_author_mode' ||
         String(((preSeedDecision as any)?.ctxPackPatch ?? {})?.presentationKind ?? '') === 'book_author';
 
+      const isMuCanonPracticeWriter =
+        String((writerInput as any)?.mode ?? '') === 'mu_canon_practice' ||
+        String((preSeedDecision as any)?.sourceKind ?? '') === 'mu_canon_practice' ||
+        String(((preSeedDecision as any)?.ctxPackPatch ?? {})?.presentationKind ?? '') === 'mu_canon_practice';
+
       const normalizedWriterText = isBookAuthorConceptWriter
         ? normalizedWriterTextRaw
             .replace(/静かに/g, '創造の方向へ')
@@ -2303,7 +2308,22 @@ const metaForRelationshipContextCapture: any = {
             .replace(/足りない/g, '未来が閉じていく')
             .replace(/欠けている/g, '未来が閉じていく')
             .trim()
-        : normalizedWriterTextRaw;
+        : isMuCanonPracticeWriter
+          ? normalizedWriterTextRaw
+              .replace(/静かに/g, '小さく')
+              .replace(/ゆっくり/g, '一つずつ')
+              .replace(/そっと/g, '小さく')
+              .replace(/相手が返しやすい/g, '現実に移しやすい')
+              .replace(/返ってくる温度/g, '現実に移った手応え')
+              .replace(/相手の気持ちを当てる/g, '景色の向きを見る')
+              .replace(/一言だけ送る/g, '一文にする')
+              .replace(/返事が軽ければ[^。]*。?/g, '')
+              .replace(/相手が広げてきたら[^。]*。?/g, '')
+              .replace(/LINE/g, '言葉')
+              .replace(/ライン/g, '言葉')
+              .replace(/連絡/g, '行動')
+              .trim()
+          : normalizedWriterTextRaw;
 
       const forbiddenMuCanonConcept =
         /(ユング|ラカン|imaginary|頭の中で思い描く力|透明な地図|子どもが.*まね|本で使われる文脈によって|もし本の文脈|たぶん|言葉になる前|言葉になる前から|設計になる前から|心の内側|内側|はい、見えます)/u;

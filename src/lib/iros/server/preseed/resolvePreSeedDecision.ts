@@ -1961,6 +1961,193 @@ function buildMuCanonConceptExplainDecision(args: {
   };
 }
 
+function isMuCanonPracticeAsk(userTextRaw: string): boolean {
+  const compact = String(userTextRaw ?? '')
+    .trim()
+    .replace(/[　\s]+/g, '');
+
+  if (!compact) return false;
+
+  const hasCanonTopic =
+    /イマジナル|創造の方向|未来の景色|かがみ|鏡|Muverse|ミューバース/u.test(compact);
+
+  const hasPracticeAsk =
+    /どうしたら|どうすれば|どうやって|使う|使え|使いたい|活かす|活かせ|実践|やり方|方法|現実にする|形にする|現実へ移す|行動にする/u.test(compact);
+
+  const hasRelationTemplateRisk =
+    /相手|返事|返信|LINE|ライン|誘う|送る|連絡|気持ち|本音|脈|恋愛/u.test(compact);
+
+  // 「イマジナルを使う」「創造の方向を実践する」は、相手反応Cテンプレより先に Mu Canon 実践へ送る。
+  return hasCanonTopic && hasPracticeAsk && !hasRelationTemplateRisk;
+}
+
+function buildMuCanonPracticeSeed(userTextRaw: string): string {
+  return [
+    'MU_CANON_PRACTICE_WRITER_V1 (DO NOT OUTPUT)',
+    'purpose=Mu Canon の実践質問に答える。通常Cルート、恋愛、相手反応、T_CONCRETIZEへ流さない。',
+    `userText=${userTextRaw}`,
+    '',
+    'CORE:',
+    'イマジナルを使う=内面に立ち上がった未来の景色を、言葉・設計・行動・場へ移していくこと',
+    '創造の方向=怖い未来、不安、比較、欠乏ではなく、守りたいもの・作りたいもの・人に渡したいものへ景色の向きを戻すこと',
+    '',
+    'ANSWER_RULES:',
+    'rule=質問に直接答える',
+    'rule=概念説明だけで終わらない',
+    'rule=恋愛相談・相手対応・返信文テンプレにしない',
+    'rule=「静かに」「ゆっくり」「そっと」のようなAI的な余韻語を使わない',
+    'rule=過去文脈に相手・恋愛・返信があっても、このターンではイマジナル実践質問を優先する',
+    'rule=相手の反応待ち、返事、温度、一言送る、広げてきたら返す、などに流さない',
+    'rule=「イマジナルを使う」を、未来の景色→一文→小さな設計→今日の行動、の流れで説明する',
+    'rule=怖い未来と創造の方向を分ける',
+    'rule=問い返しで終えない。最後は現実へ移る一文で閉じる',
+    '',
+    'MUST_NOT_USE:',
+    '静かに',
+    'ゆっくり',
+    'そっと',
+    '相手が返しやすい',
+    '一言だけ送る',
+    '返事が軽ければ',
+    '相手が広げてきたら',
+    '返ってくる温度',
+    '相手の気持ちを当てる',
+    'LINE',
+    '連絡',
+    '',
+    'OUTPUT_SHAPE:',
+    '1. イマジナルを使うとは何か',
+    '2. 怖い未来と創造の方向を分ける',
+    '3. 守りたいもの・作りたいもの・渡したいものを一文にする',
+    '4. 今日できる小さな設計・行動へ移す',
+    '5. 現実へ向かい始める文で閉じる',
+  ].join('\n');
+}
+
+function buildMuCanonPracticeDecision(args: {
+  userText: string;
+  reason?: string | null;
+}): PreSeedDecision {
+  const seedText = buildMuCanonPracticeSeed(args.userText);
+  const fallbackReply = [
+    'イマジナルを使うとは、内面に立ち上がった未来の景色を、現実へ移すことです。',
+    '',
+    'まず、いま見ている景色を二つに分けます。',
+    '怖い未来なのか、創造の方向なのか。',
+    '',
+    '怖い未来なら、何を失いたくないのかを見る。',
+    '創造の方向なら、何を守りたいのか、何を作りたいのか、誰に何を渡したいのかを見る。',
+    '',
+    'そして、それを今日できる一文にします。',
+    '',
+    'イマジナルは、思い浮かべて終わるものではなく、言葉、設計、行動、場へ移したときに現実へ向かい始めます。',
+  ].join('\n');
+
+  return {
+    kind: 'normal_chat',
+    confidence: 0.995,
+
+    sourceAuthority: 'user_text',
+    sourceKind: 'mu_canon_practice',
+    sourceId: null,
+    sourceText: args.userText,
+
+    route: 'mu_canon_concept_writer',
+
+    seedText,
+    directReply: fallbackReply,
+    writerInput: {
+      mode: 'mu_canon_practice',
+      userText: args.userText,
+      seedText,
+      fallbackReply,
+      reason: args.reason ?? 'mu_canon_practice',
+    } as any,
+
+    shouldBypassWriter: false,
+    shouldBypassRephrase: true,
+    shouldUsePreSeedWriter: true,
+
+    shouldSuppressHistoryForWriter: true,
+    shouldSuppressSimilarFlow: true,
+    shouldSuppressSlotPlan: true,
+    shouldSuppressMemoryDelta: true,
+    shouldSuppressIntuitionCandidate: true,
+    shouldSuppressNormalResonance: true,
+
+    shouldOpenContextThread: false,
+    contextThreadCode: null,
+
+    ctxPackPatch: {
+      muCanonPractice: true,
+      muCanonKnowledge: true,
+      muCanonKnowledgeMode: 'concept_explain',
+      presentationKind: 'mu_canon_practice',
+      inputKind: 'mu_canon_practice',
+      sourceKind: 'mu_canon_practice',
+      contextReset: true,
+      contextResetReason: 'mu_canon_practice',
+      shouldSuppressPastContext: true,
+      shouldSuppressHistoryForWriter: true,
+      shouldSuppressSimilarFlow: true,
+      shouldSuppressSlotPlan: true,
+      shouldSuppressNormalResonance: true,
+      historyForWriter: [],
+      similarFlowSeed: '',
+      topicDigest: '',
+      conversationLine: '',
+      muCanonPracticeSeed: seedText,
+      goalKind: 'practice',
+      targetKind: 'imajinal_practice',
+      replyGoal: { kind: 'practice', questionsMax: 0 },
+      resolvedAsk: {
+        askType: 'mu_canon_practice',
+        topic: 'imajinal_practice',
+      },
+      qCode: 'Q1',
+      depthStage: 'C1',
+      slotPlanPolicy: 'MU_CANON_PRACTICE',
+      writerPatternKey: 'MU_CANON_PRACTICE_V1',
+    } as any,
+
+    metaPatch: {
+      muCanonPractice: true,
+      muCanonKnowledge: true,
+      muCanonKnowledgeMode: 'concept_explain',
+      presentationKind: 'mu_canon_practice',
+      inputKind: 'mu_canon_practice',
+      sourceKind: 'mu_canon_practice',
+      goalKind: 'practice',
+      targetKind: 'imajinal_practice',
+      replyGoal: { kind: 'practice', questionsMax: 0 },
+      resolvedAsk: {
+        askType: 'mu_canon_practice',
+        topic: 'imajinal_practice',
+      },
+      q_code: 'Q1',
+      qCode: 'Q1',
+      depth_stage: 'C1',
+      depthStage: 'C1',
+      e_turn: 'e3',
+      eTurn: 'e3',
+      shouldSuppressHistoryForWriter: true,
+      shouldSuppressSimilarFlow: true,
+      shouldSuppressSlotPlan: true,
+      shouldSuppressNormalResonance: true,
+      slotPlanPolicy: 'MU_CANON_PRACTICE',
+      writerPatternKey: 'MU_CANON_PRACTICE_V1',
+      finalTextPolicy: 'FINAL_TEXT_MU_CANON_PRACTICE_NO_RELATION_TEMPLATE',
+    } as any,
+
+    debug: {
+      reason: args.reason ?? 'mu_canon_practice',
+      matchedPattern: 'MU_CANON_PRACTICE_V1',
+      sourceTextHead: args.userText.slice(0, 120),
+      seedHead: seedText.slice(0, 160),
+      directReplyHead: fallbackReply.slice(0, 120),
+    },
+  } as any;
+}
 function buildFreshConversationPastContextGuardDecision(args: {
   userText: string;
   reason?: string | null;
@@ -2432,6 +2619,23 @@ export async function resolvePreSeedDecision(
     return withCognitionMap(fastPathDirectReply);
   }
 
+  if (isMuCanonPracticeAsk(userText)) {
+    const practiceDecision = buildMuCanonPracticeDecision({
+      userText,
+      reason: 'mu_canon_practice_text_match',
+    });
+
+    console.log('[IROS/PRE_SEED_ENGINE][MU_CANON_PRACTICE_ENTER]', {
+      traceId: args.traceId ?? null,
+      conversationId: args.conversationId ?? null,
+      userCode: args.userCode ?? null,
+      userTextHead: userText.slice(0, 120),
+      route: practiceDecision.route,
+      presentationKind: practiceDecision.ctxPackPatch?.presentationKind ?? null,
+    });
+
+    return withCognitionMap(practiceDecision);
+  }
   const isMemoryTruthCheck =
     (
       /(覚えて|覚えてる|覚えていますか|覚えてますか|前に話した|以前話した|前話した|この前話した|あの話|その話|続き|記憶にありますか)/u.test(userText) &&
