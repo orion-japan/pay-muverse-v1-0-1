@@ -29,6 +29,11 @@ const reactionWordPatterns = [
   "今の私",
   "まさに",
   "わかりすぎる",
+  "鳥肌",
+  "言語化",
+  "救われた",
+  "しんどい",
+  "苦しい",
 ];
 
 const resonanceWordPatterns = [
@@ -48,6 +53,39 @@ const resonanceWordPatterns = [
   "寂しい",
   "我慢",
   "本音",
+  "未読",
+  "既読",
+  "沈黙",
+  "都合のいい人",
+  "境界線",
+  "承認欲求",
+  "依存",
+  "見捨てられ不安",
+];
+
+const saveIntentPatterns = [
+  "保存",
+  "見返す",
+  "覚えて",
+  "チェック",
+  "まとめ",
+  "特徴",
+  "サイン",
+  "理由",
+  "共通点",
+  "何度も",
+];
+
+const muLeadPatterns = [
+  "なんで",
+  "本当は",
+  "実は",
+  "見抜",
+  "気づいて",
+  "相手の気持ち",
+  "自分の価値",
+  "止まって",
+  "言葉に",
 ];
 
 function uniqueJoin(words: string[]) {
@@ -60,6 +98,10 @@ function clampScore(score: number) {
 
 function countMatches(text: string, patterns: string[]) {
   return patterns.filter((word) => text.includes(word)).length;
+}
+
+function hasAny(text: string, patterns: string[]) {
+  return patterns.some((word) => text.includes(word));
 }
 
 export function analyzeTikTokRadarInput(
@@ -77,33 +119,43 @@ export function analyzeTikTokRadarInput(
 
   const reactionHits = reactionWordPatterns.filter((word) => text.includes(word));
   const resonanceHits = resonanceWordPatterns.filter((word) => text.includes(word));
+  const saveHits = saveIntentPatterns.filter((word) => text.includes(word));
 
   const hasQuestionFeeling =
     text.includes("なぜ") ||
     text.includes("なんで") ||
     text.includes("本当は") ||
     text.includes("実は") ||
-    text.includes("気づいて");
+    text.includes("気づいて") ||
+    text.includes("見抜");
 
   const hasLoveTheme =
     text.includes("恋愛") ||
     text.includes("復縁") ||
     text.includes("片思い") ||
     text.includes("連絡") ||
-    text.includes("相手");
+    text.includes("相手") ||
+    text.includes("既読") ||
+    text.includes("未読");
 
   const hasPainTheme =
     text.includes("苦しい") ||
     text.includes("不安") ||
     text.includes("寂しい") ||
     text.includes("責め") ||
-    text.includes("我慢");
+    text.includes("我慢") ||
+    text.includes("しんどい") ||
+    text.includes("見捨てられ");
+
+  const hasMuLeadTheme = hasAny(text, muLeadPatterns);
+  const hasSaveFormat = hasAny(text, saveIntentPatterns);
 
   const reactionCount = countMatches(text, reactionWordPatterns);
   const resonanceCount = countMatches(text, resonanceWordPatterns);
+  const saveCount = countMatches(text, saveIntentPatterns);
 
   const whyScore = clampScore(
-    2 + reactionCount + (hasQuestionFeeling ? 1 : 0) + (hasPainTheme ? 1 : 0)
+    2 + reactionCount + (hasQuestionFeeling ? 1 : 0) + (hasPainTheme ? 1 : 0) + (hasMuLeadTheme ? 1 : 0)
   );
 
   const resonanceScore = clampScore(
@@ -111,10 +163,7 @@ export function analyzeTikTokRadarInput(
   );
 
   const saveScore = clampScore(
-    1 +
-      (text.includes("保存") || text.includes("見返す") ? 2 : 0) +
-      (hasPainTheme ? 1 : 0) +
-      (hasQuestionFeeling ? 1 : 0)
+    1 + saveCount + (hasSaveFormat ? 1 : 0) + (hasPainTheme ? 1 : 0) + (hasQuestionFeeling ? 1 : 0)
   );
 
   const reactionWords = uniqueJoin(
@@ -134,12 +183,15 @@ export function analyzeTikTokRadarInput(
         ]
   );
 
+  const totalScore = Number(whyScore) + Number(resonanceScore) + Number(saveScore);
   const status =
-    Number(whyScore) >= 5 || Number(resonanceScore) >= 5
+    totalScore >= 13 || Number(whyScore) >= 5 || Number(resonanceScore) >= 5
       ? "winner"
-      : Number(whyScore) >= 4 || Number(resonanceScore) >= 4
+      : totalScore >= 10 || Number(whyScore) >= 4 || Number(resonanceScore) >= 4
         ? "good"
-        : "watch";
+        : totalScore >= 7
+          ? "watch"
+          : "draft";
 
   const sofiaNote = [
     "Sofia自動分析:",
@@ -152,8 +204,15 @@ export function analyzeTikTokRadarInput(
     hasPainTheme
       ? "不安・苦しさ・自己否定に触れているため、共鳴が起きやすいです。"
       : "痛みの言語が少ないため、共鳴語を追加すると伸びやすいです。",
+    hasSaveFormat
+      ? "保存・見返しに向く構造があります。保存型投稿に展開できます。"
+      : "保存型にするなら、チェックリスト・特徴・理由の形に整えると強くなります。",
+    hasMuLeadTheme
+      ? "Mu導線に接続しやすい言葉があります。最後は“相手を当てる”ではなく“自分の止まりを映す”方向にしてください。"
+      : "Mu導線へつなぐには、内側の止まり・見落とし・言葉になっていないズレを足してください。",
     `反応語候補: ${reactionWords}`,
     `共鳴語候補: ${resonanceWords}`,
+    `保存語候補: ${uniqueJoin(saveHits.length > 0 ? saveHits : ["保存", "見返す", "チェック"])}`,
   ].join("\n");
 
   return {
