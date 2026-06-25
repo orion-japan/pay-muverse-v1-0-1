@@ -1,0 +1,289 @@
+.page {
+  min-height: 100vh;
+  padding: 32px 16px 64px;
+  color: #f8fbff;
+  background:
+    radial-gradient(circle at 18% 8%, rgba(124, 92, 255, 0.42), transparent 28%),
+    radial-gradient(circle at 88% 18%, rgba(34, 211, 238, 0.24), transparent 26%),
+    radial-gradient(circle at 50% 96%, rgba(250, 204, 21, 0.16), transparent 26%),
+    linear-gradient(160deg, #050817 0%, #0b1230 46%, #111827 100%);
+}
+
+.shell {
+  width: min(980px, 100%);
+  margin: 0 auto;
+}
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 30px;
+  padding: 28px 22px 24px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.045));
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(16px);
+}
+
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: -40% -20% auto auto;
+  width: 340px;
+  height: 340px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(167, 139, 250, 0.34), transparent 66%);
+  pointer-events: none;
+}
+
+.eyebrow {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: #a5f3fc;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.eyebrow::before {
+  content: "✦";
+  color: #facc15;
+  font-size: 13px;
+}
+
+.title {
+  position: relative;
+  margin: 0;
+  font-size: clamp(32px, 8vw, 52px);
+  line-height: 1.08;
+  letter-spacing: -0.04em;
+}
+
+.title span {
+  display: block;
+  color: #c4b5fd;
+  font-size: 0.44em;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.lead {
+  position: relative;
+  max-width: 640px;
+  margin: 16px 0 0;
+  color: rgba(248, 251, 255, 0.82);
+  font-size: 15px;
+  line-height: 1.95;
+}
+
+.statusCard {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin: 18px 0;
+  border: 1px solid rgba(165, 243, 252, 0.2);
+  border-radius: 22px;
+  padding: 16px;
+  background: rgba(8, 13, 32, 0.62);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.24);
+}
+
+.statusLabel {
+  display: block;
+  color: rgba(248, 251, 255, 0.56);
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+.statusValue {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(250, 204, 21, 0.32);
+  border-radius: 999px;
+  padding: 7px 12px;
+  color: #fef3c7;
+  background: rgba(250, 204, 21, 0.1);
+  font-weight: 700;
+}
+
+.statusText {
+  margin: 0;
+  color: rgba(248, 251, 255, 0.78);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.notice {
+  margin: 0 0 18px;
+  border: 1px solid rgba(250, 204, 21, 0.4);
+  border-radius: 18px;
+  padding: 13px 14px;
+  color: #fef3c7;
+  background: rgba(120, 53, 15, 0.28);
+  line-height: 1.7;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(218px, 1fr));
+  gap: 16px;
+}
+
+.bookCard {
+  position: relative;
+  overflow: hidden;
+  min-height: 250px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 26px;
+  padding: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.045)),
+    rgba(7, 12, 31, 0.72);
+  box-shadow: 0 20px 54px rgba(0, 0, 0, 0.26);
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.bookCard::before {
+  content: "";
+  position: absolute;
+  top: -80px;
+  right: -74px;
+  width: 170px;
+  height: 170px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.22), transparent 65%);
+}
+
+.bookCard::after {
+  content: "";
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #a78bfa, #22d3ee, #facc15);
+  opacity: 0.68;
+}
+
+.bookCard:hover {
+  transform: translateY(-3px);
+  border-color: rgba(165, 243, 252, 0.34);
+  box-shadow: 0 26px 70px rgba(34, 211, 238, 0.14), 0 18px 58px rgba(0, 0, 0, 0.3);
+}
+
+.bookTop {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.bookNo {
+  color: #a5f3fc;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.courseId {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 5px 8px;
+  color: rgba(248, 251, 255, 0.58);
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.bookTitle {
+  position: relative;
+  margin: 18px 0 8px;
+  font-size: 26px;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+
+.bookCopy {
+  position: relative;
+  min-height: 58px;
+  margin: 0;
+  color: rgba(248, 251, 255, 0.7);
+  font-size: 13px;
+  line-height: 1.72;
+}
+
+.actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.readButton {
+  width: 100%;
+  border: 0;
+  border-radius: 999px;
+  padding: 13px 16px;
+  color: #08111f;
+  background: linear-gradient(135deg, #fef3c7 0%, #a5f3fc 48%, #c4b5fd 100%);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  box-shadow: 0 12px 28px rgba(34, 211, 238, 0.18);
+  cursor: pointer;
+  transition: transform 150ms ease, opacity 150ms ease, box-shadow 150ms ease;
+}
+
+.readButton:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 36px rgba(167, 139, 250, 0.24);
+}
+
+.readButton:disabled {
+  opacity: 0.56;
+  cursor: not-allowed;
+}
+
+.cardNote {
+  position: relative;
+  margin: 12px 0 0;
+  color: rgba(248, 251, 255, 0.52);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.footerHint {
+  margin: 20px 0 0;
+  color: rgba(248, 251, 255, 0.56);
+  font-size: 12px;
+  line-height: 1.8;
+  text-align: center;
+}
+
+@media (max-width: 520px) {
+  .page {
+    padding: 20px 12px 48px;
+  }
+
+  .hero {
+    border-radius: 24px;
+    padding: 24px 18px 22px;
+  }
+
+  .statusCard {
+    border-radius: 20px;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .bookCard {
+    min-height: auto;
+    border-radius: 22px;
+  }
+}
