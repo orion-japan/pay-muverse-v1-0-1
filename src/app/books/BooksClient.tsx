@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { authedFetch, useAuth } from '@/context/AuthContext';
 
 const books = Array.from({ length: 10 }, (_, i) => ({
@@ -18,11 +18,39 @@ const planText: Record<string, string> = {
   admin: 'Admin：全Book対象です。Moodle管理者権限はSSOでは渡しません。',
 };
 
+function normalizePlan(value: unknown) {
+  const plan = String(value || 'free').toLowerCase();
+  return ['free', 'regular', 'premium', 'master', 'partner', 'admin'].includes(plan) ? plan : 'free';
+}
+
 export default function BooksClient() {
   const { loading, user, planStatus } = useAuth();
+  const [serverPlan, setServerPlan] = useState<string>('');
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState('');
-  const plan = String(planStatus || 'free').toLowerCase();
+  const plan = normalizePlan(serverPlan || planStatus);
+
+  useEffect(() => {
+    if (!user) {
+      setServerPlan('');
+      return;
+    }
+
+    let alive = true;
+    authedFetch('/api/get-user-info')
+      .then((res) => res.json())
+      .then((data) => {
+        if (!alive) return;
+        setServerPlan(data?.click_type || data?.plan || data?.plan_status || '');
+      })
+      .catch(() => {
+        if (alive) setServerPlan('');
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [user]);
 
   async function openBook(target_key: string) {
     setMessage('');
@@ -65,7 +93,7 @@ export default function BooksClient() {
       </section>
 
       <section style={{ border: '1px solid rgba(255,255,255,.16)', borderRadius: 18, padding: 16, marginBottom: 16 }}>
-        <strong>{loading ? '確認中...' : user ? `現在のプラン：${plan}` : '未ログイン'}</strong>
+        <strong>{loading ? '確認中...' : user ? `現在のタイプ：${plan}` : '未ログイン'}</strong>
         <p style={{ margin: '8px 0 0', lineHeight: 1.7 }}>{user ? planText[plan] || planText.free : 'ログインすると、プランに合わせて入場できます。'}</p>
       </section>
 
