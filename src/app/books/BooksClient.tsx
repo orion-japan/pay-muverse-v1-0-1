@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { authedFetch, useAuth } from '@/context/AuthContext';
+import styles from './BooksPage.module.css';
 
 const books = Array.from({ length: 10 }, (_, i) => ({
   no: i + 1,
@@ -11,12 +12,25 @@ const books = Array.from({ length: 10 }, (_, i) => ({
 
 const planText: Record<string, string> = {
   free: 'Free：第1巻の無料ページのみ。Moodle入場は有料プランからです。',
-  regular: 'Regular：今月選択した1巻だけ読めます。',
-  premium: 'Premium：全巻を読めます。',
-  master: 'Master：全巻とセッション対象です。',
-  partner: 'Partner：全巻と講座対象です。',
+  regular: 'Regular：今月選択した1巻だけ読めます。選んだ巻が、今月の学びの扉になります。',
+  premium: 'Premium：全巻を読めます。気になる巻から、流れに沿って進めます。',
+  master: 'Master：全巻とセッション対象です。読むことから、対話と実践へつなげます。',
+  partner: 'Partner：全巻と講座対象です。学びを場へ広げる導線が開きます。',
   admin: 'Admin：全巻対象です。Moodle管理者権限はSSOでは渡しません。',
 };
+
+const bookCopies = [
+  'はじまりの巻。Muverseの入口に触れ、読む準備を整えます。',
+  '違和感の輪郭を見つめ、あなたの中にある問いをほどきます。',
+  'かがみのように、言葉の奥にある形象を映していきます。',
+  '感情の揺れを手がかりに、創造の方向を見つけます。',
+  '内面の構造を読み、繰り返しの奥にある流れをつかみます。',
+  '形象が育つ場を知り、現実へ向かう力を整えます。',
+  'Muとの対話から、読むことを体験へ変えていきます。',
+  'フィールドの中で、言葉・行動・現実のつながりを見ます。',
+  'ひとつの理解が、次の創造へ開いていく巻です。',
+  '第1の旅を統合し、次のMuverseへ橋をかけます。',
+];
 
 function normalizePlan(value: unknown) {
   const plan = String(value || 'free').toLowerCase();
@@ -83,46 +97,64 @@ export default function BooksClient() {
   }
 
   return (
-    <main style={{ maxWidth: 960, margin: '0 auto', padding: '28px 16px 56px' }}>
-      <section style={{ marginBottom: 18 }}>
-        <div style={{ letterSpacing: '.12em', fontSize: 12, opacity: 0.7 }}>Mu Learning</div>
-        <h1 style={{ fontSize: 30, margin: '8px 0' }}>Mu Book 本棚</h1>
-        <p style={{ lineHeight: 1.8, opacity: 0.82 }}>
-          読む場所はMoodleへ。読み終えたら、Muへ戻れるように。ここは、第1巻から第10巻までの入口です。
+    <main className={styles.page}>
+      <div className={styles.shell}>
+        <section className={styles.hero}>
+          <div className={styles.eyebrow}>Mu Learning</div>
+          <h1 className={styles.title}>
+            Mu Book 本棚
+            <span>Reading Field</span>
+          </h1>
+          <p className={styles.lead}>
+            本を読むことは、答えを集めることではなく、内面に眠っていた言葉が動き出すこと。
+            ここから、あなたの読む力をMuverseの学びへつなげます。
+          </p>
+        </section>
+
+        <section className={styles.statusCard}>
+          <div>
+            <span className={styles.statusLabel}>現在のタイプ</span>
+            <strong className={styles.statusValue}>{loading ? '確認中...' : user ? plan : '未ログイン'}</strong>
+          </div>
+          <p className={styles.statusText}>
+            {user ? planText[plan] || planText.free : 'ログインすると、あなたのプランに合わせて入場できます。'}
+          </p>
+        </section>
+
+        {message ? <div className={styles.notice}>{message}</div> : null}
+
+        <section className={styles.grid} aria-label="Mu Book 本棚">
+          {books.map((book) => (
+            <article key={book.target_key} className={styles.bookCard}>
+              <div className={styles.bookTop}>
+                <div className={styles.bookNo}>BOOK {book.no}</div>
+                <div className={styles.courseId}>course {book.course_id}</div>
+              </div>
+
+              <h2 className={styles.bookTitle}>第{book.no}巻</h2>
+              <p className={styles.bookCopy}>{bookCopies[book.no - 1]}</p>
+
+              <div className={styles.actions}>
+                <button
+                  type="button"
+                  disabled={loading || !user || busy === book.target_key}
+                  onClick={() => openBook(book.target_key)}
+                  className={styles.readButton}
+                >
+                  {busy === book.target_key ? '扉を開いています...' : 'この巻を読む'}
+                </button>
+              </div>
+
+              <p className={styles.cardNote}>入場時にMuverse側で権限を確認します。</p>
+            </article>
+          ))}
+        </section>
+
+        <p className={styles.footerHint}>
+          Freeは無料ページへ。Regularは今月選んだ1巻へ。Premium以上は全巻へ。
+          権限の最終判定は、入場時にMuverse側で行います。
         </p>
-      </section>
-
-      <section style={{ border: '1px solid rgba(255,255,255,.16)', borderRadius: 18, padding: 16, marginBottom: 16 }}>
-        <strong>{loading ? '確認中...' : user ? `現在のタイプ：${plan}` : '未ログイン'}</strong>
-        <p style={{ margin: '8px 0 0', lineHeight: 1.7 }}>{user ? planText[plan] || planText.free : 'ログインすると、プランに合わせて入場できます。'}</p>
-      </section>
-
-      {message ? (
-        <div style={{ border: '1px solid rgba(255,210,120,.45)', borderRadius: 14, padding: 12, marginBottom: 16 }}>
-          {message}
-        </div>
-      ) : null}
-
-      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14 }}>
-        {books.map((book) => (
-          <article key={book.target_key} style={{ border: '1px solid rgba(255,255,255,.14)', borderRadius: 18, padding: 16 }}>
-            <div style={{ fontSize: 12, opacity: 0.65 }}>BOOK {book.no}</div>
-            <h2 style={{ margin: '8px 0 6px', fontSize: 22 }}>第{book.no}巻</h2>
-            <p style={{ margin: 0, opacity: 0.72 }}>Moodle course_id={book.course_id}</p>
-            <button
-              type="button"
-              disabled={loading || !user || busy === book.target_key}
-              onClick={() => openBook(book.target_key)}
-              style={{ width: '100%', marginTop: 14, padding: '12px 14px', borderRadius: 999, border: 0, cursor: loading || !user ? 'not-allowed' : 'pointer' }}
-            >
-              {busy === book.target_key ? '入場中...' : '読む'}
-            </button>
-            <p style={{ fontSize: 12, lineHeight: 1.6, opacity: 0.68 }}>
-              入場時にMuverse側で権限を確認します。
-            </p>
-          </article>
-        ))}
-      </section>
+      </div>
     </main>
   );
 }
