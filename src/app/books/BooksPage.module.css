@@ -132,14 +132,14 @@
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(218px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 16px;
 }
 
 .bookCard {
   position: relative;
   overflow: hidden;
-  min-height: 250px;
+  min-height: 390px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 26px;
   padding: 18px;
@@ -207,10 +207,57 @@
   position: relative;
   margin: 18px 0 8px;
   color: #ffffff;
-  font-size: 26px;
+  font-size: 24px;
   line-height: 1.15;
   letter-spacing: -0.03em;
   text-shadow: 0 2px 14px rgba(0, 0, 0, 0.18);
+}
+
+.bookMainTitle {
+  position: relative;
+  margin: 0 0 8px;
+  color: #ffffff;
+  font-size: 18px;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+}
+
+.bookSubtitle {
+  position: relative;
+  margin: 0 0 12px;
+  color: #ddd6fe;
+  font-size: 12px;
+  line-height: 1.55;
+  font-weight: 700;
+}
+
+.bookDirection {
+  position: relative;
+  min-height: 78px;
+  margin: 0;
+  color: rgba(248, 251, 255, 0.80);
+  font-size: 12.5px;
+  line-height: 1.72;
+}
+
+.bookCore {
+  position: relative;
+  margin: 12px 0 0;
+  border-left: 2px solid rgba(250, 204, 21, 0.76);
+  padding: 8px 0 8px 11px;
+  color: rgba(255, 255, 255, 0.90);
+  font-size: 12.5px;
+  line-height: 1.65;
+  background: linear-gradient(90deg, rgba(250, 204, 21, 0.08), transparent);
+}
+
+.bookCore span {
+  display: block;
+  margin-bottom: 4px;
+  color: #fef3c7;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
 }
 
 .bookCopy {
@@ -291,5 +338,9 @@
   .bookCard {
     min-height: auto;
     border-radius: 22px;
+  }
+
+  .bookDirection {
+    min-height: auto;
   }
 }
