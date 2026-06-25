@@ -6,16 +6,16 @@ import { authedFetch, useAuth } from '@/context/AuthContext';
 const books = Array.from({ length: 10 }, (_, i) => ({
   no: i + 1,
   target_key: `mu_book_${i + 1}`,
-  moodle_id: i + 2,
+  course_id: i + 2,
 }));
 
 const planText: Record<string, string> = {
-  free: 'Free：1章無料ページのみ。Moodle入場は有料プランからです。',
+  free: 'Free：第1巻の無料ページのみ。Moodle入場は有料プランからです。',
   regular: 'Regular：今月選択した1巻だけ読めます。',
-  premium: 'Premium：全Bookを読めます。',
-  master: 'Master：全Bookとセッション対象です。',
-  partner: 'Partner：全Bookと講座対象です。',
-  admin: 'Admin：全Book対象です。Moodle管理者権限はSSOでは渡しません。',
+  premium: 'Premium：全巻を読めます。',
+  master: 'Master：全巻とセッション対象です。',
+  partner: 'Partner：全巻と講座対象です。',
+  admin: 'Admin：全巻対象です。Moodle管理者権限はSSOでは渡しません。',
 };
 
 function normalizePlan(value: unknown) {
@@ -70,7 +70,7 @@ export default function BooksClient() {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok || !data?.ok || !data?.entry_url) {
-        setMessage(data?.message || 'このBookには入場できません。');
+        setMessage(data?.message || 'この巻には入場できません。');
         return;
       }
 
@@ -88,7 +88,7 @@ export default function BooksClient() {
         <div style={{ letterSpacing: '.12em', fontSize: 12, opacity: 0.7 }}>Mu Learning</div>
         <h1 style={{ fontSize: 30, margin: '8px 0' }}>Mu Book 本棚</h1>
         <p style={{ lineHeight: 1.8, opacity: 0.82 }}>
-          読む場所はMoodleへ。読み終えたら、Muへ戻れるように。ここは、学びの入口を並べる本棚です。
+          読む場所はMoodleへ。読み終えたら、Muへ戻れるように。ここは、第1巻から第10巻までの入口です。
         </p>
       </section>
 
@@ -107,8 +107,8 @@ export default function BooksClient() {
         {books.map((book) => (
           <article key={book.target_key} style={{ border: '1px solid rgba(255,255,255,.14)', borderRadius: 18, padding: 16 }}>
             <div style={{ fontSize: 12, opacity: 0.65 }}>BOOK {book.no}</div>
-            <h2 style={{ margin: '8px 0 6px', fontSize: 22 }}>第{book.no}章</h2>
-            <p style={{ margin: 0, opacity: 0.72 }}>Moodle id={book.moodle_id}</p>
+            <h2 style={{ margin: '8px 0 6px', fontSize: 22 }}>第{book.no}巻</h2>
+            <p style={{ margin: 0, opacity: 0.72 }}>Moodle course_id={book.course_id}</p>
             <button
               type="button"
               disabled={loading || !user || busy === book.target_key}
