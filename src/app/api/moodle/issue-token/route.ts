@@ -1,7 +1,14 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { adminAuth } from '@/lib/firebase-admin';
 import { supabaseAdmin as supabaseServer } from '@/lib/supabaseAdmin';
+import {
+  canAccessMoodleTarget,
+  findMoodleTarget,
+  getUserPlan,
+  getUserType,
+  type MoodleUserAccessRecord,
+} from '@/lib/moodleAccess';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -9,14 +16,6 @@ export const revalidate = 0;
 
 type IssueBody = {
   target_key?: string;
-};
-
-type MoodleTarget = {
-  target_key: string;
-  target_type: 'course' | 'book' | 'quiz' | 'assignment';
-  course_id: number;
-  role: 'student' | 'teacher' | 'editingteacher';
-  redirect_path: string;
 };
 
 function json(status: number, body: any) {
@@ -33,43 +32,59 @@ function hashToken(token: string) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-function resolveMoodleTarget(targetKey: string, clickType: string): MoodleTarget | null {
-  const key = targetKey || 'mu_book_1';
-
-  const targets: Record<string, MoodleTarget> = {
-    mu_book_1: {
-      target_key: 'mu_book_1',
-      target_type: 'book',
-      course_id: 2,
-      role: 'student',
-      redirect_path: '/mod/book/view.php?id=2',
-    },
-
-    mu_course_1: {
-      target_key: 'mu_course_1',
-      target_type: 'course',
-      course_id: 2,
-      role: 'student',
-      redirect_path: '/course/view.php?id=2',
-    },
-  };
-
-  const target = targets[key];
-  if (!target) return null;
-
-  // Phase 4.1:
-  // まずは全ログインユーザーに course_id=2 を許可。
-  // 次に regular / premium / master ごとの制御へ広げる。
-  const allowedForNow = ['free', 'regular', 'premium', 'master', 'teacher', 'admin'];
-
-  if (!allowedForNow.includes(clickType)) {
-    return null;
+async function readTargetKey(req: NextRequest): Promise<string> {
+  if (req.method === 'GET') {
+    return req.nextUrl.searchParams.get('target_key')?.trim() || 'mu_book_1';
   }
 
-  return target;
+  const body = (await req.json().catch(() => ({}))) as IssueBody;
+  return typeof body.target_key === 'string' && body.target_key.trim()
+    ? body.target_key.trim()
+    : 'mu_book_1';
 }
 
-export async function POST(req: NextRequest) {
+async function findMuverseUser(firebaseUid: string): Promise<{
+  user: MoodleUserAccessRecord | null;
+  error: string | null;
+}> {
+  const fullSelect = [
+    'user_code',
+    'click_username',
+    'click_type',
+    'sofia_credit',
+    'plan',
+    'plan_status',
+    'user_type',
+    'subscription_status',
+    'selected_volume',
+    'selected_volume_month',
+    'selected_volume_locked_at',
+  ].join(', ');
+
+  const legacySelect = 'user_code, click_username, click_type, sofia_credit';
+
+  let result = await supabaseServer
+    .from('users')
+    .select(fullSelect)
+    .eq('firebase_uid', firebaseUid)
+    .maybeSingle();
+
+  if (result.error) {
+    result = await supabaseServer
+      .from('users')
+      .select(legacySelect)
+      .eq('firebase_uid', firebaseUid)
+      .maybeSingle();
+  }
+
+  if (result.error) {
+    return { user: null, error: result.error.message };
+  }
+
+  return { user: (result.data ?? null) as MoodleUserAccessRecord | null, error: null };
+}
+
+async function handle(req: NextRequest) {
   try {
     const idToken = await getBearer(req);
 
@@ -77,6 +92,7 @@ export async function POST(req: NextRequest) {
       return json(401, {
         ok: false,
         reason: 'missing_firebase_token',
+        message: 'ログインが必要です。',
       });
     }
 
@@ -87,27 +103,32 @@ export async function POST(req: NextRequest) {
       return json(401, {
         ok: false,
         reason: 'invalid_firebase_token',
+        message: 'ログイン情報の有効期限が切れています。もう一度ログインしてください。',
         detail: e?.code || String(e),
       });
     }
 
     const firebase_uid = decoded.uid as string;
     const firebaseEmail = typeof decoded.email === 'string' ? decoded.email : '';
+    const targetKey = await readTargetKey(req);
+    const target = findMoodleTarget(targetKey);
 
-    const body = (await req.json().catch(() => ({}))) as IssueBody;
-    const targetKey = typeof body.target_key === 'string' ? body.target_key.trim() : 'mu_book_1';
+    if (!target) {
+      return json(404, {
+        ok: false,
+        reason: 'unknown_target',
+        message: '指定された教材が見つかりません。',
+        target_key: targetKey,
+      });
+    }
 
-    const { data: u, error: e1 } = await supabaseServer
-      .from('users')
-      .select('user_code, click_username, click_type, sofia_credit')
-      .eq('firebase_uid', firebase_uid)
-      .maybeSingle();
+    const { user: u, error: userError } = await findMuverseUser(firebase_uid);
 
-    if (e1) {
+    if (userError) {
       return json(500, {
         ok: false,
         reason: 'db_error',
-        detail: e1.message,
+        detail: userError,
       });
     }
 
@@ -115,22 +136,27 @@ export async function POST(req: NextRequest) {
       return json(404, {
         ok: false,
         reason: 'user_not_found',
+        message: 'ユーザー情報が見つかりません。',
+      });
+    }
+
+    const access = canAccessMoodleTarget(u, target);
+
+    if (!access.ok) {
+      return json(403, {
+        ok: false,
+        reason: access.reason ?? 'target_not_allowed',
+        message: access.message ?? 'この教材には入場できません。',
+        target_key: target.target_key,
+        target_type: target.target_type,
+        volume: target.volume,
+        plan: getUserPlan(u),
+        user_type: getUserType(u),
       });
     }
 
     const user_code = String(u.user_code);
     const click_username = String((u as any).click_username ?? user_code);
-    const click_type = String((u as any).click_type ?? 'free');
-
-    const target = resolveMoodleTarget(targetKey, click_type);
-
-    if (!target) {
-      return json(403, {
-        ok: false,
-        reason: 'target_not_allowed',
-        target_key: targetKey,
-      });
-    }
 
     const rawToken = crypto.randomBytes(32).toString('base64url');
     const token_hash = hashToken(rawToken);
@@ -145,7 +171,7 @@ export async function POST(req: NextRequest) {
         firstname: click_username || 'Muverse',
         lastname: 'User',
         course_id: target.course_id,
-        role: target.role,
+        role: access.role ?? target.role,
         redirect_path: target.redirect_path,
         target_key: target.target_key,
         target_type: target.target_type,
@@ -168,12 +194,14 @@ export async function POST(req: NextRequest) {
       entry_url,
       expires_at: expires,
       user_code,
-      click_type,
+      plan: getUserPlan(u),
+      user_type: getUserType(u),
       target_key: target.target_key,
       target_type: target.target_type,
       course_id: target.course_id,
-      role: target.role,
+      role: access.role ?? target.role,
       redirect_path: target.redirect_path,
+      volume: target.volume,
     });
   } catch (e: any) {
     return json(500, {
@@ -182,4 +210,12 @@ export async function POST(req: NextRequest) {
       detail: e?.message || String(e),
     });
   }
+}
+
+export async function GET(req: NextRequest) {
+  return handle(req);
+}
+
+export async function POST(req: NextRequest) {
+  return handle(req);
 }
