@@ -27,43 +27,10 @@ export default function IrosHeader({
   const router = useRouter();
   const title = 'Mu';
 
-  const openMuBook = async (e?: React.MouseEvent) => {
+  const openMuBook = (e?: React.MouseEvent) => {
     e?.preventDefault();
     e?.stopPropagation();
-
-    try {
-      const { getAuth } = await import('firebase/auth');
-      const idToken = await getAuth().currentUser?.getIdToken();
-
-      if (!idToken) {
-        alert('ログイン情報が取得できませんでした。もう一度ログインしてください。');
-        return;
-      }
-
-      const res = await fetch('/api/moodle/issue-token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
-          target_key: 'mu_book_1',
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!data.ok || !data.entry_url) {
-        console.error('Mu Book issue-token failed:', data);
-        alert('Mu Bookへ入れませんでした。');
-        return;
-      }
-
-      window.location.href = data.entry_url;
-    } catch (err) {
-      console.error('Mu Book open error:', err);
-      alert('Mu Bookへの接続でエラーが起きました。');
-    }
+    router.push('/books');
   };
 
   const chatCtx = (typeof useIrosChat === 'function' ? useIrosChat() : null) as any;
@@ -219,8 +186,8 @@ export default function IrosHeader({
           type="button"
           onClick={openMuBook}
           className="sof-btn"
-          aria-label="Mu Bookを開く"
-          title="Mu Book"
+          aria-label="Mu Book本棚を開く"
+          title="Mu Book本棚"
         >
           📖 Book
         </button>
@@ -258,79 +225,94 @@ export default function IrosHeader({
         .sof-right {
           display: flex;
           align-items: center;
-          gap: 8px;
-        }
-        .sof-left { justify-self: start; }
-        .sof-right { justify-self: end; }
-        .sof-center {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          justify-self: center;
+          gap: 6px;
           min-width: 0;
         }
-        .sof-title {
-          font-weight: 700;
-          font-size: 14px;
-          line-height: 1;
-          white-space: nowrap;
-          text-overflow: ellipsis;
-          overflow: hidden;
-          max-width: 60vw;
+        .sof-left {
+          justify-content: flex-start;
         }
-        .sof-icon-wrap {
+        .sof-right {
+          justify-content: flex-end;
+        }
+        .sof-center {
+          min-width: 0;
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          width: 26px;
-          height: 26px;
-          border-radius: 50%;
-          background: #f3f4f8;
-          border: 1px solid #e0e2ee;
-          box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02) inset;
+          gap: 8px;
+          pointer-events: none;
         }
-        .sof-icon-img {
-          width: 24px;
-          height: 24px;
-          border-radius: 50%;
-          display: block;
+        .sof-icon-wrap {
+          display: inline-flex;
+          width: 28px;
+          height: 28px;
+          align-items: center;
+          justify-content: center;
+          border-radius: 999px;
+          overflow: hidden;
+          flex: 0 0 auto;
+        }
+        .sof-title {
+          font-weight: 700;
+          font-size: 16px;
+          letter-spacing: 0.01em;
+          color: #111827;
+          white-space: nowrap;
         }
         .sof-btn {
           appearance: none;
-          border: 1px solid #e0e2ee;
-          background: #fafbff;
-          border-radius: 10px;
-          padding: 6px 10px;
+          border: 1px solid #e5e7eb;
+          background: #fff;
+          color: #111827;
+          border-radius: 999px;
+          height: 30px;
+          min-width: 30px;
+          padding: 0 10px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 13px;
           line-height: 1;
-          font-size: 14px;
           cursor: pointer;
-          transition: transform 0.06s ease, background 0.15s ease, box-shadow 0.15s ease;
-          box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03);
-          user-select: none;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
         }
-        .sof-btn:active { transform: translateY(1px); }
-        .sof-btn:hover { background: #f2f6ff; }
-        .sof-btn-accent { background: #eef5ff; border-color: #cfe0ff; }
-        .sof-btn-accent:hover { background: #e6f0ff; }
-
-        /* ★ インジケーター用の軽い余白調整 */
-.sof-meta-wrap {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 60px;
-  min-height: 28px;
-  flex-shrink: 0;
-}
+        .sof-btn:hover {
+          background: #f9fafb;
+        }
+        .sof-btn-accent {
+          border-color: #111827;
+          background: #111827;
+          color: #fff;
+          font-weight: 700;
+        }
+        .sof-btn-accent:hover {
+          background: #1f2937;
+        }
+        .sof-meta-wrap {
+          display: inline-flex;
+          align-items: center;
+        }
         @media (max-width: 480px) {
-          .sof-header { height: 42px; padding: 4px 6px; }
-          .sof-title { max-width: 54vw; font-size: 13px; }
-          .sof-btn { padding: 6px 9px; font-size: 13px; }
+          .sof-header {
+            height: 40px;
+            min-height: 40px;
+            padding: 4px 6px;
+            gap: 4px;
+          }
+          .sof-title {
+            font-size: 15px;
+          }
+          .sof-btn {
+            height: 28px;
+            min-width: 28px;
+            padding: 0 8px;
+            font-size: 12px;
+          }
+          .sof-right {
+            gap: 4px;
+          }
         }
       `}</style>
     </header>
   );
 }
-
-
