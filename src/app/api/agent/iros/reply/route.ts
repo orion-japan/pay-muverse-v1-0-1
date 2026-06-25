@@ -29,6 +29,7 @@ import { extractPendingOfferFromAssistantText } from '@/lib/iros/memory/continui
 import { runNormalBase } from '@/lib/iros/conversation/normalBase';
 import { decideExpressionLane } from '@/lib/iros/expression/decideExpressionLane';
 import { normalizeIrosStyleFinal } from '@/lib/iros/language/normalizeIrosStyleFinal';
+import { buildIrosStyleGuideLines, normalizeIrosStyleCode } from '@/lib/iros/language/styleGuide';
 import { chatComplete } from '@/lib/llm/chatComplete';
 
 import { loadIrosMemoryState } from '@/lib/iros/memoryState';
@@ -2323,6 +2324,26 @@ const metaForRelationshipContextCapture: any = {
       const writerInput = (preSeedDecision as any).writerInput ?? {};
       const seedTextForWriter = String(writerInput.seedText ?? preSeedDecision.seedText ?? '').trim();
       const fallbackText = String(writerInput.fallbackReply ?? preSeedDecision.directReply ?? '').trim();
+      const muCanonWriterStyle = normalizeIrosStyleCode((userProfile as any)?.style ?? 'plain');
+
+      const muCanonStyleContextKind =
+        String((writerInput as any)?.mode ?? '') === 'relationship_imajinal_reflection' ||
+        String((preSeedDecision as any)?.sourceKind ?? '') === 'relationship_imajinal_reflection' ||
+        String(((preSeedDecision as any)?.ctxPackPatch ?? {})?.presentationKind ?? '') === 'relationship_imajinal_reflection'
+          ? 'relationship_imajinal_reflection'
+          : (
+              String((writerInput as any)?.mode ?? '') === 'book_author_mode' ||
+              String((preSeedDecision as any)?.sourceKind ?? '') === 'book_author_mode' ||
+              String(((preSeedDecision as any)?.ctxPackPatch ?? {})?.presentationKind ?? '') === 'book_author_mode' ||
+              Boolean((writerInput as any)?.bookAuthorMode)
+            )
+            ? 'book_author_mode'
+            : 'mu_canon_concept_writer';
+
+      const muCanonStyleGuideLines = buildIrosStyleGuideLines({
+        style: muCanonWriterStyle,
+        contextKind: muCanonStyleContextKind,
+      });
 
       let writerText = '';
 
@@ -2355,7 +2376,7 @@ const metaForRelationshipContextCapture: any = {
                 '- 「言葉になる前」「言葉になる前から」「設計になる前から」を使わない',
                 '- 「本で使われる文脈によって意味が変わる」「たぶん」「もし本の文脈が」と言わない',
                 '- 診断や状態分析にしない',
-                '- 概念質問では「はい、見えます」と始めない。「はい。Muでいう〜」のように定義から入る',
+                '- 概念質問では「はい、見えます」と始めない。通常は定義から入る。ただし relationship_imajinal_reflection では、相手へ意識が寄る感じを短く受け止めてから定義へ入る',
                 '- 「内側」は使わず「内面」を使う',
                 '- 以下は本文に出さない: 本当の自分 / 本当の姿 / ほんとうの自分 / こうありたい自分 / なりたい自分 / 理想の自分 / 理想像 / 心の中で先に置く / 心の中 / まだそこまで届いていない自分 / ポジティブ思考',
                 '- イマジナルを自己啓発的な理想像として説明しない',
@@ -2372,9 +2393,11 @@ const metaForRelationshipContextCapture: any = {
                 '- 創造の方向は、守りたいもの・作りたいもの・人に渡したいものへ景色の向きを戻すこととして扱う',
                 '',
                 '文体:',
+                ...muCanonStyleGuideLines,
+                '- ただし、相手へ送る文面・例文・駆け引きには戻らない',
                 '- Muとして自然に返す',
                 '- 説明しすぎず、でも読者が次に質問したくなる余白を残す',
-                '- 8〜12文程度',
+                '- 8〜12文程度。ただし relationship_imajinal_reflection では、6〜10文程度でもよい',
                 '- 箇条書きにしすぎない',
               ].join('\n'),
             },
@@ -2548,6 +2571,8 @@ const metaForRelationshipContextCapture: any = {
           fallbackTextLen: fallbackText.length,
           safeFallbackTextLen: safeFallbackText.length,
           directTextLen: finalDirectText.length,
+          muCanonWriterStyle,
+          muCanonStyleContextKind,
           hasImajinalCorePhrase,
           isBookAuthorConceptWriter,
           error: muCanonConceptSaved?.error ?? null,
