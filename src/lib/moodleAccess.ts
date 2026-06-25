@@ -36,19 +36,19 @@ export type MoodleAccessDecision = {
 
 export const MOODLE_BOOK_TARGETS: MoodleTarget[] = Array.from({ length: 10 }, (_, index) => {
   const volume = index + 1;
-  const moodleViewId = index + 2;
+  const courseId = index + 2;
 
   return {
     target_key: `mu_book_${volume}`,
+    // 権限判定上は「Book読書対象」として扱う。
+    // Moodleへの入場先は巻ごとの course/view.php。
     target_type: 'book',
-    // 現時点で確認済みの course_id は 2。
-    // 第2巻以降を別コースに分けたら、この値だけ差し替える。
-    course_id: 2,
+    course_id: courseId,
     role: 'student',
-    redirect_path: `/mod/book/view.php?id=${moodleViewId}`,
+    redirect_path: `/course/view.php?id=${courseId}`,
     volume,
-    title: `第${volume}章`,
-    subtitle: `Mu Book ${volume}`,
+    title: `第${volume}巻`,
+    subtitle: `Mu Book 第${volume}巻`,
     free_url: volume === 1 ? '/free-book/vol1/chapter1' : undefined,
   };
 });
