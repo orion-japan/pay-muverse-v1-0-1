@@ -27,6 +27,45 @@ export default function IrosHeader({
   const router = useRouter();
   const title = 'Mu';
 
+  const openMuBook = async (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+
+    try {
+      const { getAuth } = await import('firebase/auth');
+      const idToken = await getAuth().currentUser?.getIdToken();
+
+      if (!idToken) {
+        alert('ログイン情報が取得できませんでした。もう一度ログインしてください。');
+        return;
+      }
+
+      const res = await fetch('/api/moodle/issue-token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          target_key: 'mu_book_1',
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!data.ok || !data.entry_url) {
+        console.error('Mu Book issue-token failed:', data);
+        alert('Mu Bookへ入れませんでした。');
+        return;
+      }
+
+      window.location.href = data.entry_url;
+    } catch (err) {
+      console.error('Mu Book open error:', err);
+      alert('Mu Bookへの接続でエラーが起きました。');
+    }
+  };
+
   const chatCtx = (typeof useIrosChat === 'function' ? useIrosChat() : null) as any;
 
   const currentMeta =
@@ -176,6 +215,16 @@ export default function IrosHeader({
       <div className="sof-meta-wrap" aria-label="Iros meta indicator">
   <IrosMetaBadge qCode={qCode} depth={depth} mode={mode} compact />
 </div>
+        <button
+          type="button"
+          onClick={openMuBook}
+          className="sof-btn"
+          aria-label="Mu Bookを開く"
+          title="Mu Book"
+        >
+          📖 Book
+        </button>
+
 
         <button
           type="button"
@@ -283,4 +332,5 @@ export default function IrosHeader({
     </header>
   );
 }
+
 
