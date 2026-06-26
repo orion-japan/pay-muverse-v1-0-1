@@ -14,6 +14,16 @@ type BookShelfItem = {
   core: string;
 };
 
+type BookProgress = {
+  target_key: string;
+  section_index: number | null;
+  total_sections: number | null;
+  progress_percent: number | null;
+  completed_section_index: number | null;
+  completed_progress_percent: number | null;
+  updated_at: string | null;
+};
+
 const books: BookShelfItem[] = [
   {
     no: 1,
@@ -121,9 +131,52 @@ function normalizePlan(value: unknown) {
   return ['free', 'regular', 'premium', 'master', 'partner', 'admin'].includes(plan) ? plan : 'free';
 }
 
+function toNumberOrNull(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function clampPercent(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, n));
+}
+
+function formatPercent(value: number) {
+  if (value <= 0) return '0%';
+  if (value >= 99.95) return '100%';
+  return `${Math.round(value * 10) / 10}%`;
+}
+
+function formatCompletedLabel(completedSectionIndex: number | null, progressPercent: number) {
+  if (!completedSectionIndex || completedSectionIndex <= 0) return '未読';
+  if (progressPercent >= 99.95) return '完読';
+
+  const chapterNo = Math.floor((completedSectionIndex - 1) / 3) + 1;
+  const sectionNo = ((completedSectionIndex - 1) % 3) + 1;
+
+  return `第${chapterNo}章${sectionNo}節まで完了`;
+}
+
+function normalizeBookmark(raw: any, targetKey: string): BookProgress | null {
+  if (!raw) return null;
+
+  return {
+    target_key: targetKey,
+    section_index: toNumberOrNull(raw.section_index),
+    total_sections: toNumberOrNull(raw.total_sections),
+    progress_percent: toNumberOrNull(raw.progress_percent),
+    completed_section_index: toNumberOrNull(raw.completed_section_index),
+    completed_progress_percent: toNumberOrNull(raw.completed_progress_percent),
+    updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : null,
+  };
+}
+
 export default function BooksClient() {
   const { loading, user, planStatus } = useAuth();
   const [serverPlan, setServerPlan] = useState<string>('');
+  const [progressByTargetKey, setProgressByTargetKey] = useState<Record<string, BookProgress>>({});
+  const [progressLoading, setProgressLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const plan = normalizePlan(serverPlan || planStatus);
@@ -131,6 +184,7 @@ export default function BooksClient() {
   useEffect(() => {
     if (!user) {
       setServerPlan('');
+      setProgressByTargetKey({});
       return;
     }
 
@@ -143,6 +197,45 @@ export default function BooksClient() {
       })
       .catch(() => {
         if (alive) setServerPlan('');
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      setProgressByTargetKey({});
+      return;
+    }
+
+    let alive = true;
+    setProgressLoading(true);
+
+    Promise.all(
+      books.map(async (book) => {
+        try {
+          const res = await authedFetch(`/api/moodle/bookmark?target_key=${encodeURIComponent(book.target_key)}`);
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data?.ok || !data?.found || !data?.bookmark) return null;
+          return normalizeBookmark(data.bookmark, book.target_key);
+        } catch {
+          return null;
+        }
+      })
+    )
+      .then((items) => {
+        if (!alive) return;
+
+        const next: Record<string, BookProgress> = {};
+        items.forEach((item) => {
+          if (item) next[item.target_key] = item;
+        });
+        setProgressByTargetKey(next);
+      })
+      .finally(() => {
+        if (alive) setProgressLoading(false);
       });
 
     return () => {
@@ -208,36 +301,58 @@ export default function BooksClient() {
         {message ? <div className={styles.notice}>{message}</div> : null}
 
         <section className={styles.grid} aria-label="Mu Book 本棚">
-          {books.map((book) => (
-            <article key={book.target_key} className={styles.bookCard}>
-              <div className={styles.bookTop}>
-                <div className={styles.bookNo}>BOOK {book.no}</div>
-                <div className={styles.courseId}>course {book.course_id}</div>
-              </div>
+          {books.map((book) => {
+            const progress = progressByTargetKey[book.target_key] || null;
+            const completedPercent = clampPercent(progress?.completed_progress_percent);
+            const completedSectionIndex = toNumberOrNull(progress?.completed_section_index);
+            const progressLabel = formatCompletedLabel(completedSectionIndex, completedPercent);
+            const percentLabel = progressLoading ? '読込中' : formatPercent(completedPercent);
 
-              <h2 className={styles.bookTitle}>第{book.no}巻</h2>
-              <h3 className={styles.bookMainTitle}>{book.title}</h3>
-              <p className={styles.bookSubtitle}>― {book.subtitle} ―</p>
-              <p className={styles.bookDirection}>{book.direction}</p>
-              <p className={styles.bookCore}>
-                <span>核</span>
-                {book.core}
-              </p>
+            return (
+              <article key={book.target_key} className={styles.bookCard}>
+                <div className={styles.bookTop}>
+                  <div className={styles.bookNo}>BOOK {book.no}</div>
+                  <div className={styles.courseId}>course {book.course_id}</div>
+                </div>
 
-              <div className={styles.actions}>
-                <button
-                  type="button"
-                  disabled={loading || !user || busy === book.target_key}
-                  onClick={() => openBook(book.target_key)}
-                  className={styles.readButton}
-                >
-                  {busy === book.target_key ? '扉を開いています...' : 'この巻を読む'}
-                </button>
-              </div>
+                <h2 className={styles.bookTitle}>第{book.no}巻</h2>
+                <h3 className={styles.bookMainTitle}>{book.title}</h3>
+                <p className={styles.bookSubtitle}>― {book.subtitle} ―</p>
+                <p className={styles.bookDirection}>{book.direction}</p>
+                <p className={styles.bookCore}>
+                  <span>核</span>
+                  {book.core}
+                </p>
 
-              <p className={styles.cardNote}>入場時にMuverse側で権限を確認します。</p>
-            </article>
-          ))}
+                <div className={styles.progressBox} aria-label={`第${book.no}巻の読書進捗`}>
+                  <div className={styles.progressHeader}>
+                    <span>正式進捗</span>
+                    <strong>{percentLabel}</strong>
+                  </div>
+                  <div className={styles.progressTrack} aria-hidden="true">
+                    <div
+                      className={styles.progressFill}
+                      style={{ width: progressLoading ? '0%' : `${completedPercent}%` }}
+                    />
+                  </div>
+                  <p className={styles.progressText}>{progressLoading ? '進捗を確認しています...' : progressLabel}</p>
+                </div>
+
+                <div className={styles.actions}>
+                  <button
+                    type="button"
+                    disabled={loading || !user || busy === book.target_key}
+                    onClick={() => openBook(book.target_key)}
+                    className={styles.readButton}
+                  >
+                    {busy === book.target_key ? '扉を開いています...' : 'この巻を読む'}
+                  </button>
+                </div>
+
+                <p className={styles.cardNote}>入場時にMuverse側で権限を確認します。</p>
+              </article>
+            );
+          })}
         </section>
 
         <p className={styles.footerHint}>
