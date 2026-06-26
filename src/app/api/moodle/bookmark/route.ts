@@ -19,6 +19,16 @@ type BookmarkBody = {
   mode?: string | null;
   source?: string | null;
   updated_from?: string | null;
+
+  section_index?: number | string | null;
+  total_sections?: number | string | null;
+  progress_percent?: number | string | null;
+
+  completed_section_index?: number | string | null;
+  completed_progress_percent?: number | string | null;
+
+  scroll_y?: number | string | null;
+  text?: string | null;
 };
 
 type AuthContext = {
@@ -32,6 +42,29 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Moodle-Secret',
   'Access-Control-Max-Age': '86400',
 };
+
+const bookmarkSelectFields = [
+  'user_code',
+  'target_key',
+  'course_id',
+  'chapter_id',
+  'chapter_title',
+  'position_index',
+  'paragraph_index',
+  'char_offset',
+  'audio_time',
+  'mode',
+  'source',
+  'updated_from',
+  'section_index',
+  'total_sections',
+  'progress_percent',
+  'completed_section_index',
+  'completed_progress_percent',
+  'scroll_y',
+  'text',
+  'updated_at',
+].join(', ');
 
 function json(status: number, body: any) {
   return NextResponse.json(body, { status, headers: corsHeaders });
@@ -56,6 +89,18 @@ function toNullableNumber(value: unknown) {
   if (value === undefined || value === null || value === '') return null;
   const n = Number(value);
   return Number.isFinite(n) ? Math.max(0, n) : null;
+}
+
+function toNullablePercent(value: unknown) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(100, n));
+}
+
+function calculateProgressPercent(sectionIndex: number | null, totalSections: number | null) {
+  if (sectionIndex === null || totalSections === null || totalSections <= 0) return null;
+  return Math.max(0, Math.min(100, (sectionIndex / totalSections) * 100));
 }
 
 function isAllowedTargetKey(targetKey: string) {
@@ -120,9 +165,7 @@ export async function GET(req: NextRequest) {
 
     const { data, error } = await supabaseServer
       .from('moodle_bookmarks')
-      .select(
-        'user_code, target_key, course_id, chapter_id, chapter_title, position_index, paragraph_index, char_offset, audio_time, mode, source, updated_from, updated_at'
-      )
+      .select(bookmarkSelectFields)
       .eq('user_code', auth.user_code)
       .eq('target_key', target_key)
       .maybeSingle();
@@ -156,7 +199,59 @@ export async function POST(req: NextRequest) {
       return json(401, { ok: false, reason: 'unauthorized' });
     }
 
+    const incomingSectionIndex = toNullableInt(body.section_index);
+    const incomingTotalSections = toNullableInt(body.total_sections);
+    const incomingProgressPercent =
+      toNullablePercent(body.progress_percent) ??
+      calculateProgressPercent(incomingSectionIndex, incomingTotalSections);
+
+    const { data: existingBookmark, error: existingBookmarkError } = await supabaseServer
+      .from('moodle_bookmarks')
+      .select('completed_section_index, completed_progress_percent, total_sections')
+      .eq('user_code', auth.user_code)
+      .eq('target_key', target_key)
+      .maybeSingle();
+
+    if (existingBookmarkError) {
+      return json(500, { ok: false, reason: 'db_error', detail: existingBookmarkError.message });
+    }
+
+    const existingCompletedSectionIndex = toInt(existingBookmark?.completed_section_index, 0);
+    const existingCompletedProgressPercent =
+      toNullablePercent(existingBookmark?.completed_progress_percent) ?? 0;
+    const existingTotalSections = toNullableInt(existingBookmark?.total_sections);
+
+    const isSequentialProgress =
+      incomingSectionIndex !== null &&
+      (
+        existingCompletedSectionIndex <= 0
+          ? incomingSectionIndex <= 1
+          : incomingSectionIndex <= existingCompletedSectionIndex + 1
+      );
+
+    const nextCompletedSectionIndex =
+      isSequentialProgress && incomingSectionIndex !== null
+        ? Math.max(existingCompletedSectionIndex, incomingSectionIndex)
+        : existingCompletedSectionIndex;
+
+    const effectiveTotalSections = incomingTotalSections ?? existingTotalSections;
+
+    const calculatedCompletedProgressPercent =
+      calculateProgressPercent(nextCompletedSectionIndex, effectiveTotalSections);
+
+    const nextCompletedProgressPercent =
+      calculatedCompletedProgressPercent !== null
+        ? Math.max(existingCompletedProgressPercent, calculatedCompletedProgressPercent)
+        : existingCompletedProgressPercent;
+
+    const baseUpdatedFrom = cleanText(body.updated_from, auth.by) || auth.by;
+    const finalUpdatedFrom =
+      incomingSectionIndex === null || isSequentialProgress
+        ? baseUpdatedFrom
+        : 'jump_ignored:' + baseUpdatedFrom;
+
     const now = new Date().toISOString();
+
     const payload = {
       user_code: auth.user_code,
       target_key,
@@ -169,16 +264,25 @@ export async function POST(req: NextRequest) {
       audio_time: toNullableNumber(body.audio_time),
       mode: cleanText(body.mode, 'reading') || 'reading',
       source: cleanText(body.source, 'moodle') || 'moodle',
-      updated_from: cleanText(body.updated_from, auth.by) || auth.by,
+      updated_from: finalUpdatedFrom,
+
+      section_index: incomingSectionIndex,
+      total_sections: incomingTotalSections,
+      progress_percent: incomingProgressPercent,
+
+      completed_section_index: nextCompletedSectionIndex,
+      completed_progress_percent: nextCompletedProgressPercent,
+
+      scroll_y: toNullableInt(body.scroll_y),
+      text: cleanText(body.text) || null,
+
       updated_at: now,
     };
 
     const { data, error } = await supabaseServer
       .from('moodle_bookmarks')
       .upsert(payload, { onConflict: 'user_code,target_key' })
-      .select(
-        'user_code, target_key, course_id, chapter_id, chapter_title, position_index, paragraph_index, char_offset, audio_time, mode, source, updated_from, updated_at'
-      )
+      .select(bookmarkSelectFields)
       .single();
 
     if (error) {
