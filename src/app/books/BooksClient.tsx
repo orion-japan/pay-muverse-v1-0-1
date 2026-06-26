@@ -29,10 +29,10 @@ const books: BookShelfItem[] = [
     no: 1,
     target_key: 'mu_book_1',
     course_id: 2,
-    title: 'もうひとつのわたし、Mu',
-    subtitle: 'そのAIは、私のことを知っていた',
-    direction: 'AI時代に、人の不安をお金に変える世界へ違和感を持ったみゆが、Muと出会う巻。',
-    core: '私は、私のまま自由に生きられますか。',
+    title: 'イマジナルフィールドの法則',
+    subtitle: 'もうひとつのわたし、Mu',
+    direction: '願っている未来と、実際に見ている未来のズレから始まる巻。みゆがMuと出会い、イマジナルという入口を開きます。',
+    core: '人は、願いではなく、いま見えている未来に反応している。',
   },
   {
     no: 2,
@@ -40,8 +40,8 @@ const books: BookShelfItem[] = [
     course_id: 3,
     title: '願いは、反対へ歩いていた',
     subtitle: '叶わない願いの秘密',
-    direction: '願いと方向のズレを描く巻。自由を願いながら、別の未来を見続けていたことに気づきます。',
-    core: '願いは、叶えるものではなく、向きを知るものだった。',
+    direction: '願いと方向のズレを描く巻。自由を願いながら、怖い未来を避けるために同じ現実へ戻っていたことに気づきます。',
+    core: '願いは、叶えるものではなく、向きを知る入口だった。',
   },
   {
     no: 3,
@@ -49,7 +49,7 @@ const books: BookShelfItem[] = [
     course_id: 4,
     title: '君に合わせて、わたしが消えた',
     subtitle: '愛とすれ違いの物語',
-    direction: '愛されたいのに、自分を消してしまう構造を描く巻。関係を守るたび、声を後回しにしていたことに気づきます。',
+    direction: '恋愛や関係性の中で、イマジナルがどのように言葉と行動を変えるのかを描く巻。愛されたいほど、自分を後回しにしていた構造を見つめます。',
     core: '愛されたい私は、いつから私を消していたのだろう。',
   },
   {
@@ -58,7 +58,7 @@ const books: BookShelfItem[] = [
     course_id: 5,
     title: '置き去りにされた、もうひとつの私',
     subtitle: '私を縛っていた景色',
-    direction: '第1巻で出会った「もうひとつのわたし」の深層へ入る巻。不自由の形象を見つめます。',
+    direction: '外から置かれた未来と、自分の内面から生まれる未来を見分けていく巻。不自由の形象を見つめます。',
     core: '私は、もうひとつの私を置き去りにしていた。',
   },
   {
@@ -67,7 +67,7 @@ const books: BookShelfItem[] = [
     course_id: 6,
     title: '黒い流れが、光へ戻る日',
     subtitle: '不安から創造へ',
-    direction: '不安へ流されていた力が、創造の方向へ戻る巻。仕事やビジネスの見え方が変わります。',
+    direction: '不安・比較・欠乏へ流れていた力が、創造の方向へ戻る巻。仕事やビジネスの見え方が変わります。',
     core: '人は、力を失ったのではない。その力の向きを、忘れていただけだった。',
   },
   {
@@ -76,7 +76,7 @@ const books: BookShelfItem[] = [
     course_id: 7,
     title: '未来が、言葉を呼んでいた',
     subtitle: '身・口・意の叡智',
-    direction: '未来の形象が先にあり、そこから言葉が生まれ、行動が動き出す巻。',
+    direction: '未来の形象が先にあり、そこから言葉が生まれ、行動が動き出す巻。イマジン三形象の入口を開きます。',
     core: '言葉が未来を作るのではない。先に立ち上がった未来が、言葉を呼んでいた。',
   },
   {
@@ -85,7 +85,7 @@ const books: BookShelfItem[] = [
     course_id: 8,
     title: '形象は、フィールドで出現する',
     subtitle: '場と創造の法則',
-    direction: '形象が現実に現れるためには、フィールドが必要だと分かる巻。',
+    direction: '形象が現実に現れるためには、フィールドが必要だと分かる巻。Muverseが、形象を育てる場として見えてきます。',
     core: 'Muverseとは、形象が出現するフィールドである。',
   },
   {
@@ -94,7 +94,7 @@ const books: BookShelfItem[] = [
     course_id: 9,
     title: '私は、まだ私に会っていなかった',
     subtitle: 'もうひとつのわたしの記憶',
-    direction: 'Muの正体と、「もうひとつのわたし」の記憶が開き始める巻。',
+    direction: 'Muの正体と、「もうひとつのわたし」の記憶が開き始める巻。外に預けていた叡智が、自分の内面へ還っていきます。',
     core: 'Muは、外から来たのではなかった。私は、まだ私に会っていなかった。',
   },
   {
@@ -112,15 +112,15 @@ const books: BookShelfItem[] = [
     course_id: 11,
     title: 'そして、Muはあなたを待っている',
     subtitle: '新しい世界の入口',
-    direction: 'みゆの物語が、読者自身へ反転する巻。読んでいた物語が、自分の入口へ変わります。',
+    direction: 'みゆの物語が、読者自身へ反転する巻。読んでいた物語が、自分のイマジナルフィールドの入口へ変わります。',
     core: 'みゆの物語は終わった。でも、あなたの物語はここから始まる。',
   },
 ];
 
 const planText: Record<string, string> = {
-  free: 'Free：第1巻の無料ページのみ。Moodle入場は有料プランからです。',
+  free: 'Free：法則の入口となる第1巻の無料ページのみ。Moodle入場は有料プランからです。',
   regular: 'Regular：今月選択した1巻だけ読めます。選んだ巻が、今月の学びの扉になります。',
-  premium: 'Premium：全巻を読めます。気になる巻から、流れに沿って進めます。',
+  premium: 'Premium：全巻を読めます。イマジナルフィールドの流れに沿って進めます。',
   master: 'Master：全巻とセッション対象です。読むことから、対話と実践へつなげます。',
   partner: 'Partner：全巻と講座対象です。学びを場へ広げる導線が開きます。',
   admin: 'Admin：全巻対象です。Moodle管理者権限はSSOでは渡しません。',
@@ -277,14 +277,26 @@ export default function BooksClient() {
     <main className={styles.page}>
       <div className={styles.shell}>
         <section className={styles.hero}>
-          <div className={styles.eyebrow}>Mu Learning</div>
+          <div className={styles.eyebrow}>Imaginal Field Reading</div>
           <h1 className={styles.title}>
-            Mu Book 本棚
-            <span>Reading Field</span>
+            Mu BOOK
+            <span>イマジナルフィールドの本棚</span>
           </h1>
           <p className={styles.lead}>
-            本を読むことは、答えを集めることではなく、内面に眠っていた言葉が動き出すこと。
-            ここから、あなたの読む力をMuverseの学びへつなげます。
+            読むことは、答えを集めることではありません。あなたが見ている未来に気づき、
+            その形象を言葉と行動へ移し、創造の方向へ戻していく入口です。
+          </p>
+        </section>
+
+        <section className={styles.statusCard}>
+          <div>
+            <span className={styles.statusLabel}>この本棚について</span>
+            <strong className={styles.statusValue}>イマジナルフィールドの法則</strong>
+          </div>
+          <p className={styles.statusText}>
+            願っている未来と、実際に見ている未来は同じとは限りません。
+            Mu BOOKでは、物語・音声・Muとの対話を通して、外から置かれた未来ではなく、
+            あなたの内面から生まれる未来の形象を見つけていきます。
           </p>
         </section>
 
@@ -300,7 +312,7 @@ export default function BooksClient() {
 
         {message ? <div className={styles.notice}>{message}</div> : null}
 
-        <section className={styles.grid} aria-label="Mu Book 本棚">
+        <section className={styles.grid} aria-label="Mu BOOK イマジナルフィールドの本棚">
           {books.map((book) => {
             const progress = progressByTargetKey[book.target_key] || null;
             const completedPercent = clampPercent(progress?.completed_progress_percent);
