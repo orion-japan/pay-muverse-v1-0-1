@@ -271,11 +271,11 @@
 
 .progressBox {
   position: relative;
-  margin: 14px 0 0;
-  border: 1px solid rgba(165, 243, 252, 0.18);
+  margin: 16px 0 0;
+  border: 1px solid rgba(165, 243, 252, 0.24);
   border-radius: 18px;
   padding: 12px;
-  background: rgba(8, 13, 32, 0.42);
+  background: rgba(8, 13, 32, 0.50);
 }
 
 .progressHeader {
@@ -283,13 +283,13 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 8px;
+  margin-bottom: 9px;
 }
 
 .progressHeader span {
-  color: rgba(248, 251, 255, 0.66);
+  color: rgba(248, 251, 255, 0.68);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0.08em;
 }
 
@@ -300,22 +300,31 @@
 }
 
 .progressTrack {
+  position: relative;
+  display: block;
   overflow: hidden;
-  height: 8px;
+  width: 100%;
+  height: 12px;
+  margin: 0;
+  border: 1px solid rgba(165, 243, 252, 0.26);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
 .progressFill {
+  display: block;
   height: 100%;
+  min-width: 4px;
   border-radius: inherit;
   background: linear-gradient(90deg, #a78bfa, #22d3ee, #facc15);
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.34);
   transition: width 260ms ease;
 }
 
 .progressText {
-  margin: 8px 0 0;
-  color: rgba(248, 251, 255, 0.72);
+  margin: 9px 0 0;
+  color: rgba(248, 251, 255, 0.74);
   font-size: 11.5px;
   line-height: 1.5;
 }
