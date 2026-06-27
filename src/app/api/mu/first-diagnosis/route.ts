@@ -137,7 +137,6 @@ function buildDisplayText(seed: ImaginalDiagnosisSeed, fallback: string): string
 
   return [
     'これは、画像をきっかけに見えた「今現在のイマジナル」です。',
-    '画像の内容そのものではなく、いま立ち上がっているフローをもとに見ています。',
     '',
     'あなたのイマジナルコピー',
     copy,
