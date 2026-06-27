@@ -136,8 +136,6 @@ function buildDisplayText(seed: ImaginalDiagnosisSeed, fallback: string): string
   if (!copy) return fallback;
 
   return [
-    'これは、画像をきっかけに見えた「今現在のイマジナル」です。',
-    '',
     'あなたのイマジナルコピー',
     copy,
     '',
@@ -158,6 +156,8 @@ function buildDisplayText(seed: ImaginalDiagnosisSeed, fallback: string): string
     '',
     '今日の小さな一歩',
     cleanString(seed.today_step) || '今日できる小さな一歩を、無理のない形でひとつ選んでください。',
+    '',
+    'これは、画像をきっかけに見えた「今現在のイマジナル」です。',
   ].join('\n');
 }
 
@@ -223,11 +223,9 @@ function safeParseDiagnosis(raw: string): {
 function normalizeWriterDisplayText(value: unknown, fallback: string): string {
   const text = cleanString(value);
   const base = text || fallback;
-  const requiredLead = 'これは、画像をきっかけに見えた「今現在のイマジナル」です。';
-  const withoutDuplicateLead = base
-    .replace(/^これは、画像をきっかけに見えた「今現在のイマジナル」です。\s*/u, '')
-    .trim();
-  return [requiredLead, withoutDuplicateLead].filter(Boolean).join('\n\n').trim();
+  const note = 'これは、画像をきっかけに見えた「今現在のイマジナル」です。';
+  const withoutNote = base.replace(/これは、画像をきっかけに見えた「今現在のイマジナル」です。\s*/gu, '').trim();
+  return [withoutNote, note].filter(Boolean).join('\n\n').trim();
 }
 
 async function writeDiagnosisFromSeed(params: {
@@ -237,20 +235,21 @@ async function writeDiagnosisFromSeed(params: {
   fallback: string;
 }): Promise<string> {
   const { apiKey, model, seed, fallback } = params;
-  if (!seed?.imaginal_flow_seed) return fallback;
+  if (!seed?.imaginal_flow_seed) return normalizeWriterDisplayText(fallback, fallback);
 
   const writerModel = process.env.MU_FIRST_DIAGNOSIS_WRITER_MODEL || model;
   const writerSystem = [
     'あなたはMuverseの初回イマジナル診断のWriterです。',
     '前段の画像観測とフロー判定Seedだけを正本にして、ユーザー表示用の診断文を書いてください。',
     '画像を新しく読み直さないでください。意味を追加せず、渡されたSeedから自然な日本語にしてください。',
-    '最初の1行は必ず「これは、画像をきっかけに見えた「今現在のイマジナル」です。」にしてください。',
+    '注意書きは必ず一番最後に置いてください。',
+    '最後の1行は必ず「これは、画像をきっかけに見えた「今現在のイマジナル」です。」にしてください。',
     '「画像の内容そのものではなく、いま立ち上がっているフローをもとに見ています。」は出さないでください。',
     '相手の気持ち、未来、運命、人格を断定しないでください。',
     '「寄り添います」「静かに」「本当の自分」「本当の姿」「言葉になる前」は使わないでください。',
     '出力はJSONのみ。display_text だけを持つオブジェクトにしてください。',
     'display_textには内部キー名、currentFlow、secondFlow、Seed、JSONという言葉を出さないでください。',
-    '構成は、1.注意書き 2.あなたのイマジナルコピー 3.いま見えている願い 4.見続けている未来 5.言葉に出ている反応 6.行動に出ている反応 7.創造の方向 8.今日の小さな一歩。',
+    '構成は、1.あなたのイマジナルコピー 2.いま見えている願い 3.見続けている未来 4.言葉に出ている反応 5.行動に出ている反応 6.創造の方向 7.今日の小さな一歩 8.注意書き。',
     '全体で900文字以内。',
   ].join('\n');
 
