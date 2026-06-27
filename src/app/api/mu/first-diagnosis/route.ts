@@ -20,6 +20,17 @@ import {
 
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
+type ImaginalCoreSeed = {
+  copy_material?: string;
+  copy_tone?: string;
+  undesired_future?: string;
+  avoidance_wish?: string;
+  word_from_undesired_future?: string;
+  action_from_undesired_future?: string;
+  creative_future?: string;
+  creative_word_direction?: string;
+};
+
 type ImaginalDiagnosisSeed = ImaginalFlowSeedLike & {
   kind?: 'imaginal_first';
   imaginal_copy?: string;
@@ -28,6 +39,7 @@ type ImaginalDiagnosisSeed = ImaginalFlowSeedLike & {
   word_reaction?: string;
   action_reaction?: string;
   intention_layer?: ImaginalIntentionLayer;
+  imaginal_core_seed?: ImaginalCoreSeed;
   dominant_field?: 'anxiety' | 'comparison' | 'destruction' | 'creation' | 'unknown';
   creative_direction?: string;
   today_step?: string;
@@ -123,6 +135,22 @@ function normalizeIntentionLayer(value: unknown): ImaginalIntentionLayer | undef
   return Object.values(layer).some(Boolean) ? layer : undefined;
 }
 
+function normalizeImaginalCoreSeed(value: unknown): ImaginalCoreSeed | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const v = value as Record<string, unknown>;
+  const seed: ImaginalCoreSeed = {
+    copy_material: cleanString(v.copy_material ?? v.copyMaterial),
+    copy_tone: cleanString(v.copy_tone ?? v.copyTone),
+    undesired_future: cleanString(v.undesired_future ?? v.undesiredFuture),
+    avoidance_wish: cleanString(v.avoidance_wish ?? v.avoidanceWish),
+    word_from_undesired_future: cleanString(v.word_from_undesired_future ?? v.wordFromUndesiredFuture),
+    action_from_undesired_future: cleanString(v.action_from_undesired_future ?? v.actionFromUndesiredFuture),
+    creative_future: cleanString(v.creative_future ?? v.creativeFuture),
+    creative_word_direction: cleanString(v.creative_word_direction ?? v.creativeWordDirection),
+  };
+  return Object.values(seed).some(Boolean) ? seed : undefined;
+}
+
 function normalizeDiagnosisScope(value: unknown): ImaginalDiagnosisSeed['diagnosis_scope'] | undefined {
   return String(value ?? '').trim() === 'current_imaginal' ? 'current_imaginal' : undefined;
 }
@@ -134,28 +162,29 @@ function normalizeFlowPriority(value: unknown): true | undefined {
 function buildDisplayText(seed: ImaginalDiagnosisSeed, fallback: string): string {
   const copy = cleanString(seed.imaginal_copy);
   if (!copy) return fallback;
+  const core = seed.imaginal_core_seed;
 
   return [
     'あなたのイマジナルコピー',
     copy,
     '',
     'いま見えている願い',
-    cleanString(seed.visible_wish) || 'いまの画像から見える範囲で、あなたが向かいたい方向を読んでいます。',
+    cleanString(core?.avoidance_wish) || cleanString(seed.visible_wish) || 'いま思っている未来にならないように、安心できる未来へ動きたい願いを読んでいます。',
     '',
     '見続けている未来',
-    cleanString(seed.seen_future) || '願いとは別に、先に見てしまっている未来を読んでいます。',
+    cleanString(core?.undesired_future) || cleanString(seed.seen_future) || '思い通りにならず、また待つ側に残されるように感じる未来を見ている可能性があります。',
     '',
     '言葉に出ている反応',
-    cleanString(seed.word_reaction) || '言葉の出方に出ている反応を、見えている範囲で映します。',
+    cleanString(core?.word_from_undesired_future) || cleanString(seed.word_reaction) || '不安から出る確認の言葉を、見えている範囲で映します。',
     '',
     '行動に出ている反応',
-    cleanString(seed.action_reaction) || '行動の止まり方や動き方に出ている反応を見ます。',
+    cleanString(core?.action_from_undesired_future) || cleanString(seed.action_reaction) || '今すぐ安心したい焦りが、行動の速度に出ています。',
     '',
     '創造の方向',
-    cleanString(seed.creative_direction) || '今は、見続けている未来を少しずつ創造の方向へ戻すことです。',
+    cleanString(core?.creative_future) || cleanString(seed.creative_direction) || 'すでに安心してつながっている未来に寄せて、そこから言葉を作る方向です。',
     '',
     '今日の小さな一歩',
-    cleanString(seed.today_step) || '今日できる小さな一歩を、無理のない形でひとつ選んでください。',
+    cleanString(core?.creative_word_direction) || cleanString(seed.today_step) || '怖さを回避するためではなく、安心を前提にした一言を選んでください。',
     '',
     'これは、画像をきっかけに見えた「今現在のイマジナル」です。',
   ].join('\n');
@@ -173,6 +202,8 @@ function safeParseDiagnosis(raw: string): {
       ? parsed.seed
       : parsed;
 
+    const coreSeed = normalizeImaginalCoreSeed(seedRaw?.imaginal_core_seed ?? seedRaw?.imaginalCoreSeed);
+
     const seed: ImaginalDiagnosisSeed = {
       kind: 'imaginal_first',
       imaginal_copy: cleanString(seedRaw?.imaginal_copy ?? seedRaw?.imaginalCopy),
@@ -181,6 +212,7 @@ function safeParseDiagnosis(raw: string): {
       word_reaction: cleanString(seedRaw?.word_reaction ?? seedRaw?.wordReaction),
       action_reaction: cleanString(seedRaw?.action_reaction ?? seedRaw?.actionReaction),
       intention_layer: normalizeIntentionLayer(seedRaw?.intention_layer ?? seedRaw?.intentionLayer),
+      imaginal_core_seed: coreSeed,
       diagnosis_scope: normalizeDiagnosisScope(seedRaw?.diagnosis_scope ?? seedRaw?.diagnosisScope),
       flow_priority: normalizeFlowPriority(seedRaw?.flow_priority ?? seedRaw?.flowPriority),
       image_seed: seedRaw?.image_seed ?? seedRaw?.imageSeed,
@@ -200,9 +232,9 @@ function safeParseDiagnosis(raw: string): {
         '画像は補助として扱う',
         '正本は今現在のフローと状態移管に置く',
         '画像から読み取れないことは言い切らない',
-        'イマジナルコピーは愉快な入口として扱う',
-        '本質は説明欄で渡す',
-        '創造の方向へ戻す',
+        'コピーはSeedそのものではなく、SeedからLLMが作る入口として扱う',
+        '本質はimaginal_core_seedを正本にして説明欄で渡す',
+        '創造の方向は改善策ではなく安心している未来を描く',
       ],
     };
 
@@ -243,19 +275,25 @@ async function writeDiagnosisFromSeed(params: {
     'あなたはMuverseの初回イマジナル診断のWriterです。',
     '前段の画像観測とフロー判定Seedだけを正本にして、ユーザー表示用の診断文を書いてください。',
     '画像を新しく読み直さないでください。意味を追加せず、渡されたSeedから自然な日本語にしてください。',
-    'コピーと説明の役割を分けてください。コピーは愉快で少し刺さる入口です。本質は説明欄で渡してください。',
-    'あなたのイマジナルコピーは、12〜24文字程度の短い表示コピーにしてください。長い分析文、因果説明、括弧補足は禁止です。',
-    'コピーは深刻にしすぎず、少し笑えるくらいの軽さを持たせてください。ただし茶化しすぎないでください。',
-    '良いコピー例: 「返事の空白に、夜を貸し出し中」「通知欄に、時間を家出させる夜」「未応答に、夜の主導権をレンタル中」。',
-    '悪いコピー例: 「相手の応答の有無で自分の夜の時間配分や感情の扱い方が決まってしまう未来」。これは説明文なので禁止です。',
-    'seed.imaginal_copy が説明文になっている場合は、そのまま使わず、同じ本質を短く愉快なコピーへ変換してください。',
+    'もっとも重要な正本は seed.imaginal_core_seed です。コピー文そのものではなく、copy_material / undesired_future / avoidance_wish / creative_future を見てください。',
+    'コピーはSeedではありません。コピーはLLMの仕事です。copy_material と copy_tone から、短く少し愉快な入口コピーを作ってください。',
+    'あなたのイマジナルコピーは、12〜24文字程度。長い分析文、因果説明、括弧補足、状況ラベルは禁止です。',
+    'コピーは、今見ている避けたい未来を少し面白く言い換えてください。茶化しすぎず、軽く刺さる入口にしてください。',
+    '良いコピー例: 「返事待ち沼、また開園中」「未応答の海で、また漂流中」「安心回線、ただいま圏外中」。',
+    '悪いコピー例: 「既読レンタル中、返事保留」「相手の応答の有無で自分の夜の時間配分や感情の扱い方が決まってしまう未来」。前者は状況ラベル、後者は説明文なので禁止です。',
+    '「いま見えている願い」には、imaginal_core_seed.avoidance_wish を自然な言葉で出してください。',
+    '「見続けている未来」には、imaginal_core_seed.undesired_future を出してください。これは断定ではなく、今立ち上がっている流れとして書いてください。',
+    '「言葉に出ている反応」には、imaginal_core_seed.word_from_undesired_future を出してください。',
+    '「行動に出ている反応」には、imaginal_core_seed.action_from_undesired_future を出してください。',
+    '「創造の方向」は改善策リストではありません。imaginal_core_seed.creative_future をもとに、すでに安心してつながっている未来を描いてください。',
+    '「今日の小さな一歩」には、imaginal_core_seed.creative_word_direction をもとに、安心を前提にした未来から一言を作る方向へ導いてください。',
     '注意書きは必ず一番最後に置いてください。',
     '最後の1行は必ず「これは、画像をきっかけに見えた「今現在のイマジナル」です。」にしてください。',
     '「画像の内容そのものではなく、いま立ち上がっているフローをもとに見ています。」は出さないでください。',
     '相手の気持ち、未来、運命、人格を断定しないでください。',
     '「寄り添います」「静かに」「本当の自分」「本当の姿」「言葉になる前」は使わないでください。',
     '出力はJSONのみ。display_text だけを持つオブジェクトにしてください。',
-    'display_textには内部キー名、currentFlow、secondFlow、Seed、JSONという言葉を出さないでください。',
+    'display_textには内部キー名、currentFlow、secondFlow、Seed、JSON、imaginal_core_seedという言葉を出さないでください。',
     '構成は、1.あなたのイマジナルコピー 2.いま見えている願い 3.見続けている未来 4.言葉に出ている反応 5.行動に出ている反応 6.創造の方向 7.今日の小さな一歩 8.注意書き。',
     '全体で900文字以内。',
   ].join('\n');
@@ -478,8 +516,8 @@ export async function POST(req: NextRequest) {
 
     const system = [
       'あなたはMuverseの初回イマジナル診断を行うMuです。',
-      'これは一次観測です。画像から image_seed / current_flow_input_seed / second_flow_input_seed / intention_layer を作ることが主目的です。',
-      '最終表示文は後段Writerが、コードで作られた imaginal_flow_seed を正本にして作ります。',
+      'これは一次観測です。画像から image_seed / current_flow_input_seed / second_flow_input_seed / imaginal_core_seed を作ることが主目的です。',
+      '最終表示文は後段Writerが、コードで作られた imaginal_flow_seed と imaginal_core_seed を正本にして作ります。',
       'これは画像診断ではなく、画像を入口にした「今現在のイマジナル」の状態観測です。',
       '画像は補助入力です。正本は、ユーザーがその画像を選び、今ここに出した時点で立ち上がっているフローです。',
       '画像の表面内容とフロー解釈が食い違う場合は、フロー解釈を優先してください。ただし、人格・運命・恒常的な未来として断定しないでください。',
@@ -490,28 +528,32 @@ export async function POST(req: NextRequest) {
       'まず image_seed に、画像の表面観測、見える言葉、見える行動、緊張点、ユーザーが反応している一点を入れてください。',
       '次に current_flow_input_seed と second_flow_input_seed を作ってください。e_turn は e1/e2/e3/e4/e5、depthStage は S1〜T3、polarity は pos/neg だけを使ってください。',
       'current_flow_input_seed は「今この画像を出した時点の現在状態」、second_flow_input_seed は「そこから移管しようとしている状態」です。',
-      'イマジナルコピーは、表示の入口です。本質説明ではありません。少し愉快で、でも刺さる短いコピーにしてください。',
-      'コピーは12〜24文字程度。長い説明文、因果説明、括弧補足、要約文は禁止です。',
-      '本質は visible_wish / seen_future / word_reaction / action_reaction / creative_direction に分けて渡してください。コピーに本質を詰め込まないでください。',
-      '生成前に内部で、1.表面の出来事 2.この画像を出した現在状態 3.そこから移管しようとしている状態 4.その出来事を何の意味として受け取っているか 5.その人が先に見ている未来、の順に深めてください。',
-      'imaginal_copy は intention_layer.seen_future を素材にしますが、表示用には短く愉快な入口コピーへ変換してください。S層の状況説明、F層の感情説明、R層の関係説明、C層の行動説明をそのままコピーにしてはいけません。',
+      '必ず imaginal_core_seed を作ってください。これは診断の正本です。コピー文ではなく、コピーと説明を生成するための素材です。',
+      'imaginal_core_seed.copy_material には、今見ている避けたい未来の素材を入れてください。例: 今すぐ話したい / このまま連絡手段を失う / また待つ私になる / 置いていかれるように感じる。',
+      'imaginal_core_seed.copy_tone には、愉快、少し刺さる、軽い比喩、茶化しすぎない、と入れてください。',
+      'imaginal_core_seed.undesired_future には、思い通りにならず、また待つ側に残され、置いていかれるように感じる未来を入れてください。',
+      'imaginal_core_seed.avoidance_wish には、その未来にならないように、今すぐ連絡が取れて安心したい願いを入れてください。',
+      'imaginal_core_seed.word_from_undesired_future には、不安から出る確認の言葉を入れてください。',
+      'imaginal_core_seed.action_from_undesired_future には、今すぐ安心したい焦りが行動を速くしていることを入れてください。',
+      'imaginal_core_seed.creative_future には、すでに相手と仲良く、安心してつながっている未来を描いてください。改善策リストにしないでください。',
+      'imaginal_core_seed.creative_word_direction には、怖さを避けるためではなく、安心を前提にした未来から一言を作る方向を入れてください。',
+      'imaginal_copy は仮でよいです。コピーはSeedそのものではなく、後段Writerが copy_material と copy_tone から作ります。',
       'intention_layer には received_meaning, seen_future, hidden_intention, future_distortion を入れてください。',
-      '良いコピー例: 「返事の空白に、夜を貸し出し中」「通知欄に、時間を家出させる夜」「未応答に、夜の主導権をレンタル中」。',
-      '悪いコピー例: 「相手の応答の有無で自分の夜の時間配分や感情の扱い方が決まってしまう未来」「会いたいのに、伝えられずすれ違う未来」。これは説明文なので禁止です。',
       'display_text は仮文でかまいません。最終表示文は後段Writerが作ります。',
       '相手の気持ちは断定しない。画像から読み取れないことは言い切らない。スピリチュアルな断定をしない。',
       '魂、使命、覚醒、波動、宿命、前世、高次元、宇宙からのメッセージ、あなたは〇〇タイプです、必ず変わります、絶対に叶います、相手はあなたを好きです、相手は本気ではありません、は禁止です。',
       '「寄り添います」「静かに」「本当の自分」「本当の姿」「言葉になる前」は使わないでください。',
       '出力はJSONのみ。Markdownや説明文を前後に付けないでください。',
       'JSONは display_text と seed を持つオブジェクトにしてください。',
-      'seedには kind, diagnosis_scope, flow_priority, image_seed, current_flow_input_seed, second_flow_input_seed, imaginal_copy, visible_wish, seen_future, word_reaction, action_reaction, intention_layer, dominant_field, creative_direction, today_step, image_type, evidence_points, uncertain_points, user_name_candidate, writer_directives を入れてください。',
+      'seedには kind, diagnosis_scope, flow_priority, image_seed, current_flow_input_seed, second_flow_input_seed, imaginal_core_seed, imaginal_copy, visible_wish, seen_future, word_reaction, action_reaction, intention_layer, dominant_field, creative_direction, today_step, image_type, evidence_points, uncertain_points, user_name_candidate, writer_directives を入れてください。',
       'diagnosis_scope は current_imaginal、flow_priority は true にしてください。dominant_fieldは anxiety / comparison / destruction / creation / unknown のいずれか。image_typeは line_or_dm / email / memo / todo / post_draft / book_page / application_page / other のいずれか。',
     ].join('\n');
 
     const userText = [
       'この画像から、初回イマジナル診断の一次観測Seedを作ってください。',
       '画像は補助として扱い、この画像を出した時点の currentFlow と、そこから移管しようとしている secondFlow を必ずSeedにしてください。',
-      'コピーは愉快な入口にし、本質は説明欄で渡してください。',
+      '重要: コピー文そのものではなく、コピーと本質説明を生むための imaginal_core_seed を正本として作ってください。',
+      'imaginal_core_seed には、避けたい未来、安心したい願い、不安から出る言葉、焦りから出る行動、安心してつながっている創造の未来、そこから出る一言の方向を入れてください。',
       'ユーザーに見せる診断文 display_text は仮文でよいです。本線Muへ引き継ぐ内部Seed seed を重視してください。',
       note ? `補足メモ：${note}` : '',
     ].filter(Boolean).join('\n');
