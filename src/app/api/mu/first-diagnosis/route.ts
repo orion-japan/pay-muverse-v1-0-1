@@ -21,6 +21,17 @@ import {
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
 type ImaginalCoreSeed = {
+  current_future_imaginal?: string;
+  current_future_meaning?: string;
+  current_state_from_future?: string;
+  current_word_reaction?: string;
+  current_action_reaction?: string;
+  shifted_future_imaginal?: string;
+  shifted_future_meaning?: string;
+  shifted_state_from_future?: string;
+  shifted_word_direction?: string;
+  shifted_action_direction?: string;
+  evidence_bridge?: string;
   current_interpretation?: string;
   future_imaginal_image?: string;
   copy_material?: string;
@@ -143,6 +154,17 @@ function normalizeImaginalCoreSeed(value: unknown): ImaginalCoreSeed | undefined
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const v = value as Record<string, unknown>;
   const seed: ImaginalCoreSeed = {
+    current_future_imaginal: cleanString(v.current_future_imaginal ?? v.currentFutureImaginal),
+    current_future_meaning: cleanString(v.current_future_meaning ?? v.currentFutureMeaning),
+    current_state_from_future: cleanString(v.current_state_from_future ?? v.currentStateFromFuture),
+    current_word_reaction: cleanString(v.current_word_reaction ?? v.currentWordReaction),
+    current_action_reaction: cleanString(v.current_action_reaction ?? v.currentActionReaction),
+    shifted_future_imaginal: cleanString(v.shifted_future_imaginal ?? v.shiftedFutureImaginal),
+    shifted_future_meaning: cleanString(v.shifted_future_meaning ?? v.shiftedFutureMeaning),
+    shifted_state_from_future: cleanString(v.shifted_state_from_future ?? v.shiftedStateFromFuture),
+    shifted_word_direction: cleanString(v.shifted_word_direction ?? v.shiftedWordDirection),
+    shifted_action_direction: cleanString(v.shifted_action_direction ?? v.shiftedActionDirection),
+    evidence_bridge: cleanString(v.evidence_bridge ?? v.evidenceBridge),
     current_interpretation: cleanString(v.current_interpretation ?? v.currentInterpretation),
     future_imaginal_image: cleanString(v.future_imaginal_image ?? v.futureImaginalImage),
     copy_material: cleanString(v.copy_material ?? v.copyMaterial),
@@ -177,22 +199,22 @@ function buildDisplayText(seed: ImaginalDiagnosisSeed, fallback: string): string
     copy,
     '',
     'いま見えている願い',
-    cleanString(core?.avoidance_wish) || cleanString(seed.visible_wish) || 'いま思っている未来にならないように、安心できる未来へ動きたい願いを読んでいます。',
+    cleanString(core?.current_state_from_future) || cleanString(core?.avoidance_wish) || cleanString(seed.visible_wish) || 'いま見ている未来を止めるために、安心できる反応を求めている状態を読んでいます。',
     '',
     '見続けている未来',
-    cleanString(core?.undesired_future) || cleanString(seed.seen_future) || '思い通りにならず、また待つ側に残されるように感じる未来を見ている可能性があります。',
+    cleanString(core?.current_future_imaginal) || cleanString(core?.undesired_future) || cleanString(seed.seen_future) || '思い通りにならず、また待つ側に残されるように感じる未来を見ている可能性があります。',
     '',
     '言葉に出ている反応',
-    cleanString(core?.word_from_undesired_future) || cleanString(seed.word_reaction) || '不安から出る確認の言葉を、見えている範囲で映します。',
+    cleanString(core?.current_word_reaction) || cleanString(core?.word_from_undesired_future) || cleanString(seed.word_reaction) || 'その未来を止めたい確認の言葉が出ています。',
     '',
     '行動に出ている反応',
-    cleanString(core?.action_from_undesired_future) || cleanString(seed.action_reaction) || '今すぐ安心したい焦りが、行動の速度に出ています。',
+    cleanString(core?.current_action_reaction) || cleanString(core?.action_from_undesired_future) || cleanString(seed.action_reaction) || 'その未来を止めたい焦りが、行動の速度に出ています。',
     '',
     '創造の方向',
-    cleanString(core?.creative_future) || cleanString(seed.creative_direction) || 'すでに安心してつながっている未来に寄せて、そこから言葉を作る方向です。',
+    cleanString(core?.shifted_future_imaginal) || cleanString(core?.creative_future) || cleanString(seed.creative_direction) || '未来のイマジナルを安心してつながっている方向へ置き直すことです。',
     '',
     '今日の小さな一歩',
-    cleanString(core?.creative_word_direction) || cleanString(seed.today_step) || '怖さを回避するためではなく、安心を前提にした一言を選んでください。',
+    cleanString(core?.shifted_word_direction) || cleanString(core?.creative_word_direction) || cleanString(seed.today_step) || '変えた未来のイマジナルから、一言と行動を選んでください。',
     '',
     'これは、画像をきっかけに見えた「今現在のイマジナル」です。',
   ].join('\n');
@@ -238,11 +260,11 @@ function safeParseDiagnosis(raw: string): {
         '説明調にしない',
         '相手の気持ちは断定しない',
         '画像は補助として扱う',
-        '正本は今現在のフローと状態移管に置く',
-        '画像から読み取れないことは言い切らない',
-        'コピーはSeedそのものではなく、future_imaginal_imageからLLMが作る入口として扱う',
+        '現在状態ではなく未来のイマジナルを正本にする',
+        '今は未来のイマジナルの結果として説明する',
+        '未来のイマジナルを変えると今の言葉と行動が変わる構造で返す',
+        'コピーはcurrent_future_imaginalからLLMが作る入口として扱う',
         '本質はimaginal_core_seedを正本にして説明欄で渡す',
-        '創造の方向は改善策ではなく安心している未来を描く',
       ],
     };
 
@@ -265,7 +287,12 @@ function normalizeWriterDisplayText(value: unknown, fallback: string): string {
   const text = cleanString(value);
   const base = text || fallback;
   const note = 'これは、画像をきっかけに見えた「今現在のイマジナル」です。';
-  const withoutNote = base.replace(/これは、画像をきっかけに見えた「今現在のイマジナル」です。\s*/gu, '').trim();
+  const withoutNote = base
+    .replace(/注意書き\s*[:：]?\s*/gu, '')
+    .replace(/注意\s*[:：].*?(?=\n\n|\nこれは、画像をきっかけに見えた|$)/gsu, '')
+    .replace(/ここに書かれたのは、画像をきっかけに立ち上がっている流れとして見えたもので、相手の状況や意図を断定するものではありません。\s*/gu, '')
+    .replace(/これは、画像をきっかけに見えた「今現在のイマジナル」です。\s*/gu, '')
+    .trim();
   return [withoutNote, note].filter(Boolean).join('\n\n').trim();
 }
 
@@ -282,29 +309,31 @@ async function writeDiagnosisFromSeed(params: {
   const writerSystem = [
     'あなたはMuverseの初回イマジナル診断のWriterです。',
     '前段の画像観測とフロー判定Seedだけを正本にして、ユーザー表示用の診断文を書いてください。',
+    '現在状態の説明を正本にしないでください。正本は、現在を生んでいる未来のイマジナルと、変えた先の未来のイマジナルです。',
     '画像を新しく読み直さないでください。意味を追加せず、渡されたSeedから自然な日本語にしてください。',
-    'もっとも重要な正本は seed.imaginal_core_seed です。コピー文そのものではなく、current_interpretation / future_imaginal_image / copy_material / undesired_future / avoidance_wish / creative_future を見てください。',
-    'コピーはSeedではありません。コピーはLLMの仕事です。future_imaginal_image と copy_tone から、短く少し愉快な入口コピーを作ってください。',
+    'もっとも重要な正本は seed.imaginal_core_seed です。current_future_imaginal / current_future_meaning / shifted_future_imaginal / shifted_future_meaning を最優先してください。',
+    '基本構造は「今この未来のイマジナルを見ている。だから今こうなっている。でも未来のイマジナルをこう変えると、今こう変わる」です。',
+    '「いま見えている願い」は、現在の感情説明ではなく、current_future_imaginal を見ているから起きている願いとして書いてください。',
+    '「見続けている未来」には、current_future_imaginal と current_future_meaning を書き、その先にある怖さまで書いてください。画面上の状態説明で止めないでください。',
+    '「言葉に出ている反応」には、current_future_imaginal が作っている言葉として current_word_reaction を書いてください。',
+    '「行動に出ている反応」には、current_future_imaginal が作っている行動として current_action_reaction を書いてください。',
+    '「創造の方向」には、shifted_future_imaginal と shifted_future_meaning を書いてください。連絡が来る未来ではなく、連絡が来ても来なくても自分の安心を保てる未来を優先してください。',
+    '「今日の小さな一歩」には、shifted_word_direction と shifted_action_direction を書いてください。',
+    'コピーはSeedではありません。コピーはLLMの仕事です。current_future_imaginal と copy_tone から、短く少し愉快な入口コピーを作ってください。',
     'コピーは現在状態のラベルではなく、今見ている未来のイマジナル像にしてください。',
     '「こう思っているから、この未来を見ている」という流れを、短い比喩にしてください。',
     'あなたのイマジナルコピーは、12〜24文字程度。長い分析文、因果説明、括弧補足、現在状態ラベルは禁止です。',
-    '「待機中」「開店中」「保留中」「レンタル中」のような現在状態ラベルは禁止です。',
+    '「ベル」「通知」「灯りだけ」「待機中」「開店中」「保留中」「レンタル中」のような画面上・現在状態ラベルは禁止です。',
     '良いコピー例: 「置いてけぼりの一羽アヒル」「岸に残された小舟」「改札前の迷子チケット」。',
-    '悪いコピー例: 「置いてけぼり待機、開店中」「既読レンタル中、返事保留」。これは現在状態のラベルなので禁止です。',
-    '「いま見えている願い」には、imaginal_core_seed.avoidance_wish を自然な言葉で出してください。',
-    '「見続けている未来」には、imaginal_core_seed.undesired_future と future_imaginal_image を出してください。これは断定ではなく、今立ち上がっている流れとして書いてください。',
-    '「言葉に出ている反応」には、imaginal_core_seed.word_from_undesired_future を出してください。',
-    '「行動に出ている反応」には、imaginal_core_seed.action_from_undesired_future を出してください。',
-    '「創造の方向」は改善策リストではありません。imaginal_core_seed.creative_future をもとに、すでに安心してつながっている未来を描いてください。',
-    '「今日の小さな一歩」には、imaginal_core_seed.creative_word_direction をもとに、安心を前提にした未来から一言を作る方向へ導いてください。',
-    '注意書きは必ず一番最後に置いてください。',
+    '悪いコピー例: 「ベルだけ鳴る小さな灯台ひとつ」「置いてけぼり待機、開店中」「既読レンタル中、返事保留」。これは画面上または現在状態のラベルなので禁止です。',
+    '注意書きの見出しや追加説明は出さないでください。最後の1行だけを固定文にしてください。',
     '最後の1行は必ず「これは、画像をきっかけに見えた「今現在のイマジナル」です。」にしてください。',
     '「画像の内容そのものではなく、いま立ち上がっているフローをもとに見ています。」は出さないでください。',
     '相手の気持ち、未来、運命、人格を断定しないでください。',
     '「寄り添います」「静かに」「本当の自分」「本当の姿」「言葉になる前」は使わないでください。',
     '出力はJSONのみ。display_text だけを持つオブジェクトにしてください。',
     'display_textには内部キー名、currentFlow、secondFlow、Seed、JSON、imaginal_core_seedという言葉を出さないでください。',
-    '構成は、1.あなたのイマジナルコピー 2.いま見えている願い 3.見続けている未来 4.言葉に出ている反応 5.行動に出ている反応 6.創造の方向 7.今日の小さな一歩 8.注意書き。',
+    '構成は、1.あなたのイマジナルコピー 2.いま見えている願い 3.見続けている未来 4.言葉に出ている反応 5.行動に出ている反応 6.創造の方向 7.今日の小さな一歩。最後に固定文を1行だけ置いてください。',
     '全体で900文字以内。',
   ].join('\n');
 
@@ -527,6 +556,10 @@ export async function POST(req: NextRequest) {
     const system = [
       'あなたはMuverseの初回イマジナル診断を行うMuです。',
       'これは一次観測です。画像から image_seed / current_flow_input_seed / second_flow_input_seed / imaginal_core_seed を作ることが主目的です。',
+      'この診断では、現在の状態説明を正本にしないでください。まず「今その人が見ている未来のイマジナル」を推定してください。',
+      '次に、「その未来を見ているから、今どんな状態・言葉・行動になっているか」を出してください。',
+      'さらに、「未来のイマジナルをどう変えると、今の状態・言葉・行動がどう変わるか」まで含めて seed を作ってください。',
+      '現在の状態は結果であり、未来のイマジナルが原因です。',
       '最終表示文は後段Writerが、コードで作られた imaginal_flow_seed と imaginal_core_seed を正本にして作ります。',
       'これは画像診断ではなく、画像を入口にした「今現在のイマジナル」の状態観測です。',
       '画像は補助入力です。正本は、ユーザーがその画像を選び、今ここに出した時点で立ち上がっているフローです。',
@@ -538,24 +571,26 @@ export async function POST(req: NextRequest) {
       'まず image_seed に、画像の表面観測、見える言葉、見える行動、緊張点、ユーザーが反応している一点を入れてください。',
       '次に current_flow_input_seed と second_flow_input_seed を作ってください。e_turn は e1/e2/e3/e4/e5、depthStage は S1〜T3、polarity は pos/neg だけを使ってください。',
       'current_flow_input_seed は「今この画像を出した時点の現在状態」、second_flow_input_seed は「そこから移管しようとしている状態」です。',
-      '必ず imaginal_core_seed を作ってください。これは診断の正本です。コピー文ではなく、コピーと説明を生成するための素材です。',
-      'imaginal_core_seed.current_interpretation には、今の画面をどう受け取っているかを入れてください。例: 返事がないことを、置いていかれる合図のように受け取っている。',
-      'imaginal_core_seed.future_imaginal_image には、その受け取りから見ている未来の像を入れてください。例: 連絡の流れから外れて、自分だけが残される未来。',
-      'imaginal_core_seed.copy_material には、未来の像の素材を入れてください。例: 置いてけぼり / 一羽だけ残る / 岸に残る / 改札前で迷う。',
-      'imaginal_core_seed.copy_tone には、愉快、少し刺さる、軽い比喩、茶化しすぎない、と入れてください。',
-      'imaginal_core_seed.copy_direction には、現在状態のラベルではなく、未来のイマジナル像を短い比喩にする、と入れてください。',
-      'imaginal_core_seed.copy_ng には、待機中、開店中、保留中、レンタル中、既読、返事保留などの現在状態ラベルは禁止、と入れてください。',
-      'imaginal_core_seed.undesired_future には、思い通りにならず、また待つ側に残され、置いていかれるように感じる未来を入れてください。',
-      'imaginal_core_seed.avoidance_wish には、その未来にならないように、今すぐ連絡が取れて安心したい願いを入れてください。',
-      'imaginal_core_seed.word_from_undesired_future には、不安から出る確認の言葉を入れてください。',
-      'imaginal_core_seed.action_from_undesired_future には、今すぐ安心したい焦りが行動を速くしていることを入れてください。',
-      'imaginal_core_seed.creative_future には、すでに相手と仲良く、安心してつながっている未来を描いてください。改善策リストにしないでください。',
-      'imaginal_core_seed.creative_word_direction には、怖さを避けるためではなく、安心を前提にした未来から一言を作る方向を入れてください。',
-      'imaginal_copy は仮でよいです。コピーはSeedそのものではなく、後段Writerが future_imaginal_image と copy_tone から作ります。',
+      '必ず imaginal_core_seed を作ってください。これは診断の正本です。コピー文ではなく、コピーと説明を生成するための未来イマジナルSeedです。',
+      'imaginal_core_seed.current_future_imaginal には、今その人が見ている未来のイマジナル像を入れてください。現状説明ではなく未来像にしてください。',
+      'imaginal_core_seed.current_future_meaning には、その未来をその人がどう意味づけているかを入れてください。',
+      'imaginal_core_seed.current_state_from_future には、その未来を見ているから、今どんな状態になっているかを入れてください。',
+      'imaginal_core_seed.current_word_reaction には、その未来が作っている言葉を入れてください。',
+      'imaginal_core_seed.current_action_reaction には、その未来が作っている行動を入れてください。',
+      'imaginal_core_seed.shifted_future_imaginal には、創造の方向として置き直したい未来のイマジナル像を入れてください。',
+      'imaginal_core_seed.shifted_future_meaning には、その未来では何が前提かを入れてください。',
+      'imaginal_core_seed.shifted_state_from_future には、その未来なら、今どんな状態でいられるかを入れてください。',
+      'imaginal_core_seed.shifted_word_direction には、その未来から出る言葉を入れてください。',
+      'imaginal_core_seed.shifted_action_direction には、その未来から出る行動を入れてください。',
+      'imaginal_core_seed.evidence_bridge には、画像上の根拠から、なぜその未来のイマジナルを見ていると読んだのかを短く入れてください。',
+      'copy_material / copy_tone / copy_direction / copy_ng も入れてください。コピーは current_future_imaginal を短い比喩にするための素材です。',
+      'copy_ng には、ベル、通知、灯りだけ、待機中、開店中、保留中、レンタル中、既読、返事保留などの画面上・現在状態ラベルは禁止、と入れてください。',
+      '互換のため、undesired_future には current_future_imaginal、avoidance_wish には current_state_from_future、word_from_undesired_future には current_word_reaction、action_from_undesired_future には current_action_reaction、creative_future には shifted_future_imaginal、creative_word_direction には shifted_word_direction を要約して入れてください。',
+      'imaginal_copy は仮でよいです。コピーはSeedそのものではなく、後段Writerが current_future_imaginal と copy_tone から作ります。',
       'intention_layer には received_meaning, seen_future, hidden_intention, future_distortion を入れてください。',
       'display_text は仮文でかまいません。最終表示文は後段Writerが作ります。',
       '相手の気持ちは断定しない。画像から読み取れないことは言い切らない。スピリチュアルな断定をしない。',
-      '魂、使命、覚醒、波動、宿命、前世、高次元、宇宙からのメッセージ、あなたは〇〇タイプです、必ず変わります、絶対に叶います、相手はあなたを好きです、相手は本気ではありません、は禁止です。',
+      '魂、使命、覚醒、波動、宿命、高次元、宇宙からのメッセージ、あなたは〇〇タイプです、必ず変わります、絶対に叶います、相手はあなたを好きです、相手は本気ではありません、は禁止です。',
       '「寄り添います」「静かに」「本当の自分」「本当の姿」「言葉になる前」は使わないでください。',
       '出力はJSONのみ。Markdownや説明文を前後に付けないでください。',
       'JSONは display_text と seed を持つオブジェクトにしてください。',
@@ -566,9 +601,9 @@ export async function POST(req: NextRequest) {
     const userText = [
       'この画像から、初回イマジナル診断の一次観測Seedを作ってください。',
       '画像は補助として扱い、この画像を出した時点の currentFlow と、そこから移管しようとしている secondFlow を必ずSeedにしてください。',
-      '重要: コピー文そのものではなく、コピーと本質説明を生むための imaginal_core_seed を正本として作ってください。',
-      'imaginal_core_seed には、今の受け取り、そこから見ている未来のイマジナル像、コピー素材、避けたい未来、安心したい願い、不安から出る言葉、焦りから出る行動、安心してつながっている創造の未来、そこから出る一言の方向を入れてください。',
-      'コピーは現在状態のラベルではなく、未来のイマジナル像から作る前提にしてください。',
+      '重要: 現状説明ではなく、未来のイマジナルを映すことが目的です。',
+      'まず「今見ている未来のイマジナル」を出し、その未来を見ているから今こうなっている、さらに未来のイマジナルをこう変えると今こう変わる、という構造で imaginal_core_seed を作ってください。',
+      'コピーは現在状態のラベルではなく、current_future_imaginal から作る前提にしてください。',
       'ユーザーに見せる診断文 display_text は仮文でよいです。本線Muへ引き継ぐ内部Seed seed を重視してください。',
       note ? `補足メモ：${note}` : '',
     ].filter(Boolean).join('\n');
