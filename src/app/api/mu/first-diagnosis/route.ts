@@ -156,8 +156,7 @@ function safeParseDiagnosis(raw: string): {
       ],
     };
 
-    const displayText =
-      cleanString(parsed?.display_text ?? parsed?.displayText) || buildDisplayText(seed, raw);
+    const displayText = buildDisplayText(seed, raw);
 
     return { displayText, seed };
   } catch {

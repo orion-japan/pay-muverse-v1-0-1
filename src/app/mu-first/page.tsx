@@ -30,11 +30,11 @@ type FollowupMessage = {
 };
 
 const FOLLOWUP_QUESTIONS = [
-  "相手の反応から、今どんな流れが出ていますか？",
-  "私がついやってしまう失敗やズレを見てください",
-  "今、どう返すのが自然ですか？",
-  "相手の本気度・向き合い方を見てください",
-  "もっと深くMuに聞くと、どんなことがわかりますか？",
+  "今のイマジナルコピーを、もう少し詳しく見てください",
+  "願っている未来と、見続けている未来のズレを見てください",
+  "言葉や行動に、どんな反応が出ていますか？",
+  "不安・比較・破壊・創造のどれが強く出ていますか？",
+  "今日できる小さな一歩を見てください",
 ];
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -225,7 +225,7 @@ export default function MuFirstPage() {
       if (!res.ok || !data.ok) {
         const message =
           data.error === "no_screenshot_credit"
-            ? "スクショ診断クレジットがありません。"
+            ? "イマジナル診断クレジットがありません。"
             : data.error === "invalid_image"
               ? "画像を読み取れませんでした。別の画像でお試しください。"
               : data.error === "missing_openai_api_key"
@@ -326,7 +326,7 @@ export default function MuFirstPage() {
           data.code === "no_first_followup_credit"
             ? "診断後の相談回数が残っていません。"
             : data.code === "missing_diagnosis"
-              ? "先にスクショ診断を行ってください。"
+              ? "先にイマジナル診断を行ってください。"
               : data.message || "追加相談に失敗しました。";
 
         setFollowupError(messageText);
@@ -393,7 +393,7 @@ export default function MuFirstPage() {
               letterSpacing: "0.08em",
             }}
           >
-            First Diagnosis
+            First Imaginal Diagnosis
           </p>
 
           <h1
@@ -405,9 +405,9 @@ export default function MuFirstPage() {
               letterSpacing: "-0.03em",
             }}
           >
-            スクショを1枚送って、
+            画像を1枚送って、
             <br />
-            Muの初回診断を受ける
+            はじめてのイマジナル診断を受ける
           </h1>
 
           <p
@@ -418,8 +418,8 @@ export default function MuFirstPage() {
               lineHeight: 1.8,
             }}
           >
-            LINE、SNS、メモ、やり取りの一部など、今気になっている画面を1枚選んでください。
-            Muがその状態を読み取り、最初の言葉にします。
+            LINE、SNS、メモ、書きかけの投稿、予定表、ToDo、Mu BOOKで気になったページなど、いま気になっている画面を1枚選んでください。
+            Muがその状態を読み取り、あなたが見続けている未来の方向を最初の言葉にします。
           </p>
         </div>
 
@@ -475,7 +475,7 @@ export default function MuFirstPage() {
                 fontWeight: 700,
               }}
             >
-              スクリーンショットを選ぶ
+              画像を選ぶ
             </span>
 
             <span
@@ -516,7 +516,7 @@ export default function MuFirstPage() {
             >
               <img
                 src={previewUrl}
-                alt="選択したスクリーンショット"
+                alt="選択した画像"
                 style={{
                   display: "block",
                   width: "100%",
@@ -543,7 +543,7 @@ export default function MuFirstPage() {
               cursor: canSubmit ? "pointer" : "not-allowed",
             }}
           >
-            {submitting ? "Muがスクショを読んでいます..." : "Muに診断してもらう"}
+            {submitting ? "Muが画像を読んでいます..." : "Muに診断してもらう"}
           </button>
 
           {submitting ? (
@@ -592,7 +592,7 @@ export default function MuFirstPage() {
                 fontWeight: 700,
               }}
             >
-              Muの初回診断
+              Muの初回イマジナル診断
             </p>
 
             <p

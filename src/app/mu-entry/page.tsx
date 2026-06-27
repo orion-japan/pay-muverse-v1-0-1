@@ -7,7 +7,7 @@ import { authedFetch, useAuth } from '@/context/AuthContext';
 export default function MuEntryPage() {
   const router = useRouter();
   const { loading, user } = useAuth();
-  const [entryMessage, setEntryMessage] = useState('');
+  const [entryMessage, setEntryMessage] = useState(defaultEntryMessage);
   const [messageLoading, setMessageLoading] = useState(false);
 
   useEffect(() => {
@@ -25,7 +25,7 @@ export default function MuEntryPage() {
   }, [loading, user]);
 
   useEffect(() => {
-    if (loading || !user || entryMessage || messageLoading) return;
+    if (loading || !user || messageLoading) return;
 
     let cancelled = false;
     setMessageLoading(true);
@@ -80,7 +80,7 @@ export default function MuEntryPage() {
         <div style={styles.messageWindow}>
           <p style={styles.messageLabel}>Mu</p>
           <p style={styles.muMessage}>
-            {messageLoading && !entryMessage ? 'いま、あなたの入口の流れを見ています…' : entryMessage || defaultEntryMessage}
+            {entryMessage || defaultEntryMessage}
           </p>
         </div>
 
