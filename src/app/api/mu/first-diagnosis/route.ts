@@ -220,6 +220,80 @@ function safeParseDiagnosis(raw: string): {
   }
 }
 
+function normalizeWriterDisplayText(value: unknown, fallback: string): string {
+  const text = cleanString(value);
+  const base = text || fallback;
+  const requiredLead = 'これは、画像をきっかけに見えた「今現在のイマジナル」です。';
+  const withoutDuplicateLead = base
+    .replace(/^これは、画像をきっかけに見えた「今現在のイマジナル」です。\s*/u, '')
+    .trim();
+  return [requiredLead, withoutDuplicateLead].filter(Boolean).join('\n\n').trim();
+}
+
+async function writeDiagnosisFromSeed(params: {
+  apiKey: string;
+  model: string;
+  seed: ImaginalDiagnosisSeed | null;
+  fallback: string;
+}): Promise<string> {
+  const { apiKey, model, seed, fallback } = params;
+  if (!seed?.imaginal_flow_seed) return fallback;
+
+  const writerModel = process.env.MU_FIRST_DIAGNOSIS_WRITER_MODEL || model;
+  const writerSystem = [
+    'あなたはMuverseの初回イマジナル診断のWriterです。',
+    '前段の画像観測とフロー判定Seedだけを正本にして、ユーザー表示用の診断文を書いてください。',
+    '画像を新しく読み直さないでください。意味を追加せず、渡されたSeedから自然な日本語にしてください。',
+    '最初の1行は必ず「これは、画像をきっかけに見えた「今現在のイマジナル」です。」にしてください。',
+    '「画像の内容そのものではなく、いま立ち上がっているフローをもとに見ています。」は出さないでください。',
+    '相手の気持ち、未来、運命、人格を断定しないでください。',
+    '「寄り添います」「静かに」「本当の自分」「本当の姿」「言葉になる前」は使わないでください。',
+    '出力はJSONのみ。display_text だけを持つオブジェクトにしてください。',
+    'display_textには内部キー名、currentFlow、secondFlow、Seed、JSONという言葉を出さないでください。',
+    '構成は、1.注意書き 2.あなたのイマジナルコピー 3.いま見えている願い 4.見続けている未来 5.言葉に出ている反応 6.行動に出ている反応 7.創造の方向 8.今日の小さな一歩。',
+    '全体で900文字以内。',
+  ].join('\n');
+
+  const writerUser = [
+    '以下のSeedを正本にして、初回イマジナル診断の表示文だけを作ってください。',
+    JSON.stringify(seed, null, 2),
+  ].join('\n');
+
+  try {
+    const writerRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: writerModel,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: writerSystem },
+          { role: 'user', content: writerUser },
+        ],
+      }),
+    });
+
+    if (!writerRes.ok) {
+      const detail = await writerRes.text().catch(() => '');
+      console.warn('[mu-first-diagnosis] writer skipped:', detail.slice(0, 500));
+      return normalizeWriterDisplayText(fallback, fallback);
+    }
+
+    const data = await writerRes.json().catch(() => ({}));
+    const raw = data?.choices?.[0]?.message?.content?.toString?.() ?? data?.choices?.[0]?.message?.content ?? '';
+    if (!raw) return normalizeWriterDisplayText(fallback, fallback);
+
+    const parsed = JSON.parse(String(raw).trim());
+    return normalizeWriterDisplayText(parsed?.display_text ?? parsed?.displayText, fallback);
+  } catch (e: any) {
+    console.warn('[mu-first-diagnosis] writer fatal skipped:', e?.message || e);
+    return normalizeWriterDisplayText(fallback, fallback);
+  }
+}
+
 async function uidToUserCode(uid: string): Promise<string | null> {
   const candidates: Array<{ table: string; codeCol: string; uidCol: string }> = [
     { table: 'users', codeCol: 'user_code', uidCol: 'firebase_uid' },
@@ -398,6 +472,8 @@ export async function POST(req: NextRequest) {
 
     const system = [
       'あなたはMuverseの初回イマジナル診断を行うMuです。',
+      'これは一次観測です。画像から image_seed / current_flow_input_seed / second_flow_input_seed / intention_layer を作ることが主目的です。',
+      '最終表示文は後段Writerが、コードで作られた imaginal_flow_seed を正本にして作ります。',
       'これは画像診断ではなく、画像を入口にした「今現在のイマジナル」の状態観測です。',
       '画像は補助入力です。正本は、ユーザーがその画像を選び、今ここに出した時点で立ち上がっているフローです。',
       '画像の表面内容とフロー解釈が食い違う場合は、フロー解釈を優先してください。ただし、人格・運命・恒常的な未来として断定しないでください。',
@@ -418,7 +494,7 @@ export async function POST(req: NextRequest) {
       '良い例: 「返事待ちのベンチに、長居しすぎる未来」「相手の通知欄に、自分の時間まで置いてくる未来」「会えない事実で、自分の価値を測る未来」。',
       '悪い例: 「会いたいのに、伝えられずすれ違う未来」「不安なのに、言えない未来」「確認の空白に、予定の主導権を握っている」。これは浅い状況要約なので避けてください。',
       '文字数は18〜42文字程度。短くてもよいですが、普通の恋愛診断・性格診断・状況要約に見えるコピーは禁止です。',
-      '出力構成は、1.あなたのイマジナルコピー 2.いま見えている願い 3.見続けている未来 4.言葉に出ている反応 5.行動に出ている反応 6.創造の方向 7.今日の小さな一歩。',
+      'display_text は仮文でかまいません。最終表示文は後段Writerが作ります。',
       '相手の気持ちは断定しない。画像から読み取れないことは言い切らない。スピリチュアルな断定をしない。',
       '魂、使命、覚醒、波動、宿命、前世、高次元、宇宙からのメッセージ、あなたは〇〇タイプです、必ず変わります、絶対に叶います、相手はあなたを好きです、相手は本気ではありません、は禁止です。',
       '「寄り添います」「静かに」「本当の自分」「本当の姿」「言葉になる前」は使わないでください。',
@@ -426,13 +502,12 @@ export async function POST(req: NextRequest) {
       'JSONは display_text と seed を持つオブジェクトにしてください。',
       'seedには kind, diagnosis_scope, flow_priority, image_seed, current_flow_input_seed, second_flow_input_seed, imaginal_copy, visible_wish, seen_future, word_reaction, action_reaction, intention_layer, dominant_field, creative_direction, today_step, image_type, evidence_points, uncertain_points, user_name_candidate, writer_directives を入れてください。',
       'diagnosis_scope は current_imaginal、flow_priority は true にしてください。dominant_fieldは anxiety / comparison / destruction / creation / unknown のいずれか。image_typeは line_or_dm / email / memo / todo / post_draft / book_page / application_page / other のいずれか。',
-      'display_textには内部キー名を出さず、自然な日本語で表示してください。全体で900文字以内。',
     ].join('\n');
 
     const userText = [
-      'この画像から、初回イマジナル診断として読めることを返してください。',
+      'この画像から、初回イマジナル診断の一次観測Seedを作ってください。',
       '画像は補助として扱い、この画像を出した時点の currentFlow と、そこから移管しようとしている secondFlow を必ずSeedにしてください。',
-      'ユーザーに見せる診断文 display_text と、本線Muへ引き継ぐ内部Seed seed を同時に作ってください。',
+      'ユーザーに見せる診断文 display_text は仮文でよいです。本線Muへ引き継ぐ内部Seed seed を重視してください。',
       note ? `補足メモ：${note}` : '',
     ].filter(Boolean).join('\n');
 
@@ -469,7 +544,12 @@ export async function POST(req: NextRequest) {
     if (!rawDiagnosis) return json({ ok: false, error: 'empty_diagnosis' }, 502);
 
     const parsedDiagnosis = safeParseDiagnosis(String(rawDiagnosis));
-    const diagnosis = parsedDiagnosis.displayText;
+    const diagnosis = await writeDiagnosisFromSeed({
+      apiKey,
+      model,
+      seed: parsedDiagnosis.seed,
+      fallback: parsedDiagnosis.displayText,
+    });
     if (!diagnosis) return json({ ok: false, error: 'empty_diagnosis' }, 502);
 
     await logDiagnosis({
