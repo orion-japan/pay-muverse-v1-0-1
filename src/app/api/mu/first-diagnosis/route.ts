@@ -9,6 +9,10 @@ import {
   SUPABASE_URL,
   SERVICE_ROLE,
 } from '@/lib/authz';
+import {
+  enforceImaginalCopyFromIntention,
+  type ImaginalIntentionLayer,
+} from '@/lib/iros/imaginal/imaginalCopySeed';
 
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
@@ -19,6 +23,7 @@ type ImaginalDiagnosisSeed = {
   seen_future?: string;
   word_reaction?: string;
   action_reaction?: string;
+  intention_layer?: ImaginalIntentionLayer;
   dominant_field?: 'anxiety' | 'comparison' | 'destruction' | 'creation' | 'unknown';
   creative_direction?: string;
   today_step?: string;
@@ -100,6 +105,20 @@ function normalizeImageType(value: unknown): ImaginalDiagnosisSeed['image_type']
   return 'other';
 }
 
+
+function normalizeIntentionLayer(value: unknown): ImaginalIntentionLayer | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const v = value as Record<string, unknown>;
+
+  const layer: ImaginalIntentionLayer = {
+    received_meaning: cleanString(v.received_meaning ?? v.receivedMeaning),
+    seen_future: cleanString(v.seen_future ?? v.seenFuture),
+    hidden_intention: cleanString(v.hidden_intention ?? v.hiddenIntention),
+    future_distortion: cleanString(v.future_distortion ?? v.futureDistortion),
+  };
+
+  return Object.values(layer).some(Boolean) ? layer : undefined;
+}
 function buildDisplayText(seed: ImaginalDiagnosisSeed, fallback: string): string {
   const copy = cleanString(seed.imaginal_copy);
   if (!copy) return fallback;
@@ -147,6 +166,7 @@ function safeParseDiagnosis(raw: string): {
       seen_future: cleanString(seedRaw?.seen_future ?? seedRaw?.seenFuture),
       word_reaction: cleanString(seedRaw?.word_reaction ?? seedRaw?.wordReaction),
       action_reaction: cleanString(seedRaw?.action_reaction ?? seedRaw?.actionReaction),
+      intention_layer: normalizeIntentionLayer(seedRaw?.intention_layer ?? seedRaw?.intentionLayer),
       dominant_field: normalizeDominantField(seedRaw?.dominant_field ?? seedRaw?.dominantField),
       creative_direction: cleanString(seedRaw?.creative_direction ?? seedRaw?.creativeDirection),
       today_step: cleanString(seedRaw?.today_step ?? seedRaw?.todayStep),
@@ -163,6 +183,11 @@ function safeParseDiagnosis(raw: string): {
         '創造の方向へ戻す',
       ],
     };
+
+    const enforcedSeed = enforceImaginalCopyFromIntention(seed);
+    seed.imaginal_copy = enforcedSeed.imaginal_copy;
+    seed.seen_future = enforcedSeed.seen_future;
+    seed.intention_layer = enforcedSeed.intention_layer;
 
     const displayText = buildDisplayText(seed, raw);
 
@@ -354,7 +379,9 @@ export async function POST(req: NextRequest) {
       '必ず最初に「あなたのイマジナルコピー」として、その人だけの短いコピーを1つ生成してください。',
       'イマジナルコピーは、状況の要約ではありません。画像に写っている出来事をそのまま短く言い換えるだけのコピーは禁止です。',
       'イマジナルコピーは、表面の願いではなく、その人が先に置いてしまっている未来を映してください。',
-      '生成前に内部で、1.表面の出来事 2.言葉や行動に出ている反応 3.その人が見続けている未来 4.その未来が現実を引っ張る構造、の順に深めてください。',
+            '生成前に内部で、1.表面の出来事 2.言葉や行動に出ている反応 3.その出来事を何の意味として受け取っているか 4.その人が先に見ている未来 5.その未来が現実を引っ張る構造、の順に深めてください。',
+      'imaginal_copy は必ず intention_layer.seen_future から生成してください。S層の状況説明、F層の感情説明、R層の関係説明、C層の行動説明をコピーにしてはいけません。',
+      'intention_layer には received_meaning, seen_future, hidden_intention, future_distortion を入れてください。',
       'コピーには、会いたい・伝えたい・すれ違う・不安・寂しいなどの表面語をそのまま並べないでください。表面語を使う場合は、必ず一段深い構造に変換してください。',
       '良い例: 「会えない事実で、自分の価値を測る未来」「約束の欠け目に、愛されなさを見ている」「話す前から、失われる側に立っている」「返事の遅さで、関係の終わりを先に見ている」。',
       '悪い例: 「会いたいのに、伝えられずすれ違う未来」「不安なのに、言えない未来」「誤解を解きたいのに、距離ができる未来」。これは浅い状況要約なので避けてください。',
@@ -365,7 +392,7 @@ export async function POST(req: NextRequest) {
       '「寄り添います」「静かに」「本当の自分」「本当の姿」「言葉になる前」は使わないでください。',
       '出力はJSONのみ。Markdownや説明文を前後に付けないでください。',
       'JSONは display_text と seed を持つオブジェクトにしてください。',
-      'seedには kind, imaginal_copy, visible_wish, seen_future, word_reaction, action_reaction, dominant_field, creative_direction, today_step, image_type, evidence_points, uncertain_points, user_name_candidate, writer_directives を入れてください。',
+      'seedには kind, imaginal_copy, visible_wish, seen_future, word_reaction, action_reaction, intention_layer, dominant_field, creative_direction, today_step, image_type, evidence_points, uncertain_points, user_name_candidate, writer_directives を入れてください。',
       'dominant_fieldは anxiety / comparison / destruction / creation / unknown のいずれか。image_typeは line_or_dm / email / memo / todo / post_draft / book_page / application_page / other のいずれか。',
       'display_textには内部キー名を出さず、自然な日本語で表示してください。全体で900文字以内。',
     ].join('\n');
