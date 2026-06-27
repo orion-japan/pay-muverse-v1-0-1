@@ -56,6 +56,14 @@ function normalizeDataUrl(input: unknown): string | null {
 }
 
 function cleanString(value: unknown): string | undefined {
+  if (Array.isArray(value)) {
+    const s = value
+      .map((item) => String(item ?? '').trim())
+      .filter(Boolean)
+      .join('、');
+    return s || undefined;
+  }
+
   const s = String(value ?? '').trim();
   return s || undefined;
 }
