@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import {
   normalizeAuthz,
@@ -12,6 +12,14 @@ export const dynamic = 'force-dynamic';
 
 function json(data: unknown, status = 200) {
   return NextResponse.json(data, { status });
+}
+
+function pickImaginalCopy(seed: unknown): string | null {
+  if (!seed || typeof seed !== 'object' || Array.isArray(seed)) return null;
+  const obj = seed as Record<string, unknown>;
+  const value = obj.imaginal_copy ?? obj.imaginalCopy ?? obj.imajinal_copy;
+  const s = String(value ?? '').trim();
+  return s || null;
 }
 
 export async function GET(req: NextRequest) {
@@ -78,18 +86,28 @@ export async function GET(req: NextRequest) {
     })
     .eq('user_code', userCode);
 
+  const imaginalCopy = pickImaginalCopy(latest.diagnosis_seed_json);
+  const message = imaginalCopy
+    ? [
+        'さっきのイマジナル診断では、',
+        `私のイマジナルコピーは「${imaginalCopy}」でした。`,
+        '',
+        'ここから、創造の方向を一緒に見てください。',
+      ].join('\n')
+    : 'さっきのイマジナル診断から、創造の方向を一緒に見てください。';
+
   return json({
     ok: true,
     should_bootstrap: true,
-    message: 'このスクショ診断の続きを、もう少し解説してください。',
+    message,
     firstDiagnosisContext: {
       source: 'mu_first',
+      diagnosisKind: 'imaginal_first',
       diagnosisId: latest.id,
       diagnosisText: latest.diagnosis_text,
       diagnosisSeed: latest.diagnosis_seed_json ?? null,
+      imaginalCopy,
       followups: Array.isArray(followups) ? followups : [],
     },
   });
 }
-
-
