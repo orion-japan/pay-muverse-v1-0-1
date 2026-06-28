@@ -217,6 +217,7 @@ export default function MuFirstPage() {
         body: JSON.stringify({
           image_data_url: imageDataUrl,
           source: "mu_first",
+          upload_type: "line_dm",
         }),
       });
 
@@ -475,7 +476,7 @@ export default function MuFirstPage() {
                 fontWeight: 700,
               }}
             >
-              画像を選ぶ
+              LINE/DMスクショを選ぶ
             </span>
 
             <span
@@ -487,7 +488,7 @@ export default function MuFirstPage() {
                 lineHeight: 1.6,
               }}
             >
-              画像は初回診断にだけ使います。
+              LINEまたはDMの会話画面を選んでください。右側の吹き出しをあなた側として読みます。
             </span>
           </label>
 
@@ -543,7 +544,7 @@ export default function MuFirstPage() {
               cursor: canSubmit ? "pointer" : "not-allowed",
             }}
           >
-            {submitting ? "Muが画像を読んでいます..." : "Muに診断してもらう"}
+            {submitting ? "MuがLINEスクショを読んでいます..." : "LINEスクショをMuに診断してもらう"}
           </button>
 
           {submitting ? (

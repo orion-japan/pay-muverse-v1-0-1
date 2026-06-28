@@ -585,6 +585,7 @@ export async function POST(req: NextRequest) {
 
     const model = process.env.MU_FIRST_DIAGNOSIS_MODEL || 'gpt-5-mini';
     const note = typeof body.note === 'string' && body.note.trim() ? body.note.trim().slice(0, 500) : '';
+    const uploadType = typeof body.upload_type === 'string' ? body.upload_type : 'line_dm';
 
     const system = [
       'あなたはMuverseの初回イマジナル診断を行うMuです。',
@@ -599,8 +600,8 @@ export async function POST(req: NextRequest) {
       '画像の表面内容とフロー解釈が食い違う場合は、フロー解釈を優先してください。ただし、人格・運命・恒常的な未来として断定しないでください。',
       'currentFlow は、今この画像を出した時点の現在状態として読んでください。secondFlow は、そこから移管しようとしている状態として読んでください。',
       'ユーザーが送った画像を見て、相手の気持ちや未来を断定するのではなく、ユーザーがいま見続けている未来の方向を読み取ってください。',
-      '画像はLINEやDMとは限りません。メモ、ToDo、投稿文、告知文、メール、予定表、講座画面、Mu BOOKのページ、その他の気になる画面も対象です。',
-      'OCR事前分類や会話スクショ判定は行いません。画像から読める範囲で、なぜその画面が気になっているのかを見ます。',
+      '現在この初回イマジナル診断は、LINE/DMなどの会話スクリーンショット限定です。メモ、ToDo、投稿文、告知文、メール、予定表、講座画面、Mu BOOKのページ、その他画像は診断対象にしないでください。',
+      '画像がLINE/DMなどの会話スクリーンショットではない場合は、診断を行わず、image_type を other にし、unsupported_image_type として扱えるSeedにしてください。',
       'まず image_seed に、画像の表面観測、見える言葉、見える行動、緊張点、ユーザーが反応している一点を入れてください。',
       '次に current_flow_input_seed と second_flow_input_seed を作ってください。e_turn は e1/e2/e3/e4/e5、depthStage は S1〜T3、polarity は pos/neg だけを使ってください。',
       'current_flow_input_seed は「今この画像を出した時点の現在状態」、second_flow_input_seed は「そこから移管しようとしている状態」です。',
@@ -637,7 +638,7 @@ export async function POST(req: NextRequest) {
       'image_seed には role_mapping を入れてください。LINE/DM画像なら role_mapping.user_side = "right_green", role_mapping.other_side = "left_white", role_mapping.target = "user_only" としてください。',
       'current_flow_input_seed には、右側・緑色のユーザー発言から見える反応を優先して入れてください。',
       'second_flow_input_seed には、左側・白色の相手発言から見える文脈を補助情報として入れてください。ただし診断対象にしないでください。',
-      'diagnosis_scope は current_imaginal、flow_priority は true にしてください。dominant_fieldは anxiety / comparison / destruction / creation / unknown のいずれか。image_typeは line_or_dm / email / memo / todo / post_draft / book_page / application_page / other のいずれか。',
+      'diagnosis_scope は current_imaginal、flow_priority は true にしてください。dominant_fieldは anxiety / comparison / destruction / creation / unknown のいずれか。現在はLINE/DM限定なので、会話スクショなら image_type は line_or_dm にしてください。LINE/DMではない画像は image_type を other にしてください。',
       'LINE/DM/チャット画像では、原則として右側の吹き出し・緑色の吹き出しがユーザー本人、左側の吹き出し・白色の吹き出しが相手です。',
       '画面上部に表示されている名前は、通常は相手の名前です。ユーザー名として扱わないでください。',
       '診断対象は必ずユーザー本人です。LINE/DM画像では、右側・緑色の発言からユーザーの current_future_imaginal を作ってください。',
@@ -648,6 +649,8 @@ export async function POST(req: NextRequest) {
 
     const userText = [
       'この画像から、初回イマジナル診断の一次観測Seedを作ってください。',
+      '現在はLINE/DM会話スクショ限定です。LINE/DMではない画像の場合は診断対象外として扱ってください。',
+      アップロード種別: ,
       '画像は補助として扱い、この画像を出した時点の currentFlow と、そこから移管しようとしている secondFlow を必ずSeedにしてください。',
       '重要: 現状説明ではなく、未来のイマジナルを映すことが目的です。',
       'まず「今見ている未来のイマジナル」を出し、その未来を見ているから今こうなっている、さらに未来のイマジナルをこう変えると今こう変わる、という構造で imaginal_core_seed を作ってください。',
@@ -693,6 +696,18 @@ export async function POST(req: NextRequest) {
     if (!rawDiagnosis) return json({ ok: false, error: 'empty_diagnosis' }, 502);
 
     const parsedDiagnosis = safeParseDiagnosis(String(rawDiagnosis));
+
+    if (parsedDiagnosis.seed.image_type !== 'line_or_dm') {
+      return json(
+        {
+          ok: false,
+          error: 'unsupported_image_type',
+          detail: '現在はLINEまたはDMの会話スクリーンショットのみ診断できます。',
+          credit_consumed: creditConsumed,
+        },
+        400,
+      );
+    }
     const diagnosis = await writeDiagnosisFromSeed({
       apiKey,
       model,
