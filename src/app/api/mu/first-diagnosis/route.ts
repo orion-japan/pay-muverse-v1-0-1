@@ -316,6 +316,7 @@ async function writeDiagnosisFromSeed(params: {
     '「いま見えている願い」は、現在の感情説明ではなく、current_future_imaginal を見ているから起きている願いとして書いてください。',
     '「見続けている未来」には、current_future_imaginal と current_future_meaning を書き、その先にある怖さまで書いてください。画面上の状態説明で止めないでください。',
     '「見続けている未来」には、期待が消えるだけで止めず、「自分は重要ではない」「取り残される」「もう会えなくなる」「関係から外される」など、その先にある怖さまで表現してください。',
+    '「一度の不履行が自分の価値を下げる」「価値が下がる」という表現は使わないでください。出来事が人の価値を下げるのではなく、「大切にされていないように感じる」「関係の外に置かれていくように感じる」と表現してください。',
     'コピーにも、current_future_imaginal の先にある怖さを入れてください。単なる期待や待ち合わせではなく、取り残される・重要ではない・会えなくなる恐れが伝わる比喩にしてください。',
     '「言葉に出ている反応」には、current_word_reaction をそのまま羅列しないでください。「その未来を見ているため、不安や恐怖を安心で確かめる言葉になっている。相手には責められているように届きやすい」という構造で説明してください。',
     '「行動に出ている反応」には、current_action_reaction を現状の羅列として出さないでください。「未来の不安を希望に変えたい行動が出ているが、相手からは批判や圧として受け取られやすい」という構造で説明してください。',
@@ -324,6 +325,9 @@ async function writeDiagnosisFromSeed(params: {
     '「今日の小さな一歩」には、この話題の予定調整や会う提案を書かないでください。未来の創造の実践を書いてください。例: 怖い未来を一度書き出し、安心している未来を一文で置き直し、その未来から短い一言だけ作ってから自分の行動へ戻る。',
     '「今日の小さな一歩」には、相手に何かを守らせる手順ではなく、自分が未来のイマジナルを置き直す実践を出してください。',
     'コピーはSeedではありません。コピーはLLMの仕事です。current_future_imaginal と copy_tone から、短く少し愉快な入口コピーを作ってください。',
+    '表示順では「あなたのイマジナルコピー」を1番に置いてください。ただし、生成順ではコピーを先に作らないでください。',
+    '内部では必ず先に「見続けている未来」を深く作り、その未来の一番象徴的な絵を取り出してから、最後にイマジナルコピーを作ってください。',
+    'つまり、生成順は「見続けている未来」→「その先の怖さ」→「象徴的な一枚絵」→「コピー」、表示順は「コピー」→「願い」→「見続けている未来」です。',
     'コピーは現在状態のラベルではなく、今見ている未来のイマジナル像にしてください。',
     '「こう思っているから、この未来を見ている」という流れを、短い比喩にしてください。',
     'あなたのイマジナルコピーは、12〜24文字程度。長い分析文、因果説明、括弧補足、現在状態ラベルは禁止です。',
@@ -341,9 +345,12 @@ async function writeDiagnosisFromSeed(params: {
     '全体で900文字以内。',
   ].join('\n');
 
+  const writerSeed: ImaginalDiagnosisSeed = { ...seed };
+  delete writerSeed.imaginal_copy;
   const writerUser = [
     '以下のSeedを正本にして、初回イマジナル診断の表示文だけを作ってください。',
-    JSON.stringify(seed, null, 2),
+    'imaginal_copy は渡していません。必ず imaginal_core_seed.current_future_imaginal と current_future_meaning、copy_material から1番のコピーを作ってください。',
+    JSON.stringify(writerSeed, null, 2),
   ].join('\n');
 
   try {
@@ -593,6 +600,7 @@ export async function POST(req: NextRequest) {
       'copy_ng には、ベル、通知、灯りだけ、待機中、開店中、保留中、レンタル中、既読、返事保留、期待がこぼれる、などの画面上・現在状態・浅いコピーは禁止、と入れてください。',
       '互換のため、undesired_future には current_future_imaginal、avoidance_wish には current_state_from_future、word_from_undesired_future には current_word_reaction、action_from_undesired_future には current_action_reaction、creative_future には shifted_future_imaginal、creative_word_direction には shifted_word_direction を要約して入れてください。',
       'imaginal_copy は仮でよいです。コピーはSeedそのものではなく、後段Writerが current_future_imaginal と copy_tone から作ります。',
+      '内部生成では current_future_imaginal と current_future_meaning を先に深め、その結果として copy_material と imaginal_copy を作ってください。ただし表示順では imaginal_copy を先頭に置きます。',
       'intention_layer には received_meaning, seen_future, hidden_intention, future_distortion を入れてください。',
       'display_text は仮文でかまいません。最終表示文は後段Writerが作ります。',
       '相手の気持ちは断定しない。画像から読み取れないことは言い切らない。スピリチュアルな断定をしない。',
@@ -682,5 +690,7 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: 'internal_error' }, 500);
   }
 }
+
+
 
 
