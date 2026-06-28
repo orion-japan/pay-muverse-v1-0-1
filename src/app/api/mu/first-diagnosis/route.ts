@@ -29,6 +29,14 @@ type FirstDiagnosisFutureKind =
 
 type FirstDiagnosisInputType = 'line_dm' | 'other';
 
+type FirstDiagnosisCentralTheme =
+  | 'receiving_gratitude'
+  | 'expanded_role'
+  | 'creation_seed'
+  | 'relationship_repair'
+  | 'priority_abandonment'
+  | 'unknown';
+
 type FirstDiagnosisPreSeed = {
   version: 'first_diagnosis_pre_seed_v1';
   input_type: FirstDiagnosisInputType;
@@ -43,13 +51,14 @@ type FirstDiagnosisPreSeed = {
   possible_future_kinds?: FirstDiagnosisFutureKind[];
   avoid_future_kinds?: FirstDiagnosisFutureKind[];
   avoid_phrases?: string[];
+  central_theme?: FirstDiagnosisCentralTheme;
   central_observation?: string;
   confidence?: 'high' | 'medium' | 'low';
 };
 
 type ImaginalCoreSeed = {
   future_kind?: FirstDiagnosisFutureKind;
-  central_theme?: string;
+  central_theme?: FirstDiagnosisCentralTheme;
   current_future_imaginal?: string;
   current_future_meaning?: string;
   current_state_from_future?: string;
@@ -75,6 +84,32 @@ type ImaginalCoreSeed = {
   creative_word_direction?: string;
 };
 
+type FlowPerspective = {
+  observed_surface?: string;
+  surface_polarity?: 'pos' | 'neg' | 'mixed';
+  inner_polarity?: 'pos' | 'neg' | 'mixed';
+  utterance_alignment?:
+    | 'aligned'
+    | 'partially_aligned'
+    | 'misaligned'
+    | 'overstated'
+    | 'understated';
+  direction_kind?:
+    | 'creation'
+    | 'receiving'
+    | 'anxiety'
+    | 'fear'
+    | 'confirmation'
+    | 'comparison'
+    | 'avoidance'
+    | 'destruction'
+    | 'boundary'
+    | 'mixed'
+    | 'unknown';
+  seen_future_direction?: string;
+  direction_reason?: string;
+};
+
 type ImaginalDiagnosisSeed = ImaginalFlowSeedLike & {
   kind?: 'imaginal_first';
   image_pre_seed?: FirstDiagnosisPreSeed;
@@ -85,6 +120,7 @@ type ImaginalDiagnosisSeed = ImaginalFlowSeedLike & {
   action_reaction?: string;
   intention_layer?: ImaginalIntentionLayer;
   imaginal_core_seed?: ImaginalCoreSeed;
+  flow_perspective?: FlowPerspective;
   dominant_field?: 'anxiety' | 'comparison' | 'destruction' | 'creation' | 'unknown';
   creative_direction?: string;
   today_step?: string;
@@ -168,6 +204,20 @@ function normalizeFutureKindArray(value: unknown): FirstDiagnosisFutureKind[] | 
   return items.length ? items : undefined;
 }
 
+function normalizeCentralTheme(value: unknown): FirstDiagnosisCentralTheme {
+  const v = String(value ?? '').trim();
+  if (
+    v === 'receiving_gratitude' ||
+    v === 'expanded_role' ||
+    v === 'creation_seed' ||
+    v === 'relationship_repair' ||
+    v === 'priority_abandonment'
+  ) {
+    return v;
+  }
+  return 'unknown';
+}
+
 function normalizeInputType(value: unknown): FirstDiagnosisInputType {
   return String(value ?? '').trim() === 'line_dm' ? 'line_dm' : 'other';
 }
@@ -216,6 +266,7 @@ function normalizeFirstDiagnosisPreSeed(value: unknown): FirstDiagnosisPreSeed |
     possible_future_kinds: normalizeFutureKindArray(v.possible_future_kinds ?? v.possibleFutureKinds),
     avoid_future_kinds: normalizeFutureKindArray(v.avoid_future_kinds ?? v.avoidFutureKinds),
     avoid_phrases: cleanStringArray(v.avoid_phrases ?? v.avoidPhrases, 12),
+    central_theme: normalizeCentralTheme(v.central_theme ?? v.centralTheme),
     central_observation: cleanString(v.central_observation ?? v.centralObservation),
     confidence: normalizeConfidence(v.confidence),
   };
@@ -238,6 +289,7 @@ function defaultUnsupportedPreSeed(): FirstDiagnosisPreSeed {
     possible_future_kinds: ['unknown_future'],
     avoid_future_kinds: [],
     avoid_phrases: [],
+    central_theme: 'unknown',
     central_observation: 'LINE/DMの会話スクリーンショットとして十分に確認できませんでした。',
     confidence: 'low',
   };
@@ -285,7 +337,7 @@ function normalizeImaginalCoreSeed(value: unknown): ImaginalCoreSeed | undefined
   const v = value as Record<string, unknown>;
   const seed: ImaginalCoreSeed = {
     future_kind: normalizeFutureKind(v.future_kind ?? v.futureKind),
-    central_theme: cleanString(v.central_theme ?? v.centralTheme),
+    central_theme: normalizeCentralTheme(v.central_theme ?? v.centralTheme),
     current_future_imaginal: cleanString(v.current_future_imaginal ?? v.currentFutureImaginal),
     current_future_meaning: cleanString(v.current_future_meaning ?? v.currentFutureMeaning),
     current_state_from_future: cleanString(v.current_state_from_future ?? v.currentStateFromFuture),
@@ -319,6 +371,63 @@ function normalizeDiagnosisScope(value: unknown): ImaginalDiagnosisSeed['diagnos
 
 function normalizeFlowPriority(value: unknown): true | undefined {
   return value === true || String(value ?? '').trim() === 'true' ? true : undefined;
+}
+
+function normalizeFlowPolarity(value: unknown): FlowPerspective['surface_polarity'] {
+  const v = String(value ?? '').trim();
+  if (v === 'pos' || v === 'neg' || v === 'mixed') return v;
+  return undefined;
+}
+
+function normalizeFlowUtteranceAlignment(value: unknown): FlowPerspective['utterance_alignment'] {
+  const v = String(value ?? '').trim();
+  if (
+    v === 'aligned' ||
+    v === 'partially_aligned' ||
+    v === 'misaligned' ||
+    v === 'overstated' ||
+    v === 'understated'
+  ) {
+    return v;
+  }
+  return undefined;
+}
+
+function normalizeDirectionKind(value: unknown): FlowPerspective['direction_kind'] {
+  const v = String(value ?? '').trim();
+  if (
+    v === 'creation' ||
+    v === 'receiving' ||
+    v === 'anxiety' ||
+    v === 'fear' ||
+    v === 'confirmation' ||
+    v === 'comparison' ||
+    v === 'avoidance' ||
+    v === 'destruction' ||
+    v === 'boundary' ||
+    v === 'mixed' ||
+    v === 'unknown'
+  ) {
+    return v;
+  }
+  return 'unknown';
+}
+
+function normalizeFlowPerspective(value: unknown): FlowPerspective | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const v = value as Record<string, unknown>;
+
+  const perspective: FlowPerspective = {
+    observed_surface: cleanString(v.observed_surface ?? v.observedSurface),
+    surface_polarity: normalizeFlowPolarity(v.surface_polarity ?? v.surfacePolarity),
+    inner_polarity: normalizeFlowPolarity(v.inner_polarity ?? v.innerPolarity),
+    utterance_alignment: normalizeFlowUtteranceAlignment(v.utterance_alignment ?? v.utteranceAlignment),
+    direction_kind: normalizeDirectionKind(v.direction_kind ?? v.directionKind),
+    seen_future_direction: cleanString(v.seen_future_direction ?? v.seenFutureDirection),
+    direction_reason: cleanString(v.direction_reason ?? v.directionReason),
+  };
+
+  return Object.values(perspective).some(Boolean) ? perspective : undefined;
 }
 
 function buildDisplayText(seed: ImaginalDiagnosisSeed, fallback: string): string {
@@ -379,6 +488,7 @@ function safeParseDiagnosis(raw: string, preSeed?: FirstDiagnosisPreSeed): {
       action_reaction: cleanString(seedRaw?.action_reaction ?? seedRaw?.actionReaction),
       intention_layer: normalizeIntentionLayer(seedRaw?.intention_layer ?? seedRaw?.intentionLayer),
       imaginal_core_seed: coreSeed,
+      flow_perspective: normalizeFlowPerspective(seedRaw?.flow_perspective ?? seedRaw?.flowPerspective),
       diagnosis_scope: normalizeDiagnosisScope(seedRaw?.diagnosis_scope ?? seedRaw?.diagnosisScope),
       flow_priority: normalizeFlowPriority(seedRaw?.flow_priority ?? seedRaw?.flowPriority),
       image_seed: seedRaw?.image_seed ?? seedRaw?.imageSeed,
@@ -434,6 +544,19 @@ async function createFirstDiagnosisPreSeed(params: {
   const { apiKey, model, imageDataUrl, note, uploadType } = params;
 
   const system = [
+      'FLOW_PERSPECTIVE_RULES_V1',
+      '必ず seed.flow_perspective を作ってください。',
+      'flow_perspective は、画像の表面ではなく、この画像を出した人の中で立ち上がっている未来の方向を判定するSeedです。',
+      'flow_perspective.observed_surface には、表面上は何をしているように見えるかを入れてください。例: 創造している、確認している、感謝を受け取っている、怒っている、待っている、進めようとしている。',
+      'flow_perspective.surface_polarity には、表面の言葉・行動が pos / neg / mixed のどれに見えるかを入れてください。',
+      'flow_perspective.inner_polarity には、内的状態が pos / neg / mixed のどれかを入れてください。表面が創造方向に見えても、根の未来形象が不安・恐怖・確認・比較であれば inner_polarity は neg にしてください。',
+      'flow_perspective.utterance_alignment には、表面の言葉・行動と内的状態の整合を入れてください。aligned / partially_aligned / misaligned / overstated / understated のいずれかです。',
+      'flow_perspective.direction_kind には、今見ている未来の方向を入れてください。creation / receiving / anxiety / fear / confirmation / comparison / avoidance / destruction / boundary / mixed / unknown のいずれかです。',
+      'flow_perspective.seen_future_direction には、今その人が見続けている未来の方向を短く入れてください。',
+      'flow_perspective.direction_reason には、画像上のどの観測からその方向と読んだかを入れてください。',
+      'current_flow_input_seed は、画像の表面説明ではなく、未来形象が作る内的状態として作ってください。',
+      'second_flow_input_seed は、その内的状態を見続けた場合に起こりやすい次状態として作ってください。創造方向ではありません。',
+      '創造方向は imaginal_core_seed.shifted_future_imaginal に入れてください。',
     'あなたはMuverseの初回イマジナル診断の画像観測Pre-SEEDを作る観測者です。',
     'ここでは診断文を書かないでください。',
     'ここではイマジナルコピーを作らないでください。',
@@ -464,6 +587,10 @@ async function createFirstDiagnosisPreSeed(params: {
   ].join('\n');
 
   const userText = [
+      'USER_FLOW_PERSPECTIVE_RULES_V1',
+      '重要: flow_perspective で、表面の言葉・行動と内的状態のズレを必ず判定してください。',
+      '表面がポジティブでも、根の未来形象が不安・恐怖・確認・比較であれば inner_polarity は neg にしてください。',
+      'second_flow_input_seed は創造方向ではなく、その内的状態を続けた場合に起こりやすい次状態として作ってください。',
     'この画像から、初回イマジナル診断の画像観測Pre-SEEDだけを作ってください。',
     '診断文、コピー、未来の確定文はまだ作らないでください。',
     `アップロード種別: ${uploadType}`,
@@ -550,6 +677,11 @@ async function createFirstDiagnosisCoreSeed(params: {
     'seed.image_pre_seed には、渡されたPre-SEEDをそのまま入れてください。',
     'seed.image_type は line_or_dm にしてください。',
     'seed.imaginal_core_seed.future_kind を必ず入れてください。',
+    'seed.imaginal_core_seed.central_theme を必ず入れてください。',
+    'central_theme は receiving_gratitude / expanded_role / creation_seed / relationship_repair / priority_abandonment / unknown のいずれかにしてください。',
+    'possible_future_kinds に expanded_role_future または creation_future が含まれる場合、receiving_future だけで止めないでください。',
+    '相手の言葉に「皆さんを元気に」「ベースで生きれてます」「続いています」のような広がりや継続がある場合は、expanded_role を優先候補にしてください。',
+    '右側ユーザーが相手の現在・活動・その後を確認している場合は、単なる感謝受け取りではなく、支援の影響がどこまで続いているかを見ている流れとして読んでください。',
   ].join('\n');
 
   const userText = [
@@ -599,6 +731,16 @@ async function writeDiagnosisFromSeed(params: {
 
   const writerModel = process.env.MU_FIRST_DIAGNOSIS_WRITER_MODEL || model;
   const writerSystem = [
+      'WRITER_FLOW_PERSPECTIVE_RULES_V1',
+      'seed.flow_perspective / seed.imaginal_core_seed / seed.imaginal_flow_seed.transferSeed を正本にしてください。',
+      'direction_kind は Writer 側で変更しないでください。一次解析で確定した方向判定に従ってください。',
+      'surface_polarity と inner_polarity がズレている場合は、「表面では〇〇に見えるが、内側では△△の未来を見ている」という構造で書いてください。',
+      'surface_polarity と inner_polarity がズレている場合は、utterance_alignment と imaginal_flow_seed.transferSeed.transferMeaning を使って説明してください。',
+      '表面がポジティブでも inner_polarity が neg の場合は、無理に創造方向として褒めず、根の不安・恐怖・確認・比較を状態移管として扱ってください。',
+      'secondFlow は創造方向ではありません。その内的状態を続けた場合に起こりやすい次状態として扱ってください。',
+      'direction_kind が anxiety / fear / confirmation / comparison / destruction / avoidance の場合は、その先にある怖さまで書いてください。',
+      'direction_kind が receiving / creation / boundary の場合は、無理に恐怖へ寄せず、その方向の未来像として書いてください。',
+      '表示文には flow_perspective、transferSeed、currentFlow、secondFlow、Seed、JSON などの内部名を出さないでください。',
     'あなたはMuverseの初回イマジナル診断のWriterです。',
     '前段の image_pre_seed と imaginal_core_seed だけを正本にして、ユーザー表示用の診断文を書いてください。',
     '画像を新しく読み直さないでください。',
@@ -607,6 +749,13 @@ async function writeDiagnosisFromSeed(params: {
     '怖い未来へ固定しないでください。',
     'seed.image_pre_seed.possible_future_kinds / avoid_future_kinds / avoid_phrases を必ず守ってください。',
     'もっとも重要な正本は seed.image_pre_seed と seed.imaginal_core_seed です。',
+    'LINE/DM画像では、右側の緑吹き出しをユーザー本人として扱ってください。',
+    '左側の白吹き出しは相手側の文脈として扱ってください。',
+    '診断対象は相手ではなく、ユーザー本人のイマジナルです。',
+    '相手の感謝文を中心に診断しないでください。中心は、相手の言葉に対してユーザー本人がどんな未来を見て、どんな反応をしているかです。',
+    '相手から感謝されている場面でも、「感謝を受け取る」だけで止めないでください。',
+    '右側ユーザーが相手の現在・活動・その後の変化を確認している場合は、支援の影響がどこまで続いているか、役割や活動へ広がる可能性を見ている流れとして扱ってください。',
+    '「たいしたことしてない」は、単なる受け取り拒否だけでなく、その出来事の意味をまだ測っている反応として読んでください。',
     '「見続けている未来」は、imaginal_core_seed.future_kind に合わせてください。',
     'feared_future の時だけ、怖い未来を書いてください。',
     'receiving_future の時は、すでに来ている良い未来を受け取りきれていない流れを書いてください。',
@@ -630,7 +779,18 @@ async function writeDiagnosisFromSeed(params: {
     '「寄り添います」「静かに」「本当の自分」「本当の姿」「言葉になる前」は使わないでください。',
     '出力はJSONのみ。display_text だけを持つオブジェクトにしてください。',
     'display_textには内部キー名、currentFlow、secondFlow、Seed、JSON、imaginal_core_seed、image_pre_seedという言葉を出さないでください。',
-    '構成は、1.あなたのイマジナルコピー 2.いま見えている願い 3.見続けている未来 4.言葉に出ている反応 5.行動に出ている反応 6.創造の方向 7.今日の小さな一歩。最後に固定文を1行だけ置いてください。',
+    '番号付きリストは禁止です。「1.」「2.」「3.」などを出さないでください。',
+    '独自タイトルは禁止です。「Muの初回イマジナル診断」のようなタイトルを出さないでください。',
+    '構成は見出しだけで分けてください。',
+    '見出しは必ずこの順番で出してください。',
+    'あなたのイマジナルコピー',
+    'いま見えている願い',
+    '見続けている未来',
+    '言葉に出ている反応',
+    '行動に出ている反応',
+    '創造の方向',
+    '今日の小さな一歩',
+    '各見出しの後に本文を書いてください。見出しに番号や記号を付けないでください。',
     '最後の1行は必ず「これは、画像をきっかけに見えた「今現在のイマジナル」です。」にしてください。',
     '全体で900文字以内。',
   ].join('\n');
@@ -641,6 +801,8 @@ async function writeDiagnosisFromSeed(params: {
   const writerUser = [
     '以下のSeedを正本にして、初回イマジナル診断の表示文だけを作ってください。',
     'imaginal_copy は渡していません。必ずCore Seedから作ってください。',
+    '番号付きリスト、独自タイトル、診断表形式は禁止です。',
+    '必ず「あなたのイマジナルコピー」から始めてください。',
     JSON.stringify(writerSeed, null, 2),
   ].join('\n');
 
