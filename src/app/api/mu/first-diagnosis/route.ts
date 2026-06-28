@@ -9,10 +9,7 @@ import {
   SUPABASE_URL,
   SERVICE_ROLE,
 } from '@/lib/authz';
-import {
-  enforceImaginalCopyFromIntention,
-  type ImaginalIntentionLayer,
-} from '@/lib/iros/imaginal/imaginalCopySeed';
+import { type ImaginalIntentionLayer } from '@/lib/iros/imaginal/imaginalCopySeed';
 import {
   applyImaginalFlowSeed,
   type ImaginalFlowSeedLike,
@@ -20,7 +17,39 @@ import {
 
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
+type FirstDiagnosisFutureKind =
+  | 'feared_future'
+  | 'receiving_future'
+  | 'expanded_role_future'
+  | 'creation_future'
+  | 'repair_future'
+  | 'release_future'
+  | 'choice_future'
+  | 'unknown_future';
+
+type FirstDiagnosisInputType = 'line_dm' | 'other';
+
+type FirstDiagnosisPreSeed = {
+  version: 'first_diagnosis_pre_seed_v1';
+  input_type: FirstDiagnosisInputType;
+  role_mapping: {
+    user_side: 'right_green' | 'unknown';
+    other_side: 'left_white' | 'unknown';
+    target: 'user_only' | 'unknown';
+  };
+  observed_facts?: string[];
+  user_side_signals?: string[];
+  other_side_context?: string[];
+  possible_future_kinds?: FirstDiagnosisFutureKind[];
+  avoid_future_kinds?: FirstDiagnosisFutureKind[];
+  avoid_phrases?: string[];
+  central_observation?: string;
+  confidence?: 'high' | 'medium' | 'low';
+};
+
 type ImaginalCoreSeed = {
+  future_kind?: FirstDiagnosisFutureKind;
+  central_theme?: string;
   current_future_imaginal?: string;
   current_future_meaning?: string;
   current_state_from_future?: string;
@@ -48,6 +77,7 @@ type ImaginalCoreSeed = {
 
 type ImaginalDiagnosisSeed = ImaginalFlowSeedLike & {
   kind?: 'imaginal_first';
+  image_pre_seed?: FirstDiagnosisPreSeed;
   imaginal_copy?: string;
   visible_wish?: string;
   seen_future?: string;
@@ -104,13 +134,113 @@ function cleanString(value: unknown): string | undefined {
   return s || undefined;
 }
 
-function cleanStringArray(value: unknown): string[] | undefined {
+function cleanStringArray(value: unknown, limit = 8): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const items = value
     .map((item) => String(item ?? '').trim())
     .filter(Boolean)
-    .slice(0, 8);
+    .slice(0, limit);
   return items.length ? items : undefined;
+}
+
+function normalizeFutureKind(value: unknown): FirstDiagnosisFutureKind {
+  const v = String(value ?? '').trim();
+  if (
+    v === 'feared_future' ||
+    v === 'receiving_future' ||
+    v === 'expanded_role_future' ||
+    v === 'creation_future' ||
+    v === 'repair_future' ||
+    v === 'release_future' ||
+    v === 'choice_future'
+  ) {
+    return v;
+  }
+  return 'unknown_future';
+}
+
+function normalizeFutureKindArray(value: unknown): FirstDiagnosisFutureKind[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items = value
+    .map(normalizeFutureKind)
+    .filter((item, idx, arr) => arr.indexOf(item) === idx)
+    .slice(0, 6);
+  return items.length ? items : undefined;
+}
+
+function normalizeInputType(value: unknown): FirstDiagnosisInputType {
+  return String(value ?? '').trim() === 'line_dm' ? 'line_dm' : 'other';
+}
+
+function normalizeConfidence(value: unknown): 'high' | 'medium' | 'low' {
+  const v = String(value ?? '').trim();
+  if (v === 'high' || v === 'low') return v;
+  return 'medium';
+}
+
+function normalizePreSeedRoleMapping(value: unknown): FirstDiagnosisPreSeed['role_mapping'] {
+  const v = value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+  const userSide = String(v.user_side ?? v.userSide ?? '').trim() === 'right_green'
+    ? 'right_green'
+    : 'unknown';
+
+  const otherSide = String(v.other_side ?? v.otherSide ?? '').trim() === 'left_white'
+    ? 'left_white'
+    : 'unknown';
+
+  const target = String(v.target ?? '').trim() === 'user_only'
+    ? 'user_only'
+    : 'unknown';
+
+  return {
+    user_side: userSide,
+    other_side: otherSide,
+    target,
+  };
+}
+
+function normalizeFirstDiagnosisPreSeed(value: unknown): FirstDiagnosisPreSeed | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const v = value as Record<string, unknown>;
+
+  const preSeed: FirstDiagnosisPreSeed = {
+    version: 'first_diagnosis_pre_seed_v1',
+    input_type: normalizeInputType(v.input_type ?? v.inputType),
+    role_mapping: normalizePreSeedRoleMapping(v.role_mapping ?? v.roleMapping),
+    observed_facts: cleanStringArray(v.observed_facts ?? v.observedFacts, 10),
+    user_side_signals: cleanStringArray(v.user_side_signals ?? v.userSideSignals, 10),
+    other_side_context: cleanStringArray(v.other_side_context ?? v.otherSideContext, 10),
+    possible_future_kinds: normalizeFutureKindArray(v.possible_future_kinds ?? v.possibleFutureKinds),
+    avoid_future_kinds: normalizeFutureKindArray(v.avoid_future_kinds ?? v.avoidFutureKinds),
+    avoid_phrases: cleanStringArray(v.avoid_phrases ?? v.avoidPhrases, 12),
+    central_observation: cleanString(v.central_observation ?? v.centralObservation),
+    confidence: normalizeConfidence(v.confidence),
+  };
+
+  return preSeed;
+}
+
+function defaultUnsupportedPreSeed(): FirstDiagnosisPreSeed {
+  return {
+    version: 'first_diagnosis_pre_seed_v1',
+    input_type: 'other',
+    role_mapping: {
+      user_side: 'unknown',
+      other_side: 'unknown',
+      target: 'unknown',
+    },
+    observed_facts: [],
+    user_side_signals: [],
+    other_side_context: [],
+    possible_future_kinds: ['unknown_future'],
+    avoid_future_kinds: [],
+    avoid_phrases: [],
+    central_observation: 'LINE/DMの会話スクリーンショットとして十分に確認できませんでした。',
+    confidence: 'low',
+  };
 }
 
 function normalizeDominantField(value: unknown): ImaginalDiagnosisSeed['dominant_field'] {
@@ -154,6 +284,8 @@ function normalizeImaginalCoreSeed(value: unknown): ImaginalCoreSeed | undefined
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const v = value as Record<string, unknown>;
   const seed: ImaginalCoreSeed = {
+    future_kind: normalizeFutureKind(v.future_kind ?? v.futureKind),
+    central_theme: cleanString(v.central_theme ?? v.centralTheme),
     current_future_imaginal: cleanString(v.current_future_imaginal ?? v.currentFutureImaginal),
     current_future_meaning: cleanString(v.current_future_meaning ?? v.currentFutureMeaning),
     current_state_from_future: cleanString(v.current_state_from_future ?? v.currentStateFromFuture),
@@ -199,28 +331,28 @@ function buildDisplayText(seed: ImaginalDiagnosisSeed, fallback: string): string
     copy,
     '',
     'いま見えている願い',
-    cleanString(core?.current_state_from_future) || cleanString(core?.avoidance_wish) || cleanString(seed.visible_wish) || 'いま見ている未来を止めるために、安心できる反応を求めている状態を読んでいます。',
+    cleanString(core?.current_state_from_future) || cleanString(core?.avoidance_wish) || cleanString(seed.visible_wish) || 'この画像を出した時点で反応している一点を、言葉にしようとしています。',
     '',
     '見続けている未来',
-    cleanString(core?.current_future_imaginal) || cleanString(core?.undesired_future) || cleanString(seed.seen_future) || '思い通りにならず、また待つ側に残されるように感じる未来を見ている可能性があります。',
+    cleanString(core?.current_future_imaginal) || cleanString(core?.undesired_future) || cleanString(seed.seen_future) || 'まだ断定せず、今立ち上がっている方向を観測しています。',
     '',
     '言葉に出ている反応',
-    cleanString(core?.current_word_reaction) || cleanString(core?.word_from_undesired_future) || cleanString(seed.word_reaction) || 'その未来を止めたい確認の言葉が出ています。',
+    cleanString(core?.current_word_reaction) || cleanString(core?.word_from_undesired_future) || cleanString(seed.word_reaction) || 'その未来に触れて、確認や受け取りの言葉が出ています。',
     '',
     '行動に出ている反応',
-    cleanString(core?.current_action_reaction) || cleanString(core?.action_from_undesired_future) || cleanString(seed.action_reaction) || 'その未来を止めたい焦りが、行動の速度に出ています。',
+    cleanString(core?.current_action_reaction) || cleanString(core?.action_from_undesired_future) || cleanString(seed.action_reaction) || 'その未来に触れて、もう少し見たい動きが出ています。',
     '',
     '創造の方向',
-    cleanString(core?.shifted_future_imaginal) || cleanString(core?.creative_future) || cleanString(seed.creative_direction) || '未来のイマジナルを安心してつながっている方向へ置き直すことです。',
+    cleanString(core?.shifted_future_imaginal) || cleanString(core?.creative_future) || cleanString(seed.creative_direction) || '今見えている方向を、次の創造へ置き直すことです。',
     '',
     '今日の小さな一歩',
-    cleanString(core?.shifted_word_direction) || cleanString(core?.creative_word_direction) || cleanString(seed.today_step) || '変えた未来のイマジナルから、一言と行動を選んでください。',
+    cleanString(core?.shifted_word_direction) || cleanString(core?.creative_word_direction) || cleanString(seed.today_step) || '見えている未来を一文にして、今日の行動へ戻してください。',
     '',
     'これは、画像をきっかけに見えた「今現在のイマジナル」です。',
   ].join('\n');
 }
 
-function safeParseDiagnosis(raw: string): {
+function safeParseDiagnosis(raw: string, preSeed?: FirstDiagnosisPreSeed): {
   displayText: string;
   seed: ImaginalDiagnosisSeed | null;
 } {
@@ -233,9 +365,13 @@ function safeParseDiagnosis(raw: string): {
       : parsed;
 
     const coreSeed = normalizeImaginalCoreSeed(seedRaw?.imaginal_core_seed ?? seedRaw?.imaginalCoreSeed);
+    const imagePreSeed =
+      normalizeFirstDiagnosisPreSeed(seedRaw?.image_pre_seed ?? seedRaw?.imagePreSeed) ||
+      preSeed;
 
     const seed: ImaginalDiagnosisSeed = {
       kind: 'imaginal_first',
+      image_pre_seed: imagePreSeed,
       imaginal_copy: cleanString(seedRaw?.imaginal_copy ?? seedRaw?.imaginalCopy),
       visible_wish: cleanString(seedRaw?.visible_wish ?? seedRaw?.visibleWish),
       seen_future: cleanString(seedRaw?.seen_future ?? seedRaw?.seenFuture),
@@ -259,21 +395,13 @@ function safeParseDiagnosis(raw: string): {
         'Mu文体で返す',
         '説明調にしない',
         '相手の気持ちは断定しない',
-        '画像は補助として扱う',
-        '現在状態ではなく未来のイマジナルを正本にする',
-        '今は未来のイマジナルの結果として説明する',
-        '未来のイマジナルを変えると今の言葉と行動が変わる構造で返す',
-        'コピーはcurrent_future_imaginalからLLMが作る入口として扱う',
-        '本質はimaginal_core_seedを正本にして説明欄で渡す',
+        '画像観測Pre-SEEDを正本にする',
+        '怖い未来へ固定しない',
+        '受け取り・役割拡張・創造の未来も読む',
       ],
     };
 
     Object.assign(seed, applyImaginalFlowSeed(seed));
-
-    const enforcedSeed = enforceImaginalCopyFromIntention(seed);
-    seed.imaginal_copy = enforcedSeed.imaginal_copy;
-    seed.seen_future = enforcedSeed.seen_future;
-    seed.intention_layer = enforcedSeed.intention_layer;
 
     const displayText = buildDisplayText(seed, raw);
 
@@ -296,6 +424,170 @@ function normalizeWriterDisplayText(value: unknown, fallback: string): string {
   return [withoutNote, note].filter(Boolean).join('\n\n').trim();
 }
 
+async function createFirstDiagnosisPreSeed(params: {
+  apiKey: string;
+  model: string;
+  imageDataUrl: string;
+  note: string;
+  uploadType: string;
+}): Promise<FirstDiagnosisPreSeed> {
+  const { apiKey, model, imageDataUrl, note, uploadType } = params;
+
+  const system = [
+    'あなたはMuverseの初回イマジナル診断の画像観測Pre-SEEDを作る観測者です。',
+    'ここでは診断文を書かないでください。',
+    'ここではイマジナルコピーを作らないでください。',
+    'ここでは未来を確定しないでください。',
+    '目的は、画像から「何を読めばよいか」を決めるための観測Seedを作ることです。',
+    '現在の対象はLINE/DMなどの会話スクリーンショット限定です。',
+    'LINE/DMではない、または会話画面として確認できない場合は input_type を other、confidence を low にしてください。',
+    'LINE/DMの場合、原則として右側・緑色の吹き出しがユーザー本人、左側・白色の吹き出しが相手です。',
+    '画面上部の名前は通常、相手名です。ユーザー名として扱わないでください。',
+    '診断対象はユーザー本人だけです。相手の願い・不安・未来を診断対象にしないでください。',
+    'observed_facts には、画像上で確認できる事実だけを入れてください。',
+    'user_side_signals には、右側・緑色のユーザー発言から見える反応を入れてください。',
+    'other_side_context には、左側・白色の相手発言を文脈として入れてください。',
+    'possible_future_kinds には候補だけを入れてください。複数可です。',
+    '候補は feared_future / receiving_future / expanded_role_future / creation_future / repair_future / release_future / choice_future / unknown_future です。',
+    'feared_future は、放置、拒絶、喪失、約束不履行などの根拠が右側ユーザー発言に明確にある場合だけ候補にしてください。',
+    'receiving_future は、感謝・成果・助かった・褒められた等の良い未来をユーザーが受け取りきれていない時に候補にしてください。',
+    'expanded_role_future は、ユーザーが「もっとできる」「もっと広げられる」「大きな役割があるかもしれない」という方向を見始めている時に候補にしてください。',
+    'creation_future は、仕事・企画・作品・場づくりなどが形になり始めている時に候補にしてください。',
+    'avoid_future_kinds には、この画像では使わない方がよい未来種別を入れてください。',
+    'avoid_phrases には、この画像で使うとズレる言葉を入れてください。',
+    '相手の気持ち、運命、人格を断定しないでください。',
+    '魂、使命、覚醒、波動、宿命、高次元、宇宙からのメッセージ、あなたは〇〇タイプです、必ず変わります、絶対に叶います、相手はあなたを好きです、相手は本気ではありません、は禁止です。',
+    '出力はJSONのみ。pre_seed だけを持つオブジェクトにしてください。',
+    'pre_seed.version は first_diagnosis_pre_seed_v1 にしてください。',
+    'pre_seed.input_type は line_dm または other にしてください。',
+    'pre_seed.role_mapping は user_side, other_side, target を持たせてください。',
+  ].join('\n');
+
+  const userText = [
+    'この画像から、初回イマジナル診断の画像観測Pre-SEEDだけを作ってください。',
+    '診断文、コピー、未来の確定文はまだ作らないでください。',
+    `アップロード種別: ${uploadType}`,
+    note ? `補足メモ: ${note}` : '',
+  ].filter(Boolean).join('\n');
+
+  const llmRes = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: system },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: userText },
+            { type: 'image_url', image_url: { url: imageDataUrl } },
+          ],
+        },
+      ],
+    }),
+  });
+
+  if (!llmRes.ok) {
+    const detail = await llmRes.text().catch(() => '');
+    throw new Error(`pre_seed_llm_failed: ${detail.slice(0, 500)}`);
+  }
+
+  const data = await llmRes.json().catch(() => ({}));
+  const raw = data?.choices?.[0]?.message?.content?.toString?.() ?? data?.choices?.[0]?.message?.content ?? '';
+  if (!raw) return defaultUnsupportedPreSeed();
+
+  try {
+    const parsed = JSON.parse(String(raw).trim());
+    return normalizeFirstDiagnosisPreSeed(parsed?.pre_seed ?? parsed?.preSeed ?? parsed) || defaultUnsupportedPreSeed();
+  } catch {
+    return defaultUnsupportedPreSeed();
+  }
+}
+
+async function createFirstDiagnosisCoreSeed(params: {
+  apiKey: string;
+  model: string;
+  preSeed: FirstDiagnosisPreSeed;
+  note: string;
+}): Promise<string> {
+  const { apiKey, model, preSeed, note } = params;
+
+  const system = [
+    'あなたはMuverseの初回イマジナル診断のCore Seedを作るMuです。',
+    '前段の image_pre_seed だけを正本にしてください。',
+    'ここでは画像を見直しません。Pre-SEEDにない意味を足さないでください。',
+    'Core Seedでは、Pre-SEEDの possible_future_kinds から中心となる future_kind を選んでください。',
+    '合わない場合は unknown_future にしてください。既存テンプレへ無理に寄せないでください。',
+    '未来のイマジナルは、怖い未来だけではありません。',
+    'feared_future は、Pre-SEEDで明確に候補になっている場合だけ使ってください。',
+    'receiving_future は、すでに来ている良い未来・感謝・成果を受け取りきれていない状態です。',
+    'expanded_role_future は、もっとできることがある、もっと広げられる、大きな役割が見え始めている状態です。',
+    'creation_future は、企画・仕事・作品・場が形になり始めている状態です。',
+    'repair_future は、関係や言葉を置き直す未来です。',
+    'release_future は、もう手放してよいものを見ている未来です。',
+    'choice_future は、どちらへ進むかの分岐を見ている未来です。',
+    'Pre-SEEDの avoid_future_kinds と avoid_phrases を必ず守ってください。',
+    'avoid_phrases にある語句は、current_future_imaginal / current_future_meaning / copy_material に使わないでください。',
+    'LINE/DMでは、診断対象は右側・緑色のユーザー本人だけです。左側・白色の相手は文脈としてだけ使ってください。',
+    '相手の気持ち、未来、運命、人格を断定しないでください。',
+    'imaginal_core_seed.current_future_imaginal には、今ユーザーが見ている未来のイマジナル像を入れてください。',
+    'imaginal_core_seed.current_future_meaning には、その未来をユーザーがどう意味づけているかを入れてください。',
+    'imaginal_core_seed.current_state_from_future には、その未来を見ているから今どんな状態になっているかを入れてください。',
+    'imaginal_core_seed.current_word_reaction には、その未来から出ている言葉を入れてください。',
+    'imaginal_core_seed.current_action_reaction には、その未来から出ている行動を入れてください。',
+    'shifted_future_imaginal には、創造の方向として置き直す未来を入れてください。',
+    'shifted_future_meaning には、その未来で何が前提になるかを入れてください。',
+    'copy_material は、future_kind に合う素材にしてください。怖い未来に固定しないでください。',
+    'copy_ng には、Pre-SEEDの avoid_phrases と、画面上ラベル・浅い比喩を入れてください。',
+    '出力はJSONのみ。display_text と seed を持つオブジェクトにしてください。',
+    'display_text は仮文でかまいません。最終表示文は後段Writerが作ります。',
+    'seed.kind は imaginal_first、diagnosis_scope は current_imaginal、flow_priority は true にしてください。',
+    'seed.image_pre_seed には、渡されたPre-SEEDをそのまま入れてください。',
+    'seed.image_type は line_or_dm にしてください。',
+    'seed.imaginal_core_seed.future_kind を必ず入れてください。',
+  ].join('\n');
+
+  const userText = [
+    '以下の image_pre_seed を正本にして、初回イマジナル診断のCore Seedを作ってください。',
+    '怖い未来へ固定しないでください。',
+    'Pre-SEEDの avoid_future_kinds と avoid_phrases を必ず守ってください。',
+    note ? `補足メモ: ${note}` : '',
+    JSON.stringify({ image_pre_seed: preSeed }, null, 2),
+  ].filter(Boolean).join('\n');
+
+  const llmRes = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: userText },
+      ],
+    }),
+  });
+
+  if (!llmRes.ok) {
+    const detail = await llmRes.text().catch(() => '');
+    throw new Error(`core_seed_llm_failed: ${detail.slice(0, 500)}`);
+  }
+
+  const data = await llmRes.json().catch(() => ({}));
+  const raw = data?.choices?.[0]?.message?.content?.toString?.() ?? data?.choices?.[0]?.message?.content ?? '';
+  if (!raw) throw new Error('empty_core_seed');
+
+  return String(raw);
+}
+
 async function writeDiagnosisFromSeed(params: {
   apiKey: string;
   model: string;
@@ -303,77 +595,52 @@ async function writeDiagnosisFromSeed(params: {
   fallback: string;
 }): Promise<string> {
   const { apiKey, model, seed, fallback } = params;
-  if (!seed?.imaginal_flow_seed) return normalizeWriterDisplayText(fallback, fallback);
+  if (!seed?.imaginal_core_seed) return normalizeWriterDisplayText(fallback, fallback);
 
   const writerModel = process.env.MU_FIRST_DIAGNOSIS_WRITER_MODEL || model;
   const writerSystem = [
     'あなたはMuverseの初回イマジナル診断のWriterです。',
-    '前段の画像観測とフロー判定Seedだけを正本にして、ユーザー表示用の診断文を書いてください。',
-    '現在状態の説明を正本にしないでください。正本は、現在を生んでいる未来のイマジナルと、変えた先の未来のイマジナルです。',
-    '画像を新しく読み直さないでください。意味を追加せず、渡されたSeedから自然な日本語にしてください。',
-    'もっとも重要な正本は seed.imaginal_core_seed です。current_future_imaginal / current_future_meaning / shifted_future_imaginal / shifted_future_meaning を最優先してください。',
-    '基本構造は「今この未来のイマジナルを見ている。だから今こうなっている。でも未来のイマジナルをこう変えると、今こう変わる」です。',
-    '「いま見えている願い」は、現在の感情説明ではなく、current_future_imaginal を見ているから起きている願いとして書いてください。',
-    '「いま見えている願い」では、「相手に優先されたい」「約束を守ってほしい」と要求のように並べないでください。中心は「大切にされている安心をもう一度感じたい」「関係の中に自分の居場所があると確かめたい」です。',
-    '「見続けている未来」には、current_future_imaginal と current_future_meaning を書き、その先にある怖さまで書いてください。画面上の状態説明で止めないでください。',
-    '「見続けている未来」には、期待が消えるだけで止めず、「自分は重要ではない」「取り残される」「もう会えなくなる」「関係から外される」など、その先にある怖さまで表現してください。',
-    '「一度の不履行が自分の価値を下げる」「価値が下がる」という表現は使わないでください。出来事が人の価値を下げるのではなく、「大切にされていないように感じる」「関係の外に置かれていくように感じる」と表現してください。',
-    'コピーにも、current_future_imaginal の先にある怖さを入れてください。単なる期待や待ち合わせではなく、取り残される・重要ではない・会えなくなる恐れが伝わる比喩にしてください。',
-    'コピーでは、小舟・岸・潮・灯台・ベル・通知・窓・チケット・待合室などの物体比喩に逃げないでください。',
-    'コピーは、3番の「見続けている未来」にある関係の未来そのものから作ってください。例: 関係の外に置かれる、もう会えなくなる、優先度から消える、期待していた場所から外される。',
-    'コピーは前回の診断文脈に引きずられないでください。画像ごとに、ユーザー側発言の中心から作り直してください。',
-    '右側ユーザー発言の中心が「救えたのか」「役に立てたのか」「自分の存在に意味があったのか」の確認なら、コピーもその未来から作ってください。例: 「救えた実感を探す私」「届いた影響を確かめたい私」「役に立てたことを信じきれない私」。',
-    '右側ユーザー発言に「僕がいなくても」「救われないと」「ほんとに？」「たいしたことしてない」がある場合、中心テーマは priority_abandonment ではなく rescue_impact としてください。コピー、願い、未来、言葉、行動は「救えた実感を受け取れない」「役に立てたことを確かめたい」「感謝を受け取る前に確認してしまう」方向で作ってください。',
-    'このケースでは「今回の中心テーマから外れたコピー」「関係の外に置かれる未来」「もう会えなくなる予定」などへ寄せないでください。',
-    'このケースで放置・優先順位のコピーへ安易に寄せないでください。それは相手に放置される文脈のコピーであり、今回の右側ユーザー発言の中心とは限りません。',
-    '良いコピー例はテーマ別にしてください。rescue_impact なら「救えた実感を探す私」「届いた影響を確かめたい私」「役に立てたことを信じきれない私」。priority_abandonment なら「優先順位から消えていく私」「関係の外に置かれる未来」。ただし priority_abandonment は右側ユーザー発言に明確な根拠がある場合だけ使ってください。',
-    'コピーでは「予感」を多用しないでください。弱く説明的になります。未来の絵がそのまま立ち上がる短い言葉にしてください。ただし、前回のコピーや汎用テンプレに引っ張られず、今回の右側ユーザー発言の中心テーマから作ってください。',
-    '悪いコピー例: 「岸に残された小舟」「約束の潮に残された小舟」「ベルだけ鳴る灯台」「待合室のチケット」。これは物体比喩に逃げていて、3番の未来そのものではありません。',
-    '「言葉に出ている反応」には、current_word_reaction をそのまま羅列しないでください。「その未来を見ているため、不安や恐怖を安心で確かめる言葉になっている。相手には責められているように届きやすい」という構造で説明してください。',
-    '「責めている」「自責を引き出そうとしている」「相手を動かそうとしている」と断定しないでください。代わりに「相手には責められているように届きやすい」「自責を求められているように感じられやすい」と書いてください。',
-    '本人の意図を悪く見せないでください。本当は安心したい、不安をほどきたい、つながりを確かめたい動きとして書いてください。',
-    '「行動に出ている反応」には、current_action_reaction を現状の羅列として出さないでください。「未来の不安を希望に変えたい行動が出ているが、相手からは批判や圧として受け取られやすい」という構造で説明してください。',
-    '「創造の方向」には、shifted_future_imaginal と shifted_future_meaning を書いてください。小さな約束が積み重なる未来や相手が連絡する未来を中心にしないでください。中心は、連絡が来る来ないにかかわらず自分の安心を保てる基盤を作る未来です。',
-    '「創造の方向」には、そのためにどうするかも短く入れてください。例: 相手の反応を安心の条件にしない、まず自分の時間へ戻る、責める確認ではなく安心を前提にした一言にする。',
-    '「創造の方向」では、「相手の反応が私の価値を決めない」ではなく、「相手の反応だけで私の安心を決めなくていい」という方向で書いてください。',
-    '「今日の小さな一歩」には、この話題の予定調整や会う提案を書かないでください。未来の創造の実践を書いてください。例: 怖い未来を一度書き出し、安心している未来を一文で置き直し、その未来から短い一言だけ作ってから自分の行動へ戻る。',
-    '「今日の小さな一歩」には、相手に何かを守らせる手順ではなく、自分が未来のイマジナルを置き直す実践を出してください。',
-    'コピーはSeedではありません。コピーはLLMの仕事です。current_future_imaginal と copy_tone から、短く少し愉快な入口コピーを作ってください。',
-    '表示順では「あなたのイマジナルコピー」を1番に置いてください。ただし、生成順ではコピーを先に作らないでください。',
-    '内部では必ず先に「見続けている未来」を深く作り、その未来の一番象徴的な絵を取り出してから、最後にイマジナルコピーを作ってください。',
-    'つまり、生成順は「見続けている未来」→「その先の怖さ」→「象徴的な一枚絵」→「コピー」、表示順は「コピー」→「願い」→「見続けている未来」です。',
-    'コピーは現在状態のラベルではなく、今見ている未来のイマジナル像にしてください。',
-    '「こう思っているから、この未来を見ている」という流れを、短い比喩にしてください。',
-    'あなたのイマジナルコピーは、12〜24文字程度。長い分析文、因果説明、括弧補足、現在状態ラベルは禁止です。',
-    '「ベル」「通知」「灯りだけ」「待機中」「開店中」「保留中」「レンタル中」のような画面上・現在状態ラベルは禁止です。',
-    '良いコピー例: 「置いてけぼりの一羽アヒル」「岸に残された小舟」「改札前の迷子チケット」。',
-    '悪いコピー例: 「期待がこぼれる小さな待ち合わせ」「ベルだけ鳴る小さな灯台ひとつ」「置いてけぼり待機、開店中」「既読レンタル中、返事保留」。これは画面上・現在状態、または恐れの先が浅いコピーなので禁止です。',
-    '注意書きの見出しや追加説明は出さないでください。最後の1行だけを固定文にしてください。',
-    '最後の1行は必ず「これは、画像をきっかけに見えた「今現在のイマジナル」です。」にしてください。',
-    '「画像の内容そのものではなく、いま立ち上がっているフローをもとに見ています。」は出さないでください。',
+    '前段の image_pre_seed と imaginal_core_seed だけを正本にして、ユーザー表示用の診断文を書いてください。',
+    '画像を新しく読み直さないでください。',
+    '意味を追加しないでください。',
+    '既存テンプレに寄せないでください。',
+    '怖い未来へ固定しないでください。',
+    'seed.image_pre_seed.possible_future_kinds / avoid_future_kinds / avoid_phrases を必ず守ってください。',
+    'もっとも重要な正本は seed.image_pre_seed と seed.imaginal_core_seed です。',
+    '「見続けている未来」は、imaginal_core_seed.future_kind に合わせてください。',
+    'feared_future の時だけ、怖い未来を書いてください。',
+    'receiving_future の時は、すでに来ている良い未来を受け取りきれていない流れを書いてください。',
+    'expanded_role_future の時は、もっとできることがある、もっと広げられる、大きな役割が見え始めている未来を書いてください。',
+    'creation_future の時は、創造が形になり始めている未来を書いてください。',
+    'repair_future の時は、関係や言葉を置き直す未来を書いてください。',
+    'release_future の時は、手放してよいものを見ている未来を書いてください。',
+    'choice_future の時は、分岐を見ている未来を書いてください。',
+    'unknown_future の時は、断定せず、今見えている反応だけをやわらかく出してください。',
+    '「自分は重要ではない」「取り残される」「もう会えなくなる」「関係から外される」は、avoid_phrases に含まれる場合は使わないでください。',
+    '「言葉に出ている反応」は、ユーザーを責めず、何を受け取り、何を見ようとしているかで書いてください。',
+    '「行動に出ている反応」は、圧・批判・過剰介入と強く書きすぎないでください。',
+    '「創造の方向」は、相手を変える手順ではなく、ユーザーが未来のイマジナルを置き直す方向で書いてください。',
+    'コピーはSeedではありません。コピーはWriterの仕事です。',
+    'コピーは current_future_imaginal / current_future_meaning / copy_material / future_kind から作ってください。',
+    'コピーは12〜24文字程度。現在状態ラベル、画面上ラベル、物体比喩は禁止です。',
+    '文体はMuの口調にしてください。やわらかく、近く、でも核心は外さない言い方にしてください。',
+    'ユーザーを裁く言い方、分析して突き放す言い方、専門家が診断するような硬い言い方は避けてください。',
+    '一文は短めにしてください。',
     '相手の気持ち、未来、運命、人格を断定しないでください。',
     '「寄り添います」「静かに」「本当の自分」「本当の姿」「言葉になる前」は使わないでください。',
     '出力はJSONのみ。display_text だけを持つオブジェクトにしてください。',
-    'display_textには内部キー名、currentFlow、secondFlow、Seed、JSON、imaginal_core_seedという言葉を出さないでください。',
+    'display_textには内部キー名、currentFlow、secondFlow、Seed、JSON、imaginal_core_seed、image_pre_seedという言葉を出さないでください。',
     '構成は、1.あなたのイマジナルコピー 2.いま見えている願い 3.見続けている未来 4.言葉に出ている反応 5.行動に出ている反応 6.創造の方向 7.今日の小さな一歩。最後に固定文を1行だけ置いてください。',
+    '最後の1行は必ず「これは、画像をきっかけに見えた「今現在のイマジナル」です。」にしてください。',
     '全体で900文字以内。',
   ].join('\n');
 
   const writerSeed: ImaginalDiagnosisSeed = { ...seed };
   delete writerSeed.imaginal_copy;
+
   const writerUser = [
     '以下のSeedを正本にして、初回イマジナル診断の表示文だけを作ってください。',
-    'LINE/DM/チャット画像では、右側・緑色の吹き出しがユーザー本人、左側・白色の吹き出しが相手です。診断対象は必ずユーザー本人だけにしてください。',
-    '上部に表示されている名前は相手名として扱い、ユーザー名として扱わないでください。',
-    '左側の相手の言葉は文脈としてだけ使い、相手の願い・不安・未来を診断しないでください。',
-    'コピー、願い、見続けている未来、言葉、行動、創造の方向は、すべて右側・緑色のユーザー発言から見えるイマジナルを中心にしてください。',
-    '右側のユーザー発言が「僕がいなくても」「ほんとに？」「たいしたことしてない」などの場合、そこから「自分の影響が本当に届いたのか」「役に立てたのか」「救えたのかを確かめたい未来」を読んでください。放置・優先順位の未来に安易に寄せないでください。',
-    '文体は、診断書ではなくMuの口調にしてください。やわらかく、近く、でも核心は外さない言い方にしてください。',
-    'ユーザーを裁く言い方、分析して突き放す言い方、専門家が診断するような硬い言い方は避けてください。',
-    '「〜している構造だ」「〜しようとするため」「〜を引き出そうとする」などの硬い表現は避け、Muがそっと映すように書いてください。',
-    'ただし甘くぼかしすぎないでください。未来のイマジナル、言葉、行動、創造の方向ははっきり書いてください。',
-    '一文は短めにしてください。読み手がスマホで読んでも息が詰まらない長さにしてください。',
-    'imaginal_copy は渡していません。必ず imaginal_core_seed.current_future_imaginal と current_future_meaning、copy_material から1番のコピーを作ってください。',
+    'imaginal_copy は渡していません。必ずCore Seedから作ってください。',
     JSON.stringify(writerSeed, null, 2),
   ].join('\n');
 
@@ -590,120 +857,34 @@ export async function POST(req: NextRequest) {
     const note = typeof body.note === 'string' && body.note.trim() ? body.note.trim().slice(0, 500) : '';
     const uploadType = typeof body.upload_type === 'string' ? body.upload_type : 'line_dm';
 
-    const system = [
-      'あなたはMuverseの初回イマジナル診断を行うMuです。',
-      'これは一次観測です。画像から image_seed / current_flow_input_seed / second_flow_input_seed / imaginal_core_seed を作ることが主目的です。',
-      'この診断では、現在の状態説明を正本にしないでください。まず「今その人が見ている未来のイマジナル」を推定してください。',
-      '次に、「その未来を見ているから、今どんな状態・言葉・行動になっているか」を出してください。',
-      'さらに、「未来のイマジナルをどう変えると、今の状態・言葉・行動がどう変わるか」まで含めて seed を作ってください。',
-      '現在の状態は結果であり、未来のイマジナルが原因です。',
-      '最終表示文は後段Writerが、コードで作られた imaginal_flow_seed と imaginal_core_seed を正本にして作ります。',
-      'これは画像診断ではなく、画像を入口にした「今現在のイマジナル」の状態観測です。',
-      '画像は補助入力です。正本は、ユーザーがその画像を選び、今ここに出した時点で立ち上がっているフローです。',
-      '画像の表面内容とフロー解釈が食い違う場合は、フロー解釈を優先してください。ただし、人格・運命・恒常的な未来として断定しないでください。',
-      'currentFlow は、今この画像を出した時点の現在状態として読んでください。secondFlow は、そこから移管しようとしている状態として読んでください。',
-      'ユーザーが送った画像を見て、相手の気持ちや未来を断定するのではなく、ユーザーがいま見続けている未来の方向を読み取ってください。',
-      '現在この初回イマジナル診断は、LINE/DMなどの会話スクリーンショット限定です。メモ、ToDo、投稿文、告知文、メール、予定表、講座画面、Mu BOOKのページ、その他画像は診断対象にしないでください。',
-      '画像がLINE/DMなどの会話スクリーンショットではない場合は、診断を行わず、image_type を other にし、unsupported_image_type として扱えるSeedにしてください。',
-      'まず image_seed に、画像の表面観測、見える言葉、見える行動、緊張点、ユーザーが反応している一点を入れてください。',
-      '次に current_flow_input_seed と second_flow_input_seed を作ってください。e_turn は e1/e2/e3/e4/e5、depthStage は S1〜T3、polarity は pos/neg だけを使ってください。',
-      'current_flow_input_seed は「今この画像を出した時点の現在状態」、second_flow_input_seed は「そこから移管しようとしている状態」です。',
-      '必ず imaginal_core_seed を作ってください。これは診断の正本です。コピー文ではなく、コピーと説明を生成するための未来イマジナルSeedです。',
-      'imaginal_core_seed.current_future_imaginal には、今その人が見ている未来のイマジナル像を入れてください。現状説明ではなく未来像にしてください。',
-      'imaginal_core_seed.current_future_meaning には、その未来をその人がどう意味づけているかを入れてください。',
-      'current_future_imaginal と current_future_meaning には、表面の不安だけでなく、その先にある怖さまで入れてください。ただし、毎回「期待が消える」「自分は重要ではない」「取り残される」「関係から外される」「もう会えなくなる」に寄せないでください。必ず右側・緑色のユーザー発言の中心テーマから作ってください。',
-      'まず user_side_central_theme を内部で選んでください。候補は rescue_impact（救えた実感・役に立てた実感）, priority_abandonment（優先度・放置・約束不履行）, self_doubt（自信のなさ・受け取りにくさ）, relationship_repair（関係修復）, work_creation（仕事・創造）です。',
-      'priority_abandonment は、右側・緑色のユーザー発言に「会えない」「連絡がない」「既読」「放置」「約束」「優先」「また断られた」などの明確な根拠がある場合だけ使ってください。',
-      '右側・緑色のユーザー発言に「救い」「助かった」「ほんとに？」「たいしたことしてない」「僕がいなくても」「私がいなくても」「感謝を受け取れない」などがある場合は rescue_impact を優先してください。この場合の未来は、関係から外される未来ではなく、「自分のしたことが届いていなかったかもしれない」「役に立てた実感を受け取れない」「救えたことを信じきれない」未来です。',
-      'imaginal_core_seed.current_state_from_future には、その未来を見ているから、今どんな状態になっているかを入れてください。',
-      'imaginal_core_seed.current_word_reaction には、その未来が作っている言葉を入れてください。現状のセリフ羅列ではなく、不安や恐怖を安心で確かめる言葉になり、相手には責められているように届きやすい構造を入れてください。',
-      'imaginal_core_seed.current_action_reaction には、その未来が作っている行動を入れてください。現状の羅列ではなく、未来の不安を希望に変えたい行動が出て、反対に相手から批判や圧として受け取られやすい構造を入れてください。',
-      'imaginal_core_seed.shifted_future_imaginal には、創造の方向として置き直したい未来のイマジナル像を入れてください。相手が連絡する未来や約束が守られる未来だけにしないでください。中心は、連絡が来る来ないにかかわらず自分の安心を保てる基盤を作る未来です。',
-      'imaginal_core_seed.shifted_future_meaning には、その未来では何が前提かを入れてください。例: 相手の反応だけで自分の安心を決めなくていい、私は自分の時間に戻れる、つながりを失った前提に落ちなくていい。',
-      'shifted_future_meaning では、「価値」よりも「安心」を使ってください。例: 相手の反応だけで私の安心を決めなくていい、私は自分の時間へ戻れる、関係から外された前提に落ちなくていい。',
-      'imaginal_core_seed.shifted_state_from_future には、その未来なら、今どんな状態でいられるかを入れてください。',
-      'imaginal_core_seed.shifted_word_direction には、その未来から出る言葉を入れてください。',
-      'imaginal_core_seed.shifted_action_direction には、その未来から出る行動を入れてください。相手に何かを守らせる手順ではなく、自分が未来のイマジナルを置き直す実践にしてください。',
-      'imaginal_core_seed.evidence_bridge には、画像上の根拠から、なぜその未来のイマジナルを見ていると読んだのかを短く入れてください。',
-      'copy_material / copy_tone / copy_direction / copy_ng も入れてください。コピーは current_future_imaginal を短い比喩にするための素材です。',
-      'copy_material には、user_side_central_theme に合う素材を入れてください。rescue_impact なら「救えた実感を探す」「届いた影響を確かめたい」「役に立てたことを信じきれない」。priority_abandonment なら「関係の外に置かれる」「もう会えなくなる」「優先度から消える」。根拠がないテーマの素材は使わないでください。',
-      'copy_material は物体比喩ではなく、関係の未来そのものを素材にしてください。例: 関係の外に置かれる / もう会えなくなる / 優先度から消える / 期待していた場所から外される。',
-      'copy_ng には、小舟、岸、潮、灯台、ベル、通知、窓、チケット、待合室など、物体や画面の比喩に逃げるコピーは禁止、と入れてください。',
-      'copy_ng には、ベル、通知、灯りだけ、待機中、開店中、保留中、レンタル中、既読、返事保留、期待がこぼれる、などの画面上・現在状態・浅いコピーは禁止、と入れてください。',
-      '互換のため、undesired_future には current_future_imaginal、avoidance_wish には current_state_from_future、word_from_undesired_future には current_word_reaction、action_from_undesired_future には current_action_reaction、creative_future には shifted_future_imaginal、creative_word_direction には shifted_word_direction を要約して入れてください。',
-      'imaginal_copy は仮でよいです。コピーはSeedそのものではなく、後段Writerが current_future_imaginal と copy_tone から作ります。',
-      '内部生成では current_future_imaginal と current_future_meaning を先に深め、その結果として copy_material と imaginal_copy を作ってください。ただし表示順では imaginal_copy を先頭に置きます。',
-      'intention_layer には received_meaning, seen_future, hidden_intention, future_distortion を入れてください。',
-      'display_text は仮文でかまいません。最終表示文は後段Writerが作ります。',
-      '相手の気持ちは断定しない。画像から読み取れないことは言い切らない。スピリチュアルな断定をしない。',
-      '魂、使命、覚醒、波動、宿命、高次元、宇宙からのメッセージ、あなたは〇〇タイプです、必ず変わります、絶対に叶います、相手はあなたを好きです、相手は本気ではありません、は禁止です。',
-      '「寄り添います」「静かに」「本当の自分」「本当の姿」「言葉になる前」は使わないでください。',
-      '出力はJSONのみ。Markdownや説明文を前後に付けないでください。',
-      'JSONは display_text と seed を持つオブジェクトにしてください。',
-      'seedには kind, diagnosis_scope, flow_priority, image_seed, current_flow_input_seed, second_flow_input_seed, imaginal_core_seed, imaginal_copy, visible_wish, seen_future, word_reaction, action_reaction, intention_layer, dominant_field, creative_direction, today_step, image_type, evidence_points, uncertain_points, user_name_candidate, writer_directives を入れてください。',
-      'image_seed には role_mapping を入れてください。LINE/DM画像なら role_mapping.user_side = "right_green", role_mapping.other_side = "left_white", role_mapping.target = "user_only" としてください。',
-      'current_flow_input_seed には、右側・緑色のユーザー発言から見える反応を優先して入れてください。',
-      'second_flow_input_seed には、左側・白色の相手発言から見える文脈を補助情報として入れてください。ただし診断対象にしないでください。',
-      'diagnosis_scope は current_imaginal、flow_priority は true にしてください。dominant_fieldは anxiety / comparison / destruction / creation / unknown のいずれか。現在はLINE/DM限定なので、会話スクショなら image_type は line_or_dm にしてください。LINE/DMではない画像は image_type を other にしてください。',
-      'LINE/DM/チャット画像では、原則として右側の吹き出し・緑色の吹き出しがユーザー本人、左側の吹き出し・白色の吹き出しが相手です。',
-      '画面上部に表示されている名前は、通常は相手の名前です。ユーザー名として扱わないでください。',
-      '診断対象は必ずユーザー本人です。LINE/DM画像では、右側・緑色の発言からユーザーの current_future_imaginal を作ってください。',
-      '左側・白色の発言は、相手の文脈としてだけ使ってください。左側の人の願い・不安・未来を診断対象にしないでください。',
-      '右側の発言に「僕」「私」「ほんとに？」「たいしたことしてない」などがある場合、それはユーザー本人の言葉として扱ってください。',
-      '今回の読みでは、相手がどう感じているかではなく、ユーザーが何を見て、何を確かめたくなっているかを中心にしてください。',
-    ].join('\n');
-
-    const userText = [
-      'この画像から、初回イマジナル診断の一次観測Seedを作ってください。',
-      '現在はLINE/DM会話スクショ限定です。LINE/DMではない画像の場合は診断対象外として扱ってください。',
-      '最初に、右側・緑色のユーザー発言の中心テーマを見てください。放置・優先順位・約束不履行は、右側発言に明確な根拠がある場合だけ使ってください。',
-      '右側発言が「救えたのか」「役に立ったのか」「たいしたことしてない」「ほんとに？」に近い場合は、救えた実感や感謝の受け取りに関するイマジナルとして読んでください。',
-      'アップロード種別: ' + uploadType,
-      '画像は補助として扱い、この画像を出した時点の currentFlow と、そこから移管しようとしている secondFlow を必ずSeedにしてください。',
-      '重要: 現状説明ではなく、未来のイマジナルを映すことが目的です。',
-      'まず「今見ている未来のイマジナル」を出し、その未来を見ているから今こうなっている、さらに未来のイマジナルをこう変えると今こう変わる、という構造で imaginal_core_seed を作ってください。',
-      '見ている未来には、その先の恐れまで入れてください。期待が消える、自分は重要ではない、取り残される、もう会えなくなる、関係から外れるなどの怖さを必要に応じて含めてください。',
-      '言葉と行動は、現状の写しではなく、その未来の不安を安心や希望に変えようとして出ている反応として作ってください。',
-      '変えた先の未来は、相手の連絡や約束の成否ではなく、連絡が来る来ないにかかわらず自分の安心を保てる基盤を作る未来にしてください。',
-      '今日の一歩は予定調整や会う提案ではなく、未来のイマジナルを置き直す実践にしてください。',
-      'コピーは現在状態のラベルではなく、current_future_imaginal から作る前提にしてください。',
-      'ユーザーに見せる診断文 display_text は仮文でよいです。本線Muへ引き継ぐ内部Seed seed を重視してください。',
-      note ? `補足メモ：${note}` : '',
-    ].filter(Boolean).join('\n');
-
-    const llmRes = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: system },
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: userText },
-              { type: 'image_url', image_url: { url: imageDataUrl } },
-            ],
-          },
-        ],
-      }),
+    const preSeed = await createFirstDiagnosisPreSeed({
+      apiKey,
+      model,
+      imageDataUrl,
+      note,
+      uploadType,
     });
 
-    if (!llmRes.ok) {
-      const detail = await llmRes.text().catch(() => '');
-      console.error('[mu-first-diagnosis] LLM error:', detail.slice(0, 500));
-      return json({ ok: false, error: 'llm_failed', detail }, 502);
+    if (preSeed.input_type !== 'line_dm') {
+      return json(
+        {
+          ok: false,
+          error: 'unsupported_image_type',
+          detail: '現在はLINEまたはDMの会話スクリーンショットのみ診断できます。',
+          credit_consumed: creditConsumed,
+        },
+        400,
+      );
     }
 
-    const data = await llmRes.json().catch(() => ({}));
-    const rawDiagnosis = data?.choices?.[0]?.message?.content?.toString?.() ?? data?.choices?.[0]?.message?.content ?? '';
-    if (!rawDiagnosis) return json({ ok: false, error: 'empty_diagnosis' }, 502);
+    const rawCoreSeed = await createFirstDiagnosisCoreSeed({
+      apiKey,
+      model,
+      preSeed,
+      note,
+    });
 
-    const parsedDiagnosis = safeParseDiagnosis(String(rawDiagnosis));
+    const parsedDiagnosis = safeParseDiagnosis(String(rawCoreSeed), preSeed);
 
     if (!parsedDiagnosis.seed || parsedDiagnosis.seed.image_type !== 'line_or_dm') {
       return json(
@@ -716,6 +897,7 @@ export async function POST(req: NextRequest) {
         400,
       );
     }
+
     const diagnosis = await writeDiagnosisFromSeed({
       apiKey,
       model,
@@ -747,7 +929,3 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: 'internal_error' }, 500);
   }
 }
-
-
-
-
