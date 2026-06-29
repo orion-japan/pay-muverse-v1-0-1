@@ -91,8 +91,8 @@ export default function MuEntryPage() {
         </div>
 
         <div style={styles.buttonGroup}>
-          <button style={styles.button} onClick={() => router.push('/mu-first')}>
-            画像を送って診断する
+          <button style={styles.button} onClick={() => router.push('/mu-imaginal')}>
+            イマジナル診断を受ける
           </button>
           <button style={styles.secondaryButton} onClick={() => router.push('/books')}>
             第1章を読む
