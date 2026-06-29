@@ -210,8 +210,8 @@ function normalizePreSeed(value: unknown): ImaginalPreSeed {
     },
     attention_point: cleanString(v.attention_point, '画像の中で、ユーザーの心が止まっている一点'),
     wished_future_seed: {
-      wished_future: cleanString(wished.wished_future, '遅れてもちゃんとつながり直せる'),
-      wished_future_scene: cleanString(wished.wished_future_scene, '相手の都合があっても、あとで自然につながり直せる場面'),
+      wished_future: cleanString(wished.wished_future, '遅れても、関係の中でちゃんとつながり直せる'),
+      wished_future_scene: cleanString(wished.wished_future_scene, '遅れやすれ違いがあっても、短く状況が戻り、こちらも安心して自分の時間へ戻れる場面'),
       wished_future_reason: cleanString(wished.wished_future_reason, '画像を見返している奥に、待つだけで終わりたくない願いがあるため'),
     },
     continued_future_seed: {
@@ -289,7 +289,7 @@ function inferWishedFutureTransfer(preSeed: ImaginalPreSeed): WishedFutureTransf
         ? '先に断ち切る行動ではなく、境界線を持って一度だけ伝え、自分の場へ戻る行動に変える'
         : base === 'creation'
           ? '思いつきを保存するだけでなく、今日ひとつ公開・送信・実行する'
-          : '反応を待ち続ける行動から、一度だけ伝えて自分の時間へ戻る行動に変える';
+          : '反応を待ち続ける行動から、一度だけ未来を置いて自分の時間へ戻る行動に変える';
 
   return {
     wished_future_direction: wished,
@@ -547,10 +547,10 @@ export async function POST(req: NextRequest) {
       '画像に写っている事実を見てください。既読、未読、Read表示、返信の有無、コール、不在着信、通話履歴があれば観測してください。',
       'ただし、相手の気持ちや未来は断定しないでください。見る対象は、画像を送ったユーザーの中で立ち上がっている未来です。',
       '重要: continued_future は状態説明ではなく、ユーザーが先に見てしまっている「このまま続いた先の未来」にしてください。',
-      '重要: future_scene は、画像の事実から立ち上がる未来の一場面として書いてください。例: 何度か掛け直してもつながらず、私だけ待つ側に残る場面。',
+      '重要: future_scene は、画像の事実から立ち上がる未来の一場面として書いてください。画像にない場所・姿勢・生活状況は足さないでください。',
       '重要: copy_seed は、continued_future を短く圧縮し、必ず末尾を「不安の未来」「破壊の未来」「比較の未来」「創造の未来」のいずれかで閉じてください。',
       '重要: wished_future は「安心して自分の未来へ進めること」のような汎用語で逃げないでください。画像に即して、何が回復すると願っているかを書いてください。',
-      '重要: wished_future_scene は、ユーザーが本当は置きたい具体的な未来場面にしてください。例: 遅れてもちゃんとつながり直せる場面。',
+      '重要: wished_future_scene は、相手の具体的なセリフを指定しないでください。相手を動かす未来ではなく、関係の場がどう回復するか、自分がどう安心して戻れるかを書いてください。',
       '思い続けている未来の基本分類は、不安 / 破壊 / 比較 / 創造 の4つです。',
       '確認、受け取り、境界線、混在、不明は内部状態として見てもよいですが、continued_future、future_scene、copy_seed、future_labelにはそのまま出さないでください。',
       'JSONは version, image_observation, attention_point, wished_future_seed, continued_future_seed, gap_seed を持つオブジェクトにしてください。',
@@ -558,7 +558,9 @@ export async function POST(req: NextRequest) {
       'wished_future_seed は wished_future, wished_future_scene, wished_future_reason を持ってください。',
       'continued_future_seed は continued_future, future_scene, future_base, future_label, copy_seed, direction_reason を持ってください。',
       'copy_seed の良い例: このままつながれず、私だけ待つ側に残される不安の未来。',
+      'wished_future_scene の良い例: 遅れやすれ違いがあっても、短く状況が戻り、こちらも安心して自分の時間へ戻れる場面。',
       'copy_seed の悪い例: 既読の向こうで、私が先に進む瞬間。これは状態コピーであり、見続けている未来ではありません。',
+      'wished_future_scene の悪い例: 相手が「ミーティング終わったよ、ごめんね。大丈夫？」と言ってくれる場面。これは相手のセリフを指定しすぎています。',
     ].join('\n');
 
     const preSeedRes = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -621,6 +623,8 @@ export async function POST(req: NextRequest) {
         'wished_future_sceneを願っている未来の正本にする',
         'future_sceneを思い続けている未来の正本にする',
         '相手の気持ちは断定しない',
+        '相手の具体的なセリフを指定しない',
+        '画像にない場所・姿勢・生活状況を足さない',
         '確認の未来、受け取りの未来、境界線の未来、混在の未来、不明の未来を表示しない',
         '診断文は5項目で返す',
       ],
@@ -636,10 +640,11 @@ export async function POST(req: NextRequest) {
       '④ くり返す出来事や起こりえる出来事',
       '⑤ 未来を変える言葉と行動',
       '① イマジナルコピーは pre_seed.continued_future_seed.copy_seed を正本にしてください。言い換える場合も、同じ未来を保ち、末尾の未来分類を残してください。',
-      '② 願っている未来は pre_seed.wished_future_seed.wished_future_scene を正本にしてください。汎用語に戻さないでください。',
-      '③ 思い続けている未来は pre_seed.continued_future_seed.future_scene と copy_seed を正本にしてください。現在状態の説明で止めないでください。',
-      '④ くり返す出来事は、future_sceneを見続けた場合に起こりやすい流れとして書いてください。相手の気持ちは断定しないでください。',
-      '⑤ 未来を変える言葉と行動は、wished_future_sceneへ移るための言葉と行動として書いてください。単なるセルフヘルプにしないでください。',
+      '② 願っている未来は pre_seed.wished_future_seed.wished_future_scene を正本にしてください。汎用語に戻さず、相手の具体的なセリフを指定しないでください。',
+      '③ 思い続けている未来は pre_seed.continued_future_seed.future_scene と copy_seed を正本にしてください。現在状態の説明で止めず、画像にない場所・姿勢・生活状況を足さないでください。',
+      '④ くり返す出来事は、future_sceneを見続けた場合に起こりやすい流れとして書いてください。相手の気持ちは断定しないでください。長くなりすぎないよう4文以内にしてください。',
+      '⑤ 未来を変える言葉と行動は、wished_future_sceneへ移るための言葉と行動として書いてください。単なるセルフヘルプや返信マニュアルにしないでください。相手に言わせる文や、相手を動かす文を中心にしないでください。',
+      '⑤ は、未来を置き直す言葉を1つ、行動を1つ、短く書いてください。例文を多用しないでください。',
       '「確認の未来」「受け取りの未来」「境界線の未来」「混在の未来」「不明の未来」は表示しないでください。',
       '相手の気持ち、相手の未来、相手の人格を断定しないでください。',
       '誰にでも当てはまる抽象語だけで終わらせないでください。',
