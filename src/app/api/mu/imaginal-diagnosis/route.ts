@@ -364,6 +364,146 @@ function normalizeDiagnosisText(value: unknown, seed: ImaginalDiagnosisSeed): st
   return [withoutDuplicateNote, note].filter(Boolean).join('\n\n');
 }
 
+async function buildStructuralDiagnosisSeedFromLlm(params: {
+  apiKey: string;
+  model: string;
+  sourceSeed: ImaginalDiagnosisSeed;
+}): Promise<Record<string, unknown>> {
+  const { apiKey, model, sourceSeed } = params;
+
+  const system = [
+    'あなたはMuverseのイマジナル診断Seedを、構造Seedへ変換する専門器です。',
+    '入力には画像由来の観測や具体語が含まれる場合がありますが、出力には絶対に残さないでください。',
+    '出力に、スクショ内の文字、相手名、時刻、既読、未読、通話、No answer、Missed、ミーティング、電話、掛け直し、本文引用などを書いてはいけません。',
+    '出力するのは、未来の方向、フローの状態、移管の状態だけです。',
+    '未来の方向は、出来事説明ではなく「このまま続いた先に見ている未来」にしてください。',
+    '願っている未来は、相手を動かす未来ではなく、ユーザーが置きたい未来の方向にしてください。',
+    'flow_state_seed は、今の反応の状態を、抽象化して書いてください。',
+    'transfer_state_seed は、どの未来からどの未来へ移管するかを書いてください。',
+    '出力はJSONのみです。',
+    'JSONは version, scope, future_direction_seed, flow_state_seed, transfer_state_seed, writer_directives を持ってください。',
+    'version は imaginal_diagnosis_seed_v3、scope は future_direction_flow_transfer です。',
+    'future_direction_seed は continued_future_direction, continued_future_label, future_base, wished_future_direction, direction_gap, imaginal_copy_seed, direction_reason を持ってください。',
+    'flow_state_seed は e_turn, polarity, yure, margin, current_state, state_hold_reason を持ってください。',
+    'transfer_state_seed は transfer_from, transfer_to, word_shift, action_shift, field_shift を持ってください。',
+    'imaginal_copy_seed は必ず「不安の未来」「破壊の未来」「比較の未来」「創造の未来」のいずれかで閉じてください。',
+    '良い例: このまま安心を外側に預け、私だけ待つ側に残される不安の未来。',
+    '悪い例: 既読だけが残り、No answerが続く不安の未来。これはスクショ内容が残っています。',
+  ].join('\n');
+
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: system },
+        {
+          role: 'user',
+          content: [
+            '以下のSeedを、スクショ内容を完全に落とした構造Seedへ変換してください。',
+            JSON.stringify(sourceSeed, null, 2),
+          ].join('\n\n'),
+        },
+      ],
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    console.error('[mu-imaginal-diagnosis] structural seed LLM error:', detail.slice(0, 500));
+    throw new Error('structural_seed_failed');
+  }
+
+  const data = await res.json().catch(() => ({}));
+  const raw = extractAssistantContent(data);
+  const parsed = safeParseJsonObject(raw);
+
+  const futureRaw = parsed.future_direction_seed && typeof parsed.future_direction_seed === 'object'
+    ? parsed.future_direction_seed as Record<string, unknown>
+    : {};
+  const flowRaw = parsed.flow_state_seed && typeof parsed.flow_state_seed === 'object'
+    ? parsed.flow_state_seed as Record<string, unknown>
+    : {};
+  const transferRaw = parsed.transfer_state_seed && typeof parsed.transfer_state_seed === 'object'
+    ? parsed.transfer_state_seed as Record<string, unknown>
+    : {};
+
+  const futureBase = normalizeFutureBase(futureRaw.future_base);
+  const futureLabel = normalizeFutureLabel(futureRaw.continued_future_label, futureBase);
+  const continuedFuture = cleanString(
+    futureRaw.continued_future_direction,
+    'このまま安心を外側に預け、私だけ待つ側に残される'
+  );
+  const wishedFuture = cleanString(
+    futureRaw.wished_future_direction,
+    '外側の反応に左右されず、関係の場が戻る未来を先に置ける'
+  );
+  const copySeed = normalizeCopySeed(futureRaw.imaginal_copy_seed, continuedFuture, futureLabel);
+
+  return {
+    version: 'imaginal_diagnosis_seed_v3',
+    scope: 'future_direction_flow_transfer',
+    future_direction_seed: {
+      continued_future_direction: continuedFuture,
+      continued_future_label: futureLabel,
+      future_base: futureBase,
+      wished_future_direction: wishedFuture,
+      direction_gap: cleanString(
+        futureRaw.direction_gap,
+        '願っている未来へ向かいたいのに、思い続けている未来が先に立ち上がっている'
+      ),
+      imaginal_copy_seed: copySeed,
+      direction_reason: cleanString(
+        futureRaw.direction_reason,
+        '安心の基準が外側の反応へ寄っているため'
+      ),
+    },
+    flow_state_seed: {
+      e_turn: normalizeEnum(flowRaw.e_turn, ['e1', 'e2', 'e3', 'e4', 'e5'] as const, 'e1'),
+      polarity: normalizeEnum(flowRaw.polarity, ['pos', 'neg', 'mixed'] as const, futureBase === 'creation' ? 'pos' : 'neg'),
+      yure: normalizeEnum(flowRaw.yure, ['low', 'middle', 'high'] as const, futureBase === 'destruction' ? 'high' : 'middle'),
+      margin: normalizeEnum(flowRaw.margin, ['none', 'small', 'medium', 'large'] as const, 'small'),
+      current_state: cleanString(
+        flowRaw.current_state,
+        `「${copySeed}」を先に見ているため、安心の基準が外側へ寄り、内側の余白が狭くなっている状態`
+      ),
+      state_hold_reason: cleanString(
+        flowRaw.state_hold_reason,
+        '未来の方向が変わらない限り、言葉と行動が確認へ戻りやすいため'
+      ),
+    },
+    transfer_state_seed: {
+      transfer_from: cleanString(transferRaw.transfer_from, copySeed),
+      transfer_to: cleanString(transferRaw.transfer_to, wishedFuture),
+      word_shift: cleanString(
+        transferRaw.word_shift,
+        `「${copySeed}」を確かめる言葉から、「${wishedFuture}」を先に置く言葉へ移す`
+      ),
+      action_shift: cleanString(
+        transferRaw.action_shift,
+        '外側の反応を追い続ける行動から、一度置いて自分の場へ戻る行動へ移す'
+      ),
+      field_shift: cleanString(
+        transferRaw.field_shift,
+        '待つことで安心を得る場から、未来を先に置いて安心を戻す場へ移る'
+      ),
+    },
+    writer_directives: [
+      '画像内容を説明しない',
+      'スクショ内の文字、既読、通話、時刻、相手名などを正本にしない',
+      '未来の方向を正本にする',
+      'フローの状態を正本にする',
+      '移管の状態を正本にする',
+      '相手の気持ちは断定しない',
+      '診断文は5項目で返す',
+    ],
+  };
+}
 async function uidToUserCode(uid: string): Promise<string | null> {
   const candidates: Array<{ table: string; codeCol: string; uidCol: string }> = [
     { table: 'users', codeCol: 'user_code', uidCol: 'firebase_uid' },
@@ -630,21 +770,23 @@ export async function POST(req: NextRequest) {
       ],
     };
 
+
+    const structuralDiagnosisSeed = await buildStructuralDiagnosisSeedFromLlm({ apiKey, model, sourceSeed: diagnosisSeed });
+
     const writerSystem = [
       'あなたはMuverseの新イマジナル診断のWriterです。',
-      '画像を見直さず、渡されたPreSeed、ContinuedFutureFlowSeed、WishedFutureTransferSeedだけを正本にしてください。',
+      '渡されたSeedだけを正本にしてください。画像を見直さないでください。スクショ内容を説明しないでください。',
       '診断文は、必ず次の5項目で書いてください。',
       '① イマジナルコピー',
       '② 願っている未来',
       '③ 思い続けている未来',
       '④ くり返す出来事や起こりえる出来事',
       '⑤ 未来を変える言葉と行動',
-      '① イマジナルコピーは pre_seed.continued_future_seed.copy_seed を正本にしてください。言い換える場合も、同じ未来を保ち、末尾の未来分類を残してください。',
-      '② 願っている未来は pre_seed.wished_future_seed.wished_future_scene を正本にしてください。汎用語に戻さず、相手の具体的なセリフを指定しないでください。',
-      '③ 思い続けている未来は pre_seed.continued_future_seed.future_scene と copy_seed を正本にしてください。現在状態の説明で止めず、画像にない場所・姿勢・生活状況を足さないでください。',
-      '④ くり返す出来事は、future_sceneを見続けた場合に起こりやすい流れとして書いてください。相手の気持ちは断定しないでください。長くなりすぎないよう4文以内にしてください。',
-      '⑤ 未来を変える言葉と行動は、wished_future_sceneへ移るための言葉と行動として書いてください。単なるセルフヘルプや返信マニュアルにしないでください。相手に言わせる文や、相手を動かす文を中心にしないでください。',
-      '⑤ は、未来を置き直す言葉を1つ、行動を1つ、短く書いてください。例文を多用しないでください。',
+      '① イマジナルコピーは future_direction_seed.imaginal_copy_seed を正本にしてください。',
+      '② 願っている未来は pre_seed.wished_future_seed.wished_future_scene を正本にしてください。汎用語に戻さないでください。',
+      '③ 思い続けている未来は pre_seed.continued_future_seed.future_scene と copy_seed を正本にしてください。現在状態の説明で止めないでください。',
+      '④ くり返す出来事は、future_sceneを見続けた場合に起こりやすい流れとして書いてください。相手の気持ちは断定しないでください。',
+      '⑤ 未来を変える言葉と行動は、wished_future_sceneへ移るための言葉と行動として書いてください。単なるセルフヘルプにしないでください。',
       '「確認の未来」「受け取りの未来」「境界線の未来」「混在の未来」「不明の未来」は表示しないでください。',
       '相手の気持ち、相手の未来、相手の人格を断定しないでください。',
       '誰にでも当てはまる抽象語だけで終わらせないでください。',
@@ -668,7 +810,7 @@ export async function POST(req: NextRequest) {
             role: 'user',
             content: [
               '以下のSeed群を正本として、Muのイマジナル診断文を書いてください。',
-              JSON.stringify(diagnosisSeed, null, 2),
+              JSON.stringify(structuralDiagnosisSeed, null, 2),
             ].join('\n\n'),
           },
         ],
@@ -696,7 +838,7 @@ export async function POST(req: NextRequest) {
         mediaCode: body.media_code || null,
         conversationId: body.conversation_id || body.conversationId || null,
         diagnosisText: diagnosis,
-        diagnosisSeedJson: diagnosisSeed,
+        diagnosisSeedJson: structuralDiagnosisSeed as any,
       });
     } catch (e: any) {
       console.error('[mu-imaginal-diagnosis] log failed:', e?.message || e);
@@ -718,7 +860,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       user_code: userCode,
       diagnosis,
-      diagnosis_seed: diagnosisSeed,
+      diagnosis_seed: structuralDiagnosisSeed,
       diagnosis_log_id: diagnosisLogId || null,
       source: body.source || 'mu_imaginal',
       credit_consumed: MU_IMAGINAL_CREDIT_COST,
@@ -729,3 +871,5 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: 'internal_error' }, 500);
   }
 }
+
+
