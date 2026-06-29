@@ -387,14 +387,7 @@ async function buildStructuralDiagnosisSeedFromLlm(params: {
     'flow_state_seed は e_turn, polarity, yure, margin, current_state, state_hold_reason を持ってください。',
     'transfer_state_seed は transfer_from, transfer_to, word_shift, action_shift, field_shift を持ってください。',
     'imaginal_copy_seed は必ず「不安の未来」「破壊の未来」「比較の未来」「創造の未来」のいずれかで閉じてください。',
-'imaginal_copy_seed は分類名だけにしてはいけません。「不安の未来」だけは禁止です。',
-'imaginal_copy_seed は、未来の方向を一文で表すこと。目安は分類名を除いて15文字以上です。',
-'wished_future_direction には、深夜、夜間、折り返し、連絡、電話、通話、既読、未読、No answer、Missed、ミーティング、掛け直しなどの表面語を入れないでください。',
-'wished_future_direction は、連絡手段ではなく、関係の場・自分の時間・安心の戻り方として書いてください。',
-'continued_future_direction にも、深夜、夜間、折り返し、連絡、電話、通話、既読、未読、No answer、Missed、ミーティング、掛け直しなどの表面語を入れないでください。',
     '良い例: このまま安心を外側に預け、私だけ待つ側に残される不安の未来。',
-'良い wished_future_direction 例: 関係の場が戻り、自分の時間へ安心して戻れる。',
-'悪い wished_future_direction 例: 深夜でも折り返しの連絡が入る未来。これは表面語が残っています。',
     '悪い例: 既読だけが残り、No answerが続く不安の未来。これはスクショ内容が残っています。',
   ].join('\n');
 
@@ -450,11 +443,7 @@ async function buildStructuralDiagnosisSeedFromLlm(params: {
     futureRaw.wished_future_direction,
     '外側の反応に左右されず、関係の場が戻る未来を先に置ける'
   );
-  let copySeed = normalizeCopySeed(futureRaw.imaginal_copy_seed, continuedFuture, futureLabel);
-const copyBody = stripFutureLabel(copySeed);
-if (!copyBody || copyBody.length < 15) {
-  copySeed = normalizeCopySeed(continuedFuture, continuedFuture, futureLabel);
-}
+  const copySeed = normalizeCopySeed(futureRaw.imaginal_copy_seed, continuedFuture, futureLabel);
 
   return {
     version: 'imaginal_diagnosis_seed_v3',
@@ -794,7 +783,6 @@ export async function POST(req: NextRequest) {
       '④ くり返す出来事や起こりえる出来事',
       '⑤ 未来を変える言葉と行動',
       '① イマジナルコピーは future_direction_seed.imaginal_copy_seed を正本にしてください。',
-'① イマジナルコピーは「不安の未来」「破壊の未来」「比較の未来」「創造の未来」だけで終わらせないでください。必ず未来の方向を一文にしてください。',
       '② 願っている未来は future_direction_seed.wished_future_direction を正本にしてください。相手のセリフや相手を動かす文にしないでください。',
       '③ 思い続けている未来は future_direction_seed.continued_future_direction と future_direction_seed.imaginal_copy_seed を正本にしてください。',
       '④ くり返す出来事は flow_state_seed.current_state と flow_state_seed.state_hold_reason から、続きやすい流れを書いてください。スクショ説明に戻らないでください。4文以内にしてください。',
