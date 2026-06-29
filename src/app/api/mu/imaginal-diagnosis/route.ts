@@ -13,20 +13,23 @@ import {
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
 type FutureBase = 'anxiety' | 'destruction' | 'comparison' | 'creation' | 'unknown';
+type FutureLabel = '不安の未来' | '破壊の未来' | '比較の未来' | '創造の未来';
+
+type ImageType =
+  | 'line_dm'
+  | 'email'
+  | 'memo'
+  | 'todo'
+  | 'post_draft'
+  | 'calendar'
+  | 'book_page'
+  | 'application_page'
+  | 'other';
 
 type ImaginalPreSeed = {
-  version: 'imaginal_pre_seed_v1';
+  version: 'imaginal_pre_seed_v2';
   image_observation: {
-    image_type:
-      | 'line_dm'
-      | 'email'
-      | 'memo'
-      | 'todo'
-      | 'post_draft'
-      | 'calendar'
-      | 'book_page'
-      | 'application_page'
-      | 'other';
+    image_type: ImageType;
     visible_facts: string[];
     read_state: 'read' | 'unread' | 'mixed' | 'unknown';
     reply_state: 'replied' | 'no_reply' | 'waiting' | 'unknown';
@@ -38,12 +41,15 @@ type ImaginalPreSeed = {
   attention_point: string;
   wished_future_seed: {
     wished_future: string;
+    wished_future_scene: string;
     wished_future_reason: string;
   };
   continued_future_seed: {
     continued_future: string;
+    future_scene: string;
     future_base: FutureBase;
-    future_label: string;
+    future_label: FutureLabel;
+    copy_seed: string;
     direction_reason: string;
   };
   gap_seed: {
@@ -69,7 +75,7 @@ type WishedFutureTransferSeed = {
 };
 
 type ImaginalDiagnosisSeed = {
-  version: 'imaginal_diagnosis_seed_v1';
+  version: 'imaginal_diagnosis_seed_v2';
   pre_seed: ImaginalPreSeed;
   continued_future_flow_seed: ContinuedFutureFlowSeed;
   wished_future_transfer_seed: WishedFutureTransferSeed;
@@ -78,7 +84,7 @@ type ImaginalDiagnosisSeed = {
 
 const MU_IMAGINAL_CREDIT_COST = 5;
 const MU_IMAGINAL_ALLOWED_USER_TYPES = ['premium', 'master', 'partner', 'admin'];
-const DISPLAY_LABELS = ['不安の未来', '破壊の未来', '比較の未来', '創造の未来'];
+const FUTURE_LABELS: FutureLabel[] = ['不安の未来', '破壊の未来', '比較の未来', '創造の未来'];
 
 function json(data: unknown, init?: number | ResponseInit) {
   const status =
@@ -125,16 +131,31 @@ function normalizeFutureBase(value: unknown): FutureBase {
   );
 }
 
-function normalizeFutureLabel(value: unknown, base: FutureBase): string {
-  const raw = cleanString(value);
-  if (DISPLAY_LABELS.includes(raw)) return raw;
-
-  if (base === 'anxiety') return '不安の未来';
+function futureLabelFromBase(base: FutureBase): FutureLabel {
   if (base === 'destruction') return '破壊の未来';
   if (base === 'comparison') return '比較の未来';
   if (base === 'creation') return '創造の未来';
-
   return '不安の未来';
+}
+
+function normalizeFutureLabel(value: unknown, base: FutureBase): FutureLabel {
+  const raw = cleanString(value);
+  if (FUTURE_LABELS.includes(raw as FutureLabel)) return raw as FutureLabel;
+  return futureLabelFromBase(base);
+}
+
+function stripFutureLabel(value: string): string {
+  return value
+    .replace(/(?:不安の未来|破壊の未来|比較の未来|創造の未来)[。\s]*$/u, '')
+    .replace(/[。\s]+$/u, '')
+    .trim();
+}
+
+function normalizeCopySeed(value: unknown, continuedFuture: string, label: FutureLabel): string {
+  const raw = cleanString(value);
+  const source = raw || `${continuedFuture}${label}`;
+  const stripped = stripFutureLabel(source);
+  return `${stripped}${label}`;
 }
 
 function normalizePreSeed(value: unknown): ImaginalPreSeed {
@@ -153,9 +174,14 @@ function normalizePreSeed(value: unknown): ImaginalPreSeed {
   const gap = v.gap_seed && typeof v.gap_seed === 'object' ? v.gap_seed : {};
 
   const futureBase = normalizeFutureBase(continued.future_base);
+  const futureLabel = normalizeFutureLabel(continued.future_label, futureBase);
+  const continuedFuture = cleanString(
+    continued.continued_future,
+    'このまま安心を外側の反応に預け、待つ側に残される',
+  );
 
   return {
-    version: 'imaginal_pre_seed_v1',
+    version: 'imaginal_pre_seed_v2',
     image_observation: {
       image_type: normalizeEnum(
         observation.image_type,
@@ -184,19 +210,22 @@ function normalizePreSeed(value: unknown): ImaginalPreSeed {
     },
     attention_point: cleanString(v.attention_point, '画像の中で、ユーザーの心が止まっている一点'),
     wished_future_seed: {
-      wished_future: cleanString(wished.wished_future, '安心して自分の未来へ進めること'),
-      wished_future_reason: cleanString(wished.wished_future_reason, '画像を見返している奥に、未来を変えたい願いがあるため'),
+      wished_future: cleanString(wished.wished_future, '遅れてもちゃんとつながり直せる'),
+      wished_future_scene: cleanString(wished.wished_future_scene, '相手の都合があっても、あとで自然につながり直せる場面'),
+      wished_future_reason: cleanString(wished.wished_future_reason, '画像を見返している奥に、待つだけで終わりたくない願いがあるため'),
     },
     continued_future_seed: {
-      continued_future: cleanString(continued.continued_future, '安心を外側の反応に預け続けてしまう未来'),
+      continued_future: continuedFuture,
+      future_scene: cleanString(continued.future_scene, '反応を待ち、何度か確かめてもつながらず、待つ側に残る場面'),
       future_base: futureBase,
-      future_label: normalizeFutureLabel(continued.future_label, futureBase),
+      future_label: futureLabel,
+      copy_seed: normalizeCopySeed(continued.copy_seed, continuedFuture, futureLabel),
       direction_reason: cleanString(continued.direction_reason, '画像の一点に反応が集まり、未来の見方が固定されているため'),
     },
     gap_seed: {
       gap_between_wish_and_continued_future: cleanString(
         gap.gap_between_wish_and_continued_future,
-        '願っている未来へ進みたいのに、思い続けている未来が先に立ち上がっている',
+        'つながり直せる未来を願っているのに、待つ側に残される未来を先に見ている',
       ),
     },
   };
@@ -229,7 +258,8 @@ function inferContinuedFutureFlow(preSeed: ImaginalPreSeed): ContinuedFutureFlow
     yure,
     margin,
     state_summary: [
-      `思い続けている未来は「${preSeed.continued_future_seed.continued_future}」です。`,
+      `思い続けている未来は「${preSeed.continued_future_seed.copy_seed}」です。`,
+      `場面としては「${preSeed.continued_future_seed.future_scene}」を先に見ています。`,
       `そのため今は、${attention}に反応が集まりやすい状態です。`,
       facts ? `見えている事実は ${facts} です。` : '',
     ].filter(Boolean).join(' '),
@@ -239,33 +269,34 @@ function inferContinuedFutureFlow(preSeed: ImaginalPreSeed): ContinuedFutureFlow
 
 function inferWishedFutureTransfer(preSeed: ImaginalPreSeed): WishedFutureTransferSeed {
   const wished = preSeed.wished_future_seed.wished_future;
-  const continued = preSeed.continued_future_seed.continued_future;
+  const wishedScene = preSeed.wished_future_seed.wished_future_scene;
+  const continuedCopy = preSeed.continued_future_seed.copy_seed;
   const base = preSeed.continued_future_seed.future_base;
 
   const wordShift =
     base === 'comparison'
-      ? '反応で価値を測る言葉から、自分が創りたいものを置く言葉へ変える'
+      ? `反応で価値を測る言葉から、「${wishedScene}」を先に置く言葉へ変える`
       : base === 'destruction'
-        ? '壊れる前に閉じる言葉から、守りたい未来を短く伝える言葉へ変える'
+        ? `壊れる前に閉じる言葉から、「${wishedScene}」を守る一言へ変える`
         : base === 'creation'
-          ? 'すでに出ている創造の言葉を、行動に移せる一文へ絞る'
-          : '不安を確かめる言葉から、願っている未来を先に置く言葉へ変える';
+          ? `すでに出ている創造の言葉を、「${wishedScene}」に向かう一文へ絞る`
+          : `不安を確かめる言葉から、「${wishedScene}」を先に置く言葉へ変える`;
 
   const actionShift =
     base === 'comparison'
-      ? '見比べる行動を減らし、小さく出す・置く・届ける行動に変える'
+      ? '見比べて確かめ続ける行動を減らし、小さく置く・届ける・進める行動に変える'
       : base === 'destruction'
-        ? '先に断ち切る行動ではなく、境界線を持って一歩だけ伝える行動に変える'
+        ? '先に断ち切る行動ではなく、境界線を持って一度だけ伝え、自分の場へ戻る行動に変える'
         : base === 'creation'
           ? '思いつきを保存するだけでなく、今日ひとつ公開・送信・実行する'
-          : '反応を待ち続ける行動から、自分の未来を進める小さな行動に変える';
+          : '反応を待ち続ける行動から、一度だけ伝えて自分の時間へ戻る行動に変える';
 
   return {
     wished_future_direction: wished,
-    transfer_direction: `「${continued}」を見続ける位置から、「${wished}」を先に置く位置へ移る`,
+    transfer_direction: `「${continuedCopy}」を見続ける位置から、「${wishedScene}」を先に置く位置へ移る`,
     required_word_shift: wordShift,
     required_action_shift: actionShift,
-    changed_future: `言葉と行動が変わることで、${wished}未来が現実に近づきます。`,
+    changed_future: `言葉と行動が変わることで、「${wishedScene}」という未来が現実に近づきます。`,
   };
 }
 
@@ -307,13 +338,13 @@ function normalizeDiagnosisText(value: unknown, seed: ImaginalDiagnosisSeed): st
     'Muのイマジナル診断',
     '',
     'イマジナルコピー',
-    `${seed.pre_seed.wished_future_seed.wished_future}へ進みたいのに、${seed.pre_seed.continued_future_seed.continued_future}を見ている。`,
+    seed.pre_seed.continued_future_seed.copy_seed,
     '',
     '願っている未来',
-    `あなたが本当は向かいたい未来は、${seed.pre_seed.wished_future_seed.wished_future}です。`,
+    `あなたが本当は向かいたい未来は、${seed.pre_seed.wished_future_seed.wished_future_scene}です。`,
     '',
     '思い続けている未来',
-    `けれど今、長く思い続けている未来は、${seed.pre_seed.continued_future_seed.continued_future}の方向にあります。`,
+    `けれど今、長く思い続けている未来は、${seed.pre_seed.continued_future_seed.copy_seed}です。`,
     '',
     'くり返す出来事や起こりえる出来事',
     `この未来を見続けると、${seed.continued_future_flow_seed.state_summary}`,
@@ -515,11 +546,19 @@ export async function POST(req: NextRequest) {
       '診断文は書かないでください。出力はJSONのみです。',
       '画像に写っている事実を見てください。既読、未読、Read表示、返信の有無、コール、不在着信、通話履歴があれば観測してください。',
       'ただし、相手の気持ちや未来は断定しないでください。見る対象は、画像を送ったユーザーの中で立ち上がっている未来です。',
+      '重要: continued_future は状態説明ではなく、ユーザーが先に見てしまっている「このまま続いた先の未来」にしてください。',
+      '重要: future_scene は、画像の事実から立ち上がる未来の一場面として書いてください。例: 何度か掛け直してもつながらず、私だけ待つ側に残る場面。',
+      '重要: copy_seed は、continued_future を短く圧縮し、必ず末尾を「不安の未来」「破壊の未来」「比較の未来」「創造の未来」のいずれかで閉じてください。',
+      '重要: wished_future は「安心して自分の未来へ進めること」のような汎用語で逃げないでください。画像に即して、何が回復すると願っているかを書いてください。',
+      '重要: wished_future_scene は、ユーザーが本当は置きたい具体的な未来場面にしてください。例: 遅れてもちゃんとつながり直せる場面。',
       '思い続けている未来の基本分類は、不安 / 破壊 / 比較 / 創造 の4つです。',
-      '確認、受け取り、境界線、混在、不明は内部状態としては見てもよいですが、continued_future や future_label にはそのまま出さないでください。',
-      '必ず、その未来を思い続けた先に何が起こるかが分かる言葉にしてください。',
+      '確認、受け取り、境界線、混在、不明は内部状態として見てもよいですが、continued_future、future_scene、copy_seed、future_labelにはそのまま出さないでください。',
       'JSONは version, image_observation, attention_point, wished_future_seed, continued_future_seed, gap_seed を持つオブジェクトにしてください。',
-      'version は imaginal_pre_seed_v1 にしてください。',
+      'version は imaginal_pre_seed_v2 にしてください。',
+      'wished_future_seed は wished_future, wished_future_scene, wished_future_reason を持ってください。',
+      'continued_future_seed は continued_future, future_scene, future_base, future_label, copy_seed, direction_reason を持ってください。',
+      'copy_seed の良い例: このままつながれず、私だけ待つ側に残される不安の未来。',
+      'copy_seed の悪い例: 既読の向こうで、私が先に進む瞬間。これは状態コピーであり、見続けている未来ではありません。',
     ].join('\n');
 
     const preSeedRes = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -570,7 +609,7 @@ export async function POST(req: NextRequest) {
     const wishedFutureTransferSeed = inferWishedFutureTransfer(preSeed);
 
     const diagnosisSeed: ImaginalDiagnosisSeed = {
-      version: 'imaginal_diagnosis_seed_v1',
+      version: 'imaginal_diagnosis_seed_v2',
       pre_seed: preSeed,
       continued_future_flow_seed: continuedFutureFlowSeed,
       wished_future_transfer_seed: wishedFutureTransferSeed,
@@ -578,6 +617,9 @@ export async function POST(req: NextRequest) {
         'Mu文体で返す',
         '画像を見直さない',
         'PreSeedとFlow結果だけを正本にする',
+        'copy_seedをイマジナルコピーの正本にする',
+        'wished_future_sceneを願っている未来の正本にする',
+        'future_sceneを思い続けている未来の正本にする',
         '相手の気持ちは断定しない',
         '確認の未来、受け取りの未来、境界線の未来、混在の未来、不明の未来を表示しない',
         '診断文は5項目で返す',
@@ -593,9 +635,15 @@ export async function POST(req: NextRequest) {
       '③ 思い続けている未来',
       '④ くり返す出来事や起こりえる出来事',
       '⑤ 未来を変える言葉と行動',
+      '① イマジナルコピーは pre_seed.continued_future_seed.copy_seed を正本にしてください。言い換える場合も、同じ未来を保ち、末尾の未来分類を残してください。',
+      '② 願っている未来は pre_seed.wished_future_seed.wished_future_scene を正本にしてください。汎用語に戻さないでください。',
+      '③ 思い続けている未来は pre_seed.continued_future_seed.future_scene と copy_seed を正本にしてください。現在状態の説明で止めないでください。',
+      '④ くり返す出来事は、future_sceneを見続けた場合に起こりやすい流れとして書いてください。相手の気持ちは断定しないでください。',
+      '⑤ 未来を変える言葉と行動は、wished_future_sceneへ移るための言葉と行動として書いてください。単なるセルフヘルプにしないでください。',
       '「確認の未来」「受け取りの未来」「境界線の未来」「混在の未来」「不明の未来」は表示しないでください。',
       '相手の気持ち、相手の未来、相手の人格を断定しないでください。',
       '誰にでも当てはまる抽象語だけで終わらせないでください。',
+      '「既読の向こうで、私が先に進む瞬間」のような、未来分類で閉じていないコピーは禁止です。',
       '出力はJSONのみ。diagnosis にユーザー表示用診断文を入れてください。',
       '診断文の最後には必ず「これは、画像をきっかけに見えた「今現在のイマジナル」です。」を入れてください。',
     ].join('\n');
