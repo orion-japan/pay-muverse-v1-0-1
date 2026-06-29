@@ -48,8 +48,8 @@ export default function MuImaginalPage() {
   const [imageName, setImageName] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
   const [diagnosis, setDiagnosis] = useState("");
-  const [diagnosisSeed, setDiagnosisSeed] = useState<unknown>(null);
-  const [diagnosisLogId, setDiagnosisLogId] = useState<string | null>(null);
+  const [, setDiagnosisSeed] = useState<unknown>(null);
+  const [, setDiagnosisLogId] = useState<string | null>(null);
   const [selectedQuestion, setSelectedQuestion] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -234,7 +234,7 @@ export default function MuImaginalPage() {
             <div style={styles.followupBox}>
               <p style={styles.followupTitle}>この診断について、Muに聞いてみる</p>
               <p style={styles.followupNote}>
-                Phase 1では質問ボタンの表示までです。回答APIは次の実装で接続します。
+                番号を選ぶと、次にMuへ聞く問いを確認できます。
               </p>
 
               <div style={styles.questionList}>
@@ -254,21 +254,6 @@ export default function MuImaginalPage() {
                 <p style={styles.selectedQuestion}>
                   選択中：{selectedQuestion}
                 </p>
-              ) : null}
-
-              {diagnosisLogId ? (
-                <p style={styles.savedNote}>
-                  診断は保存されました。ID: {diagnosisLogId}
-                </p>
-              ) : null}
-
-              {diagnosisSeed ? (
-                <details style={styles.seedDetails}>
-                  <summary>診断Seedを確認する</summary>
-                  <pre style={styles.seedPre}>
-                    {JSON.stringify(diagnosisSeed, null, 2)}
-                  </pre>
-                </details>
               ) : null}
             </div>
           </div>
@@ -462,27 +447,6 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#4e4378",
     fontSize: 13,
     lineHeight: 1.6,
-  },
-  savedNote: {
-    margin: "12px 0 0",
-    color: "#8b817b",
-    fontSize: 12,
-    lineHeight: 1.6,
-  },
-  seedDetails: {
-    marginTop: 12,
-    color: "#6b5a80",
-    fontSize: 12,
-  },
-  seedPre: {
-    marginTop: 8,
-    whiteSpace: "pre-wrap",
-    wordBreak: "break-word",
-    overflow: "auto",
-    maxHeight: 260,
-    background: "rgba(246,242,255,0.76)",
-    borderRadius: 12,
-    padding: 10,
   },
   backLink: {
     textAlign: "center",
