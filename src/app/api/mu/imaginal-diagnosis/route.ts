@@ -1,4 +1,4 @@
-export const runtime = 'nodejs';
+﻿export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -55,6 +55,7 @@ type ImaginalPreSeed = {
   gap_seed: {
     gap_between_wish_and_continued_future: string;
   };
+  direction_resolution_seed: DirectionResolutionSeed;
 };
 
 type ContinuedFutureFlowSeed = {
@@ -86,6 +87,18 @@ type DirectionKind =
   | 'boundary'
   | 'mixed'
   | 'unknown';
+
+type ReceivingEligibility = 'allowed' | 'blocked' | 'unknown';
+type DirectionReceivingSubKind = 'gratitude' | 'completion' | 'none' | 'generic' | 'unknown';
+
+type DirectionResolutionSeed = {
+  primary_future_base: FutureBase;
+  primary_direction_kind: DirectionKind;
+  receiving_eligibility: ReceivingEligibility;
+  receiving_subkind: DirectionReceivingSubKind;
+  direction_lock: boolean;
+  direction_reason: string;
+};
 
 type PolarityKind = 'pos' | 'neg' | 'mixed';
 type UtteranceAlignmentKind = 'aligned' | 'partially_aligned' | 'misaligned' | 'overstated' | 'understated';
@@ -167,6 +180,29 @@ const MU_IMAGINAL_CREDIT_COST = 5;
 const MU_IMAGINAL_ALLOWED_USER_TYPES = ['premium', 'master', 'partner', 'admin'];
 const FUTURE_LABELS: FutureLabel[] = ['不安の未来', '破壊の未来', '比較の未来', '創造の未来'];
 
+const DIRECTION_KINDS: DirectionKind[] = [
+  'creation',
+  'receiving',
+  'anxiety',
+  'fear',
+  'confirmation',
+  'comparison',
+  'avoidance',
+  'destruction',
+  'boundary',
+  'mixed',
+  'unknown',
+];
+
+const RECEIVING_ELIGIBILITIES: ReceivingEligibility[] = ['allowed', 'blocked', 'unknown'];
+const DIRECTION_RECEIVING_SUBKINDS: DirectionReceivingSubKind[] = [
+  'gratitude',
+  'completion',
+  'none',
+  'generic',
+  'unknown',
+];
+
 function json(data: unknown, init?: number | ResponseInit) {
   const status =
     typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200);
@@ -239,6 +275,141 @@ function normalizeCopySeed(value: unknown, continuedFuture: string, label: Futur
   return `${stripped}${label}`;
 }
 
+
+function fallbackDirectionKindFromBase(base: FutureBase): DirectionKind {
+  if (base === 'creation') return 'creation';
+  if (base === 'comparison') return 'comparison';
+  if (base === 'destruction') return 'destruction';
+  if (base === 'anxiety') return 'anxiety';
+  return 'unknown';
+}
+
+function normalizeDirectionResolutionSeed(
+  value: unknown,
+  futureBase: FutureBase,
+): DirectionResolutionSeed {
+  const v =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, any>)
+      : {};
+
+  const rawPrimaryBase = normalizeFutureBase(v.primary_future_base);
+  const primaryFutureBase = rawPrimaryBase === 'unknown' ? futureBase : rawPrimaryBase;
+
+  let primaryDirectionKind = normalizeEnum(
+    v.primary_direction_kind,
+    DIRECTION_KINDS,
+    fallbackDirectionKindFromBase(primaryFutureBase),
+  );
+
+  const receivingEligibility = normalizeEnum(
+    v.receiving_eligibility,
+    RECEIVING_ELIGIBILITIES,
+    'unknown',
+  );
+
+  const receivingSubkind = normalizeEnum(
+    v.receiving_subkind,
+    DIRECTION_RECEIVING_SUBKINDS,
+    primaryDirectionKind === 'receiving' ? 'generic' : 'none',
+  );
+
+  
+  if (receivingEligibility === 'blocked' && primaryDirectionKind === 'receiving') {
+    primaryDirectionKind =
+      primaryFutureBase === 'anxiety'
+        ? 'confirmation'
+        : fallbackDirectionKindFromBase(primaryFutureBase);
+  }
+return {
+    primary_future_base: primaryFutureBase,
+    primary_direction_kind: primaryDirectionKind,
+    receiving_eligibility: receivingEligibility,
+    receiving_subkind: receivingSubkind,
+    direction_lock: typeof v.direction_lock === 'boolean' ? v.direction_lock : false,
+    direction_reason: cleanString(
+      v.direction_reason,
+      'PreSeed の未来方向を正本として扱うため',
+    ),
+  };
+}
+
+function normalizeGapBetweenWishAndContinued(value: unknown, base: FutureBase): string {
+  const fallback =
+    base === 'creation'
+      ? '立ち上がっている未来を願っているのに、言葉と行動の一点へ集まりきっていない'
+      : base === 'comparison'
+        ? '自分の価値を自分で置きたいのに、外側の反応で測る未来を先に見ている'
+        : base === 'destruction'
+          ? '守りたい未来を願っているのに、先に閉じる未来を見ている'
+          : 'つながり直せる未来を願っているのに、待つ側に残される未来を先に見ている';
+
+  const raw = cleanString(value, fallback);
+
+  if (
+    base === 'creation' &&
+    /(待つ側|残される|不安|つながり直せる未来を願っている)/u.test(raw)
+  ) {
+    return fallback;
+  }
+
+  return raw;
+}
+
+function futureBaseFromDirectionKind(direction: DirectionKind): FutureBase {
+  if (direction === 'creation' || direction === 'receiving') return 'creation';
+  if (direction === 'comparison') return 'comparison';
+  if (direction === 'fear' || direction === 'destruction' || direction === 'avoidance') {
+    return 'destruction';
+  }
+  if (direction === 'anxiety' || direction === 'confirmation' || direction === 'boundary') {
+    return 'anxiety';
+  }
+  return 'unknown';
+}
+
+function effectiveDirectionKindFromPreSeed(preSeed: ImaginalPreSeed): DirectionKind {
+  const directionSeed = preSeed.direction_resolution_seed;
+
+  
+  // GRATITUDE_EFFECTIVE_DIRECTION_LOCK:
+  // ここでも gratitude を creation 汎用へ落とさない。
+  if (hasGratitudeReturnSignal(preSeed)) {
+    return 'receiving';
+  }
+if (
+    directionSeed?.receiving_eligibility === 'allowed' &&
+    (
+      directionSeed.primary_direction_kind === 'receiving' ||
+      directionSeed.receiving_subkind === 'gratitude' ||
+      directionSeed.receiving_subkind === 'completion'
+    )
+  ) {
+    return 'receiving';
+  }
+
+  if (
+    directionSeed?.direction_lock &&
+    directionSeed.primary_direction_kind &&
+    directionSeed.primary_direction_kind !== 'unknown'
+  ) {
+    return directionSeed.primary_direction_kind;
+  }
+
+  const base = effectiveFutureBaseFromPreSeed(preSeed);
+  if (base === 'creation') return 'creation';
+  if (base === 'comparison') return 'comparison';
+  if (base === 'destruction') return 'destruction';
+  if (base === 'anxiety') return 'anxiety';
+
+  return 'unknown';
+}
+
+function effectiveFutureBaseFromPreSeed(preSeed: ImaginalPreSeed): FutureBase {
+  const directionBase = futureBaseFromDirectionKind(effectiveDirectionKindFromPreSeed(preSeed));
+  if (directionBase !== 'unknown') return directionBase;
+  return preSeed.continued_future_seed.future_base;
+}
 function normalizePreSeed(value: unknown): ImaginalPreSeed {
   const v = value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, any>)
@@ -270,7 +441,22 @@ function normalizePreSeed(value: unknown): ImaginalPreSeed {
     'このまま安心を外側の反応に預け、待つ側に残される',
   );
 
-  return {
+  
+
+  const directionResolutionSeed = normalizeDirectionResolutionSeed(
+    v.direction_resolution_seed,
+    futureBase,
+  );
+
+  const effectiveFutureBase =
+    directionResolutionSeed.direction_lock &&
+    directionResolutionSeed.primary_direction_kind &&
+    directionResolutionSeed.primary_direction_kind !== 'unknown'
+      ? futureBaseFromDirectionKind(directionResolutionSeed.primary_direction_kind)
+      : futureBase;
+
+  const normalizedFutureBase = effectiveFutureBase === 'unknown' ? futureBase : effectiveFutureBase;
+  const normalizedFutureLabel = futureLabelFromBase(normalizedFutureBase);return {
     version: 'imaginal_pre_seed_v2',
     image_observation: {
       image_type: normalizeEnum(
@@ -313,16 +499,36 @@ function normalizePreSeed(value: unknown): ImaginalPreSeed {
       direction_reason: cleanString(continued.direction_reason, '画像の一点に反応が集まり、未来の見方が固定されているため'),
     },
     gap_seed: {
-      gap_between_wish_and_continued_future: cleanString(
+      gap_between_wish_and_continued_future: normalizeGapBetweenWishAndContinued(
         gap.gap_between_wish_and_continued_future,
-        'つながり直せる未来を願っているのに、待つ側に残される未来を先に見ている',
+        normalizedFutureBase,
       ),
     },
+    direction_resolution_seed: directionResolutionSeed,
   };
 }
 
 function inferContinuedFutureFlow(preSeed: ImaginalPreSeed): ContinuedFutureFlowSeed {
-  const base = preSeed.continued_future_seed.future_base;
+  const direction = effectiveDirectionKindFromPreSeed(preSeed);
+  const base = effectiveFutureBaseFromPreSeed(preSeed);
+  const receivingSubKind = direction === 'receiving' ? inferReceivingSubKind(preSeed) : 'generic';
+
+  if (direction === 'receiving') {
+    const isCompletion = receivingSubKind === 'completion';
+
+    return {
+      e_turn: 'e4',
+      polarity: 'pos',
+      yure: 'low',
+      margin: 'medium',
+      state_summary: isCompletion
+        ? '返ってきた一点を足場に、確認から実行へ移れる状態です。'
+        : '返ってきた感謝や成果を、確認材料ではなく成果として受け取れる状態です。',
+      state_hold_reason: isCompletion
+        ? '返ってきた一点をさらに確かめ続けると、実行へ移る流れが止まりやすいためです。'
+        : '返ってきた感謝や成果をさらに確認する材料へ戻すと、受け取りの流れが止まりやすいためです。',
+    };
+  }
 
   const e_turn =
     base === 'creation' ? 'e4'
@@ -378,23 +584,43 @@ function inferContinuedFutureFlow(preSeed: ImaginalPreSeed): ContinuedFutureFlow
     state_summary: stateSummary,
     state_hold_reason: holdReason,
   };
-}
-
-function inferWishedFutureTransfer(preSeed: ImaginalPreSeed): WishedFutureTransferSeed {
+}function inferWishedFutureTransfer(preSeed: ImaginalPreSeed): WishedFutureTransferSeed {
   const wished = preSeed.wished_future_seed.wished_future;
   const continued = preSeed.continued_future_seed.continued_future;
-  const base = preSeed.continued_future_seed.future_base;
+  const direction = effectiveDirectionKindFromPreSeed(preSeed);
+  const base = effectiveFutureBaseFromPreSeed(preSeed);
+  const receivingSubKind = direction === 'receiving' ? inferReceivingSubKind(preSeed) : 'generic';
+
+  if (direction === 'receiving' && receivingSubKind === 'completion') {
+    return {
+      wished_future_direction: '返ってきた一点を受け取り、確認を終えて現実の行動へ進むこと',
+      transfer_direction: '「' + continued + '」を見続ける位置から、返ってきた一点を足場にして実行へ移る位置へ移る',
+      required_word_shift: 'さらに確かめる言葉から、返ってきた一点を受け取って決める言葉へ変える',
+      required_action_shift: '追加確認へ進む前に、決まった時間・場所・次の手順を一行にまとめる行動へ変える',
+      changed_future: '返ってきた一点を足場にすることで、確認の流れが実行の流れへ移ります。',
+    };
+  }
+
+  if (direction === 'receiving') {
+    return {
+      wished_future_direction: '返ってきた感謝や成果を、追加確認に変えず一度受け取ること',
+      transfer_direction: '「' + continued + '」を見続ける位置から、返ってきた感謝や成果を受け取り次の創造へ進める位置へ移る',
+      required_word_shift: 'さらに確かめる言葉から、受け取った成果を場に置く言葉へ変える',
+      required_action_shift: '追加確認へ進む前に、返ってきた感謝を一文で記録する行動へ変える',
+      changed_future: '返ってきた感謝や成果を成果として受け取ることで、確認の流れが次の創造へ移ります。',
+    };
+  }
 
   const wordShift =
     base === 'creation'
-      ? `広がっている思いを、「${wished}」へ向かう一文に絞る`
+      ? '広がっている思いを、「' + wished + '」へ向かう一文に絞る'
       : base === 'comparison'
-        ? `反応で価値を測る言葉から、「${wished}」を先に置く言葉へ変える`
+        ? '反応で価値を測る言葉から、「' + wished + '」を先に置く言葉へ変える'
         : base === 'destruction'
-          ? `壊れる前に閉じる言葉から、「${wished}」を守る言葉へ変える`
+          ? '壊れる前に閉じる言葉から、「' + wished + '」を守る言葉へ変える'
           : base === 'anxiety'
-            ? `不安を確かめる言葉から、「${wished}」を先に置く言葉へ変える`
-            : `迷いを確認する言葉から、「${wished}」を選ぶ言葉へ変える`;
+            ? '不安を確かめる言葉から、「' + wished + '」を先に置く言葉へ変える'
+            : '迷いを確認する言葉から、「' + wished + '」を選ぶ言葉へ変える';
 
   const actionShift =
     base === 'creation'
@@ -409,18 +635,17 @@ function inferWishedFutureTransfer(preSeed: ImaginalPreSeed): WishedFutureTransf
 
   const changedFuture =
     base === 'creation'
-      ? `言葉と行動が一点に集まることで、「${wished}」が形になり始めます。`
-      : `言葉と行動を変えることで、「${wished}」に近づく未来へ移ります。`;
+      ? '言葉と行動が一点に集まることで、「' + wished + '」が形になり始めます。'
+      : '言葉と行動を変えることで、「' + wished + '」に近づく未来へ移ります。';
 
   return {
     wished_future_direction: wished,
-    transfer_direction: `「${continued}」を見続ける位置から、「${wished}」へ向かう位置へ移る`,
+    transfer_direction: '「' + continued + '」を見続ける位置から、「' + wished + '」へ向かう位置へ移る',
     required_word_shift: wordShift,
     required_action_shift: actionShift,
     changed_future: changedFuture,
   };
-}
-function buildImageShapeStateSeed(preSeed: ImaginalPreSeed): ImageShapeStateSeed {
+}function buildImageShapeStateSeed(preSeed: ImaginalPreSeed): ImageShapeStateSeed {
   const source = [
     preSeed.attention_point,
     preSeed.continued_future_seed.continued_future,
@@ -434,7 +659,7 @@ function buildImageShapeStateSeed(preSeed: ImaginalPreSeed): ImageShapeStateSeed
     ...preSeed.image_observation.other_context,
   ].filter(Boolean).join('\n');
 
-  const base = preSeed.continued_future_seed.future_base;
+  const base = effectiveFutureBaseFromPreSeed(preSeed);
 
   const hasResponseGap =
     /(既読|Read|無応答|応答がない|応答がない|通話がつながら|つながらず|不在|No answer|Missed|折り返し.*ない|返ってこない)/iu.test(source);
@@ -503,13 +728,23 @@ function buildImageShapeStateSeed(preSeed: ImaginalPreSeed): ImageShapeStateSeed
 
 
 function hasActionCompletionSignal(preSeed: ImaginalPreSeed, imageShape?: ImageShapeStateSeed): boolean {
+  const directionSeed = preSeed.direction_resolution_seed;
+
+  if (directionSeed?.receiving_eligibility === 'blocked') return false;
+  if (
+    directionSeed?.receiving_eligibility === 'allowed' &&
+    directionSeed.receiving_subkind === 'completion'
+  ) {
+    return true;
+  }
+
   const source = JSON.stringify({ preSeed, imageShape });
 
   const hasCompletion =
-    /(予約|予約しました|取りました|取れました|取った|確定|決まりました|決まった|時間|到着|着く予定|向かって|18:30|Event updated|予定|場所|店|レストラン|集合|手配|更新|完了|入れました|押さえました)/.test(source);
+    /(予約(しました|完了|取れた|取った|取ってくれた)|確定(しました|した)|決ま(った|りました)|場所.*(決ま|確定|押さえ)|時間.*(決ま|確定)|店.*(予約|押さえ|決ま)|レストラン.*(予約|押さえ|決ま)|集合.*(決ま|確定)|手配(しました|完了|済み)|到着(しました|した|予定)|向かって(います|る)|Event updated)/iu.test(source);
 
   const hasHardAnxiety =
-    /(返事がない|既読だけ|無視|不在|出ない|待ち続け|怖い|切れる|終わる|ブロック|拒否)/.test(source);
+    /(返事がない|既読だけ|無視|不在|不在着信|No answer|Missed|出ない|応答がない|通話がつながら|折り返し.*ない|待ち続け|ねちゃった|寝ちゃった|怖い|切れる|終わる|ブロック|拒否)/iu.test(source);
 
   return hasCompletion && !hasHardAnxiety;
 }
@@ -526,12 +761,68 @@ function hasReceivingReturnSignal(preSeed: ImaginalPreSeed): boolean {
   return hasReturn && !hasHardBoundary;
 }
 function inferDirectionKind(preSeed: ImaginalPreSeed, imageShape: ImageShapeStateSeed): DirectionKind {
-  // 予定確定・予約完了・行動完了が見える場合は、receiving completion として扱う。
-  if (hasActionCompletionSignal(preSeed, imageShape)) return 'receiving';
-  // 予定確定・予約完了・行動完了が見える場合は、確認不安ではなく創造の完了として扱う。
-  if (hasActionCompletionSignal(preSeed)) return 'creation';
-  // receiving は boundary より優先。感謝・救い・成果が返っている場合は、まず受け取り構造として扱う。
-  if (hasReceivingReturnSignal(preSeed)) return 'receiving';
+  
+  // GRATITUDE_DIRECTION_LOCK:
+  // 感謝・助かった・救い・成果が返っている場合は、creation 汎用ではなく receiving/gratitude を正本にする。
+  if (hasGratitudeReturnSignal(preSeed, imageShape)) {
+    return 'receiving';
+  }
+const directionSeed = preSeed.direction_resolution_seed;
+  const base = effectiveFutureBaseFromPreSeed(preSeed);
+
+  if (directionSeed?.receiving_eligibility === 'blocked') {
+    if (directionSeed.primary_direction_kind === 'receiving') {
+      if (base === 'anxiety') return 'confirmation';
+      if (base === 'comparison') return 'comparison';
+      if (base === 'destruction') return 'destruction';
+      if (base === 'creation') return 'creation';
+      return 'anxiety';
+    }
+
+    if (
+      directionSeed.primary_direction_kind &&
+      directionSeed.primary_direction_kind !== 'unknown'
+    ) {
+      return directionSeed.primary_direction_kind;
+    }
+
+    if (base === 'anxiety') return 'anxiety';
+    if (base === 'comparison') return 'comparison';
+    if (base === 'destruction') return 'destruction';
+    if (base === 'creation') return 'creation';
+  }
+
+  if (
+    directionSeed?.receiving_eligibility === 'allowed' &&
+    (
+      directionSeed.primary_direction_kind === 'receiving' ||
+      directionSeed.receiving_subkind === 'completion' ||
+      directionSeed.receiving_subkind === 'gratitude' ||
+      hasReceivingReturnSignal(preSeed) ||
+      hasActionCompletionSignal(preSeed, imageShape)
+    )
+  ) {
+    return 'receiving';
+  }
+  if (
+    directionSeed?.direction_lock &&
+    directionSeed.primary_direction_kind &&
+    directionSeed.primary_direction_kind !== 'unknown'
+  ) {
+    return directionSeed.primary_direction_kind;
+  }
+
+  if (
+    directionSeed?.receiving_eligibility === 'allowed' &&
+    (
+      directionSeed.primary_direction_kind === 'receiving' ||
+      directionSeed.receiving_subkind === 'completion' ||
+      directionSeed.receiving_subkind === 'gratitude'
+    )
+  ) {
+    return 'receiving';
+  }
+
   const source = [
     preSeed.attention_point,
     preSeed.continued_future_seed.continued_future,
@@ -545,14 +836,15 @@ function inferDirectionKind(preSeed: ImaginalPreSeed, imageShape: ImageShapeStat
     imageShape.field_shape,
   ].filter(Boolean).join('\n');
 
-  const base = preSeed.continued_future_seed.future_base;
+  // direction_resolution_seed がない旧データだけ fallback で拾う
+  if (hasActionCompletionSignal(preSeed, imageShape)) return 'receiving';
+  if (hasReceivingReturnSignal(preSeed)) return 'receiving';
 
   if (base === 'creation') return 'creation';
   if (base === 'comparison') return 'comparison';
   if (base === 'destruction') return 'destruction';
 
   if (/(境界|守る|距離|線引き|自分の領域|これ以上)/u.test(source)) return 'boundary';
-  if (/(受け取|感謝|届いたもの|成果|反応を受け取る)/u.test(source)) return 'receiving';
   if (/(証明|確かめ|確認|反応で安心|安心.*外側|返事.*安心|待つ側)/u.test(source)) return 'confirmation';
   if (/(失う|切れる|置いていかれる|返ってこない恐怖|怖い)/u.test(source)) return 'fear';
   if (/(先延ばし|見ない|避け|逃げ|保留)/u.test(source)) return 'avoidance';
@@ -773,6 +1065,21 @@ function buildImaginalCopyByDirection(direction: DirectionKind): string {
 
   return `安心したいのに、自分だけが待つ側に残る${end}`;
 }
+function compactWishedFuture(preSeed: ImaginalPreSeed): string {
+  const wished = cleanString(preSeed.wished_future_seed.wished_future);
+
+  if (!wished) {
+    return '外側の反応を追い続ける位置から、自分の場へ安心を戻すこと';
+  }
+
+  return wished
+    .replace(/（[^）]*）/g, '')
+    .replace(/こちらが/g, '')
+    .replace(/長時間/g, '長く')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function buildImaginalCoreSeed(
   preSeed: ImaginalPreSeed,
   imageShape: ImageShapeStateSeed,
@@ -791,7 +1098,7 @@ function buildImaginalCoreSeed(
       ? [
           '返ってきた一点によって、場が待ちから行動へ移り始めている',
           '予定・時間・場所・返事・予約など、現実が動く材料が返ってきている',
-          'コピー素材: 旗が立つ、予定が歩き出す、地図が開く、時計が味方する、席が息をする、など現実が動く比喩を使う。ただし例文を固定コピーにしない。',
+          'コピー方針: 返ってきた一点が現実の行動へ移る動きを、固定例なしで短い比喩にする。',
           `currentFlow: ${currentFlow.basedOn}`,
           `secondFlow: ${secondFlow.basedOn}`,
           `創造方向: ${imaginalFlow.transferSeed.transfer_point}`,
@@ -800,7 +1107,7 @@ function buildImaginalCoreSeed(
         ? [
             '返ってきた感謝や成果がある',
             '受け取る前に、次の確認へ進みそうになっている',
-            'receivingのコピー素材: 花束を飾って進む、拍手を束ねて進む、贈り物を受け取って渡す、感謝の種が芽を出す、など創造側の完了した動きを使う。ただし例文を固定コピーにしない。居座る・残業する・増えるなど不安側の動詞は避ける。',
+            'コピー方針: 返ってきた感謝や成果そのものが、次の働きへ変わる動きを、固定例なしで短い比喩にする。',
             `currentFlow: ${currentFlow.basedOn}`,
             `secondFlow: ${secondFlow.basedOn}`,
             `創造方向: ${imaginalFlow.transferSeed.transfer_point}`,
@@ -826,20 +1133,20 @@ function buildImaginalCoreSeed(
   ];
 
   const copyLateralHintSeed = [
-    '増えていくものの比喩を使ってよい。ただしコピー内で使う比喩は1つだけにする。羊、待ち番号、通知バッジ、未回収の荷物、閉店後の呼び鈴などから自然に選ぶが固定しない。',
-    '眠れない、区切れない、戻れない、置きっぱなし、増殖する、残業する、迷子になる、などの軽いズラしを使ってよい。ただし一文に詰め込みすぎない。',
-    '「つながり直したい」「待つ側」「取り残される」「安心を外側」など、本質の直球語はコピーでは避ける。',
-    'コピーは少し笑えるくらいでよい。深刻に言いすぎない。比喩を2つ以上混ぜない。願い側の説明を書かず、比喩だけで短く言う。',
-    '比喩はSeedの状況から毎回選ぶか、その場で新しく作る。',
+    '比喩は、その回のSeedからWriterが新しく作る。過去の出力やSeed内の例語を使い回さない。',
+    '比喩は1つだけにする。複数の比喩を混ぜない。',
+    'copy_ending_label と比喩の動きを必ず一致させる。',
+    '創造の未来では、比喩の動きは前へ進む・形になる・場に置かれる・受け取られる方向にする。',
+    '不安の未来では、比喩の動きは止まる・残る・増える・回収されない方向にする。',
+    '恐怖の未来では、比喩の動きは閉じる・遠ざかる・切れる方向にする。',
+    '比較の未来では、比喩の動きは測る・並ぶ・見比べる方向にする。',
     'コピー本文は12〜18文字程度にする。末尾ラベルを含めても長くしない。',
-    '「〜したいのに」「自分の落ち着き」「取り戻したい」など願い側の説明は①では避ける。',
-    '比喩 + 軽い動き + copy_ending_label の形にする。',
-    '名詞だけを連ねたコピーにしない。必ず動きのある言葉を1つ入れる。',
-    '「増殖」「渋滞」だけで終わらせず、「育つ」「居座る」「残業する」「逃げる」「増えていく」などの動きを使う。',
-    '漢字が詰まりすぎる言い方を避け、少し口語にする。',
-    'receivingでは、比喩の動きは創造側にする。例: 飾る、束ねる、受け取る、渡す、進む、芽を出す。居座る、残業する、増える、逃げるは避ける。',
-    'receivingでは、コピーを未完了形にしない。「〜したいのに」「〜しそう」「〜のに」で止めない。',
-    'receivingでは、比喩 + 創造側の動詞 + copy_ending_label で一文を完結させる。',
+    '願い側の説明を書かず、今見続けている未来のズレだけを短く出す。',
+    '画像の表面語、人物名、Seed名、内部ラベルを使わない。',
+    '具体例としての名詞・動詞リストを参照せず、その回のSeedから生成する。',
+    '比喩は、読んだ瞬間に状態の向きが伝わるものにする。意味が曖昧な物だけの比喩にしない。',
+    '創造・receivingでは、道具が移動する比喩ではなく、返ってきた反応や成果そのものが場に置かれ、次の働きへ変わる比喩にする。',
+    '抽象的な器・道具・入れ物だけを主役にしない。主役は、Seed内の「感謝」「成果」「返ってきたもの」「形になりかけているもの」の動きにする。',
   ];
 
   const imaginalCopy = [
@@ -857,7 +1164,7 @@ function buildImaginalCoreSeed(
         ? '返ってきた感謝や成果を、追加確認に変えず一度受け取ること'
         : perspective.direction_kind === 'creation'
           ? '内面に立ち上がった未来を、言葉と行動の一点として現実の場に置くこと'
-          : '外側の反応を追い続ける位置から、自分の場へ安心を戻すこと';
+          : compactWishedFuture(preSeed);
 
   const seenFutureImaginal =
     perspective.direction_kind === 'receiving' && receivingSubKind === 'completion'
@@ -908,24 +1215,54 @@ function buildImaginalCoreSeed(
 
 type ReceivingSubKind = 'gratitude' | 'completion' | 'generic';
 
+
+
+function hasHardBlockedReceivingSignal(
+  preSeed: ImaginalPreSeed,
+  imageShape?: ImageShapeStateSeed,
+): boolean {
+  const source = JSON.stringify({ preSeed, imageShape });
+
+  return /(Missed|No answer|不在着信|応答がない|通話がつながら|折り返し.*ない|返事がない|既読だけ|待ち続け|深夜.*待ち|ブロック|拒否)/iu.test(source);
+}
+function hasGratitudeReturnSignal(
+  preSeed: ImaginalPreSeed,
+  imageShape?: ImageShapeStateSeed,
+): boolean {
+  if (hasHardBlockedReceivingSignal(preSeed, imageShape)) return false;
+
+  const source = JSON.stringify({ preSeed, imageShape });
+
+  return /(感謝|ありがとう|ありがと|助かりました|助かった|救いでした|救われた|続いてます|普通に生きれてます|成果が返ってき|返ってきた感謝|感謝や成果|受け取られている|受け取られている手応え)/u.test(source);
+}
 function inferReceivingSubKind(
   preSeed: ImaginalPreSeed,
   imageShape?: ImageShapeStateSeed,
 ): ReceivingSubKind {
+  const directionSeed = preSeed.direction_resolution_seed;
+
+  // まず gratitude を最優先で固定
+  if (directionSeed?.receiving_eligibility === 'allowed') {
+    if (directionSeed.receiving_subkind === 'gratitude') return 'gratitude';
+    if (hasGratitudeReturnSignal(preSeed, imageShape)) return 'gratitude';
+    if (directionSeed.receiving_subkind === 'completion') return 'completion';
+  }
+
+  if (directionSeed?.receiving_eligibility === 'blocked') return 'generic';
+
   const source = JSON.stringify({ preSeed, imageShape });
 
+  // fallback でも gratitude を completion より先に見る
+  if (hasGratitudeReturnSignal(preSeed, imageShape)) return 'gratitude';
+
   const hasCompletion =
-    /(予約|取りました|取ってくれ|取れました|確定|決まりました|決まった|時間|到着|着く予定|向かって|18:30|Event updated|予定|場所|店|レストラン|集合|手配|更新)/.test(source);
+    /(予約(しました|完了|取れた|取った|取ってくれた)|確定(しました|した)|決ま(った|りました)|場所.*(決ま|確定|押さえ)|時間.*(決ま|確定)|店.*(予約|押さえ|決ま)|レストラン.*(予約|押さえ|決ま)|集合.*(決ま|確定)|手配(しました|完了|済み)|到着(しました|した|予定)|向かって(います|る)|Event updated)/iu.test(source);
 
   if (hasCompletion) return 'completion';
 
-  const hasGratitude =
-    /(感謝|ありがとう|ありがと|救い|救われ|助か|助かりました|成果|返ってき|普通に生き|続いてます)/.test(source);
-
-  if (hasGratitude) return 'gratitude';
-
   return 'generic';
 }
+
 function buildEffectiveImageShapeStateSeed(
   imageShape: ImageShapeStateSeed,
   perspective: FlowPerspectiveSeed,
@@ -1248,7 +1585,17 @@ export async function POST(req: NextRequest) {
       'future_base と future_label は必ず対応させてください。不安の未来=anxiety、破壊の未来=destruction、比較の未来=comparison、創造の未来=creation です。',
       '創造の未来は、すでに創りたい方向や置きたい未来が立ち上がっている状態です。単なる前向きさではなく、言葉や行動へ移せる未来として扱ってください。',
       '確認、受け取り、境界線、混在、不明は内部状態として見てもよいですが、continued_future、future_scene、copy_seed、future_labelにはそのまま出さないでください。',
-      'JSONは version, image_observation, attention_point, wished_future_seed, continued_future_seed, gap_seed を持つオブジェクトにしてください。',
+      '重要: direction_resolution_seed を必ず出してください。',
+      '重要: primary_direction_kind は、画像の表面語ではなく、ユーザーが見続けている未来の向きで判定してください。',
+      '重要: 時間・予定・場所・返信・既読などの表面語だけで receiving / completion にしないでください。',
+      '重要: completion は、ユーザーの意識が「返ってきた一点を受け取り、現実の行動へ進む方向」に向いている場合だけ allowed にしてください。',
+      '重要: 感謝、ありがとう、助かりました、救いでした、救われた、続いてます、普通に生きれてます等が相手や場から返っている場合は、primary_direction_kind を receiving、receiving_eligibility を allowed、receiving_subkind を gratitude にしてください。',
+      '重要: 既読、不在、No answer、返事待ち、待ち続ける未来、安心を外側で確かめ続ける未来が中心なら receiving_eligibility は blocked にしてください。',
+      '重要: primary_direction_kind は creation / receiving / confirmation / anxiety / fear / comparison / destruction / avoidance / boundary / unknown のいずれかにしてください。',
+      '重要: future_base が anxiety で、primary_direction_kind が receiving になる場合は、direction_reason にその理由を明記してください。',
+      '重要: 方向が明確な場合は direction_lock を true にしてください。',
+      'direction_resolution_seed は primary_future_base, primary_direction_kind, receiving_eligibility, receiving_subkind, direction_lock, direction_reason を持ってください。',
+      'JSONは version, image_observation, attention_point, wished_future_seed, continued_future_seed, gap_seed, direction_resolution_seed を持つオブジェクトにしてください。',
       'version は imaginal_pre_seed_v2 にしてください。',
       'wished_future_seed は wished_future, wished_future_scene, wished_future_reason を持ってください。',
       'continued_future_seed は continued_future, future_scene, future_base, future_label, copy_seed, direction_reason を持ってください。',
@@ -1412,16 +1759,22 @@ const effectiveImageShapeStateSeed = buildEffectiveImageShapeStateSeed(imageShap
       'receivingの場合は、居座る・残業する・増えるなど不安側の動詞を使わないでください。飾る、束ねる、受け取る、渡す、進む、芽を出すなど創造側の動詞を使ってください。receivingではコピーを未完了形にしないでください。「〜したいのに」「〜のに」で止めず、比喩 + 創造側の動詞 + copy_ending_label で完結させてください。',
       '①イマジナルコピーは、imaginal_core_seed.copy_material_seed、copy_generation_policy、copy_lateral_hint_seed、copy_ending_label を素材にして、Writerが毎回新しく生成してください。テンプレート化しないでください。願い側の説明を書かず、短い比喩コピーにしてください。「〜したいのに」「自分の落ち着き」「取り戻したい」「待つ側」「安心を外側」などの直球語を避けてください。比喩は1つだけにしてください。コピー本文は12〜18文字程度にしてください。名詞だけを連ねたコピーにせず、必ず動きのある言葉を1つ入れてください。たとえば「通知バッジ増殖」ではなく「通知バッジだけ育つ」「通知バッジが居座る」「呼び鈴だけ残業する」のようにしてください。ただし例文を固定コピーとして使わないでください。コピー本文に「未来」という語を入れないでください。「未来」は末尾のcopy_ending_labelにだけ含めてください。コピーの末尾は必ず copy_ending_label と完全一致させてください。',
       '①は改善案にしないでください。「変える」「仕組み」「循環へ移る」ではなく、今見続けている未来のズレを言葉にしてください。',
-      '①の型は「〇〇したいのに、□□の未来」のようにしてください。',
+      '①の型は「比喩 + 動き + copy_ending_label」にしてください。「〜したいのに」は使わないでください。',
+      '①では具体的な比喩例や固定語を使い回さず、その回のSeedから新しい比喩を1つだけ作ってください。',
+      '①では copy_ending_label と比喩の動きを必ず一致させてください。創造は前へ進む動き、不安は止まる・残る動き、恐怖は閉じる動き、比較は測る・並ぶ動きとして扱ってください。',
+      '①では過去に出したコピーや、Seed内の説明語をそのまま組み合わせないでください。',
+      '①の比喩は、読んだ瞬間に状態の向きが伝わるものにしてください。意味が曖昧な物だけの比喩にしないでください。',
+      '①が receiving / 創造の未来の場合、道具が移動する比喩ではなく、返ってきた反応や成果そのものが場に置かれ、次の働きへ変わる比喩にしてください。',
+      '①では、器・道具・入れ物だけを主役にしないでください。Seed内の「感謝」「成果」「返ってきたもの」「形になりかけているもの」の動きを主役にしてください。',
       '②願っている未来は、imaginal_core_seed.wished_future_imaginal を正本にしてください。表面の出来事ではなく、本当は向かいたい方向として書いてください。',
-      '③見続けている未来は、imaginal_core_seed.seen_future_imaginal と flow_perspective.direction_kind を正本にしてください。',
+      '③見続けている未来は、imaginal_core_seed.seen_future_imaginal を正本にしてください。末尾の「（不安の未来）」「（恐怖の未来）」「（比較の未来）」「（創造の未来）」を必ず残してください。flow_perspective.direction_kind は内部確認にだけ使い、本文には出さないでください。',
       '④くり返す出来事や起こりえる出来事は、second_flow_input_seed と image_shape_state_seed をもとに書いてください。これは創造方向ではなく、今の未来形象を見続けた場合に起こりやすい次状態です。',
       '⑤未来を変える言葉と行動は、imaginal_flow_seed.transferSeed、imaginal_core_seed.creative_direction、small_step をもとに書いてください。',
       '⑤では、抽象論ではなく、画像から見えている状況に即して、言葉と行動の置き換えを具体的に説明してください。',
       '相手の気持ち、相手の未来、相手の人格を断定しないでください。',
       '「確認の未来」「受け取りの未来」「境界線の未来」「混在の未来」「不明の未来」は表示しないでください。',
       '出力はJSONのみです。キーは diagnosis だけにしてください。',
-      '特定の比喩を固定テンプレートにしないでください。羊、通知、画面、スマホ、待合室などは使ってもよいですが、毎回Seedから自然に選んでください。',
+      '特定の比喩を固定テンプレートにしないでください。Seedの方向と場の状態から、その場で新しい比喩を1つだけ作ってください。',
       'receivingなどの内部英語ラベルを本文に出さないでください。',
       '本文にSeed名、JSONキー名、内部タグ、画像観測ログを出さないでください。copy_material_seedという語を本文に出さないでください。',
       'diagnosis の本文は必ず次の5項目にしてください: ① イマジナルコピー、② 願っている未来、③ 思い続けている未来、④ くり返す出来事や起こりえる出来事、⑤ 未来を変える言葉と行動。',
@@ -1503,5 +1856,16 @@ const effectiveImageShapeStateSeed = buildEffectiveImageShapeStateSeed(imageShap
     return json({ ok: false, error: 'internal_error' }, 500);
   }
 }
+
+
+
+
+
+
+
+
+
+
+
 
 
