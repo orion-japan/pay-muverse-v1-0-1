@@ -162,7 +162,7 @@ export default function MyPage() {
 
         if (mounted) setProfileState(profileForUI);
 
-        // 招待用URLの生成：長いURLを作成 → invite_links に保存 → join.muverse.jp/i/xxxx の短縮URLを表示
+        // 招待用URLの生成：join.muverse.jp/register へ直接渡すURLを invite_links に保存 → join.muverse.jp/i/xxxx を表示
         setLinkLoading(true);
         try {
           const appCode = await resolveAppCode(idToken, user_code);
@@ -190,7 +190,8 @@ export default function MyPage() {
           if (eve) params.set('eve', eve);
           params.set('media_code', 'AP');
 
-          const longLink = `https://mu-verse.jp/?${params.toString()}`;
+          const registerOrigin = process.env.NEXT_PUBLIC_JOIN_BASE_URL || 'https://join.muverse.jp';
+          const registerLink = `${registerOrigin.replace(/\/+$/, '')}/register?${params.toString()}`;
 
           try {
             const shortRes = await fetch('/api/my/short-invite-link', {
@@ -200,7 +201,7 @@ export default function MyPage() {
                 Authorization: `Bearer ${idToken}`,
               },
               body: JSON.stringify({
-                destination_url: longLink,
+                destination_url: registerLink,
                 ref: appCode,
                 rcode,
                 mcode,
@@ -214,13 +215,13 @@ export default function MyPage() {
               if (mounted) setJoinLink(shortJson.short_url);
             } else {
               if (mounted) {
-                setJoinLink(longLink);
-                setLinkMsg(`短縮URL生成エラー: ${shortJson?.error || '長いURLを表示しています'}`);
+                setJoinLink(registerLink);
+                setLinkMsg(`短縮URL生成エラー: ${shortJson?.error || '登録URLを表示しています'}`);
               }
             }
           } catch (shortErr: any) {
             if (mounted) {
-              setJoinLink(longLink);
+              setJoinLink(registerLink);
               setLinkMsg(`短縮URL生成エラー: ${shortErr?.message || shortErr}`);
             }
           }
