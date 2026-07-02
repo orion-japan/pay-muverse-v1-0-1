@@ -26,7 +26,7 @@ export default function MyPage() {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  // 参加リンク
+  // 招待リンク（短縮URL）
   const [joinLink, setJoinLink] = useState<string | null>(null);
   const [linkLoading, setLinkLoading] = useState(false);
   const [linkMsg, setLinkMsg] = useState<string | null>(null);
@@ -162,7 +162,7 @@ export default function MyPage() {
 
         if (mounted) setProfileState(profileForUI);
 
-        // 参加用URLの生成（既存ロジック維持）
+        // 招待用URLの生成：長いURLを作成 → invite_links に保存 → join.muverse.jp/i/xxxx の短縮URLを表示
         setLinkLoading(true);
         try {
           const appCode = await resolveAppCode(idToken, user_code);
@@ -190,8 +190,40 @@ export default function MyPage() {
           if (eve) params.set('eve', eve);
           params.set('media_code', 'AP');
 
-          const finalLink = `https://mu-verse.jp/?${params.toString()}`;
-          if (mounted) setJoinLink(finalLink);
+          const longLink = `https://mu-verse.jp/?${params.toString()}`;
+
+          try {
+            const shortRes = await fetch('/api/my/short-invite-link', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${idToken}`,
+              },
+              body: JSON.stringify({
+                destination_url: longLink,
+                ref: appCode,
+                rcode,
+                mcode,
+                media_code: 'AP',
+                label: `${profileForUI.name || user_code} 招待リンク`,
+              }),
+              cache: 'no-store',
+            });
+            const shortJson = await shortRes.json().catch(() => ({}));
+            if (shortRes.ok && shortJson?.ok && shortJson?.short_url) {
+              if (mounted) setJoinLink(shortJson.short_url);
+            } else {
+              if (mounted) {
+                setJoinLink(longLink);
+                setLinkMsg(`短縮URL生成エラー: ${shortJson?.error || '長いURLを表示しています'}`);
+              }
+            }
+          } catch (shortErr: any) {
+            if (mounted) {
+              setJoinLink(longLink);
+              setLinkMsg(`短縮URL生成エラー: ${shortErr?.message || shortErr}`);
+            }
+          }
         } catch (e: any) {
           if (mounted) setLinkMsg(`URL生成エラー: ${e?.message || e}`);
         } finally {
@@ -211,12 +243,12 @@ export default function MyPage() {
   // LINE共有
   const shareViaLINE = () => {
     if (!joinLink) return;
-    const text = `参加用URL\n${joinLink}`;
+    const text = `Muverse 招待リンク\n${joinLink}`;
     const url = `https://line.me/R/msg/text/?${encodeURIComponent(text)}`;
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
-  // QR生成
+  // QR生成（短縮URLを埋め込む）
   useEffect(() => {
     if (!joinLink || !qrCanvasRef.current) return;
     QRCode.toCanvas(qrCanvasRef.current, joinLink, { width: 240, margin: 1 }, (err) => {
@@ -230,7 +262,7 @@ export default function MyPage() {
     const url = qrCanvasRef.current.toDataURL('image/png');
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'muverse-join-qr.png';
+    a.download = 'muverse-invite-qr.png';
     a.click();
   };
 
@@ -266,10 +298,10 @@ export default function MyPage() {
 
         <UserProfile profile={profileState} isMyPage />
 
-        {/* 参加URL */}
+        {/* 招待URL */}
         <section className="profile-card" style={{ marginTop: 12 }}>
           <h2 className="section-title" style={{ margin: '0 0 8px' }}>
-            参加用URL
+            あなた専用の招待リンク
           </h2>
 
           {linkLoading && <p style={{ margin: 0 }}>URL を準備中...</p>}
@@ -287,9 +319,7 @@ export default function MyPage() {
                   padding: 10,
                 }}
               >
-                <div style={{ fontSize: 12, wordBreak: 'break-all', color: '#111827' }}>
-                  {joinLink}
-                </div>
+                <div style={{ fontSize: 12, wordBreak: 'break-all', color: '#111827' }}>{joinLink}</div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button className="settings-btn" onClick={shareViaLINE}>
                     💚 LINEで共有
@@ -304,7 +334,7 @@ export default function MyPage() {
                   </button>
                 </div>
                 <p style={{ margin: 0, fontSize: 11, color: '#6b7280' }}>
-                  ※ 必要に応じて LIFF の「トーク選択」UIへ切替可能です。
+                  ※ QRコードにもこの短縮URLが入ります。
                 </p>
               </div>
 
