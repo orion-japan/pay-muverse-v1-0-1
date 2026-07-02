@@ -12,11 +12,7 @@ function clean(v: unknown) {
   return typeof v === 'string' ? v.trim() : '';
 }
 
-function sanitizeCode(v: string) {
-  return v.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 28);
-}
-
-function randomCode(len = 6) {
+function randomCode(len = 9) {
   let s = '';
   for (let i = 0; i < len; i++) s += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
   return s;
@@ -25,6 +21,25 @@ function randomCode(len = 6) {
 function shortUrl(code: string) {
   const origin = process.env.NEXT_PUBLIC_JOIN_BASE_URL || 'https://join.muverse.jp';
   return `${origin.replace(/\/+$/, '')}/i/${code}`;
+}
+
+function isLegacyExposedCode(code?: string | null) {
+  // 旧実装で rcode/user_code が見えてしまう u-669933 形式を破棄する
+  return !!code && /^u-[A-Za-z0-9_-]+$/i.test(code);
+}
+
+async function createUniqueShortCode() {
+  for (let i = 0; i < 12; i++) {
+    const candidate = randomCode(9);
+    const { data, error } = await supabaseAdmin
+      .from('invite_links')
+      .select('id')
+      .eq('short_code', candidate)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return candidate;
+  }
+  throw new Error('short code generation failed');
 }
 
 export async function POST(req: Request) {
@@ -74,7 +89,7 @@ export async function POST(req: Request) {
 
     if (existingErr) throw existingErr;
 
-    if (existing?.short_code) {
+    if (existing?.short_code && !isLegacyExposedCode(existing.short_code)) {
       const { data: updated, error: updateErr } = await supabaseAdmin
         .from('invite_links')
         .update({
@@ -95,19 +110,28 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, invite: updated, short_url: shortUrl(updated.short_code) });
     }
 
-    let baseCode = sanitizeCode(`u-${rcode || user.user_code}`);
-    if (baseCode.length < 4) baseCode = `u-${randomCode(6)}`;
+    const short_code = await createUniqueShortCode();
 
-    let short_code = baseCode;
-    for (let i = 0; i < 8; i++) {
-      const { data: dup, error: dupErr } = await supabaseAdmin
+    if (existing?.id && isLegacyExposedCode(existing.short_code)) {
+      const { data: regenerated, error: regenerateErr } = await supabaseAdmin
         .from('invite_links')
-        .select('id, created_by')
-        .eq('short_code', short_code)
-        .maybeSingle();
-      if (dupErr) throw dupErr;
-      if (!dup) break;
-      short_code = `${baseCode}-${randomCode(4)}`.slice(0, 32);
+        .update({
+          short_code,
+          destination_url,
+          ref: ref || null,
+          rcode: rcode || null,
+          mcode: mcode || null,
+          media_code,
+          label,
+          memo,
+          is_active: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id)
+        .select('*')
+        .single();
+      if (regenerateErr) throw regenerateErr;
+      return NextResponse.json({ ok: true, invite: regenerated, short_url: shortUrl(regenerated.short_code) });
     }
 
     const { data: inserted, error: insertErr } = await supabaseAdmin
